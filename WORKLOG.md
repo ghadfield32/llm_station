@@ -75,3 +75,26 @@ fast "has this been done?" index. Dates are when the line was written.
 ## Registry / adding projects
 - `config/projects.yaml` (observe) + `configs/kanban.yaml` (dispatch) — never
   merge. New repo: block in projects.yaml [+ `new_project.py` for a board].
+
+## Proactive ops lane / Judge Gate
+- ROOT-CAUSED 06-13: proactive-runner exited 1 every boot via judge-gate 502 on
+  `/proactive/judge`. NOT max_tokens (instrumented: finish_reason=stop, 65 tok,
+  valid JSON 15/15 — my earlier "bump to 1500" was refuted). Two real causes.
+- CAUSE A: `_llm` was blind+lossy (no finish_reason check, content capped 300c)
+  → any model hiccup became an opaque "did not return JSON" 502, undiagnosable.
+- CAUSE B (base): `run_check` FABRICATED evidence (`<dag_runs for airflow>`); the
+  judge ruled on fakes, and once JSON parsed it would open RCA missions off fake
+  data. The 502 was the only thing blocking garbage missions.
+- FIXED A 06-13: judge_gate `_llm` logs model/finish_reason/usage every call +
+  full raw output on failure; reports truncation (finish=length) vs non-JSON
+  distinctly. No max_tokens change (not the cause).
+- FIXED B 06-13: proactive_runner uses `collectors.py` registry — a check whose
+  evidence keys aren't all wired is SKIPPED (no judge call, no mission), never
+  fabricated. Empty registry today → all 6 checks skip, runner exits 0.
+- TESTS 8/8: tests/test_proactive_runner.py (skip-unwired / judge-when-wired),
+  tests/test_judge_gate_llm.py (truncation vs non-JSON vs upstream-error).
+- VERIFIED: rebuilt both; runner exit 0 all-skipped; missions 2→2 (no garbage);
+  judge-gate logs finish_reason; valid /proactive/judge still 200.
+- NEXT: wire real collectors to activate checks (local-first: `ledger_mission_stats`
+  + `litellm_spend_api` for usage-digest-weekly; `ruff_report`/`tree` for
+  *-standards). Until wired the lane is an honest no-op, not fake-green.

@@ -356,6 +356,8 @@ switch ($Task.ToLowerInvariant()) {
     Invoke-Python @a
   }
   "improvement-scan-validate" { Invoke-Python "-m" "command_center.cli.improvement" "scan-validate" }
+  "knowledge-generate" { Invoke-Python "-m" "command_center.cli.knowledge" "generate" }
+  "knowledge-validate" { Invoke-Python "-m" "command_center.cli.knowledge" "validate" }
   "judge-calibration" { Invoke-Python "-m" "command_center.cli.improvement" "calibration" }
   "attention-digest" { Invoke-Python "-m" "command_center.cli.improvement" "attention" }
   default {

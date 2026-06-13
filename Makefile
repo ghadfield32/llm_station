@@ -18,7 +18,7 @@ LITELLM_DIGEST ?= ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0
         improvement-run improvement-verify improvement-report improvement-request-promotion \
         improvement-canary improvement-promote improvement-rollback improvement-post-watch \
         improvement-board improvement-propose improvement-scan improvement-scan-validate \
-        judge-calibration attention-digest
+        knowledge-generate knowledge-validate judge-calibration attention-digest
 
 help:  ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -262,6 +262,10 @@ improvement-scan:  ## Observer-only self-improvement scan -> Proposed cards + re
 	@$(PY) -m command_center.cli.improvement scan $(if $(APPLY),--apply,) $(if $(FEEDS),--feeds $(FEEDS),) $(if $(METHOD),--method $(METHOD),) $(if $(SHOW),--show-report,)
 improvement-scan-validate:  ## Blocking validation gate for the discovery scan (N/N PASS)
 	@$(PY) -m command_center.cli.improvement scan-validate
+knowledge-generate:  ## Generate the observer-only OKF knowledge/ bundle from authoritative sources
+	@$(PY) -m command_center.cli.knowledge generate
+knowledge-validate:  ## Blocking validation gate for the knowledge/ bundle (N/N PASS)
+	@$(PY) -m command_center.cli.knowledge validate
 judge-calibration:  ## Score the judge against the calibration set (TP/FP/FN/precision/recall)
 	@$(PY) -m command_center.cli.improvement calibration
 attention-digest:  ## Print the human-attention morning brief + queue metrics

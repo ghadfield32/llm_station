@@ -16,6 +16,7 @@ This is intentionally small and auditable — extend the policy, don't hide it.
 
 import os
 import json
+import logging
 from enum import IntEnum
 from typing import Optional
 
@@ -23,6 +24,18 @@ import httpx
 import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+# Self-contained logger so judge-gate's model calls are visible in
+# `docker compose logs judge-gate` regardless of uvicorn's logging config.
+# Every LLM call logs model + finish_reason + token usage; a failed call logs
+# the FULL raw model output, so a 502 here is diagnosable instead of opaque.
+log = logging.getLogger("judge_gate")
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s judge_gate: %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+    log.propagate = False
 
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000/v1")
 JUDGE_GATE_KEY   = os.environ.get("JUDGE_GATE_KEY", "")
@@ -137,8 +150,24 @@ def _with_standards(system: str) -> str:
     return system + _standards_text()
 
 
+MAX_TOKENS = 600
+
+
 async def _llm(model: str, system: str, user: str) -> dict:
-    """Call a model through LiteLLM and parse a JSON object out of the reply."""
+    """Call a model through LiteLLM and parse the JSON object it returns.
+
+    This function reports *why* a call fails instead of hiding it. It logs the
+    model, finish_reason, and token usage on every call, and on a failure logs
+    the FULL raw model output. The two failure modes are reported distinctly,
+    because they have different fixes:
+      - finish_reason == "length": the reply was cut off at MAX_TOKENS, so the
+        JSON is structurally incomplete. The fix is to shorten the prompt/
+        evidence or raise the cap deliberately — NOT to treat it as "bad JSON".
+      - otherwise unparseable: the model genuinely returned non-JSON (prose,
+        extra objects). The fix is a prompt/model issue.
+    Earlier this raised a single generic "did not return JSON" with the content
+    truncated to 300 chars, which made a real 502 impossible to diagnose.
+    """
     if not JUDGE_GATE_KEY:
         raise HTTPException(500, "JUDGE_GATE_KEY not configured")
     payload = {
@@ -148,7 +177,7 @@ async def _llm(model: str, system: str, user: str) -> dict:
             {"role": "user", "content": user},
         ],
         "temperature": 0,
-        "max_tokens": 600,
+        "max_tokens": MAX_TOKENS,
     }
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(
@@ -157,14 +186,35 @@ async def _llm(model: str, system: str, user: str) -> dict:
             json=payload,
         )
     if r.status_code != 200:
+        log.error("LiteLLM HTTP %s for model=%s: %s", r.status_code, model, r.text[:500])
         raise HTTPException(502, f"LiteLLM error {r.status_code}: {r.text[:300]}")
-    text = r.json()["choices"][0]["message"]["content"].strip()
-    # Be tolerant of accidental code fences.
-    text = text.replace("```json", "").replace("```", "").strip()
+
+    body = r.json()
+    choice = body["choices"][0]
+    finish = choice.get("finish_reason")
+    usage = body.get("usage", {})
+    content = choice["message"]["content"]
+    log.info("model=%s finish_reason=%s completion_tokens=%s prompt_tokens=%s",
+             model, finish, usage.get("completion_tokens"), usage.get("prompt_tokens"))
+
+    # A length-capped reply is incomplete by construction — report exactly that,
+    # with the numbers that prove it, rather than mislabeling it as non-JSON.
+    if finish == "length":
+        log.error("model=%s TRUNCATED at max_tokens=%s (completion_tokens=%s); raw=%r",
+                  model, MAX_TOKENS, usage.get("completion_tokens"), content)
+        raise HTTPException(502, (
+            f"{model} reply truncated at max_tokens={MAX_TOKENS} "
+            f"(completion_tokens={usage.get('completion_tokens')}); the prompt is "
+            "over-producing — shorten the evidence/prompt or raise the cap."))
+
+    # Be tolerant of accidental code fences, then parse.
+    text = content.strip().replace("```json", "").replace("```", "").strip()
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        raise HTTPException(502, f"Triage model did not return JSON: {text[:300]}")
+    except json.JSONDecodeError as e:
+        log.error("model=%s returned non-JSON (finish_reason=%s): %r", model, finish, content)
+        raise HTTPException(502, (
+            f"{model} returned non-JSON (finish_reason={finish}): {text[:500]}")) from e
 
 
 @app.get("/health")

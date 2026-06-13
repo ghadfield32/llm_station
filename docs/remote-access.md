@@ -24,31 +24,34 @@ the full VPS-vs-desktop trade-off.
 | Surface | Local port | Tailnet URL | Status |
 |---|---|---|---|
 | AppFlowy (boards/knowledge) | 8081 | **https://vengeance.taile6a055.ts.net** | ✅ served + verified reachable |
-| Uptime Kuma (health) | 3001 | add Serve (below) | localhost-only |
-| Airflow (betts DAGs) | 8090 | add Serve | localhost-only |
-| Ledger (missions/audit) | 8091 | add Serve | localhost-only |
-| LiteLLM (gateway/usage) | 4000 | add Serve | localhost-only |
+| Airflow (DAGs) | 8090 | https://vengeance.taile6a055.ts.net:8443 | ✅ served + verified (2026-06-13) |
+| Ledger (missions/audit) | 8091 | https://vengeance.taile6a055.ts.net:10000 | ✅ served + verified (2026-06-13) |
+| LiteLLM (gateway/usage) | 4000 | https://vengeance.taile6a055.ts.net:11000 | ✅ served + verified (2026-06-13) |
+| Uptime Kuma (health) | 3001 | https://vengeance.taile6a055.ts.net:12000 | ✅ served + verified (2026-06-13) |
 
 **Phone now:** with the Tailscale app connected, open
 `https://vengeance.taile6a055.ts.net` in Safari → AppFlowy boards. That's the
 "anywhere" surface for approving cards. Discord/Telegram/Slack also work from the
 desktop behind NAT (outbound) — no Serve needed for chat.
 
-### To expose a dashboard over the tailnet (optional, run yourself)
+### Dashboards over the tailnet (all four are served as of 2026-06-13)
 
-AppFlowy already owns `/` on 443. Serve each extra dashboard on its own HTTPS
-port (tailnet-only). Run from an elevated shell:
+AppFlowy owns `/` on 443; each extra dashboard gets its own HTTPS port (tailnet-only).
+These four are currently running (Tailscale 1.98 accepts arbitrary high ports):
 
 ```powershell
 tailscale serve --bg --https=8443  http://127.0.0.1:8090   # Airflow  -> :8443
 tailscale serve --bg --https=10000 http://127.0.0.1:8091   # Ledger   -> :10000
-# then reach e.g. https://vengeance.taile6a055.ts.net:8443
-tailscale serve status      # list what's exposed
-tailscale serve --https=8443 off    # stop exposing one
+tailscale serve --bg --https=11000 http://127.0.0.1:4000   # LiteLLM  -> :11000
+tailscale serve --bg --https=12000 http://127.0.0.1:3001   # Kuma     -> :12000
+tailscale serve status                  # list what's exposed
+tailscale serve --https=8443 off        # stop exposing one
 ```
-If Tailscale rejects a port, use the standard Serve HTTPS ports `443 / 8443 /
-10000` (older builds restrict to those). Only expose what you actually want on
-your phone — each is operational data.
+`--bg` persists the proxy across reboots (re-served by the Tailscale service). If an
+older build rejects a port, fall back to the standard Serve HTTPS ports `443 / 8443 /
+10000`. Everything stays tailnet-only — never `tailscale funnel` (public, on the
+do-not-build list). Each surface is operational data; turn off any you don't want on
+your phone with the `off` command above.
 
 ## Packages watcher — run on the HOST (not the curator container)
 

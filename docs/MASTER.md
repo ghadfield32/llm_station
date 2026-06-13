@@ -134,7 +134,7 @@ The dangerous mistakes — silently broken routing, an approval gate quietly
 disabled, a sandbox that leaks secrets, a wandering refactor agent — cannot be
 committed in the first place.
 
-The thirteen config files and their contracts:
+The config files and their contracts:
 
 | File | Governs |
 |---|---|
@@ -151,6 +151,8 @@ The thirteen config files and their contracts:
 | `configs/kanban.yaml` | bridge dispatch contract: sections, risk ceilings, ready statuses |
 | `configs/ui.yaml` | WebUI safety defaults (single-container, password, ledger-governed writes) |
 | `configs/channels.yaml` | chat transports (Discord/Slack/Telegram/WhatsApp) → transport + model alias |
+| `configs/improvement.yaml` | self-improvement experiment definitions (+ `improvement-targets.yaml` per-target refs) |
+| `configs/discovery.yaml` | daily-scan knobs: ranking / triage / code-health / acceptance (no inline literals) |
 
 ---
 
@@ -368,13 +370,20 @@ Three lanes:
 - **Repo stewardship** — structure, test quality, docs freshness, dead code,
   dependency drift, and defensive-coding *debt* (the same things the judge
   blocks at commit time, swept for after the fact).
-- **Self-improvement scan** — daily report + Proposed backlog cards across
-  automation, structure, metrics, code quality, standards, data handling,
-  net-new ideas, reliability/observability, and cost. It cannot approve, verify,
-  promote, canary, merge, deploy, rotate secrets, or execute experiments.
-  Implemented as the observer-only Airflow DAG `self_improvement_daily` (+ the
-  `improvement scan` CLI / Kanban / Discord touchpoints); full design + as-built
-  reference in [daily-self-improvement-dag.md](daily-self-improvement-dag.md).
+- **Self-improvement scan** — a daily observer-only pipeline
+  (`scan → classify_and_dedup → score_and_rank → draft_proposals → emit`) across nine
+  pillars: automation, structure, updated-metrics, code quality, standards, data handling,
+  net-new ideas, reliability/observability, and cost. It drafts `Proposed` Backlog cards +
+  one report and **nothing else** — it cannot approve, verify, promote, canary, merge, deploy,
+  rotate secrets, or execute experiments (the `ObserverCharter` makes that structural). Ranking
+  is **data-derived** — every knob lives in `configs/discovery.yaml`, and a learned `P(accept)`
+  model (`acceptance.py`) takes over from the ICE/RICE/WSJF formula only once it beats it on
+  held-out card outcomes. A blocking `make improvement-scan-validate` gate guards it. Reaches you
+  three ways: **AppFlowy Kanban** (where you act, per-pillar swimlanes), an **email digest** (SMTP,
+  Start-Here top-3 + new-since-yesterday + failed sources), and a **chat ping**. Implemented as the
+  Airflow DAG `dags/self_improvement_daily.py` + the `improvement scan` CLI; full design + as-built
+  reference in [daily-self-improvement-dag.md](daily-self-improvement-dag.md) and the project tracker
+  [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md).
 
 Stage by stage:
 
@@ -677,7 +686,9 @@ llm_station/
 │   ├── evals.yaml              routing/judge regression suite (model-promotion gate)
 │   ├── kanban.yaml             bridge dispatch contract: sections, ceilings, ready statuses
 │   ├── ui.yaml                 WebUI safety defaults (ledger-governed external writes)
-│   └── channels.yaml           chat transports → transport + model alias (tokens stay in .env)
+│   ├── channels.yaml           chat transports → transport + model alias (tokens stay in .env)
+│   ├── improvement.yaml        experiment definitions (worked set) + improvement-targets.yaml (per-target refs)
+│   └── discovery.yaml          daily-scan knobs: ranking/triage/code-health/acceptance (DiscoveryConfig)
 │
 ├── src/command_center/         INSTALLABLE PACKAGE (uv pip install -e .; run via `make`/`python -m`)
 │   ├── schemas/                PYDANTIC CONTRACTS that validate the YAML
@@ -697,11 +708,32 @@ llm_station/
 │   │   ├── run_evals.py        routing/judge regression suite
 │   │   ├── smoke_mission.py    `make mission-dryrun` (fake L0–L4, no model calls)
 │   │   ├── usage_digest.py     LiteLLM spend + Ledger summary → usage-digest.md
-│   │   └── kanban_bridge.py    Approved cards → Ledger missions (+CardKey writeback)
-│   └── channels/               CHAT TRANSPORTS — one authority, many surfaces
-│       ├── core.py             transport-agnostic GatewayCore.run_turn() (LiteLLM tool loop)
-│       ├── discord.py · slack.py · telegram.py · whatsapp.py   thin per-platform adapters
-│       └── __main__.py         runner: configs/channels.yaml → launch enabled adapters
+│   │   ├── kanban_bridge.py    Approved cards → Ledger missions (+CardKey writeback)
+│   │   ├── improvement.py      improvement-loop + daily-scan operator CLI (scan, scan-validate, …)
+│   │   └── knowledge.py        OKF knowledge-bundle CLI (generate, validate)
+│   ├── channels/               CHAT TRANSPORTS — one authority, many surfaces
+│   │   ├── core.py             transport-agnostic GatewayCore.run_turn() (LiteLLM tool loop)
+│   │   ├── discord.py · slack.py · telegram.py · whatsapp.py   thin per-platform adapters
+│   │   └── __main__.py         runner: configs/channels.yaml → launch enabled adapters
+│   ├── improvement/            SELF-IMPROVEMENT SUBSYSTEM (experiment loop + daily observer scan)
+│       ├── lifecycle.py        experiment state machine (Canary/Promoted are human-only)
+│       ├── registry.py         experiment records on ledger.db — the enforcement point
+│       ├── runner.py · verifier.py   baseline-vs-candidate runner · independent verifier (can only reject)
+│       ├── schema.py           ExperimentDefinition + DiscoveryConfig contracts
+│       ├── proposals.py · board.py · attention.py · promotion.py   propose · Kanban board · brief · canary
+│       ├── statistics.py · jury.py · drift.py · control.py   measurement-science layers (mSPRT/CUPED, κ-α, drift)
+│       ├── selfmetrics.py      DORA · acceptance-by-pillar · convergence power-law · BWT/FWT
+│       └── discovery/          the daily observer-only scan (sources→findings→triage→rank→draft→emit)
+│           ├── pillars · findings · ranking · acceptance   9 pillars · ICE/RICE/WSJF/VOI · learned P(accept)
+│           ├── charter · sources · triage · report · manifest   observer wall · scanners · dedup · report+sidecar
+│           ├── pipeline · dag_support · validate   orchestrator · Airflow glue · blocking N/N gate
+│           └── delivery/        email digest (stdlib SMTP) + chat ping (board.py drives the Kanban)
+│   └── knowledge/              OKF KNOWLEDGE PRODUCER (observer-only; source → derived bundle)
+│       ├── profile.py          OkfConcept — the strict growth-os-0.1 frontmatter contract
+│       ├── document.py         concept read/write (frontmatter + generated block + human notes)
+│       ├── producers.py        deterministic source→concept extractors (no source → no concept)
+│       ├── bundle.py           assemble concepts + per-section index.md (progressive disclosure)
+│       └── validate.py         the blocking N/N PASS gate
 │
 ├── generated/                  DISPOSABLE rendered output — never hand-edited
 │   ├── litellm-config.yaml     rendered gateway config (only ollama_chat/... models)
@@ -719,6 +751,8 @@ llm_station/
 │                               holds no secrets; max action = open a gated mission
 │
 ├── scripts/                    non-Python wrappers: cc.ps1 (Windows), live_smoke.{ps1,sh}
+├── dags/                       Airflow DAGs: self_improvement_daily.py (observer-only daily scan)
+├── knowledge/                  OKF knowledge bundle (Git-backed, derived; `make knowledge-generate`)
 ├── tests/                      contract regression tests (pytest; run by CI)
 │
 ├── repo-template/              installed into each onboarded repo by `make repo-install`
@@ -731,7 +765,7 @@ llm_station/
 ├── .github/workflows/contracts.yml   CI: this repo's own validate gate
 ├── data/book-checklist.md      275-book curriculum source for the library board
 ├── appflowy_kanban/            Growth OS (see 11.2)
-└── docs/                       18 docs + this one (see §12)
+└── docs/                       the docs set + this one (see §12); backend/ = borrowed standards (§13)
 ```
 
 ### 11.2 Growth OS (`appflowy_kanban/growth-os/`)
@@ -801,6 +835,8 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [request-routing-examples.md](request-routing-examples.md) | 8 worked examples: request → route → expected response |
 | [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
 | [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
+| [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
+| [knowledge-format.md](knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
 | [breakage-map.md](breakage-map.md) | what breaks when you change something |
 | [environment-map.md](environment-map.md) | environment table + activity mapping |
 | [github-safety.md](github-safety.md) | branch protection commands, PAT/App scopes, deploy gating |
@@ -872,6 +908,36 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-13 — OKF knowledge bundle + dashboards on the tailnet
+
+- **OKF knowledge producer.** New observer-only subsystem `src/command_center/knowledge/` (+ the
+  `knowledge` CLI / `make knowledge-generate|validate`) that reads authoritative sources (configs,
+  the Ledger, code, DAGs) and writes a Git-backed `knowledge/` bundle of OKF concepts under a strict
+  `growth-os-0.1` profile. Source systems produce OKF; OKF never modifies them (every concept is
+  `authority: derived` and points at its source). Clobber-safe generated/human split; data-derived
+  freshness (no timestamp churn on unchanged source); a blocking N/N validation gate (frontmatter,
+  source-path existence, link resolution, secret scan). First generation: 14 concepts, 7/7 PASS.
+  Design: [knowledge-format.md](knowledge-format.md).
+- **Dashboards on the tailnet.** Airflow / Ledger / LiteLLM / Uptime-Kuma now served over Tailscale
+  (8443 / 10000 / 11000 / 12000) — tailnet-only, verified reachable. [remote-access.md](remote-access.md) updated.
+
+### 2026-06-13 — self-improvement scan: data-derived ranking + delivery + standards pass
+
+- **Data-derived ranking.** Every scan decision moved out of code into `configs/discovery.yaml`
+  (`DiscoveryConfig`, in `make validate`) — no inline literals. Added `improvement/discovery/
+  acceptance.py`: a pure-Python logistic `P(accept)` learner from the Ledger's card accept/reject
+  history (leakage-controlled features, temporal split, champion–challenger vs the ICE/RICE/WSJF
+  formula; abstains below a documented sample floor). Records features at draft time (the feedback loop).
+- **Delivery.** `improvement/discovery/delivery/` — an email digest (stdlib SMTP; dry-run writes
+  HTML, fail-loud on missing creds), a one-line chat ping, and a `Pillar` column on the Kanban board
+  for per-pillar swimlanes. CLI flags `--email/--board/--ping` + a new-since-yesterday diff.
+- **Standards (principles-only).** Module-tree + 5-stage header on `pipeline.py`; a blocking
+  `improvement scan-validate` gate (10/10 — asserts the observer wall + no-leakage); a report
+  manifest sidecar (sha256 + provenance). Verified the `docs/backend/` R2/fleet/Railway/medallion
+  standards are the betts pipeline's and **don't apply here** (no such infra) — applied only the
+  transferable principles. Tracker: `docs/backend/projects/SELF_IMPROVEMENT_PIPELINE.md`.
+- **Zero new deps**; full suite + ladder (validate · scan-validate · evals) green; ruff + mypy clean.
 
 ### 2026-06-13 — model-selection track + routing check + Hermes spike
 

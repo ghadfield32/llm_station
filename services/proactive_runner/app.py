@@ -22,6 +22,8 @@ import time
 import yaml
 import httpx
 
+from collectors import collect_evidence
+
 LEDGER = os.environ.get("LEDGER_BASE_URL", "http://ledger:8090")
 JUDGE_GATE = os.environ.get("JUDGE_GATE_BASE_URL", "http://judge-gate:8088")
 CONFIG_PATH = os.environ.get("PROACTIVE_CONFIG", "/app/proactive.yaml")
@@ -35,15 +37,23 @@ def load_checks() -> dict:
 
 
 def run_check(check: dict) -> dict:
-    """Run one check: collect evidence, ask judges, decide on_fail action.
+    """Run one check: collect REAL evidence, ask judges, decide on_fail action.
 
-    The real evidence collectors (Airflow/Dagster API, asset checks, ruff/semgrep
-    over a repo) are wired per-target at install. This function is the control
-    flow they plug into — it stays small on purpose.
+    Evidence collectors (Airflow/Dagster API, asset checks, ruff/semgrep over a
+    repo) are registered per evidence-key in collectors.py and wired per-target
+    at install. A check whose declared evidence is not fully wired is SKIPPED —
+    we never judge or act on fabricated evidence, so an unwired check costs
+    nothing and opens no missions. It activates automatically once its
+    collectors are registered.
     """
     name = check["name"]
-    # 1. collect evidence (placeholder: real collectors return logs/metrics/reports)
-    evidence = {k: f"<{k} for {check['target']}>" for k in check.get("evidence", [])}
+    # 1. collect real evidence. If any declared evidence key has no collector,
+    #    skip this check entirely rather than sending the judge placeholders.
+    evidence, unwired = collect_evidence(check)
+    if unwired:
+        result = {"name": name, "result": "skipped",
+                  "reason": "evidence collectors not wired", "unwired_evidence": unwired}
+        return result
 
     # 2. ask the judges named on the check (Judge Gate routes them cheap-first)
     verdict = ask_judges(check, evidence)
