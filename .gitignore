@@ -34,8 +34,10 @@ htmlcov/
 *.tar.gz
 *.tgz
 # improvement-loop runtime evidence + active-version state (data/calibration and
-# data/sealed-evals ARE committed inputs; this output dir is not)
+# data/sealed-evals ARE committed inputs; these output dirs are not)
 data/improvement/
+data/discovery/   # scan feature-log output (card_features.jsonl); regenerated each run
+data/ledger.db    # runtime ledger state
 generated/improvements-board.json
 *.zip
 "updated files"
