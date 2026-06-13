@@ -72,15 +72,15 @@ State: ✅ done · 🟡 in progress · ⬜ todo · **N/A** infra-coupled (no R2/
 
 | Standard (transferable) | State | Evidence / Remaining |
 |-------------------------|:----:|----------------------|
-| No defensive coding / fail-loud (no `except: pass`, no fake values) | ✅ | scan itself *detects* this; `run_scanners` records errors, never swallows |
-| **Data-derived decisions / no hardcoded thresholds** | ⬜ | **GAP**: ICE/RICE/WSJF weights + confidence-band half-width are inline literals → externalize to `configs/discovery.yaml`, then learn P(accept) |
-| No data leakage / temporal safety | 🟡 | metrics read events at event-time; learned ranker must train on cards `created_at < cutoff`, validate `≥ cutoff` (temporal split, no random); acceptance features exclude post-decision fields |
-| Module-tree + stage header at top of orchestrator | ⬜ | add the §6 mandatory module-tree docstring to `pipeline.py` |
-| Blocking validation gate ("N/N PASS") | ⬜ | add `scan-validate` CLI + `make improvement-scan-validate` |
+| No defensive coding / fail-loud (no `except: pass`, no fake values) | ✅ | scan itself *detects* this; `run_scanners` records errors, never swallows; SMTP fails loud on missing creds |
+| **Data-derived decisions / no hardcoded thresholds** | ✅ | every knob in `configs/discovery.yaml` (`DiscoveryConfig`), no inline literals; learned P(accept) ranker in `acceptance.py` (`test_discovery_config.py`, `test_acceptance.py`) |
+| No data leakage / temporal safety | ✅ | learned ranker uses `temporal_split` (older trains, newer validates), standardizes on train only, features carry no outcome field; `scan-validate` asserts `acceptance_features_have_no_leakage` |
+| Module-tree + stage header at top of orchestrator | ✅ | `pipeline.py` module docstring enumerates the module tree, 5 stages, modes, observer boundary, hard contracts |
+| Blocking validation gate ("N/N PASS") | ✅ | `validate.py` → `improvement scan-validate` / `make improvement-scan-validate` (10/10 PASS; `test_discovery_validate.py`) |
 | Idempotency | ✅ | content-hashed ids; dedup-guarded drafting; logical-date keyed (`test_second_apply_is_idempotent`) |
-| Artifact manifest (sha256 + provenance) | ⬜ | add `manifest.py` sidecar on the report |
-| Multi-session git hygiene (exact staging, branch-per-session, no `-A`/force-push) | 🟡 | process rule — see §6 |
-| uv / pyproject dependency discipline | ✅ | target zero new deps (SMTP is stdlib `smtplib`); any add → `uv pip install` + pinned range + `uv sync` |
+| Artifact manifest (sha256 + provenance) | ✅ | `manifest.py` sidecar `<report>.manifest.json` (output sha256, injected produced_at, git_sha, lib versions; `test_discovery_manifest.py`) |
+| Multi-session git hygiene (exact staging, branch-per-session, no `-A`/force-push) | 🟡 | process rule — see §6; followed by hand |
+| uv / pyproject dependency discipline | ✅ | **zero** new deps added (SMTP/hashing/subprocess are stdlib); `uv sync` unchanged |
 | R2 publish + lock/validation protocol | **N/A** | no R2 in this repo |
 | 5080/4090 fleet routing | **N/A** | no production fleet for this project |
 | Railway serving / medallion / DuckDB / dbt | **N/A** | not present; the scan serves a report + Kanban cards, not a model |
@@ -111,10 +111,10 @@ This is also why the delivery's **acceptance feedback loop** matters — it's th
 
 | Surface | Module | Role | State |
 |---------|--------|------|:----:|
-| AppFlowy Kanban | `board.py` (+ Pillar/Score/Band/Unknowns) | where you ACT (the human wall) | 🟡 exists; enrich row |
-| Email digest (SMTP) | `delivery/digest.py` + `email_smtp.py` | where you LEARN/triage (3-min skim) | ⬜ |
-| Chat ping (Discord/…) | `delivery/ping.py` | the nudge | ⬜ |
-| Weekly metrics rollup | `selfmetrics.py` → digest | see the loop improving | ⬜ |
+| AppFlowy Kanban | `board.py` (+ `Pillar` for swimlanes) | where you ACT (the human wall) | ✅ |
+| Email digest (SMTP) | `delivery/digest.py` + `email_smtp.py` | where you LEARN/triage (3-min skim) | ✅ |
+| Chat ping (Discord/…) | `delivery/ping.py` | the nudge | ✅ |
+| Weekly metrics rollup | `selfmetrics.py` → digest `weekly=` | see the loop improving | 🟡 renderer ready; Monday auto-send TBD |
 
 Digest order: **Start-Here top-3 (by score)** → new-since-yesterday / aging → not-proposed
 (negative-memory) → failed sources → weekly trend. Every line links to its Kanban card. Body capped;
@@ -130,13 +130,19 @@ overflow reported, never silently dropped. SMTP creds from env; **dry-run writes
 
 ## 7. Done / Remaining (in order)
 
-1. ✅ Pipeline built (sources→findings→triage→rank→report), DAG, CLI, selfmetrics — 369 tests green.
+1. ✅ Pipeline built (sources→findings→triage→rank→report), DAG, CLI, selfmetrics.
 2. ✅ This tracker (planning surface).
-3. ⬜ Phase A: `configs/discovery.yaml` + `DiscoveryConfig` + `ranking_config.py`; remove inline weights.
-4. ⬜ `acceptance.py`: outcome recorder + pure-Python P(accept) + champion-challenger (Phase B).
-5. ⬜ Module-tree header on `pipeline.py`; `scan-validate` blocking gate; `manifest.py` sidecar.
-6. ⬜ `delivery/`: digest renderer + SMTP sender + chat ping; enrich Kanban row; CLI `--email/--board/--ping`.
-7. ⬜ Close: full suite + ladder green; ruff/mypy clean; `uv sync` if any dep added; update this tracker.
+3. ✅ Phase A: `configs/discovery.yaml` + `DiscoveryConfig` (contract in `..schema`); inline literals removed.
+4. ✅ `acceptance.py`: `FeatureLog` recorder + pure-Python P(accept) + temporal split + champion-challenger (Phase B harness; abstains until ≥`min_decisions` real outcomes — wired into the scan's draft step).
+5. ✅ Module-tree header on `pipeline.py`; `scan-validate` blocking gate (10/10); `manifest.py` sidecar.
+6. ✅ `delivery/`: digest renderer + stdlib SMTP sender + chat ping; Kanban `Pillar` row; CLI `--email/--board/--ping` + new-since-yesterday diff.
+7. ✅ Close: full suite green; ladder (validate / scan-validate 10/10 / evals) green; ruff + mypy clean on new code; **zero new deps** (no `uv sync` change). Multi-session git hygiene (§6) followed.
+
+Open follow-ups (data-gated, not blocking): the learned ranker stays in **report-only** mode until real
+accept/reject history accrues — it abstains to the formula and the champion-challenger verdict is
+surfaced (not auto-swapped); swapping the live ranker to P(accept) is a deliberate, gated step.
+A weekly metrics rollup email (DORA / acceptance-by-pillar / convergence) — the digest already
+accepts a `weekly` dict; auto-scheduling it on Mondays is the remaining wiring.
 
 See also: `../self-improvement-dag.md` is folded into `../../daily-self-improvement-dag.md` (the design +
 as-built reference); `../../MASTER.md` §6.4 indexes the scan.
