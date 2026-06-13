@@ -2,11 +2,7 @@
 
 > **Start here:** [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md) is the ordered cold-start (prerequisites → first boot → channels → definition of done). [`docs/MASTER.md`](docs/MASTER.md) is the consolidated system guide — every pipeline stage by stage, the full module tree with purposes, the doc index, and the change log. This README covers the contract model; those docs cover everything.
 
-```bash
-git clone --recurse-submodules https://github.com/ghadfield32/llm_station.git
-cd llm_station && uv venv .venv && uv pip install -e .
-make validate   # nothing runs until the contracts pass
-```
+Runs **entirely on your own machine** — no cloud bill (see [Cost](#cost)). Jump to the **[Quickstart](#quickstart)** to go from clone → AppFlowy boards → chatting with it on Discord/Telegram.
 
 Same architecture as v3 (VPS brain · Tailscale · Hermes · LiteLLM · Judge Gate · Ledger · leases · 4090 worker · VS Code tunnel · pre-commit/pre-push judges · GitHub gates), now with a proactive ops lane (DAG/data health + repo stewardship), standards rendering, usage digests, and propose-only model scouting. v4 adds the thing that makes it **repeatable and hard to break**: a **typed contract layer**. Every editable config validates against a Pydantic model before it can do anything, and a breakage map tells you what ripples when you change something.
 
@@ -39,6 +35,72 @@ Rules: secrets never live in YAML; generated files are never hand-edited; a typo
 - a `repo_task` environment that is persistent or holds secrets → rejected (isolation invariant)
 
 The dangerous mistakes — silently broken routing, an approval gate quietly disabled, a sandbox that leaks secrets — can't be committed.
+
+---
+
+## Quickstart
+
+Local, end-to-end: **clone → AppFlowy boards → chat with it from a channel.** All on your machine, no cloud bill. Needs **Docker, [uv](https://docs.astral.sh/uv/), Ollama, and git**. (Windows: swap `make X` for `.\scripts\cc.ps1 X`.) The full, annotated version with every option is [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md).
+
+### 1 — Get the code
+
+```bash
+git clone --recurse-submodules https://github.com/ghadfield32/llm_station.git
+cd llm_station
+uv venv .venv && uv pip install -e ".[gateways]"   # package + chat-channel deps
+make validate                                      # contracts pass → you're set up right
+```
+
+`--recurse-submodules` pulls **AppFlowy-Cloud** (the self-hosted board server) into `appflowy_kanban/AppFlowy-Cloud`. Already cloned without it? `git submodule update --init --recursive`.
+
+### 2 — Bring up the control plane (LiteLLM + Judge Gate + Ledger)
+
+```bash
+make setup       # creates .env, builds service images
+# edit .env: set OLLAMA_API_BASE (local: http://host.docker.internal:11434);
+#            do NOT add OpenAI/Anthropic keys (local-only by contract)
+ollama pull qwen3:8b        # any local model the configs route to
+make bootstrap   # first boot: litellm + db + ledger
+make keys        # mints 2 virtual keys → paste both into .env
+make up && make health      # full stack, all green
+make live-smoke  # proves real local replies through Ollama/LiteLLM
+```
+
+### 3 — Stand up AppFlowy (your boards + the Growth OS curator)
+
+AppFlowy Cloud is the **human surface** — todos, mission cards, papers/repos/signals, a 275-book library. The server is the submodule from step 1; you point the **AppFlowy desktop/mobile app** ([download here](https://appflowy.io)) at it.
+
+```bash
+# a) the AppFlowy board server (the submodule from step 1)
+cd appflowy_kanban/AppFlowy-Cloud
+cp deploy.env .env   # set POSTGRES_PASSWORD, GOTRUE_JWT_SECRET, API_EXTERNAL_URL, admin email/pw
+docker compose up -d
+
+# b) the Growth OS curator — runs in its OWN venv (requirements.txt), not the command-center pkg
+cd ../growth-os
+python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # Linux: .venv/bin/pip
+cp .env.example .env                              # fill APPFLOWY_* (+ optional GITHUB_TOKEN)
+.venv/Scripts/python scripts/setup_workspace.py   # creates the 8 databases (idempotent)
+.venv/Scripts/python -m growthos.curate --dry-run # safe: writes _export/*.csv, no live writes
+```
+
+Then point the **AppFlowy desktop/mobile app** at your `API_EXTERNAL_URL`. Full detail (curator config, the always-on hourly loop, phone/Tailscale access) is in [`appflowy_kanban/growth-os/README.md`](appflowy_kanban/growth-os/README.md). AppFlowy's free self-host tier = 1 user.
+
+### 4 — Talk to it from a channel
+
+Pick a transport (Telegram is the easiest — no public webhook). Per-platform token steps are in [`docs/channels.md`](docs/channels.md).
+
+```bash
+# 1. get a bot token (Telegram: message @BotFather) and put it in .env:
+#      TELEGRAM_BOT_TOKEN=...
+# 2. turn the channel on in configs/channels.yaml:  enabled: true
+# 3. launch it:
+make gateway CHANNELS=telegram      # or: discord / slack / whatsapp
+# dry-run first to see what would start, connecting to nothing:
+python -m command_center.channels --dry-run
+```
+
+Now message your bot: *"what's on my todo board?"* or *"draft a mission card: add retry logic to the odds DAG, L2, repo betts_basketball."* It routes through your local model to the same action layer — and **cannot** approve its own mission cards (you drag the card to Approved; that's the wall).
 
 ---
 
@@ -145,7 +207,13 @@ Start with [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md) (cold star
 
 ## Cost
 
-Lean control plane ~$15–35/mo plus your hardware/electricity. LiteLLM model calls are local Ollama calls, so they do not create OpenAI/Anthropic/OpenRouter API charges. Claude Code and Codex executor work uses their own login/subscription lanes.
+**Running it locally costs $0 in cloud charges** — which is the default and how it runs today. Everything (LiteLLM, Judge Gate, Ledger, AppFlowy, Ollama) is Docker on your own machine:
+
+- **Model calls** route through LiteLLM to **local Ollama** — no OpenAI/Anthropic/OpenRouter API charges, ever (the contract forbids provider keys).
+- **Claude Code / Codex** executor work uses your existing **subscription/login**, not metered API billing.
+- You pay only **your own electricity/hardware**.
+
+The only *optional* recurring cost is a **VPS (~$5–12/mo)** if you later want an always-on "brain" that stays up when your workstation/4090 sleep (Phase 1 in [SETUP-FROM-SCRATCH](docs/SETUP-FROM-SCRATCH.md)). It is not required — skip it and run on one machine.
 
 ## Before production
 The local checkout is pinned to a verified LiteLLM digest. When upgrading LiteLLM,
