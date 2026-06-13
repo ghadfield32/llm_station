@@ -31,6 +31,7 @@ dev = [
 # any directory. The config-pipeline commands read `configs/` relative to the repo root and are
 # invoked through `make` or `python -m command_center.cli.<name>` from the repo root (see Makefile).
 [project.scripts]
+cc = "command_center.cli.main:main"                  # portable operator interface: `uv run cc <command>`
 cc-gateway = "command_center.channels.__main__:main"
 cc-model-scout = "command_center.registry.model_scout:main"
 cc-usage-digest = "command_center.cli.usage_digest:main"

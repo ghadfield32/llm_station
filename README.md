@@ -103,6 +103,33 @@ Now message your bot: *"what's on my todo board?"* or *"draft a mission card: ad
 
 ---
 
+## Ways to run it (make · uv · docker)
+
+`make` is the reference, but it isn't required — pick whatever fits your machine. All four do the same operations:
+
+| Interface | Best for | Example |
+|---|---|---|
+| **`make <target>`** | Linux/macOS with GNU Make | `make first-boot` |
+| **`.\scripts\cc.ps1 <target>`** | Windows, no Make | `.\scripts\cc.ps1 first-boot` |
+| **`uv run cc <command>`** | **any OS, zero install** (uv syncs the project, then runs) | `uv run cc first-boot` |
+| **`docker compose up -d`** | pure-Docker, no host Python | renders its own config via the `config-render` service |
+
+The portable **`cc`** command (run `uv run cc help` for the full list) mirrors the Makefile and adds a one-button start:
+
+```bash
+uv run cc start                 # ONE BUTTON: control plane up → keys → health → opens the UIs
+uv run cc start --appflowy --channel telegram   # also: AppFlowy boards + guided Telegram setup
+uv run cc open                  # open the dashboards (LiteLLM, Ledger, Uptime Kuma) in your browser
+uv run cc channel discord       # guided favorite-channel setup (opens the bot page, enables, launches)
+uv run cc doctor                # the preflight checklist
+```
+
+- **UIs auto-open.** `cc start` (and `cc open`) launch the **LiteLLM admin** (`:4000/ui`), **Ledger** (`:8091`), and **Uptime Kuma** (`:3001`) dashboards. The **Hermes** UI is opt-in (`cc start --hermes`) and currently a placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/STATUS.md)).
+- **Favorite channel, guided.** `cc channel <discord|slack|telegram|whatsapp>` checks your tokens, opens the platform's bot-creation page if they're missing, enables the channel in `configs/channels.yaml`, and launches it. (Token creation is the one step only you can do on the platform.)
+- **AppFlowy, automatic.** `cc start --appflowy` runs `appflowy-init` + `appflowy-up` (scaffolds both `.env`s from templates and brings up the board server + curator).
+
+---
+
 ## Layout
 
 **New here? Read [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md)** — the ordered

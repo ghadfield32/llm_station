@@ -1,9 +1,11 @@
 # Setup from scratch
 
 The one setup doc: from "nothing installed" to "control plane up, channels chatting,
-agents working in leased worktrees" — in build order. Linux/VPS uses `make`; Windows
-uses the parity helper `.\scripts\cc.ps1 <target>`. The deep reference is
+agents working in leased worktrees" — in build order. The deep reference is
 [MASTER.md](MASTER.md); per-channel detail is [channels.md](channels.md).
+
+**Four equivalent interfaces** — use whichever fits (full table in the [README](../README.md#ways-to-run-it-make--uv--docker)):
+`make <target>` (Linux/macOS) · `.\scripts\cc.ps1 <target>` (Windows) · **`uv run cc <command>` (any OS, zero-install)** · `docker compose up -d` (pure Docker; it renders its own config). The fastest start on a fresh machine is **`uv run cc start`** (one button: control plane → keys → health → opens the UIs; add `--appflowy --channel telegram`). The steps below use `make`; substitute freely.
 
 > This doc consolidates the former `runbook.md`, `COMPLETE-SETUP.md`, and
 > `SETUP-REMAINING.md`. Live progress tracking lives in [STATUS.md](STATUS.md).
