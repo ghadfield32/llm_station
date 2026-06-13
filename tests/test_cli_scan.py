@@ -23,7 +23,8 @@ def temp_registry(tmp_path, monkeypatch):
 
 def _args(tmp_path, **kw) -> argparse.Namespace:
     base = dict(apply=False, method="wsjf", feeds="", source=[], max_cards=20,
-                report_out=str(tmp_path / "report.md"), show_report=False)
+                report_out=str(tmp_path / "report.md"), show_report=False,
+                email=False, email_to="", board=False, ping=False, feature_log="")
     base.update(kw)
     return argparse.Namespace(**base)
 

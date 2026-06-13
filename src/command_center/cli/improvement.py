@@ -299,10 +299,13 @@ def cmd_scan(args) -> int:
     def fetch(spec: dict) -> list:
         return feeds.get(spec["name"], [])
 
+    from command_center.improvement.discovery.acceptance import FeatureLog
     scanners = [build_scanner(s, reg, fetch) for s in specs]
     report_out = args.report_out or DEFAULT_REPORT_PATH
+    # record each drafted card's pre-decision features so the P(accept) ranker can learn (apply only)
+    feature_log = FeatureLog(args.feature_log or "data/discovery/card_features.jsonl")
     pipe = ScanPipeline(ObserverCharter(reg, report_path=report_out),
-                        method=args.method, max_cards=args.max_cards)
+                        method=args.method, max_cards=args.max_cards, feature_log=feature_log)
     now = datetime.now(timezone.utc)
     rep = pipe.run(scanners, date=now.date().isoformat(), now_iso=now.isoformat(),
                    apply=args.apply)
@@ -319,6 +322,32 @@ def cmd_scan(args) -> int:
         print("\n" + rep.report_markdown)
     elif args.apply:
         print(f"report -> {rep.report_path}")
+
+    # ---- delivery: email digest / Kanban board / chat ping (all opt-in) ----
+    import os
+    board_url = os.environ.get("DISCOVERY_BOARD_URL", "")
+    report_url = os.environ.get("DISCOVERY_REPORT_URL", "")
+    snap = Path(report_out).with_name("discovery-last-ids.json")
+    prev_ids = set(json.loads(snap.read_text(encoding="utf-8"))) if snap.exists() else None
+    if args.email:
+        from command_center.improvement.discovery.delivery import deliver_email, render_digest
+        subject, html = render_digest(rep, prev_ids=prev_ids, board_url=board_url,
+                                      report_url=report_url,
+                                      confidence_half_width=pipe.confidence_half_width)
+        to = args.email_to or os.environ.get("DISCOVERY_SMTP_TO", "")
+        print("email: " + deliver_email(subject, html, to=to, dry_run=not args.apply,
+                                         out_path="generated/self-improvement-digest.html"))
+    if args.board:
+        res = ImprovementsBoard(reg).sync(FileBoardSink(BOARD_OUT), dry_run=not args.apply)
+        bmode = "APPLY" if args.apply else "DRY-RUN"
+        print(f"board [{bmode}]: created={len(res['created'])} updated={len(res['updated'])} "
+              f"human_fields_preserved={len(res['human_fields_preserved'])}")
+    if args.ping:
+        from command_center.improvement.discovery.delivery import render_ping
+        print("ping: " + render_ping(rep, board_url=board_url, report_url=report_url))
+    if args.apply:                                   # remember what was shown for tomorrow's diff
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        snap.write_text(json.dumps(rep.drafted_ids), encoding="utf-8")
     return 0
 
 
@@ -377,6 +406,15 @@ def main() -> int:
     p.add_argument("--max-cards", type=int, default=None, dest="max_cards")
     p.add_argument("--report-out", default="", dest="report_out")
     p.add_argument("--show-report", action="store_true", dest="show_report")
+    p.add_argument("--email", action="store_true",
+                   help="render the email digest (dry-run writes HTML; --apply sends via SMTP)")
+    p.add_argument("--email-to", default="", dest="email_to",
+                   help="recipient (or DISCOVERY_SMTP_TO env)")
+    p.add_argument("--board", action="store_true",
+                   help="sync Proposed cards to the Kanban board")
+    p.add_argument("--ping", action="store_true", help="print a one-line chat-channel nudge")
+    p.add_argument("--feature-log", default="", dest="feature_log",
+                   help="acceptance feature-log path (default data/discovery/card_features.jsonl)")
     add("scan-validate", cmd_scan_validate)
 
     args = ap.parse_args()

@@ -8,6 +8,16 @@ schema_version: command-center.models.v1
 roles:
   triage:
     - {alias: triage-local, provider: ollama, model: "qwen3-coder:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+    # Second-GPU failover (5080 laptop = `msi` on the tailnet). DISABLED until
+    # that node is real, because shipping a dead endpoint makes the bot worse:
+    #   1. on msi: set OLLAMA_HOST=0.0.0.0, run Ollama, `ollama pull devstral:24b`
+    #      (the 5080 is 16 GB — it CANNOT fit qwen3-coder:30b ~19 GB; devstral
+    #      Q4 ~14 GB fits and is whitelisted).
+    #   2. set OLLAMA_API_BASE_5080=http://msi:11434 in .env (verify it answers).
+    #   3. uncomment the line below, then `make models`. LiteLLM then
+    #      load-balances triage across both GPUs (simple-shuffle) and retries
+    #      the survivor if one is down — that is the "route to more GPU" path.
+    # - {alias: triage-5080, provider: ollama, model: "devstral:24b", priority: 2, local: true, monthly_budget_usd: 0, vram_gb: 14, license: Apache-2.0, api_base_env: OLLAMA_API_BASE_5080}
 
   local-judge:
     - {alias: judge-qwen, provider: ollama, model: "qwen3:30b", priority: 1, local: true, vram_gb: 19, license: Apache-2.0}

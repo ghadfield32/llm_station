@@ -6,6 +6,21 @@ liners. Newest notes at the top of each topic. Full design lives in
 fast "has this been done?" index. Dates are when the line was written.
 
 ## Channels / gateways (Discord, Slack, Telegram, WhatsApp)
+- DONE 06-13: bot busy rules in `channels/core.py` — one in-flight turn per
+  conversation (2nd concurrent msg gets "still working" reply, no history
+  corruption / no doubled GPU call) + global `max_concurrency` semaphore
+  (env GATEWAY_MAX_CONCURRENCY|OLLAMA_NUM_PARALLEL, default 1). Tested live.
+- DONE 06-13: "route to more GPU" MECHANISM — `ModelCandidate.api_base_env`
+  (contracts.py) + render emits per-candidate `api_base`; lower-priority
+  role candidates can sit on a 2nd Ollama endpoint, LiteLLM load-balances
+  (simple-shuffle) + retries survivor. Validates + renders unchanged
+  (default OLLAMA_API_BASE). Decision: **fully local, NO Modal** — fail-closed
+  invariant kept.
+- BLOCKED (user): 5080 failover not live — `msi:11434` unreachable (Ollama off
+  or bound to 127.0.0.1), and 5080 is 16GB so it needs devstral:24b (~14GB),
+  NOT qwen3-coder:30b (~19GB). Candidate sits COMMENTED in models.yaml; enable:
+  on msi `OLLAMA_HOST=0.0.0.0` + run Ollama + `ollama pull devstral:24b`; set
+  `OLLAMA_API_BASE_5080` in .env; uncomment triage-5080; `make models`.
 - DONE 06-12: Discord bot live again — root cause was **no process running**
   (not config); brains (litellm/ollama) were up the whole time.
 - DONE 06-12: canonical runner is `python -m command_center.channels` (reads

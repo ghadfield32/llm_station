@@ -23,13 +23,28 @@ from pathlib import Path
 from .registry import ExperimentRegistry
 
 # The board columns (mission section 10). HUMAN_OWNED ones are never overwritten by sync.
+# Pillar lets the AppFlowy board group scan-drafted cards into per-pillar swimlanes.
 BOARD_FIELDS = [
-    "ExperimentID", "Title", "TargetType", "Target", "Hypothesis", "Status",
+    "ExperimentID", "Title", "Pillar", "TargetType", "Target", "Hypothesis", "Status",
     "Decision", "Risk", "Baseline", "Candidate", "PrimaryMetric", "VerifierVerdict",
     "HumanDecision", "MissionID", "CanaryStatus", "RollbackStatus", "ReopenConditions",
     "Created", "LastUpdated", "ReviewNotes",
 ]
 HUMAN_OWNED = frozenset({"HumanDecision", "ReopenConditions", "ReviewNotes"})
+
+# pillar 4-char code -> pillar name, parsed from a scan-drafted id "EXP-scan-{code}-..."
+# (mirrors the scan's Finding.experiment_id scheme; "" for non-scan experiments).
+_PILLAR4 = {
+    "auto": "automation", "stru": "structure", "upda": "updated_metrics",
+    "code": "code_quality", "rule": "rules_standards", "data": "data_handling",
+    "full": "full_idea", "reli": "reliability_observability", "cost": "cost_finops",
+}
+
+
+def _pillar_of(experiment_id: str) -> str:
+    if experiment_id.startswith("EXP-scan-"):
+        return _PILLAR4.get(experiment_id.split("-")[2][:4], "")
+    return ""
 
 
 def experiment_to_row(exp: dict, defn: dict | None) -> dict:
@@ -45,6 +60,7 @@ def experiment_to_row(exp: dict, defn: dict | None) -> dict:
     return {
         "ExperimentID": exp["experiment_id"],
         "Title": exp.get("title", ""),
+        "Pillar": _pillar_of(exp["experiment_id"]),
         "TargetType": exp.get("target_type", ""),
         "Target": exp.get("target_ref", ""),
         "Hypothesis": (defn or {}).get("hypothesis", ""),

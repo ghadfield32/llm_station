@@ -50,10 +50,15 @@ def build(reg, canary, promote) -> str:
             ordered = [c for c in ordered if c.canary_weight > 0] + \
                       [c for c in ordered if c.canary_weight == 0]
         for c in ordered:
+            # Per-candidate endpoint: a role's lower-priority candidate can
+            # live on a second GPU by setting api_base_env in models.yaml.
+            # Defaults to OLLAMA_API_BASE (the primary 4090). simple-shuffle +
+            # num_retries (router_settings) load-balances same-named
+            # deployments and retries the survivor if one endpoint is down.
             lines += [f"  - model_name: {role}",
                       "    litellm_params:",
                       f"      model: {provider_model(c)}",
-                      "      api_base: os.environ/OLLAMA_API_BASE"]
+                      f"      api_base: os.environ/{c.api_base_env}"]
             if c.canary_weight and role not in canary:
                 lines.append(f"      weight: {c.canary_weight}")
         if role in canary:

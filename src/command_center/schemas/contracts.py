@@ -21,6 +21,12 @@ class ModelCandidate(Strict):
     vram_gb: int | None = Field(default=None, ge=1)
     license: str | None = None
     notes: str | None = None
+    # Name of the env var holding this candidate's Ollama endpoint. Lets a
+    # second GPU (e.g. the 5080 on the tailnet) serve a role's lower-priority
+    # candidate. Defaults to OLLAMA_API_BASE (the primary 4090) so existing
+    # single-endpoint configs are unchanged. Still local-only — it names an
+    # Ollama base, never a cloud provider; provider routes stay forbidden.
+    api_base_env: str = "OLLAMA_API_BASE"
 
 
 class ScoutSpec(Strict):
