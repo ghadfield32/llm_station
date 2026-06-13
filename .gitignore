@@ -36,8 +36,10 @@ htmlcov/
 # improvement-loop runtime evidence + active-version state (data/calibration and
 # data/sealed-evals ARE committed inputs; these output dirs are not)
 data/improvement/
-data/discovery/   # scan feature-log output (card_features.jsonl); regenerated each run
-data/ledger.db    # runtime ledger state
+# scan feature-log output (card_features.jsonl); regenerated each run
+data/discovery/
+# runtime ledger state
+data/ledger.db
 generated/improvements-board.json
 *.zip
 "updated files"
