@@ -57,6 +57,34 @@ llm_station/
 brief, guidelines, retention · q15min (host task) = bridge · on demand/host =
 packages, import_books/dags, selftest.
 
+## AppFlowy view mechanics (load-bearing — verified against docs + source)
+
+What the REST API CAN do: create databases, add fields, create views
+(Grid=1/Board=2/Calendar=3), read/upsert rows. What it CANNOT do (confirmed
+in `AppFlowy-Cloud/src/api/workspace.rs` — no routes exist; docs.appflowy.io
+agrees): delete a field, reorder fields, or set any **view setting**
+(group-by, filter, sort, column order/visibility). Those live in client-side
+collab state and are UI-only.
+
+Consequences we design around:
+- A **board auto-groups by the first single-select field**, and AppFlowy
+  auto-adds a junk `Type` (single-select, 0 options) + `Done` (checkbox) to
+  EVERY new grid before our schema fields. So a fresh board groups by the
+  empty `Type` → one blank column. The one-time UI cleanup per database:
+  **delete the `Type` and `Done` columns** → the board then groups by
+  `Status` (the queue→in-progress→done flow) automatically, and the grid
+  loses its clutter. This is the single fix for both the board-grouping and
+  the long-standing "blank columns/rows" complaint.
+- **Never rename** status options — the curator, retention, and all 20 tools
+  write those exact strings; renames silently break writes. Reorder/recolor
+  /hide groups freely.
+- **One board per database**, not many filtered ones. Per-tier library boards
+  were tried and removed: the API can't set their filter/group, so they came
+  up as empty duplicates. The right tool to read the curriculum a tier at a
+  time is the **Tier Board** (auto-groups by Tier → Essential is its own
+  column). Multiple *views* per database (Grid+Board+Calendar) is supported
+  and used; multiple near-identical boards is the anti-pattern.
+
 ## The two registries (do not merge them)
 
 | File | Owns | Consumed by |

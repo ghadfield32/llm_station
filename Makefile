@@ -11,9 +11,13 @@ LITELLM_DIGEST ?= ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0
 
 .PHONY: help setup verify verify-base validate schema render up bootstrap down keys health \
         models models-canary models-promote models-rollback \
-        model-scout proactive-validate proactive-smoke targets-validate kanban-validate kanban-bridge appflowy-audit tools-validate evals cross-refs ui-validate \
+        model-scout model-fit proactive-validate proactive-smoke targets-validate kanban-validate kanban-bridge appflowy-audit tools-validate evals cross-refs ui-validate \
         standards-validate forbidden-providers usage-digest usage-report live-smoke impact mission-dryrun env-smoke repo-install backup restore-drill logs \
-        gateway channels-validate lint test
+        gateway channels-validate lint test doctor first-boot models-light appflowy-init appflowy-up \
+        improvement-validate improvement-list improvement-register improvement-baseline \
+        improvement-run improvement-verify improvement-report improvement-request-promotion \
+        improvement-canary improvement-promote improvement-rollback improvement-post-watch \
+        improvement-board improvement-propose improvement-scan judge-calibration attention-digest
 
 help:  ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -45,8 +49,8 @@ env-smoke:  ## Validate environments + isolation invariants
 proactive-validate:  ## Validate configs/proactive.yaml against its contract
 	@$(PY) -c "import yaml; from command_center.schemas import ProactiveConfig; ProactiveConfig.model_validate(yaml.safe_load(open('configs/proactive.yaml'))); print('proactive-validate: PASS')"
 
-proactive-smoke:  ## Dry-run the proactive lane: list checks + their on_fail + risk cap (no calls)
-	@$(PY) -c "import yaml; from command_center.schemas import ProactiveConfig; c=ProactiveConfig.model_validate(yaml.safe_load(open('configs/proactive.yaml'))); [print(f'  {x.name:34s} {x.schedule:14s} on_fail={x.on_fail:18s} max={x.auto_patch_max_risk.value}') for x in c.runtime_checks+c.repo_stewardship]; print('proactive-smoke: PASS')"
+proactive-smoke:  ## Dry-run proactive lanes: list schedules, actions, write/risk caps (no calls)
+	@$(PY) -c "import yaml; from command_center.schemas import ProactiveConfig; c=ProactiveConfig.model_validate(yaml.safe_load(open('configs/proactive.yaml'))); [print(f'  {x.name:34s} {x.schedule:14s} on_fail={x.on_fail:18s} max={x.auto_patch_max_risk.value}') for x in c.runtime_checks+c.repo_stewardship]; [print(f'  {x.name:34s} {x.schedule:14s} self_improvement writes={\"+\".join(x.write_scopes):29s} max_generated={x.max_generated_experiment_risk.value}') for x in c.self_improvement_scans]; print('proactive-smoke: PASS')"
 
 targets-validate:  ## Validate configs/targets.yaml (the watch inventory)
 	@$(PY) -c "import yaml; from command_center.schemas import TargetsConfig; TargetsConfig.model_validate(yaml.safe_load(open('configs/targets.yaml'))); print('targets-validate: PASS')"
@@ -93,10 +97,21 @@ setup:  ## Check deps, create isolated .venv (uv), create .env, validate+render,
 	  test -d .venv || python3 -m venv .venv; \
 	  .venv/bin/pip install --quiet -e .; \
 	fi
-	@test -f .env || { $(PY) -m command_center.cli.init_env; echo "replace LiteLLM digest, confirm OLLAMA_API_BASE, then re-run"; exit 1; }
+	@test -f .env || { $(PY) -m command_center.cli.init_env; echo "created .env — set OLLAMA_API_BASE (local default host.docker.internal is fine), then re-run 'make setup'"; exit 1; }
 	@$(MAKE) render
 	@$(COMPOSE) build ledger judge-gate proactive-runner
-	@echo "setup OK — next: replace the LiteLLM digest, then make bootstrap"
+	@echo "setup OK — next: 'make first-boot' (one shot), or bootstrap -> keys -> up"
+
+doctor:  ## Preflight: docker daemon, uv, ollama, service ports, .env, provider boundary, digest
+	@$(PY) -m command_center.cli.doctor
+
+first-boot:  ## One-shot first boot: doctor -> setup -> bootstrap -> keys (auto-writes .env) -> up -> health
+	@$(MAKE) doctor
+	@$(MAKE) setup
+	@$(MAKE) bootstrap
+	@$(MAKE) keys
+	@$(MAKE) up
+	@$(MAKE) health
 
 verify-base:  ## Verify digest + base secrets before first boot keys exist
 	@$(PY) -m command_center.cli.verify_env --mode base
@@ -124,13 +139,9 @@ bootstrap:  ## FIRST BOOT ONLY: bring up litellm+db+ledger so you can mint keys
 down:  ## Stop
 	@$(COMPOSE) down
 
-keys:  ## Create budgeted LiteLLM virtual keys (first boot)
+keys:  ## Mint budgeted LiteLLM virtual keys and write them straight into .env (no copy-paste)
 	@$(MAKE) verify-base
-	@source .env; \
-	echo "hermes-orchestrator:"; curl -s $(LITELLM_URL)/key/generate -H "Authorization: Bearer $$LITELLM_MASTER_KEY" -H 'Content-Type: application/json' -d '{"key_alias":"hermes-orchestrator","models":["triage","planner","coder","architect-judge","security-judge","local-judge"],"metadata":{"routing":"local-only"},"rpm_limit":60,"max_parallel_requests":4}'; echo; \
-	echo "judge-gate:"; curl -s $(LITELLM_URL)/key/generate -H "Authorization: Bearer $$LITELLM_MASTER_KEY" -H 'Content-Type: application/json' -d '{"key_alias":"judge-gate","models":["triage","planner","architect-judge","security-judge","local-judge"],"metadata":{"routing":"local-only"},"rpm_limit":120,"max_parallel_requests":4}'; echo; \
-	echo "paste BOTH keys above into .env as HERMES_LITELLM_KEY / JUDGE_GATE_LITELLM_KEY,"; \
-	echo "confirm they are non-empty, then run 'make up'."
+	@$(PY) -m command_center.cli.mint_keys
 
 health:  ## Check every service health endpoint
 	@for s in "litellm:4000/health/liveliness" "judge-gate:8088/health" "ledger:$(LEDGER_HOST_PORT)/health"; do \
@@ -140,6 +151,21 @@ models:  ## Validate+render, pull local tags, restart litellm
 	@$(MAKE) render
 	@for t in $$($(PY) -c "import yaml; print(' '.join(yaml.safe_load(open('configs/models.yaml')).get('local_whitelist',[])))"); do echo "ollama pull $$t"; OLLAMA_HOST=$(OLLAMA_HOST) ollama pull $$t || echo "(skip $$t)"; done
 	@$(COMPOSE) restart litellm && echo "models updated"
+
+models-light:  ## Switch to the small-GPU/CPU profile (qwen3:8b), pull it, re-render
+	@$(PY) -c "import yaml; from command_center.schemas import ModelRegistry; ModelRegistry.model_validate(yaml.safe_load(open('configs/models.light.yaml'))); print('models.light.yaml: VALID')"
+	@for t in $$($(PY) -c "import yaml; print(' '.join(yaml.safe_load(open('configs/models.light.yaml')).get('local_whitelist',[])))"); do echo "ollama pull $$t"; OLLAMA_HOST=$(OLLAMA_HOST) ollama pull $$t || echo "(skip $$t)"; done
+	@cp configs/models.light.yaml configs/models.yaml
+	@$(MAKE) render
+	@echo "switched to LIGHT profile (qwen3:8b). Revert: git checkout configs/models.yaml"
+
+appflowy-init:  ## Scaffold AppFlowy-Cloud/.env + growth-os/.env from templates (no clobber)
+	@$(PY) -m command_center.cli.appflowy_init
+
+appflowy-up:  ## Start the AppFlowy board server + Growth OS curator stacks
+	@cd appflowy_kanban/AppFlowy-Cloud && $(COMPOSE) up -d
+	@cd appflowy_kanban/growth-os && $(COMPOSE) -f docker-compose.curator.yml up -d --build
+	@echo "AppFlowy + curator up. Sign up a user, put creds in growth-os/.env, then setup_workspace.py"
 
 models-canary:  ## Route ~10% of a role to a local challenger. ROLE= MODEL=ollama_chat/tag
 	@test -n "$(ROLE)" -a -n "$(MODEL)" || { echo "usage: make models-canary ROLE=coder MODEL=ollama_chat/qwen3-coder:30b"; exit 1; }
@@ -159,6 +185,9 @@ models-rollback:  ## Revert canary for ROLE=
 model-scout:  ## Propose model candidates from configured sources. Never edits configs.
 	@$(PY) -m command_center.registry.model_scout --output generated/model-scout-report.md || true
 	@echo "review generated/model-scout-report.md, then edit configs/models.yaml manually if warranted"
+
+model-fit:  ## Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
+	@$(PY) -m command_center.cli.model_fit $(if $(CTX),--ctx $(CTX),) $(if $(MODEL),--model $(MODEL),) $(if $(ENV),--env $(ENV),) $(if $(VRAM),--vram-gb $(VRAM),)
 
 usage-digest:  ## Write generated/usage-digest.md from LiteLLM + Ledger usage APIs
 	@$(PY) -m command_center.cli.usage_digest --output generated/usage-digest.md
@@ -198,3 +227,39 @@ lint:  ## ruff + mypy over src/ (install the dev extra first: uv pip install -e 
 
 test:  ## Run the test suite (install the dev extra first: uv pip install -e ".[dev]")
 	@$(PY) -m pytest
+
+# ---- improvement loop (experiment registry on the Ledger; dry-run by default) ----
+improvement-validate:  ## Validate configs/improvement.yaml experiment definitions
+	@$(PY) -m command_center.cli.improvement validate
+improvement-list:  ## List registered experiments (STATUS= to filter)
+	@$(PY) -m command_center.cli.improvement list $(if $(STATUS),--status $(STATUS),)
+improvement-register:  ## Register an experiment ID=EXP-... (dry-run; APPLY=1 to commit). MISSION= optional
+	@$(PY) -m command_center.cli.improvement register --id $(ID) $(if $(MISSION),--mission $(MISSION),) $(if $(APPLY),--apply,)
+improvement-baseline:  ## Capture the baseline for ID=EXP-... (dry-run; APPLY=1 to run)
+	@$(PY) -m command_center.cli.improvement baseline --id $(ID) $(if $(APPLY),--apply,)
+improvement-run:  ## Run the candidate for ID=EXP-... (dry-run; APPLY=1 to run)
+	@$(PY) -m command_center.cli.improvement run --id $(ID) $(if $(APPLY),--apply,)
+improvement-verify:  ## Independently verify ID=EXP-... (dry-run; APPLY=1 to run). VERIFIER= optional
+	@$(PY) -m command_center.cli.improvement verify --id $(ID) $(if $(VERIFIER),--verifier $(VERIFIER),) $(if $(APPLY),--apply,)
+improvement-report:  ## Full audit report for ID=EXP-...
+	@$(PY) -m command_center.cli.improvement report --id $(ID)
+improvement-request-promotion:  ## Move a Verified experiment to Awaiting Human Promotion. ID=EXP-... APPLY=1
+	@$(PY) -m command_center.cli.improvement request-promotion --id $(ID) $(if $(APPLY),--apply,)
+improvement-canary:  ## HUMAN: start a canary. ID=EXP-... APPROVER=you APPLY=1
+	@$(PY) -m command_center.cli.improvement canary --id $(ID) --approver "$(APPROVER)" $(if $(APPLY),--apply,)
+improvement-promote:  ## HUMAN: promote after a clean canary. ID=EXP-... APPROVER=you APPLY=1
+	@$(PY) -m command_center.cli.improvement promote --id $(ID) --approver "$(APPROVER)" $(if $(APPLY),--apply,)
+improvement-rollback:  ## Roll back ID=EXP-... (APPLY=1). REASON= optional
+	@$(PY) -m command_center.cli.improvement rollback --id $(ID) $(if $(REASON),--reason "$(REASON)",) $(if $(APPLY),--apply,)
+improvement-post-watch:  ## Record a post-watch checkpoint. ID=EXP-... CHECKPOINT=1h [REGRESSION=1] APPLY=1
+	@$(PY) -m command_center.cli.improvement post-watch --id $(ID) --checkpoint $(or $(CHECKPOINT),1h) $(if $(REGRESSION),--regression,) $(if $(APPLY),--apply,)
+improvement-board:  ## Project the registry onto the improvements board (dry-run; APPLY=1 to write)
+	@$(PY) -m command_center.cli.improvement board $(if $(APPLY),--apply,)
+improvement-propose:  ## Run controlled proposal generation from evidence (dry-run; APPLY=1 to draft)
+	@$(PY) -m command_center.cli.improvement propose $(if $(APPLY),--apply,)
+improvement-scan:  ## Observer-only self-improvement scan -> Proposed cards + report (dry-run; APPLY=1). FEEDS=path SHOW=1
+	@$(PY) -m command_center.cli.improvement scan $(if $(APPLY),--apply,) $(if $(FEEDS),--feeds $(FEEDS),) $(if $(METHOD),--method $(METHOD),) $(if $(SHOW),--show-report,)
+judge-calibration:  ## Score the judge against the calibration set (TP/FP/FN/precision/recall)
+	@$(PY) -m command_center.cli.improvement calibration
+attention-digest:  ## Print the human-attention morning brief + queue metrics
+	@$(PY) -m command_center.cli.improvement attention

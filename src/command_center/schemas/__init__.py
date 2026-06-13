@@ -5,11 +5,11 @@ from .contracts import (
     JudgeSpec, JudgeStage, JudgeConfig,
     TierPolicy, GatesConfig,
     EnvironmentSpec, EnvironmentsConfig,
-    ProactiveCheck, ProactiveConfig,
+    ProactiveCheck, SelfImprovementScan, ProactiveConfig,
     RepoTarget, DagTarget, DataAssetTarget, ServiceTarget, TargetsConfig,
     KanbanSource, KanbanSection, KanbanConfig,
     ToolPolicy, ToolsConfig,
-    EvalCase, EvalsConfig,
+    EvalCase, EvalsConfig, EvalSuiteRef,
     StandardsProfile, SkillUpdatePolicy, StandardsConfig, ScoutSpec,
     WebUIConfig, UIConfig,
     ChannelSpec, ChannelsConfig,
@@ -31,3 +31,14 @@ CONFIG_CONTRACTS = {
     "configs/ui.yaml": UIConfig,
     "configs/channels.yaml": ChannelsConfig,
 }
+
+# The improvement loop's experiment contract. Registered here so the same
+# `make validate` / `make schema` / `make impact` machinery covers it — it is an
+# editable config like any other, not a parallel system. Imported after the dict
+# to keep the import edge one-directional (improvement.schema -> schemas.base).
+from ..improvement.schema import ImprovementConfig  # noqa: E402
+
+CONFIG_CONTRACTS["configs/improvement.yaml"] = ImprovementConfig
+# Per-target reference experiments (one per target type) — same contract, validated by
+# the same `make validate`. Kept separate so the main improvement.yaml stays the worked set.
+CONFIG_CONTRACTS["configs/improvement-targets.yaml"] = ImprovementConfig

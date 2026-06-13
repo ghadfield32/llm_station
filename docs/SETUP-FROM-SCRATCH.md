@@ -31,6 +31,10 @@ uses the parity helper `.\scripts\cc.ps1 <target>`. The deep reference is
 LiteLLM is pinned by **immutable digest** (not pip) on purpose — supply-chain guard.
 You never `pip install litellm`.
 
+> **Low VRAM / laptop / CPU?** The default models are ~24 GB-class (need a big GPU). Run
+> **`make models-light`** at step 5 to switch to a `qwen3:8b` profile (~5 GB) so you still get
+> real replies. `make doctor` warns you up front if the routed models aren't pulled.
+
 ## 1. Clone (with the submodule)
 
 ```bash
@@ -73,20 +77,31 @@ When installing or upgrading LiteLLM: pull the official GHCR image, inspect its 
 digest, replace the pin in `docker-compose.yml` **and** `Makefile`, then
 `make verify-base` (Windows: `.\scripts\cc.ps1 verify-base`).
 
-## 4. Validate before booting anything
+## 4. Preflight + validate before booting
 
 ```bash
+make doctor           # one green/red checklist: docker, uv, ollama, ports, .env, providers, digest
 make validate         # configs match contracts + cross-refs + render + provider boundary
 make mission-dryrun   # L0–L4 lifecycle is coherent (no model calls)
 ```
 
-Both must pass. They make typos and broken invariants fail now, not at runtime.
+`make doctor` surfaces every prerequisite at once instead of failing one at a time. All three
+must pass before you boot.
 
 ## 5. First boot (Phase 1 — the control plane)
 
+**The easy way — one command** (chains doctor → setup → bootstrap → keys → up → health; it pauses
+once if `.env` still needs `OLLAMA_API_BASE`, then just re-run it):
+
+```bash
+make first-boot       # Windows: .\scripts\cc.ps1 first-boot
+```
+
+**Or step by step**, if you want to watch each stage:
+
 ```bash
 make bootstrap        # FIRST BOOT: litellm-db + litellm + ledger only, waits for health
-make keys             # mints the two budgeted LiteLLM virtual keys — paste BOTH into .env
+make keys             # mints the two virtual keys AND writes them into .env (no copy-paste)
 make verify           # full runtime prerequisites, including the virtual keys
 make up               # full control plane
 make health           # every service OK?
@@ -97,7 +112,24 @@ Windows: the same targets via `.\scripts\cc.ps1 bootstrap | keys | verify | up |
 
 > Why `bootstrap` before `up`: clients read their LiteLLM virtual key from `.env`, but
 > that key doesn't exist until LiteLLM is up and `make keys` mints it. `bootstrap` starts
-> just the infra so keys can be minted first.
+> just the infra so keys can be minted first. `make keys` now writes both keys into `.env`
+> for you — no manual paste.
+
+### Environment & stacks map
+
+Three `.env` files and three Docker stacks, each with a clear owner — fill only what you use:
+
+| File | Owns | When |
+|---|---|---|
+| `.env` (repo root) | control plane (LiteLLM/Judge Gate/Ledger) + chat-channel tokens | always |
+| `appflowy_kanban/AppFlowy-Cloud/.env` | the AppFlowy board server (Postgres, GoTrue, S3/MinIO, external URL) | if you use AppFlowy (§6) |
+| `appflowy_kanban/growth-os/.env` | the Growth OS curator (AppFlowy creds, GitHub PAT) | if you use the curator (§6) |
+
+| Stack | Compose file | Brought up by |
+|---|---|---|
+| Control plane | `docker-compose.yml` | `make up` |
+| AppFlowy server | `appflowy_kanban/AppFlowy-Cloud/docker-compose.yml` | `make appflowy-up` (after `make appflowy-init`) |
+| Growth OS curator | `appflowy_kanban/growth-os/docker-compose.curator.yml` | `make appflowy-up` (brings up both) |
 
 The live smoke proves: Ollama direct reply · LiteLLM `triage`/`planner`/`local-judge`
 aliases · `gpt-*` and `claude-*` names **denied** through LiteLLM · executor shell has no
@@ -161,8 +193,9 @@ the agent misbehaves.
 
 ## 9. Optional phases
 
-- **Phase 3.5 — proactive ops lane:** scheduled DAG/data/repo checks → gated missions
-  ([proactive-ops.md](proactive-ops.md)).
+- **Phase 3.5 — proactive ops lane:** scheduled DAG/data/repo checks → gated missions,
+  plus the observer-only daily self-improvement report/card scan
+  ([proactive-ops.md](proactive-ops.md), [daily-self-improvement-dag.md](daily-self-improvement-dag.md)).
 - **Phase 4 — workspace platforms:** Coder / OpenHands / Codespaces, only when tunnels are
   outgrown. Mirage stays a read-only watch-list experiment ([optional-mirage.md](optional-mirage.md)).
 - **Phase 5 — home relay:** a mini-PC for Wake-on-LAN/watchdog/backup mirror, only after

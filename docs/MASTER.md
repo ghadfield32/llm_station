@@ -144,7 +144,7 @@ The thirteen config files and their contracts:
 | `configs/environments.yaml` | one environment per activity, isolation rules |
 | `configs/standards.yaml` | durable operating standards for Claude, Codex, and Judge Gate |
 | `configs/breakage.yaml` | what ripples when you change a file (powers `make impact`) |
-| `configs/proactive.yaml` | scheduled checks on already-done work, RCA caps |
+| `configs/proactive.yaml` | scheduled checks on already-done work, RCA caps, daily self-improvement scan |
 | `configs/targets.yaml` | the watch inventory: repos, DAGs, data assets, services + SLOs |
 | `configs/tools.yaml` | tool permissions the judges can cite |
 | `configs/evals.yaml` | routing/judge regression suite = the model-promotion gate |
@@ -187,7 +187,7 @@ Access (on the do-not-build list by default).
 | **Proactive Runner** | Scheduled checks on already-done work. Holds no secrets; its strongest autonomous act is opening a gated mission. |
 | **Discord Gateway** | Discord ↔ LiteLLM (`triage`) ↔ the Growth OS action layer. Fail-fast without `DISCORD_BOT_TOKEN`. |
 | Uptime Kuma + restic | Health monitoring and backups. |
-| *(optional profile)* Hermes | **Not started by default.** The `nousresearch/hermes-agent` image is a phantom (not published); the profile is a placeholder until a verified runtime or local bridge is chosen. LiteLLM + Ollama + the action layer already serve its role. |
+| *(optional profile)* Hermes | **Not adopted — evaluated 2026-06-13 → DEFER.** Hermes Agent is real now (v0.16.0, PyPI/official image); the old "phantom image" note is stale. An isolated spike (see change log + `evaluation/capability-assessment/hermes/DECISION.md`) found cross-session memory works but is just a local `MEMORY.md` (not beyond-stack) and self-improving skills did not auto-fire. LiteLLM + Ollama + the action layer serve its role; revisit only if autonomous skill self-improvement materializes. |
 
 ### The worker (4090 / currently the same workstation)
 
@@ -360,13 +360,21 @@ the L4 wall and never ran.
 
 Defined in `configs/proactive.yaml`, validated by `ProactiveConfig`, run by
 `services/proactive_runner` (a thin scheduler invoked by host cron / systemd:
-`docker compose run --rm proactive-runner`). Two lanes:
+`docker compose run --rm proactive-runner`) or by a low-privilege Airflow wrapper.
+Three lanes:
 
 - **Runtime health** — DAG run health, data freshness, data quality
   (schema/nulls/rows/drift), service/pipeline perf.
 - **Repo stewardship** — structure, test quality, docs freshness, dead code,
   dependency drift, and defensive-coding *debt* (the same things the judge
   blocks at commit time, swept for after the fact).
+- **Self-improvement scan** — daily report + Proposed backlog cards across
+  automation, structure, metrics, code quality, standards, data handling,
+  net-new ideas, reliability/observability, and cost. It cannot approve, verify,
+  promote, canary, merge, deploy, rotate secrets, or execute experiments.
+  Implemented as the observer-only Airflow DAG `self_improvement_daily` (+ the
+  `improvement scan` CLI / Kanban / Discord touchpoints); full design in
+  [self-improvement-dag.md](self-improvement-dag.md).
 
 Stage by stage:
 
@@ -663,7 +671,7 @@ llm_station/
 │   ├── environments.yaml       one environment per activity + isolation invariants
 │   ├── standards.yaml          operating standards → CLAUDE.md/AGENTS.md + Judge Gate
 │   ├── breakage.yaml           what-breaks-when map (drives `make impact`)
-│   ├── proactive.yaml          scheduled checks, on_fail policy, RCA risk caps
+│   ├── proactive.yaml          scheduled checks, on_fail policy, RCA risk caps, self-improvement scan
 │   ├── targets.yaml            watch inventory: repos, DAGs, data assets, services
 │   ├── tools.yaml              tool permissions the judges can cite
 │   ├── evals.yaml              routing/judge regression suite (model-promotion gate)
@@ -791,7 +799,8 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [model-routing.md](model-routing.md) | lanes, local roles, fail-closed behavior |
 | [model-update.md](model-update.md) | safe model rollout + current local picks |
 | [request-routing-examples.md](request-routing-examples.md) | 8 worked examples: request → route → expected response |
-| [proactive-ops.md](proactive-ops.md) | the proactive lane, RCA loop, contract-rejected configs |
+| [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
+| [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only Airflow wrapper plan for daily improvement report + Proposed cards |
 | [breakage-map.md](breakage-map.md) | what breaks when you change something |
 | [environment-map.md](environment-map.md) | environment table + activity mapping |
 | [github-safety.md](github-safety.md) | branch protection commands, PAT/App scopes, deploy gating |
@@ -802,6 +811,13 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [autonomy-idea-map.md](autonomy-idea-map.md) | channels/brain/knowledge/wall picture + autonomy phases |
 | [growth-os-engineering.md](growth-os-engineering.md) | Growth OS living engineering reference (module tree, standards, cross-session rules) |
 | [capability-evaluation-loop.md](capability-evaluation-loop.md) | reusable mission brief for evaluating external tools/repos/skills — staged, evidence-first, L2-capped, with command-center mapping |
+| [improvement-loop.md](improvement-loop.md) | **the coded improvement loop** — lifecycle, runner, promotion/canary/rollback, operator CLI (the system improves itself, human-gated) |
+| [experiment-registry.md](experiment-registry.md) | the experiment tables added to the one `ledger.db` — schema, events, negative-result memory, migration |
+| [independent-verification.md](independent-verification.md) | the verifier that checks the work: separation, reproduction, sealed evals, self-verification prevention |
+| [judge-calibration.md](judge-calibration.md) | judges as measured components — precision/recall, safety-first gate, anti-self-certification |
+| [human-attention-governance.md](human-attention-governance.md) | human attention as a constrained resource — queue metrics, morning brief, bottleneck warnings |
+| [improvement-loop-audit.md](improvement-loop-audit.md) | the pre-work discrepancy report (documented vs implemented vs tested) |
+| [improvement-roadmap-phases.md](improvement-roadmap-phases.md) | **measurement-science layers (Phases 1–6)** — mSPRT/CUPED, judge/jury κ-α, anti-Goodhart, bandit scheduling, drift/canary stats, AI-control + observability spec |
 
 ---
 
@@ -856,6 +872,29 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-13 — model-selection track + routing check + Hermes spike
+
+- **WS1 hardware-fit selector.** `registry/vram.py` (GQA-aware VRAM formula off Ollama
+  `/api/show` + `/api/tags`, `/api/ps` ground-truth) + `cli/model_fit.py` + `make model-fit`
+  + `tests/test_vram.py`. Budget reads `gpu_vram_gb` (new `EnvironmentSpec` field) from
+  `environments.yaml`. Live finding: the 30B incumbents need ~39k ctx (not 64k) on the 4090.
+- **WS2 model scout rewrite.** Fixed 3 bugs (dead source-gate, archived HF leaderboard,
+  AA-shaped score keys); keyless-first sources (Aider polyglot + Ollama tags, AA optional via
+  `AA_API_KEY`); every candidate annotated with the WS1 fit gate. `tests/test_model_scout.py`.
+- **WS3 confirmed pre-built** — the `model` target was already wired end to end (harness,
+  adapter, `EXP-model-ref`, parametrized lifecycle test); no new code. Deleted the dead
+  `llama3-groq-tool-use:70b` (can't fit 24 GB).
+- **Routing check.** Coding is executor-driven (Claude primary, Codex cross-provider fallback);
+  local models never do primary coding. Added judge-route cross-ref validation to
+  `check_cross_refs.py` (a typo'd `escalation_role` was unchecked) + `tests/test_routing.py`.
+- **WS4 Hermes spike → DEFER.** Ran v0.16.0 isolated (local Ollama, no keys). Cross-session
+  memory PASS (local `MEMORY.md` — not beyond-stack); self-improving skills FAIL (curator
+  auto-created 0 skills). The "phantom image" note (§ above) is now corrected. Evidence under
+  `evaluation/capability-assessment/hermes/`; tested `safety_preflight.py` corrected to the real
+  v0.16.0 schema (the drafted `data_collection` key does not exist).
+- **Roadmap.** `docs/system-roadmap.md` is the consolidated whole-system map; `STATUS.md` tracks
+  the tactical order. Track A (model selection) + the routing check are complete.
 
 ### 2026-06-12 — docs consolidated to one setup path
 

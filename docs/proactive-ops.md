@@ -7,10 +7,11 @@ opens a gated RCA/debug mission that flows through the *same* lease → checks �
 → human-gate → GitHub pipeline as everything else.
 
 It is defined in `configs/proactive.yaml`, validated by `ProactiveConfig` in
-`schemas/contracts.py`, and run by `services/proactive_runner`. Edit the YAML,
-`make proactive-validate`, done. No code changes to add or retune a check.
+`schemas/contracts.py`, and run by `services/proactive_runner` or an external
+Airflow wrapper. Edit the YAML, `make proactive-validate`, done. No code changes
+to add or retune a check.
 
-## Two lanes
+## Three lanes
 
 **Runtime health** — are the DAGs/data/services still current and correct?
 - DAG run health (failed/retried/delayed/long-running tasks)
@@ -25,9 +26,19 @@ It is defined in `configs/proactive.yaml`, validated by `ProactiveConfig` in
   workaround comments, duplicate abstractions — the same things the
   `defensive-coding-judge` blocks at commit time, now swept for *after the fact*
 
-The deterministic tools run first in both lanes (Airflow/Dagster asset checks, Great
-Expectations, Evidently/whylogs for drift; ruff/semgrep/pytest for repos). LLMs only
-judge what the tools surface — cheaper, and the tools are the source of truth.
+**Self-improvement scan** — are there high-value improvements the system should
+propose across Kanban, papers, repos, code health, model/provider changes, data
+handling, reliability, and cost? This lane is configured as
+`self_improvement_scans.daily-self-improvement-brief`. It is stricter than normal
+repo stewardship: it writes only Proposed backlog cards and one decision report,
+and it is contract-forbidden from approving, verifying, promoting, canarying,
+merging, deploying, rotating secrets, or executing the experiments it drafts. See
+`docs/daily-self-improvement-dag.md`.
+
+The deterministic tools run first in every lane (Airflow/Dagster asset checks,
+Great Expectations, Evidently/whylogs for drift; ruff/semgrep/pytest for repos;
+usage/model/dependency/research scans for self-improvement). LLMs only judge what
+the tools surface — cheaper, and the tools are the source of truth.
 
 ## The cardinal safety property: observe, don't refactor
 
@@ -116,7 +127,7 @@ genuine finding escalates to the local planner/debugger aliases and then into th
 
 ```bash
 make proactive-validate     # contract-check configs/proactive.yaml
-make proactive-smoke        # list every check, its schedule, on_fail, and risk cap
+make proactive-smoke        # list schedules, actions, write scopes, and risk caps
 ```
 
 The runner is a thin scheduler invoked by host cron / systemd timer:
@@ -124,3 +135,8 @@ The runner is a thin scheduler invoked by host cron / systemd timer:
 no secrets, and mounts `proactive.yaml` read-only. Wire the real evidence collectors
 (Airflow/Dagster API, asset checks, ruff/semgrep over each repo) per target at install —
 the runner is the control flow they plug into.
+
+For the daily self-improvement scan, Airflow should be only the scheduler. The DAG
+uses a low-privilege service account, runs the scan/classify/rank/report tasks, and
+then invokes `improvement propose --signals ... --apply` only to land bounded
+`Proposed` experiments/cards. Human approval still happens on the Kanban wall.

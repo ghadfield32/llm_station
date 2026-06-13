@@ -1,0 +1,24 @@
+{
+  "id": "sealed-retrieval-holdout",
+  "version": "2026-06-12",
+  "kind": "retrieval_gold",
+  "note": "Held-out queries the implementer's harness never reads. The verifier runs these to check the candidate did not overfit to the visible gold set. Keep access-controlled.",
+  "cases": [
+    {"query": "how does the ledger sign approvals to keep agents from approving",
+     "expect_any": ["services/ledger/app.py"]},
+    {"query": "proactive runner strongest autonomous action open gated mission",
+     "expect_any": ["services/proactive_runner/app.py", "configs/proactive.yaml"]},
+    {"query": "experiment registry append only events table schema",
+     "expect_any": ["improvement/ledger_schema.py", "improvement/registry.py"]},
+    {"query": "verifier independence self verification prevention",
+     "expect_any": ["improvement/verifier.py"]},
+    {"query": "growth os curator refuses agent setting approved status",
+     "expect_any": ["growthos/actions.py"]},
+    {"query": "litellm pinned by image digest compose service",
+     "expect_any": ["docker-compose.yml"]},
+    {"query": "improvement experiment promotion human approval required contract",
+     "expect_any": ["improvement/schema.py"]},
+    {"query": "kanban bridge dry run opens ledger mission drafts",
+     "expect_any": ["cli/kanban_bridge.py", "configs/kanban.yaml"]}
+  ]
+}

@@ -39,8 +39,18 @@ changes:
     rollout: [direct]
 
   configs/evals.yaml:
-    affects: [routing/judge regression suite, model promotion gate]
+    affects: [routing/judge regression suite, model promotion gate, sealed/adversarial eval registry]
     required_checks: [make evals]
+    rollout: [direct]
+
+  configs/improvement.yaml:
+    affects: [improvement experiments, baseline/candidate runner, verifier, promotion gates]
+    required_checks: [make improvement-validate, make validate]
+    rollout: [make improvement-baseline, make improvement-run, make improvement-verify, "human promote or rollback"]
+
+  configs/improvement-targets.yaml:
+    affects: [per-target-type reference experiments, harness_library coverage]
+    required_checks: [make improvement-validate, make validate]
     rollout: [direct]
 
   configs/standards.yaml:

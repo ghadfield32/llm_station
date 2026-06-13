@@ -1,0 +1,45 @@
+schema_version: command-center.improvement.v1
+
+# UNSAFE fixture — every experiment here violates the contract. It exists only so the
+# demo can prove `make improvement-validate` REJECTS it. It must never validate.
+# Each experiment trips a different rejection rule (see src/command_center/improvement/schema.py).
+
+experiments:
+  # 1) auto-promotion + human approval disabled + L4 action from an automated experiment
+  - experiment_id: EXP-unsafe-autopromote
+    title: "tries to promote itself with no human"
+    owner: nobody
+    target_type: model
+    target_ref: "configs/models.yaml"
+    problem_statement: "wants to swap the model with no oversight"
+    hypothesis: "newer is better (asserted, not measured)"
+    baseline: "current model"
+    candidate: "leaderboard #1"
+    risk_tier: L4_dangerous            # rejected: experiments cap at L2
+    metrics:
+      - name: quality
+        direction: increase
+        required: true
+        baseline_source: b
+        candidate_source: c
+    budgets:
+      max_iterations: 1
+      max_wall_minutes: 5
+      max_input_tokens: 0
+      max_output_tokens: 0
+      max_cost_usd: 0
+      max_gpu_hours: 0
+      max_changed_files: 1
+      max_diff_lines: 10
+    verification:
+      independent_context: false       # rejected: candidate would verify itself
+      reproduce_commands: []           # rejected: empty
+      required_evidence: []            # rejected: empty
+    promotion:
+      human_approval_required: false   # rejected
+      canary_required: false
+      rollback_required: false         # rejected: no rollback
+      automatic_promotion: true        # rejected: no component promotes itself
+    post_watch:
+      checkpoints: ["1h"]
+      rollback_triggers: []            # rejected: empty

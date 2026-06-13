@@ -56,35 +56,34 @@ make validate                                      # contracts pass → you're s
 ### 2 — Bring up the control plane (LiteLLM + Judge Gate + Ledger)
 
 ```bash
+make doctor      # green/red preflight: docker, ollama, ports, .env, providers, digest
 make setup       # creates .env, builds service images
 # edit .env: set OLLAMA_API_BASE (local: http://host.docker.internal:11434);
 #            do NOT add OpenAI/Anthropic keys (local-only by contract)
-ollama pull qwen3:8b        # any local model the configs route to
-make bootstrap   # first boot: litellm + db + ledger
-make keys        # mints 2 virtual keys → paste both into .env
-make up && make health      # full stack, all green
+make models      # pull the default models (24 GB-class) ...
+# ... OR, on a laptop / small GPU / CPU, get a real reply without the big models:
+make models-light   # switches to a qwen3:8b profile and pulls it (~5 GB)
+make first-boot  # one shot: doctor → bootstrap → keys (auto-writes .env) → up → health
 make live-smoke  # proves real local replies through Ollama/LiteLLM
 ```
+
+`make first-boot` replaces the old 5-step dance (`bootstrap → keys → paste → up → health`) — `make keys` now writes the virtual keys into `.env` for you. Windows: `.\scripts\cc.ps1 first-boot`. `make doctor` tells you up front if a model still needs pulling.
 
 ### 3 — Stand up AppFlowy (your boards + the Growth OS curator)
 
 AppFlowy Cloud is the **human surface** — todos, mission cards, papers/repos/signals, a 275-book library. The server is the submodule from step 1; you point the **AppFlowy desktop/mobile app** ([download here](https://appflowy.io)) at it.
 
 ```bash
-# a) the AppFlowy board server (the submodule from step 1)
-cd appflowy_kanban/AppFlowy-Cloud
-cp deploy.env .env   # set POSTGRES_PASSWORD, GOTRUE_JWT_SECRET, API_EXTERNAL_URL, admin email/pw
-docker compose up -d
-
-# b) the Growth OS curator — runs in its OWN venv (requirements.txt), not the command-center pkg
-cd ../growth-os
-python -m venv .venv && .venv/Scripts/pip install -r requirements.txt   # Linux: .venv/bin/pip
-cp .env.example .env                              # fill APPFLOWY_* (+ optional GITHUB_TOKEN)
-.venv/Scripts/python scripts/setup_workspace.py   # creates the 8 databases (idempotent)
-.venv/Scripts/python -m growthos.curate --dry-run # safe: writes _export/*.csv, no live writes
+make appflowy-init   # scaffolds AppFlowy-Cloud/.env + growth-os/.env from templates (localhost defaults)
+make appflowy-up     # starts the board server + the Growth OS curator
+# then, as appflowy-init prints:
+#   1. open the printed URL and SIGN UP a user (the GoTrue admin can't own a workspace)
+#   2. put that user's creds into appflowy_kanban/growth-os/.env (APPFLOWY_* keys)
+#   3. cd appflowy_kanban/growth-os && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
+#      .venv/Scripts/python scripts/setup_workspace.py   # creates the 8 databases (idempotent)
 ```
 
-Then point the **AppFlowy desktop/mobile app** at your `API_EXTERNAL_URL`. Full detail (curator config, the always-on hourly loop, phone/Tailscale access) is in [`appflowy_kanban/growth-os/README.md`](appflowy_kanban/growth-os/README.md). AppFlowy's free self-host tier = 1 user.
+Then point the **AppFlowy desktop/mobile app** ([download here](https://appflowy.io)) at the printed URL. `appflowy-init` uses AppFlowy's shipped localhost defaults — fine for local/tailnet; **rotate the secrets before any public exposure**. Full detail (curator config, hourly loop, phone/Tailscale access) is in [`appflowy_kanban/growth-os/README.md`](appflowy_kanban/growth-os/README.md). AppFlowy's free self-host tier = 1 user.
 
 ### 4 — Talk to it from a channel
 

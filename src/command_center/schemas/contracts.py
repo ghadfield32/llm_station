@@ -157,6 +157,7 @@ class EnvironmentSpec(Strict):
     allowed_secrets: list[str] = []
     max_parallel_tasks: int = Field(default=1, ge=1)
     gpu_required: bool = False
+    gpu_vram_gb: int | None = Field(default=None, ge=1)   # total card VRAM; the model-fit budget
     persistent: bool = False
 
 
@@ -199,16 +200,64 @@ class ProactiveCheck(Strict):
     max_staleness_hours: int | None = Field(default=None, ge=1)
 
 
+class SelfImprovementScan(Strict):
+    name: str
+    target: str
+    schedule: str
+    owner: str
+    pillars: list[Literal[
+        "automation",
+        "structure",
+        "updated_metrics",
+        "code_quality",
+        "rules_standards",
+        "data_handling",
+        "full_idea_updates",
+        "reliability_observability",
+        "cost_finops",
+    ]]
+    sources: list[str]
+    evidence: list[str]
+    output_artifacts: list[Literal["backlog_cards", "decision_report"]]
+    trigger_surfaces: list[Literal["airflow", "kanban", "discord", "chat", "mcp"]] = ["airflow"]
+    max_daily_cards: int = Field(default=10, ge=1, le=25)
+    report_top_n: int = Field(default=15, ge=1, le=50)
+    min_evidence_occurrences: int = Field(default=3, ge=1)
+    cooldown_hours: int = Field(default=168, ge=24)
+    write_scopes: list[Literal["backlog_cards", "report_artifact"]] = [
+        "backlog_cards",
+        "report_artifact",
+    ]
+    # The scan itself is observer-only. This cap controls the strongest generated
+    # experiment contract it may draft into Proposed state.
+    max_generated_experiment_risk: RiskTier = RiskTier.L2
+    observer_only: bool = True
+    uses_existing_approval_wall: bool = True
+    independent_verifier_required: bool = True
+    forbidden_actions: list[str] = Field(default_factory=lambda: [
+        "approve",
+        "promote",
+        "canary",
+        "merge",
+        "deploy",
+        "rotate_secrets",
+        "execute_experiment",
+        "mark_verified",
+    ])
+
+
 class ProactiveConfig(Strict):
     schema_version: str
     runtime_checks: list[ProactiveCheck] = []     # DAG/data freshness, quality, drift
     repo_stewardship: list[ProactiveCheck] = []   # structure, tests, docs, defensive-coding debt
+    self_improvement_scans: list[SelfImprovementScan] = []  # observer-only proposal/report loops
 
     @model_validator(mode="after")
     def _checks(self):
         all_checks = self.runtime_checks + self.repo_stewardship
         names = [c.name for c in all_checks]
-        if len(names) != len(set(names)):
+        scan_names = [s.name for s in self.self_improvement_scans]
+        if len(names + scan_names) != len(set(names + scan_names)):
             raise ValueError("duplicate proactive check names")
         valid_on_fail = {"ledger_report", "open_rca_mission"}
         for c in all_checks:
@@ -231,6 +280,57 @@ class ProactiveConfig(Strict):
         for c in self.repo_stewardship:
             if c.auto_patch_max_risk not in (RiskTier.L0, RiskTier.L1, RiskTier.L2):
                 raise ValueError(f"repo stewardship '{c.name}' cannot exceed L2")
+        for s in self.self_improvement_scans:
+            if not s.owner:
+                raise ValueError(f"self-improvement scan '{s.name}' must declare an owner")
+            if not s.schedule:
+                raise ValueError(f"self-improvement scan '{s.name}' must declare a schedule")
+            if not s.pillars:
+                raise ValueError(f"self-improvement scan '{s.name}' must declare at least one pillar")
+            if not s.sources:
+                raise ValueError(f"self-improvement scan '{s.name}' must declare at least one source")
+            if not s.evidence:
+                raise ValueError(f"self-improvement scan '{s.name}' must collect evidence")
+            if set(s.output_artifacts) != {"backlog_cards", "decision_report"}:
+                raise ValueError(
+                    f"self-improvement scan '{s.name}' may write only backlog_cards "
+                    "and decision_report artifacts"
+                )
+            if set(s.write_scopes) != {"backlog_cards", "report_artifact"}:
+                raise ValueError(
+                    f"self-improvement scan '{s.name}' write_scopes must stay limited to "
+                    "backlog_cards and report_artifact"
+                )
+            if s.max_generated_experiment_risk in (RiskTier.L3, RiskTier.L4):
+                raise ValueError(
+                    f"self-improvement scan '{s.name}' cannot generate L3/L4 experiments"
+                )
+            if not s.observer_only:
+                raise ValueError(f"self-improvement scan '{s.name}' must stay observer_only")
+            if not s.uses_existing_approval_wall:
+                raise ValueError(
+                    f"self-improvement scan '{s.name}' must use the existing approval wall"
+                )
+            if not s.independent_verifier_required:
+                raise ValueError(
+                    f"self-improvement scan '{s.name}' must require independent verification"
+                )
+            required_forbidden = {
+                "approve",
+                "promote",
+                "canary",
+                "merge",
+                "deploy",
+                "rotate_secrets",
+                "execute_experiment",
+                "mark_verified",
+            }
+            missing = required_forbidden - set(s.forbidden_actions)
+            if missing:
+                raise ValueError(
+                    f"self-improvement scan '{s.name}' missing forbidden action(s): "
+                    f"{sorted(missing)}"
+                )
         return self
 
 
@@ -418,9 +518,32 @@ class EvalCase(Strict):
     expected_auto_allowed: bool | None = None
 
 
+# A reference to a held-out / sealed / adversarial / historical / rotating eval
+# SUITE. Implementers can read this REF (id/category/description) but NOT the suite
+# CONTENT — the inputs and expected answers live under `source`, an access-controlled
+# path the verifier/eval-service reads and the implementer's harness does not. This is
+# filesystem SEPARATION, not cryptographic secrecy (see docs/independent-verification.md).
+class EvalSuiteRef(Strict):
+    id: str
+    category: Literal["sealed", "adversarial", "historical", "rotating",
+                      "repository_specific"]
+    description: str
+    version: str                                  # pinned; changing a suite is its own experiment
+    source: str                                   # path to the access-controlled content file
+    owner: str
+    rotates: bool = False                         # rotating suites are refreshed on a cadence
+    retired: bool = False                         # saturated suites are retired, not endlessly mined
+    saturation_threshold: float = Field(default=0.98, ge=0.0, le=1.0)
+
+
 class EvalsConfig(Strict):
     schema_version: str
     cases: list[EvalCase]
+    # Held-out families. Visible refs only; content stays under access control.
+    sealed: list[EvalSuiteRef] = []
+    adversarial: list[EvalSuiteRef] = []
+    historical: list[EvalSuiteRef] = []
+    rotating: list[EvalSuiteRef] = []
 
     @model_validator(mode="after")
     def _checks(self):
@@ -435,6 +558,15 @@ class EvalsConfig(Strict):
             overlap = set(c.expected_stages) & set(c.forbidden_stages)
             if overlap:
                 raise ValueError(f"eval '{c.name}' lists stage(s) {sorted(overlap)} as both expected and forbidden")
+        all_refs = self.sealed + self.adversarial + self.historical + self.rotating
+        ids = [r.id for r in all_refs]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate eval suite id across sealed/adversarial/historical/rotating")
+        for r in all_refs:
+            # sealed content must live under the access-controlled sealed-evals area
+            if not r.source.replace("\\", "/").startswith("data/sealed-evals/"):
+                raise ValueError(f"eval suite '{r.id}' source must live under data/sealed-evals/ "
+                                 "(access-controlled; not visible to implementers)")
         return self
 
 

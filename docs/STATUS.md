@@ -5,7 +5,11 @@ forward-looking "what's left, in what order" list. Keep it short and honest.
 (Absorbs the former `SETUP-REMAINING.md` deployment checklist and
 `growth-os-system.md` status snapshot.)
 
-_Last updated: 2026-06-12._
+For the high-level, whole-system map (control plane + knowledge base + managed
+projects + fleet, with the module tree and the strategic order) see
+[system-roadmap.md](system-roadmap.md). This file stays the tactical tracker.
+
+_Last updated: 2026-06-13._
 
 ## Done
 
@@ -63,6 +67,43 @@ _Last updated: 2026-06-12._
    the CWD (run from repo root via `make` / `python -m`). If you want the console scripts to
    work from any directory, anchor their file reads to the repo root and expose the rest as
    entry points.
+
+### Model selection (Track A in `system-roadmap.md`; gated in order)
+
+1. **WS1 — hardware-fit selector. ✅ done 2026-06-13.** `registry/vram.py` (GQA-aware
+   formula, data from Ollama `/api/show` + `/api/tags`, `/api/ps` ground-truth) +
+   `cli/model_fit.py` + `make model-fit` + `tests/test_vram.py` (13 green). Budget reads
+   `gpu_vram_gb` from `environments.yaml`. Confirmed live: 30B-class fit, 70B does not.
+   (Built on Ollama metadata instead of wrapping quantest — same GGUF fields, no Go-binary dep.)
+2. **WS2 — fix the scout. ✅ done 2026-06-13.** Rewrote `model_scout.py`: fixed the dead
+   source-gate, dropped the archived HF leaderboard + AA-shaped score keys; keyless-first
+   sources (Aider polyglot + Ollama tags, AA optional via `AA_API_KEY`); every candidate
+   annotated with the WS1 fit gate. `tests/test_model_scout.py` (6 green). Live run surfaced
+   that the 30B incumbents need ~39k ctx (not 64k) to fit the 4090.
+3. **WS3 — evaluate upgrades. ✅ already built (no new code).** The `model` target was already
+   wired end to end: `harness_library.ModelHarness` (deterministic stand-in), the generic model
+   promotion adapter, `EXP-model-ref` in `configs/improvement-targets.yaml`, and
+   `test_all_target_types.py::test_target_type_full_lifecycle` (parametrized over model). Also
+   deleted the dead `llama3-groq-tool-use:70b`. **Remaining real work:** a LIVE-model A/B harness
+   (real Ollama inference, currently env-blocked) + a pulled candidate. Until then the working,
+   human-gated upgrade path is `make models-canary ROLE=… MODEL=ollama_chat/<tag>` → `make evals`
+   → `make models-promote`.
+4. **Routing check. ✅ done 2026-06-13.** Confirmed coding is executor-driven (Claude primary,
+   Codex cross-provider fallback "if Claude stalls"); local models never do primary coding, so
+   they can't flail; `stuck-escalation` escalates *judging* to a stronger local `architect-judge`.
+   Added judge-route cross-ref validation to `check_cross_refs.py` (a typo'd `escalation_role` was
+   previously unchecked) + `tests/test_routing.py` (5 green).
+5. **WS4 — Hermes spike. ✅ ran 2026-06-13 → DEFER (do not adopt).** Installed v0.16.0 in an
+   isolated uv venv (`C:\tmp\hermes-spike`, since removed), pointed at host Ollama `:11434` direct
+   (provider `custom`), no keys/`.env`/Nous login. **Cross-session memory: PASS** (fresh session
+   recalled the taught fact; artifact `memories/MEMORY.md` verified) — but it's a local `MEMORY.md`,
+   the same pattern this stack already uses. **Self-improving skills: FAIL** — the curator found
+   "no candidates" and auto-created 0 skills (explicit authoring works, but that's not the claim).
+   Gates 1 & 3 of the adoption rubric fail → DEFER. Evidence + disposition:
+   `evaluation/capability-assessment/hermes/DECISION.md`. Tested `safety_preflight.py` (9 green)
+   was corrected to the REAL v0.16.0 schema (the drafted `data_collection` key doesn't exist).
+   Note: a pre-existing retrieval-equivalence test (`runner.py:452`) flakes when the IDE/linter
+   writes files mid-test — fail-loud-on-changed-corpus is by design; passes on a clean retry.
 
 ## Honest scope notes (carried from growth-os-system)
 

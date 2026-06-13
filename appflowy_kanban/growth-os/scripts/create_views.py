@@ -26,18 +26,20 @@ PLANS = [
     ("signals", 2, "Triage Board"),
     ("packages", 2, "Triage Board"),
     ("guidelines", 2, "Review Board"),
-    ("library", 2, "Tier Board"),       # groups by Tier (first select field)
-    ("library", 2, "Reading Board"),    # regroup in UI: Group by -> Status
+    ("library", 2, "Tier Board"),       # auto-groups by Tier (first select);
+                                         # use this to work a tier at a time -
+                                         # Essential is its own column
+    ("library", 2, "Reading Board"),    # one-time UI: Group by -> Status
     ("lessons", 3, "Review Calendar"),  # calendar on NextReview (first date)
-    ("lessons", 2, "Status Board"),     # regroup in UI if it picks Domain
-    # one working board per tier: in UI set Filter Tier=<name> + Group by
-    # Status once per view (view settings are client-side; no REST for them)
-    ("library", 2, "Tier: Essential"),
-    ("library", 2, "Tier: Optional"),
-    ("library", 2, "Tier: Companion"),
-    ("library", 2, "Tier: Fun"),
-    ("library", 2, "Tier: Reference"),
+    ("lessons", 2, "Status Board"),     # one-time UI: Group by -> Status
 ]
+# NOTE: AppFlowy view settings (group-by, filter, sort, column order) live in
+# client-side collab state and have NO REST API (verified against the server
+# source + docs.appflowy.io). A board auto-groups by the database's FIRST
+# single-select field. So we create exactly one board per database here and
+# the group/filter clicks are a documented one-time UI pass. Per-tier filtered
+# boards were tried and removed - the Tier Board (grouped by Tier) is the
+# correct, single-view way to read the curriculum one tier at a time.
 
 
 def main() -> None:

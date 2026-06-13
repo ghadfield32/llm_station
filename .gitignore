@@ -33,6 +33,10 @@ htmlcov/
 *.sqlite3
 *.tar.gz
 *.tgz
+# improvement-loop runtime evidence + active-version state (data/calibration and
+# data/sealed-evals ARE committed inputs; this output dir is not)
+data/improvement/
+generated/improvements-board.json
 *.zip
 "updated files"
 updated files
@@ -64,3 +68,7 @@ Thumbs.db
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# improvement-loop pytest runtime artifacts (cache/proposals are disposable)
+generated/pytest-cache/
+generated/pytest-proposals/

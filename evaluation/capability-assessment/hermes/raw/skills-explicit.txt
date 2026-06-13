@@ -1,0 +1,16 @@
+I've successfully created the reusable 'release-tag' skill for you. The skill includes:
+
+1. A proper skill definition with description and tags
+2. A Python script that takes a date in YYYYMMDD format and outputs REL-<date>
+3. Documentation explaining how to use the skill
+
+The skill is now persisted and can be reused whenever you need to generate release tags. To use it, you can call the script directly with a date parameter in YYYYMMDD format:
+
+```bash
+python release_tag.py 20231201
+# Output: REL-20231201
+```
+
+The skill is located at: C:\tmp\hermes-spike\HERMES_HOME\skills\release-tag
+
+You can invoke this skill in future tasks whenever you need to generate release tags in the specified format.

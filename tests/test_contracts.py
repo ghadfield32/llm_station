@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from command_center.schemas import CONFIG_CONTRACTS
+from command_center.schemas.contracts import ProactiveConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,3 +52,29 @@ def test_gateway_core_imports_without_transport_sdks():
     assert "already called this with identical" in src
     assert "Tool budget exhausted" in src
     assert GatewayConfig and GatewayCore
+
+
+def test_daily_self_improvement_scan_is_observer_only():
+    cfg = ProactiveConfig.model_validate(_load("configs/proactive.yaml"))
+    scans = {s.name: s for s in cfg.self_improvement_scans}
+    scan = scans["daily-self-improvement-brief"]
+    assert scan.observer_only
+    assert scan.uses_existing_approval_wall
+    assert scan.independent_verifier_required
+    assert set(scan.write_scopes) == {"backlog_cards", "report_artifact"}
+    assert set(scan.output_artifacts) == {"backlog_cards", "decision_report"}
+    assert scan.max_generated_experiment_risk.value == "L2_local_edits"
+
+
+def test_daily_self_improvement_scan_cannot_generate_external_write_work():
+    raw = _load("configs/proactive.yaml")
+    raw["self_improvement_scans"][0]["max_generated_experiment_risk"] = "L3_external_write"
+    with pytest.raises(ValueError, match="cannot generate L3/L4"):
+        ProactiveConfig.model_validate(raw)
+
+
+def test_daily_self_improvement_scan_cannot_add_extra_artifacts():
+    raw = _load("configs/proactive.yaml")
+    raw["self_improvement_scans"][0]["output_artifacts"] = ["decision_report"]
+    with pytest.raises(ValueError, match="may write only"):
+        ProactiveConfig.model_validate(raw)

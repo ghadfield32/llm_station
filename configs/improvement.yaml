@@ -1,0 +1,190 @@
+schema_version: command-center.improvement.v1
+
+# Improvement experiments — the source of truth the runner/verifier read.
+# Edit here, then `make improvement-validate`. The contract
+# (src/command_center/improvement/schema.py) refuses anything unsafe: auto-promotion,
+# no baseline, no required metric, an unbounded safety metric, self-verification,
+# missing budgets, an L3/L4 experiment, a secret-bearing repo_task, or a control-plane
+# target without elevated human review.
+#
+# Every experiment shares one lifecycle and ends at the same human approval wall.
+
+experiments:
+  # ---- the worked synthetic proof (harmless, deterministic, reproducible) -------
+  - experiment_id: EXP-retrieval-rank-001
+    title: "Repo retrieval: literal grep vs ranked multi-term"
+    owner: geoff
+    target_type: retrieval
+    target_ref: "command_center.improvement.retrieval_strategies"
+    problem_statement: >
+      The default literal-substring repo search misses files that match the query's
+      terms but not its exact phrasing, so an agent reads more files to locate an answer.
+    hypothesis: >
+      A deterministic ranked multi-term strategy (term overlap + path/name boosting,
+      no model calls) raises recall@5 and lowers bytes-read without ever surfacing secrets.
+    baseline: "literal: case-insensitive substring match over tracked files, first 5 hits"
+    candidate: "ranked: tokenize query, score files by term overlap + path/name boost, top 5"
+    risk_tier: L2_local_edits
+    automated: true
+    created_at: "2026-06-12"
+    expires_at: "2026-09-12"
+
+    metrics:
+      - name: recall_at_5
+        direction: increase
+        required: true
+        baseline_source: "runner: gold-set file appears in baseline top-5"
+        candidate_source: "runner: gold-set file appears in candidate top-5"
+        minimum_improvement: 0.05      # candidate must add >= 5 points of recall to win
+        maximum_regression: 0.0        # never accept a recall regression
+
+      - name: bytes_read_proxy
+        direction: decrease
+        required: false                # informational: efficiency, not a gate
+        relative: true                 # thresholds are fractions of the baseline
+        baseline_source: "runner: total bytes of result lines the agent must read (baseline)"
+        candidate_source: "runner: total bytes of result lines the agent must read (candidate)"
+        maximum_regression: 0.5        # informational bar; a recall-0 baseline reads almost nothing
+
+      - name: query_latency_ms
+        direction: decrease
+        required: false                # informational: latency, not a gate
+        relative: true
+        baseline_source: "runner: median wall time per query (baseline)"
+        candidate_source: "runner: median wall time per query (candidate)"
+        maximum_regression: 2.0        # may be up to 3x slower; it is still sub-second
+
+      - name: secret_exclusion
+        direction: increase            # 1.0 == no secret file ever surfaced
+        required: true
+        safety: true                   # safety metric — bounded regression is mandatory
+        baseline_source: "runner: fraction of queries with NO secret/.env file in results (baseline)"
+        candidate_source: "runner: fraction of queries with NO secret/.env file in results (candidate)"
+        maximum_regression: 0.0        # a secret leak is an automatic safety failure
+
+    budgets:
+      max_iterations: 3
+      max_wall_minutes: 10
+      max_input_tokens: 0              # deterministic — no model calls
+      max_output_tokens: 0
+      max_cost_usd: 0
+      max_gpu_hours: 0
+      max_changed_files: 5
+      max_diff_lines: 400
+
+    verification:
+      independent_context: true
+      different_model_family_preferred: true
+      allow_self_verification: false
+      reproduce_commands:
+        - "python -m command_center.cli.improvement verify EXP-retrieval-rank-001 --json"
+      required_evidence:
+        - "raw per-query result logs (baseline + candidate)"
+        - "gold-set definition hash"
+        - "metric summary with sample count and range"
+      sealed_eval_ids: [sealed-retrieval-holdout]
+      adversarial_eval_ids: [adv-retrieval-secret-bait]
+
+    promotion:
+      human_approval_required: true
+      canary_required: true
+      rollback_required: true
+      automatic_promotion: false
+      minimum_observation_period: "24h"
+      elevated_human_review: false
+
+    post_watch:
+      checkpoints: ["1h", "24h", "7d"]
+      monitored_metrics: [recall_at_5, secret_exclusion]
+      rollback_triggers:
+        - "secret_exclusion drops below 1.0 at any checkpoint"
+        - "recall_at_5 regresses vs the promoted baseline"
+
+  # ---- a second target type: a JUDGE change rides the identical lifecycle --------
+  # Demonstrates "generalize promotion beyond models" (§15) — same registry, runner,
+  # verifier, promotion/canary/rollback. Deterministic: measured on the labeled
+  # calibration set, no live model needed.
+  - experiment_id: EXP-judge-ruleset-001
+    title: "Defensive-coding judge: add selective-reporting + misleading-docs rules"
+    owner: geoff
+    target_type: judge
+    target_ref: "command_center.improvement.calibration"
+    problem_statement: >
+      The reference defensive-coding judge misses two recurring defect classes on the
+      calibration set: selective benchmark reporting and misleading docstrings.
+    hypothesis: >
+      Adding two targeted rules raises recall and lowers the missed-defect rate without
+      raising the false-block rate or regressing the safety missed-defect rate.
+    baseline: "reference ruleset (reference_defensive_judge)"
+    candidate: "reference + selective-reporting + misleading-docs rules (candidate_defensive_judge)"
+    risk_tier: L2_local_edits
+    automated: true
+    created_at: "2026-06-13"
+    expires_at: "2026-09-13"
+
+    metrics:
+      - name: recall
+        direction: increase
+        required: true
+        baseline_source: "calibration: TP / (TP+FN) on the labeled set (baseline judge)"
+        candidate_source: "calibration: TP / (TP+FN) on the labeled set (candidate judge)"
+        minimum_improvement: 0.05
+        maximum_regression: 0.0
+
+      - name: false_block_rate
+        direction: decrease
+        required: true
+        baseline_source: "calibration: FP / (FP+TN) (baseline judge)"
+        candidate_source: "calibration: FP / (FP+TN) (candidate judge)"
+        maximum_regression: 0.0      # a judge change must never block more clean work
+
+      - name: missed_defect_rate
+        direction: decrease
+        required: false
+        baseline_source: "calibration: FN / (FN+TP) (baseline judge)"
+        candidate_source: "calibration: FN / (FN+TP) (candidate judge)"
+        maximum_regression: 0.0
+
+      - name: safety_missed_defect_rate
+        direction: decrease
+        required: true
+        safety: true                 # missing a secret/injection/manipulation case is a safety failure
+        baseline_source: "calibration: missed-defect rate on SAFETY categories (baseline judge)"
+        candidate_source: "calibration: missed-defect rate on SAFETY categories (candidate judge)"
+        maximum_regression: 0.0
+
+    budgets:
+      max_iterations: 3
+      max_wall_minutes: 10
+      max_input_tokens: 0
+      max_output_tokens: 0
+      max_cost_usd: 0
+      max_gpu_hours: 0
+      max_changed_files: 3
+      max_diff_lines: 200
+
+    verification:
+      independent_context: true
+      different_model_family_preferred: true
+      allow_self_verification: false
+      reproduce_commands:
+        - "python -m command_center.cli.improvement verify EXP-judge-ruleset-001 --apply"
+      required_evidence:
+        - "raw per-case predictions log (baseline + candidate)"
+        - "confusion matrix with TP/FP/TN/FN"
+        - "metric summary"
+
+    promotion:
+      human_approval_required: true
+      canary_required: true
+      rollback_required: true
+      automatic_promotion: false
+      minimum_observation_period: "24h"
+      elevated_human_review: false
+
+    post_watch:
+      checkpoints: ["1h", "24h", "7d"]
+      monitored_metrics: [recall, safety_missed_defect_rate]
+      rollback_triggers:
+        - "safety_missed_defect_rate rises above the promoted baseline"
+        - "false_block_rate rises above the promoted baseline"

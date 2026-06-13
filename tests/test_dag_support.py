@@ -1,0 +1,143 @@
+"""
+The Airflow-free DAG glue: building one scanner per source spec, running a single source with
+failure captured (not swallowed), the collect→draft→emit `finish` stage, and the XCom-safe
+round-trip serialization the dynamic task mapping relies on.
+"""
+from __future__ import annotations
+
+import pytest
+
+from command_center.improvement.discovery import (
+    CodeHealthScanner, DependencyScanner, Finding, KanbanScanner, LedgerHealthScanner,
+    ModelRegistryScanner, PapersScanner, Pillar, ScanOutcome, build_scanner, finish,
+    offline_specs, scan_one,
+)
+from command_center.improvement.discovery.dag_support import SOURCE_REGISTRY
+from command_center.improvement.registry import ExperimentRegistry
+
+NOW = "2026-06-13T08:00:00+00:00"
+
+
+def _reg(tmp_path):
+    return ExperimentRegistry(db_path=str(tmp_path / "ledger.db"))
+
+
+# ------------------------------------------------------------------- build_scanner
+
+@pytest.mark.parametrize("kind,cls", [
+    ("code_health", CodeHealthScanner), ("ledger", LedgerHealthScanner),
+    ("papers", PapersScanner), ("model_registry", ModelRegistryScanner),
+    ("dependencies", DependencyScanner), ("kanban", KanbanScanner),
+])
+def test_build_scanner_for_each_kind(tmp_path, kind, cls):
+    spec = {"name": kind, "kind": kind, "pillar": "code_quality", "config": {"root": "src"}}
+    s = build_scanner(spec, _reg(tmp_path), fetch=lambda _s: [])
+    assert isinstance(s, cls)
+
+
+def test_build_scanner_feed_without_fetch_raises(tmp_path):
+    spec = {"name": "arxiv", "kind": "papers", "pillar": "full_idea", "config": {}}
+    with pytest.raises(ValueError, match="requires a fetch"):
+        build_scanner(spec, _reg(tmp_path), fetch=None)
+
+
+def test_build_scanner_unknown_kind_raises(tmp_path):
+    spec = {"name": "weird", "kind": "weird", "pillar": "automation", "config": {}}
+    with pytest.raises(ValueError, match="unknown source kind"):
+        build_scanner(spec, _reg(tmp_path), fetch=lambda _s: [])
+
+
+# ------------------------------------------------------------------- scan_one
+
+def test_scan_one_offline_code_health(tmp_path):
+    spec = {"name": "code_health", "kind": "code_health", "pillar": "code_quality",
+            "config": {"root": "src"}}
+    out = scan_one(spec, _reg(tmp_path))
+    assert out["scanner"] == "code_health" and out["error"] == ""
+    assert isinstance(out["findings"], list)
+
+
+def test_scan_one_feed_with_records(tmp_path):
+    spec = {"name": "litellm_registry", "kind": "model_registry",
+            "pillar": "updated_metrics", "config": {}}
+    records = [{"model": "m", "provider": "p", "metric": "acc",
+                "candidate": 0.9, "incumbent": 0.8, "direction": "increase"}]
+    out = scan_one(spec, _reg(tmp_path), fetch=lambda _s: records)
+    assert out["error"] == "" and len(out["findings"]) == 1
+
+
+def test_scan_one_captures_fetch_failure_not_swallowed(tmp_path):
+    spec = {"name": "arxiv", "kind": "papers", "pillar": "full_idea", "config": {}}
+
+    def boom(_s):
+        raise ConnectionError("arxiv down")
+
+    out = scan_one(spec, _reg(tmp_path), fetch=boom)
+    assert out["findings"] == []
+    assert "arxiv down" in out["error"]            # captured + reportable, not lost
+
+
+# ------------------------------------------------------------------- finish
+
+def _outcome(title):
+    f = Finding(pillar=Pillar.CODE_QUALITY, source="t", title=title, claim="c", evidence="e")
+    return ScanOutcome("code_health", Pillar.CODE_QUALITY, [f]).to_dict()
+
+
+def test_finish_apply_drafts_proposed_cards_and_report(tmp_path):
+    reg = _reg(tmp_path)
+    report_path = tmp_path / "report.md"
+    res = finish([_outcome("A"), _outcome("B")], reg, date="2026-06-13", now_iso=NOW,
+                 apply=True, report_path=str(report_path))
+    assert res["applied"] is True and len(res["drafted"]) == 2
+    rows = reg.list_experiments()
+    assert all(r["status"] == "Proposed" for r in rows)
+    assert report_path.read_text(encoding="utf-8").startswith("# Daily")
+
+
+def test_finish_dry_run_writes_nothing(tmp_path):
+    reg = _reg(tmp_path)
+    report_path = tmp_path / "report.md"
+    res = finish([_outcome("A")], reg, date="2026-06-13", now_iso=NOW, apply=False,
+                 report_path=str(report_path))
+    assert res["applied"] is False
+    assert reg.list_experiments() == []
+    assert report_path.exists() is False
+
+
+def test_finish_surfaces_failed_source(tmp_path):
+    reg = _reg(tmp_path)
+    failed = ScanOutcome("arxiv", Pillar.FULL_IDEA, [], error="ConnectionError: down").to_dict()
+    res = finish([failed, _outcome("A")], reg, date="2026-06-13", now_iso=NOW, apply=True,
+                 report_path=str(tmp_path / "r.md"))
+    assert res["n_failed"] == 1 and "arxiv" in res["failed_sources"]
+
+
+# ------------------------------------------------------------------- serialization
+
+def test_finding_round_trips_through_dict():
+    f = Finding(pillar=Pillar.UPDATED_METRICS, source="litellm", title="try model",
+                claim="c", evidence="e", impact=0.7, effort=2.0, detail={"n_sources": 2})
+    g = Finding.from_dict(f.to_dict())
+    assert g.pillar is f.pillar
+    assert g.suggested_target_type is f.suggested_target_type
+    assert g.experiment_id == f.experiment_id
+    assert g.impact == f.impact and g.detail == f.detail
+
+
+def test_scanoutcome_round_trips_through_dict():
+    f = Finding(pillar=Pillar.AUTOMATION, source="kanban", title="x", claim="c", evidence="e")
+    o = ScanOutcome("kanban", Pillar.AUTOMATION, [f], error="")
+    o2 = ScanOutcome.from_dict(o.to_dict())
+    assert o2.scanner == "kanban" and o2.pillar is Pillar.AUTOMATION
+    assert o2.findings[0].experiment_id == f.experiment_id
+
+
+# ------------------------------------------------------------------- registry shape
+
+def test_source_registry_spans_pillars_and_offline_subset():
+    pillars = {s["pillar"] for s in SOURCE_REGISTRY}
+    # the registry touches several distinct pillars (not just one)
+    assert len(pillars) >= 4
+    offline = {s["name"] for s in offline_specs()}
+    assert offline == {"code_health", "ledger"}      # the two network-free sources

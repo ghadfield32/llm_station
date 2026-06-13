@@ -1,0 +1,1 @@
+I've confirmed that your project's secret build flag is BANANA_MODE. This is now stored in my memory for future reference.

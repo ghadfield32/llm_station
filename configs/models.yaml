@@ -42,10 +42,11 @@ local_whitelist:
   - "qwen3:30b"
   - "devstral:24b"
 
-# The model scout proposes LOCAL model candidates only. Public leaderboards may
-# be used for discovery, but provider routes are contract-forbidden in roles.
+# The model scout proposes candidates and annotates each with VRAM fit on the
+# 4090 (WS1 gate). Discovery is keyless-first; provider routes stay forbidden in
+# roles. artificial-analysis runs only if AA_API_KEY is set (optional tiebreaker).
 scout:
   cadence: monthly
-  sources: [huggingface-open-llm-leaderboard, local-ollama-tags, provider-release-blogs]
+  sources: [aider-polyglot, local-ollama-tags, artificial-analysis]
   propose_only: true
-  max_candidates_per_run: 3
+  max_candidates_per_run: 10

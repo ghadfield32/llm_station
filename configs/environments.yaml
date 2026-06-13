@@ -14,6 +14,7 @@ environments:
     kind: worker
     host: desktop-4090
     gpu_required: true
+    gpu_vram_gb: 24            # RTX 4090; the budget `make model-fit` sizes against
     persistent: true
     allowed_egress: [tailscale, litellm, github, package_registries]
     allowed_secrets: [GITHUB_TOKEN]

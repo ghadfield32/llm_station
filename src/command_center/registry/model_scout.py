@@ -1,15 +1,31 @@
 #!/usr/bin/env python3
 """Generate a model-scout report from configured discovery sources.
 
-The scout is deliberately propose-only. It can discover candidates and write a
-report, but it never edits `configs/models.yaml` and never promotes a model.
-Promotion remains: YAML edit -> validate -> canary -> evals -> human approval.
-"""
+The scout is deliberately propose-only. It discovers candidate local models and
+writes a report; it NEVER edits configs/models.yaml and never promotes. Promotion
+stays: YAML edit -> validate -> canary -> evals -> human approval.
 
+Discovery is keyless-first. Sources (declared in models.yaml `scout.sources`):
+  - aider-polyglot     : Aider's polyglot coding leaderboard (public YAML, no key).
+                         The coding-quality signal that ranks candidates.
+  - local-ollama-tags  : models already installed via Ollama (guaranteed runnable).
+  - artificial-analysis: OPTIONAL. Used only if AA_API_KEY is set in the env;
+                         otherwise skipped with a note. Never required.
+
+Every candidate is annotated with VRAM fit on this machine via the WS1 fit gate
+(command_center.registry.vram), so the shortlist distinguishes "runnable on the
+4090" from "would OOM". A candidate we can't size (not pulled) is reported as
+"unknown - pull to verify" -- never a fabricated number.
+
+Per-source failures are collected and surfaced, not swallowed: a down source
+shows up in the report's "Source Errors" section and sets a non-zero exit, but
+the other sources still produce a report.
+"""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,92 +33,127 @@ from typing import Any
 import httpx
 import yaml
 
-from command_center.schemas import ModelRegistry
-
+from command_center.registry import vram
+from command_center.schemas import EnvironmentsConfig, ModelRegistry
 
 ROOT = Path(__file__).resolve().parents[3]
 MODELS = ROOT / "configs" / "models.yaml"
+ENVIRONMENTS = ROOT / "configs" / "environments.yaml"
 DEFAULT_OUTPUT = ROOT / "generated" / "model-scout-report.md"
-OPENROUTER_MODELS = "https://openrouter.ai/api/v1/models"
+
+AIDER_POLYGLOT_URL = (
+    "https://raw.githubusercontent.com/Aider-AI/aider/main/"
+    "aider/website/_data/polyglot_leaderboard.yml"
+)
+ARTIFICIAL_ANALYSIS_URL = "https://artificialanalysis.ai/api/v2/data/llms/models"
+DEFAULT_FIT_CTX = 65536
+WORKER_ENV = "cc-worker-4090"
+
+KNOWN_SOURCES = {"aider-polyglot", "local-ollama-tags", "artificial-analysis"}
 
 
 def load_registry() -> ModelRegistry:
     return ModelRegistry.model_validate(yaml.safe_load(MODELS.read_text(encoding="utf-8")))
 
 
-def fetch_openrouter() -> list[dict[str, Any]]:
-    response = httpx.get(OPENROUTER_MODELS, timeout=30)
-    response.raise_for_status()
-    data = response.json()
-    models = data.get("data", [])
-    if not isinstance(models, list):
-        raise RuntimeError("OpenRouter model API returned an unexpected shape")
-    return [m for m in models if isinstance(m, dict)]
-
-
-def score_model(model: dict[str, Any]) -> float:
-    benchmarks = model.get("benchmarks") or {}
-    aa = benchmarks.get("artificial_analysis") or {}
-    design = benchmarks.get("design_arena") or []
-
-    coding = float(aa.get("coding_index") or 0)
-    agentic = float(aa.get("agentic_index") or 0)
-    intelligence = float(aa.get("intelligence_index") or 0)
-    design_bonus = 0.0
-    if isinstance(design, list):
-        for row in design:
-            if not isinstance(row, dict):
-                continue
-            category = str(row.get("category", "")).lower()
-            if category in {"codecategories", "fullstack", "website", "dataviz"}:
-                rank = float(row.get("rank") or 100)
-                design_bonus += max(0.0, 25.0 - rank)
-    return coding * 2.0 + agentic * 1.2 + intelligence + design_bonus
-
-
-def price_per_million(value: Any) -> float | None:
+def gpu_budget_gb() -> float | None:
+    """Total VRAM of the GPU worker, for fit annotation. None if not declared."""
     try:
-        return float(value) * 1_000_000
-    except Exception:
+        cfg = EnvironmentsConfig.model_validate(
+            yaml.safe_load(ENVIRONMENTS.read_text(encoding="utf-8"))
+        )
+    except FileNotFoundError:
         return None
+    for env in cfg.environments:
+        if env.name == WORKER_ENV:
+            return float(env.gpu_vram_gb) if env.gpu_vram_gb else None
+    return None
 
 
-def summarize_model(model: dict[str, Any]) -> dict[str, Any]:
-    pricing = model.get("pricing") or {}
-    aa = (model.get("benchmarks") or {}).get("artificial_analysis") or {}
-    return {
-        "id": model.get("id"),
-        "name": model.get("name"),
-        "hugging_face_id": model.get("hugging_face_id"),
-        "license": model.get("license") or model.get("license_name"),
-        "context_length": model.get("context_length"),
-        "created": model.get("created"),
-        "prompt_per_mtok": price_per_million(pricing.get("prompt")),
-        "completion_per_mtok": price_per_million(pricing.get("completion")),
-        "coding_index": aa.get("coding_index"),
-        "agentic_index": aa.get("agentic_index"),
-        "intelligence_index": aa.get("intelligence_index"),
-        "score": score_model(model),
-    }
+# ---- per-source fetchers (each returns normalized candidate dicts) ----------
+
+def fetch_aider_polyglot() -> list[dict[str, Any]]:
+    """Aider polyglot coding leaderboard -> candidates ranked by pass_rate_2."""
+    r = httpx.get(AIDER_POLYGLOT_URL, timeout=30, follow_redirects=True)
+    r.raise_for_status()
+    rows = yaml.safe_load(r.text)
+    if not isinstance(rows, list):
+        raise RuntimeError("aider polyglot leaderboard is not a YAML list")
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict) or "model" not in row:
+            continue
+        out.append({
+            "id": str(row["model"]),
+            "name": str(row["model"]),
+            "source": "aider-polyglot",
+            "coding_score": row.get("pass_rate_2"),
+            "edit_format": row.get("edit_format"),
+            "ollama_tag": None,
+        })
+    return out
 
 
-def primary_models(registry: ModelRegistry) -> dict[str, Any]:
-    return {
-        role: sorted(candidates, key=lambda c: c.priority)[0]
-        for role, candidates in registry.roles.items()
-    }
+def fetch_ollama_local() -> list[dict[str, Any]]:
+    """Installed Ollama models -> candidates that are guaranteed runnable."""
+    tags = vram.ollama_tags()
+    return [
+        {"id": name, "name": name, "source": "local-ollama-tags",
+         "coding_score": None, "edit_format": None, "ollama_tag": name}
+        for name in sorted(tags)
+    ]
 
 
-def price_text(prompt: float | None, completion: float | None) -> str:
-    def fmt(value: float | None) -> str:
-        if value is None:
-            return "n/a"
-        if value == 0:
-            return "free"
-        return f"${value:.4f}/M"
+def fetch_artificial_analysis() -> list[dict[str, Any]]:
+    """OPTIONAL AA Data API (open-weights only). Empty unless AA_API_KEY is set."""
+    key = os.environ.get("AA_API_KEY")
+    if not key:
+        return []
+    r = httpx.get(ARTIFICIAL_ANALYSIS_URL, headers={"x-api-key": key}, timeout=30)
+    r.raise_for_status()
+    payload = r.json()
+    rows = payload.get("data", payload if isinstance(payload, list) else [])
+    out: list[dict[str, Any]] = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not row.get("is_open_weights"):
+            continue
+        out.append({
+            "id": str(row.get("slug") or row.get("name")),
+            "name": str(row.get("name")),
+            "source": "artificial-analysis",
+            "coding_score": (row.get("evaluations") or {}).get("coding_index"),
+            "edit_format": None,
+            "ollama_tag": None,
+        })
+    return out
 
-    return f"{fmt(prompt)} in / {fmt(completion)} out"
 
+FETCHERS = {
+    "aider-polyglot": fetch_aider_polyglot,
+    "local-ollama-tags": fetch_ollama_local,
+    "artificial-analysis": fetch_artificial_analysis,
+}
+
+
+# ---- fit annotation (WS1 gate) ---------------------------------------------
+
+def annotate_fit(candidate: dict[str, Any], budget_gb: float | None, ctx: int,
+                 installed: set[str]) -> str:
+    """Real VRAM verdict for a candidate, or an honest 'unknown'. No fabrication."""
+    if budget_gb is None:
+        return "n/a (no gpu_vram_gb configured)"
+    tag = candidate.get("ollama_tag")
+    if not tag or tag not in installed:
+        return "unknown - pull to verify"
+    try:
+        est = vram.estimate_installed(tag, ctx=ctx, budget_gb=budget_gb)
+    except vram.VramError as exc:
+        return f"unknown ({exc})"
+    verdict = "FITS" if est.fits else "NO"
+    return f"{verdict} @ {ctx//1024}k (max {est.max_ctx_fits//1024}k, {est.headroom_gb:.1f}G free)"
+
+
+# ---- report rendering -------------------------------------------------------
 
 def incumbent_cost_text(model: Any) -> str:
     if model.local:
@@ -112,31 +163,16 @@ def incumbent_cost_text(model: Any) -> str:
     return f"{model.provider} pricing not encoded"
 
 
-def incumbent_label(model: Any) -> str:
-    return f"{model.alias} ({model.provider}/{model.model})"
+def primary_models(registry: ModelRegistry) -> dict[str, Any]:
+    return {
+        role: sorted(candidates, key=lambda c: c.priority)[0]
+        for role, candidates in registry.roles.items()
+    }
 
 
-def candidate_vram_fit(candidate: dict[str, Any]) -> str:
-    model_id = str(candidate.get("id") or "").lower()
-    hf_id = str(candidate.get("hugging_face_id") or "").lower()
-    if "ollama" in model_id:
-        return "local tag; verify VRAM"
-    if hf_id:
-        return "unknown; check model card"
-    return "hosted/no local VRAM"
-
-
-def infer_candidate_role(candidate: dict[str, Any], incumbents: dict[str, Any]) -> str:
-    model_id = str(candidate.get("id") or "").lower()
-    text = " ".join([model_id, str(candidate.get("name") or "").lower()])
-    if any(token in text for token in ("coder", "code", "glm", "kimi", "deepseek", "qwen")):
-        return "open-heavy-coder" if "open-heavy-coder" in incumbents else "coder"
-    if (candidate.get("prompt_per_mtok") or 9999) <= 1:
-        return "triage" if "triage" in incumbents else next(iter(incumbents))
-    return "planner" if "planner" in incumbents else next(iter(incumbents))
-
-
-def render_report(registry: ModelRegistry, candidates: list[dict[str, Any]], errors: list[str]) -> str:
+def render_report(registry: ModelRegistry, candidates: list[dict[str, Any]],
+                  errors: list[str], notes: list[str], budget_gb: float | None,
+                  ctx: int, installed: set[str]) -> str:
     scout = registry.scout
     generated_at = datetime.now(timezone.utc).isoformat()
     incumbents = primary_models(registry)
@@ -145,68 +181,104 @@ def render_report(registry: ModelRegistry, candidates: list[dict[str, Any]], err
         "",
         f"Generated: `{generated_at}`",
         f"Cadence: `{scout.cadence if scout else 'not configured'}`",
+        f"GPU budget: `{budget_gb:g} GB`" if budget_gb else "GPU budget: `not configured`",
         "",
         "Policy: propose-only. This report does not edit configs or promote models.",
         "",
         "## Sources",
         "",
     ]
-    sources = scout.sources if scout else []
-    lines += [f"- {source}" for source in sources]
+    lines += [f"- {s}" for s in (scout.sources if scout else [])]
+    if notes:
+        lines += ["", "## Notes", ""] + [f"- {n}" for n in notes]
     if errors:
-        lines += ["", "## Source Errors", ""]
-        lines += [f"- {error}" for error in errors]
+        lines += ["", "## Source Errors", ""] + [f"- {e}" for e in errors]
 
     lines += [
         "",
-        "## Incumbent Snapshot",
+        "## Incumbent Snapshot (with current fit)",
         "",
-        "| role | incumbent | license | VRAM | cost context |",
-        "| --- | --- | --- | ---: | --- |",
+        "| role | incumbent | license | VRAM fit | cost |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for role, model in sorted(incumbents.items()):
-        vram = f"{model.vram_gb} GB" if model.vram_gb else "n/a"
+        fit = annotate_fit({"ollama_tag": model.model}, budget_gb, ctx, installed) \
+            if model.local else "hosted"
         lines.append(
             f"| `{role}` | `{model.alias}` / `{model.provider}:{model.model}` | "
-            f"{model.license or 'unknown'} | {vram} | {incumbent_cost_text(model)} |"
+            f"{model.license or 'unknown'} | {fit} | {incumbent_cost_text(model)} |"
         )
 
     lines += [
         "",
-        "## Candidate Shortlist",
+        f"## Candidate Shortlist (top by coding score; fit @ ctx={ctx//1024}k)",
         "",
-        "| rank | suggested role | incumbent | candidate | license | VRAM fit | candidate price | coding | agentic | score |",
-        "| ---: | --- | --- | --- | --- | --- | --- | ---: | ---: | ---: |",
+        "| rank | candidate | source | coding | VRAM fit |",
+        "| ---: | --- | --- | ---: | --- |",
     ]
     if not candidates:
-        lines.append("| - | - | - | no candidates available; run without `--offline` or review source errors | - | - | - | - | - | - |")
-    for index, c in enumerate(candidates, start=1):
-        role = infer_candidate_role(c, incumbents)
-        incumbent = incumbents[role]
+        lines.append("| - | no candidates (run online; check source errors) | - | - | - |")
+    for i, c in enumerate(candidates, start=1):
+        score = c["coding_score"]
+        score_txt = f"{score}" if score is not None else "n/a"
+        fit = annotate_fit(c, budget_gb, ctx, installed)
         lines.append(
-            f"| {index} | `{role}` | {incumbent_label(incumbent)} | `{c['id']}` | "
-            f"{c.get('license') or 'unknown'} | {candidate_vram_fit(c)} | "
-            f"{price_text(c['prompt_per_mtok'], c['completion_per_mtok'])} vs {incumbent_cost_text(incumbent)} | "
-            f"{c['coding_index'] or 'n/a'} | "
-            f"{c['agentic_index'] or 'n/a'} | {c['score']:.1f} |"
+            f"| {i} | `{c['id']}` | {c['source']} | {score_txt} | {fit} |"
         )
 
     lines += [
         "",
         "## Promotion Gate",
         "",
-        "1. Edit `configs/models.yaml` with one candidate as a canary.",
-        "2. Run `make validate`, `make render`, and `make evals`.",
-        "3. Run `make models-canary ROLE=... MODEL=...`.",
-        "4. Compare cost, latency, judge block quality, and rollback rate.",
-        "5. Promote or roll back manually.",
+        "1. Pull a fitting candidate and add it to `configs/models.yaml` as a canary.",
+        "2. `make validate && make evals`.",
+        "3. `make models-canary ROLE=... MODEL=ollama_chat/<tag>`.",
+        "4. Compare evals, latency, judge-block quality, rollback rate.",
+        "5. Promote or roll back manually (human-only).",
     ]
     return "\n".join(lines) + "\n"
+
+
+def gather(registry: ModelRegistry, *, offline: bool, ctx: int,
+           max_candidates: int) -> tuple[list[dict[str, Any]], list[str], list[str], set[str]]:
+    """Run each configured source's fetcher; collect candidates, errors, notes."""
+    sources = registry.scout.sources if registry.scout else []
+    candidates: list[dict[str, Any]] = []
+    errors: list[str] = []
+    notes: list[str] = []
+    installed: set[str] = set()
+
+    # installed tags are needed for fit annotation regardless of source list
+    if not offline:
+        try:
+            installed = set(vram.ollama_tags())
+        except vram.VramError as exc:
+            notes.append(f"Ollama unreachable; fit shown as unknown ({exc})")
+
+    for source in sources:
+        if source not in KNOWN_SOURCES:
+            errors.append(f"{source}: unknown source (known: {sorted(KNOWN_SOURCES)})")
+            continue
+        if offline:
+            notes.append(f"{source}: skipped (offline)")
+            continue
+        try:
+            found = FETCHERS[source]()
+            if source == "artificial-analysis" and not found and not os.environ.get("AA_API_KEY"):
+                notes.append("artificial-analysis: skipped (no AA_API_KEY; optional tiebreaker)")
+            candidates += found
+        except (httpx.HTTPError, RuntimeError) as exc:
+            errors.append(f"{source}: {exc}")
+
+    # rank: models with a coding score first (desc), runnable-but-unscored after
+    candidates.sort(key=lambda c: (c["coding_score"] is None, -(c["coding_score"] or 0)))
+    return candidates[:max_candidates], errors, notes, installed
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--ctx", type=int, default=DEFAULT_FIT_CTX)
     parser.add_argument("--json", action="store_true", help="write JSON instead of Markdown")
     parser.add_argument("--offline", action="store_true", help="only validate scout config")
     args = parser.parse_args()
@@ -215,38 +287,27 @@ def main() -> int:
     if registry.scout is None:
         raise SystemExit("configs/models.yaml has no scout section")
 
-    candidates: list[dict[str, Any]] = []
-    errors: list[str] = []
-    if not args.offline and "openrouter-rankings" in registry.scout.sources:
-        try:
-            models = fetch_openrouter()
-            candidates = [
-                summarize_model(model)
-                for model in models
-                if model.get("id") and score_model(model) > 0
-            ]
-            candidates.sort(key=lambda c: c["score"], reverse=True)
-            candidates = candidates[: registry.scout.max_candidates_per_run]
-        except Exception as exc:
-            errors.append(f"openrouter-rankings: {exc}")
+    budget = gpu_budget_gb()
+    candidates, errors, notes, installed = gather(
+        registry, offline=args.offline, ctx=args.ctx,
+        max_candidates=registry.scout.max_candidates_per_run,
+    )
 
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     if args.json:
-        incumbents = {
-            role: {
-                "alias": model.alias,
-                "provider": model.provider,
-                "model": model.model,
-                "license": model.license,
-                "vram_gb": model.vram_gb,
-                "cost_context": incumbent_cost_text(model),
-            }
-            for role, model in primary_models(registry).items()
-        }
-        out.write_text(json.dumps({"incumbents": incumbents, "candidates": candidates, "errors": errors}, indent=2), encoding="utf-8")
+        out.write_text(json.dumps({
+            "sources": registry.scout.sources,
+            "gpu_budget_gb": budget,
+            "candidates": candidates,
+            "notes": notes,
+            "errors": errors,
+        }, indent=2), encoding="utf-8")
     else:
-        out.write_text(render_report(registry, candidates, errors), encoding="utf-8")
+        out.write_text(
+            render_report(registry, candidates, errors, notes, budget, args.ctx, installed),
+            encoding="utf-8",
+        )
     print(f"wrote {out}")
     return 0 if not errors else 2
 

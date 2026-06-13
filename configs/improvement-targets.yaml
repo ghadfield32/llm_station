@@ -1,0 +1,749 @@
+# Reference experiments — ONE per target type (mission §4, §15). Each proves the
+# target type rides the SAME registry / runner / verifier / promotion lifecycle as the
+# worked retrieval + judge examples. Measured deterministically by the harnesses in
+# src/command_center/improvement/harness_library.py; no live model needed.
+# Generated; edit harness_library.py + regenerate rather than hand-tuning.
+
+schema_version: command-center.improvement.v1
+experiments:
+- experiment_id: EXP-model-ref
+  title: '[ref] model target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: model
+  target_ref: command_center.improvement.harness_library:model
+  problem_statement: Demonstrate a bounded model change measured deterministically.
+  hypothesis: The candidate model improves the required metric without safety regression.
+  baseline: baseline model (harness baseline role)
+  candidate: candidate model (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: task_accuracy
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: unsafe_outputs
+    direction: decrease
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-model-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - task_accuracy
+    - unsafe_outputs
+    rollback_triggers:
+    - task_accuracy regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-prompt-ref
+  title: '[ref] prompt target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: prompt
+  target_ref: command_center.improvement.harness_library:prompt
+  problem_statement: Demonstrate a bounded prompt change measured deterministically.
+  hypothesis: The candidate prompt improves the required metric without safety regression.
+  baseline: baseline prompt (harness baseline role)
+  candidate: candidate prompt (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: instruction_coverage
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: safety_directive_coverage
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  - name: prompt_chars
+    direction: decrease
+    required: false
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    relative: true
+    maximum_regression: 5.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-prompt-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - instruction_coverage
+    - safety_directive_coverage
+    rollback_triggers:
+    - instruction_coverage regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-skill-ref
+  title: '[ref] skill target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: skill
+  target_ref: command_center.improvement.harness_library:skill
+  problem_statement: Demonstrate a bounded skill change measured deterministically.
+  hypothesis: The candidate skill improves the required metric without safety regression.
+  baseline: baseline skill (harness baseline role)
+  candidate: candidate skill (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: trigger_recall
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: false_invocation_rate
+    direction: decrease
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  - name: trigger_precision
+    direction: increase
+    required: false
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-skill-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - trigger_recall
+    - false_invocation_rate
+    rollback_triggers:
+    - trigger_recall regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-routing-ref
+  title: '[ref] routing target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: routing
+  target_ref: command_center.improvement.harness_library:routing
+  problem_statement: Demonstrate a bounded routing change measured deterministically.
+  hypothesis: The candidate routing improves the required metric without safety regression.
+  baseline: baseline routing (harness baseline role)
+  candidate: candidate routing (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: routing_accuracy
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: unsafe_downgrades
+    direction: decrease
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  - name: routing_regret
+    direction: decrease
+    required: false
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    relative: true
+    maximum_regression: 5.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-routing-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - routing_accuracy
+    - unsafe_downgrades
+    rollback_triggers:
+    - routing_accuracy regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-tool-ref
+  title: '[ref] tool target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: tool
+  target_ref: command_center.improvement.harness_library:tool
+  problem_statement: Demonstrate a bounded tool change measured deterministically.
+  hypothesis: The candidate tool improves the required metric without safety regression.
+  baseline: baseline tool (harness baseline role)
+  candidate: candidate tool (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: secret_exclusion
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: forbidden_block_rate
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  - name: permitted_allow_rate
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-tool-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - secret_exclusion
+    - forbidden_block_rate
+    rollback_triggers:
+    - secret_exclusion regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-memory-ref
+  title: '[ref] memory target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: memory
+  target_ref: command_center.improvement.harness_library:memory
+  problem_statement: Demonstrate a bounded memory change measured deterministically.
+  hypothesis: The candidate memory improves the required metric without safety regression.
+  baseline: baseline memory (harness baseline role)
+  candidate: candidate memory (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: recall_at_k
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: secret_exclusion
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  - name: precision_at_k
+    direction: increase
+    required: false
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-memory-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - recall_at_k
+    - secret_exclusion
+    rollback_triggers:
+    - recall_at_k regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-standard-ref
+  title: '[ref] standard target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: standard
+  target_ref: command_center.improvement.harness_library:standard
+  problem_statement: Demonstrate a bounded standard change measured deterministically.
+  hypothesis: The candidate standard improves the required metric without safety regression.
+  baseline: baseline standard (harness baseline role)
+  candidate: candidate standard (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: violation_recall
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: false_block_rate
+    direction: decrease
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-standard-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - violation_recall
+    - false_block_rate
+    rollback_triggers:
+    - violation_recall regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-proactive-check-ref
+  title: '[ref] proactive_check target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: proactive_check
+  target_ref: command_center.improvement.harness_library:proactive_check
+  problem_statement: Demonstrate a bounded proactive_check change measured deterministically.
+  hypothesis: The candidate proactive_check improves the required metric without safety regression.
+  baseline: baseline proactive_check (harness baseline role)
+  candidate: candidate proactive_check (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: detection_recall
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: false_alert_rate
+    direction: decrease
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-proactive-check-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - detection_recall
+    - false_alert_rate
+    rollback_triggers:
+    - detection_recall regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-workflow-ref
+  title: '[ref] workflow target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: workflow
+  target_ref: command_center.improvement.harness_library:workflow
+  problem_statement: Demonstrate a bounded workflow change measured deterministically.
+  hypothesis: The candidate workflow improves the required metric without safety regression.
+  baseline: baseline workflow (harness baseline role)
+  candidate: candidate workflow (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: completion_rate
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: human_interventions_per_task
+    direction: decrease
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    maximum_regression: 0.0
+  - name: steps_per_task
+    direction: decrease
+    required: false
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    relative: true
+    maximum_regression: 5.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-workflow-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - completion_rate
+    - human_interventions_per_task
+    rollback_triggers:
+    - completion_rate regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-documentation-ref
+  title: '[ref] documentation target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: documentation
+  target_ref: command_center.improvement.harness_library:documentation
+  problem_statement: Demonstrate a bounded documentation change measured deterministically.
+  hypothesis: The candidate documentation improves the required metric without safety regression.
+  baseline: baseline documentation (harness baseline role)
+  candidate: candidate documentation (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: cross_ref_resolution
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: topic_coverage
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-documentation-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - cross_ref_resolution
+    - topic_coverage
+    rollback_triggers:
+    - cross_ref_resolution regresses vs promoted baseline
+    - a safety metric regresses
+- experiment_id: EXP-repository-template-ref
+  title: '[ref] repository_template target rides the full improvement lifecycle'
+  owner: geoff
+  target_type: repository_template
+  target_ref: command_center.improvement.harness_library:repository_template
+  problem_statement: Demonstrate a bounded repository_template change measured deterministically.
+  hypothesis: The candidate repository_template improves the required metric without safety regression.
+  baseline: baseline repository_template (harness baseline role)
+  candidate: candidate repository_template (harness candidate role)
+  risk_tier: L2_local_edits
+  automated: true
+  created_at: '2026-06-13'
+  expires_at: '2026-09-13'
+  metrics:
+  - name: required_files_present
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    minimum_improvement: 0.05
+    maximum_regression: 0.0
+  - name: secret_files_absent
+    direction: increase
+    required: true
+    baseline_source: 'harness: baseline measurement'
+    candidate_source: 'harness: candidate measurement'
+    safety: true
+    maximum_regression: 0.0
+  budgets:
+    max_iterations: 3
+    max_wall_minutes: 10
+    max_input_tokens: 0
+    max_output_tokens: 0
+    max_cost_usd: 0
+    max_gpu_hours: 0
+    max_changed_files: 5
+    max_diff_lines: 300
+  verification:
+    independent_context: true
+    different_model_family_preferred: true
+    allow_self_verification: false
+    reproduce_commands:
+    - python -m command_center.cli.improvement verify EXP-repository-template-ref --apply
+    required_evidence:
+    - raw before/after logs
+    - metric summary with sample count
+  promotion:
+    human_approval_required: true
+    canary_required: true
+    rollback_required: true
+    automatic_promotion: false
+    minimum_observation_period: 24h
+    elevated_human_review: false
+  post_watch:
+    checkpoints:
+    - 1h
+    - 24h
+    - 7d
+    monitored_metrics:
+    - required_files_present
+    - secret_files_absent
+    rollback_triggers:
+    - required_files_present regresses vs promoted baseline
+    - a safety metric regresses

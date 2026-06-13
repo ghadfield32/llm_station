@@ -9,6 +9,24 @@ reference so the inventory and the watchers can't drift apart.
 import sys
 import yaml
 
+
+def check_judge_routing(judges: dict, roles: set) -> list:
+    """Every judge's role_alias and escalation_role must resolve to a real
+    models.yaml role. A stage's cheap->strong escalation that points at a
+    nonexistent route would silently never fire — so a typo here is a routing
+    break, not a no-op. Returns a list of dangling-reference messages."""
+    problems = []
+    for stage in judges.get("stages", []):
+        for j in stage.get("judges", []):
+            for field in ("role_alias", "escalation_role"):
+                ref = j.get(field)
+                if ref and ref not in roles:
+                    problems.append(
+                        f"judge '{j.get('name')}' {field} '{ref}' "
+                        f"is not a role in models.yaml")
+    return problems
+
+
 def main() -> int:
     targets = yaml.safe_load(open("configs/targets.yaml"))
     proactive = yaml.safe_load(open("configs/proactive.yaml"))
@@ -22,7 +40,11 @@ def main() -> int:
     known |= {"airflow", "data_assets", "services"}
 
     ok = True
-    checks = proactive.get("runtime_checks", []) + proactive.get("repo_stewardship", [])
+    checks = (
+        proactive.get("runtime_checks", [])
+        + proactive.get("repo_stewardship", [])
+        + proactive.get("self_improvement_scans", [])
+    )
     for c in checks:
         tgt = c.get("target")
         if tgt not in known:
@@ -64,6 +86,14 @@ def main() -> int:
             print(f"  DANGLING: channel '{ch.get('name')}' uses model '{ch.get('model')}' "
                   f"which is not a role in models.yaml")
             ok = False
+
+    # every judge's role_alias + escalation_role must route to a real role, so the
+    # cheap->strong / stuck-escalation chain can never point at a nonexistent model
+    judges = yaml.safe_load(open("configs/judges.yaml"))
+    for msg in check_judge_routing(judges, roles):
+        print(f"  DANGLING: {msg}")
+        ok = False
+
     print("cross-refs: PASS" if ok else "cross-refs: FAIL")
     return 0 if ok else 1
 

@@ -1,0 +1,37 @@
+schema_version: command-center.models.v1
+
+# LIGHT profile — for a laptop / small GPU / CPU, so *anyone* can get a real reply
+# without the 24 GB-class default models. Every role routes to one small local model.
+# Activate with `make models-light` (pulls the tag, swaps this over configs/models.yaml,
+# re-renders). Revert with `git checkout configs/models.yaml`.
+#
+# qwen3:8b (~5 GB, tool-calling capable) is the default light pick. On a CPU-only or
+# <6 GB box, change the model tags below to e.g. "llama3.2:3b" and re-run `make models-light`.
+# Same contract as configs/models.yaml: local-only, provider ollama, one route per role.
+
+roles:
+  triage:
+    - {alias: triage-local, provider: ollama, model: "qwen3:8b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 6, license: Apache-2.0}
+  local-judge:
+    - {alias: judge-qwen, provider: ollama, model: "qwen3:8b", priority: 1, local: true, vram_gb: 6, license: Apache-2.0}
+  planner:
+    - {alias: planner-local, provider: ollama, model: "qwen3:8b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 6, license: Apache-2.0}
+  coder:
+    - {alias: coder-local, provider: ollama, model: "qwen3:8b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 6, license: Apache-2.0}
+  architect-judge:
+    - {alias: arch-local, provider: ollama, model: "qwen3:8b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 6, license: Apache-2.0}
+  security-judge:
+    - {alias: security-local, provider: ollama, model: "qwen3:8b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 6, license: Apache-2.0}
+
+executors:
+  - {name: claude-code, family: anthropic, command: claude, coder_alias: coder-local, priority: 1}
+  - {name: codex-cli, family: openai, command: codex, coder_alias: coder-local, priority: 2}
+
+local_whitelist:
+  - "qwen3:8b"
+
+scout:
+  cadence: monthly
+  sources: [aider-polyglot, local-ollama-tags, artificial-analysis]
+  propose_only: true
+  max_candidates_per_run: 10

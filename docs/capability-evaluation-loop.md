@@ -1,5 +1,14 @@
 # Repository Capability Evaluation Loop
 
+> **Methodology vs mechanism.** This doc is the **manual methodology** (Investigator /
+> Implementer / independent Verifier) for evaluating *external* candidates — run by hand,
+> with hand-authored evidence under `evaluation/capability-assessment/`. The **coded,
+> contract-enforced, Ledger-backed** version of the same idea — for the system's *own*
+> prompts/skills/models/tools/routing/judges/standards — now lives in
+> [improvement-loop.md](improvement-loop.md) (registry, runner, independent verifier, sealed
+> evals, human-gated promotion). Use this doc for "should we adopt tool X"; use the
+> improvement loop for "should we change our own component Y".
+
 A reusable mission prompt for deciding whether an external tool, repository,
 agent pattern, skill, or library should be adopted. The job is not to advocate
 and not to install everything — it is to produce **reproducible evidence**
