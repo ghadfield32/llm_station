@@ -1,0 +1,40 @@
+# Add-on compose file: runs the Curator + daily jobs alongside AppFlowy Cloud.
+#   docker compose -f docker-compose.curator.yml up -d --build
+# Hourly: curate (papers/repos/signals; dedupes, so reruns are free).
+# Daily after 06:00: brief (+ mission worklog), package_watch, guidelines.
+services:
+  growthos-curator:
+    build: .
+    image: growthos-curator:latest
+    container_name: growthos-curator
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # inside the container "localhost" is the container itself; reach
+      # host services via Docker Desktop's host alias
+      - APPFLOWY_BASE_URL=http://host.docker.internal:8081
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - LEDGER_BASE_URL=http://host.docker.internal:8091
+      - GROWTHOS_KANBAN_IMPORTED=/app/_cc_generated/kanban-imported.json
+      - GROWTHOS_STANDARDS_PATH=/app/_cc_configs/standards.yaml
+      - AIRFLOW_BASE_URL=http://host.docker.internal:8090
+    volumes:
+      - ./config:/app/config:ro
+      - ./_state:/app/_state
+      - ./_export:/app/_export
+      # command-center bridge state (read-only) for the brief's worklog;
+      # repo roots (read-only) for package_watch lockfile parsing
+      - ../../generated:/app/_cc_generated:ro
+      - ../../configs:/app/_cc_configs:ro
+    command: >
+      sh -c "while true; do
+               python -m growthos.curate || true;
+               python -m growthos.airflow_sync || true;
+               H=$$(date +%H); TODAY=$$(date +%F);
+               if [ \"$$H\" -ge 6 ] && [ \"$$(cat /app/_state/brief.date 2>/dev/null)\" != \"$$TODAY\" ]; then
+                 python -m growthos.brief && echo \"$$TODAY\" > /app/_state/brief.date || true;
+                 python -m growthos.guidelines || true;
+                 python -m growthos.retention || true;
+               fi;
+               sleep 3600;
+             done"

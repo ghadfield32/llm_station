@@ -1,0 +1,101 @@
+# ============================================================================
+# Growth OS — what to ingest and how to rank it.
+# Edit freely; this is the single source of truth for the Curator.
+# Relevance is data-driven: items are scored against the interest_profile and
+# only the top-N per source are kept (no magic global threshold).
+# ============================================================================
+
+interest_profile:
+  weights:
+    bayesian: 3.0
+    hierarchical model: 3.0
+    probabilistic: 2.0
+    uncertainty: 2.0
+    calibration: 2.5
+    forecasting: 3.0
+    time series: 2.0
+    sports analytics: 3.0
+    basketball: 2.5
+    nba: 2.0
+    player tracking: 2.5
+    computer vision: 2.5
+    pose estimation: 2.0
+    object tracking: 2.0
+    homography: 1.5
+    mlops: 2.0
+    data engineering: 2.0
+    streaming: 1.5
+    kafka: 1.5
+    flink: 1.5
+    iceberg: 1.5
+    dbt: 1.5
+    feature store: 1.5
+    large language model: 2.5
+    llm agent: 3.0
+    retrieval augmented: 2.0
+    fine-tuning: 2.0
+    reinforcement learning: 2.0
+    evaluation: 1.5
+  penalties:
+    survey: -0.5
+    blockchain: -2.0
+    quantum computing: -1.0
+
+scoring:
+  method: embedding          # semantic scoring via Ollama; "keyword" to disable
+  embed_model: nomic-embed-text
+  embed_scale: 10.0          # cosine similarity -> 0..10 score range
+
+# Rolling-window retention for the auto-curated inboxes: rows still in Inbox
+# after `days` get Status=Archived (human-triaged rows are never touched;
+# there is no row-delete API, Archived is the retirement state).
+retention:
+  days: 7
+  databases:
+    papers: Published
+    repos: Updated
+    signals: Published
+
+# Release-note / guideline feeds -> `guidelines` DB (Status=Review on arrival).
+# GitHub releases expose .atom feeds; these track the stack you actually run.
+guidelines:
+  lookback_days: 30
+  feeds:
+    - https://github.com/astral-sh/uv/releases.atom
+    - https://github.com/apache/airflow/releases.atom
+    - https://github.com/AppFlowy-IO/AppFlowy/releases.atom
+    - https://github.com/ollama/ollama/releases.atom
+
+sources:
+  arxiv:
+    enabled: true
+    top_n: 12
+    lookback_days: 3
+    categories: [cs.LG, stat.ML, cs.CV, cs.CL, cs.AI, stat.ME, stat.AP]
+    queries:
+      - "all:Bayesian AND all:forecasting"
+      - "all:sports AND all:tracking"
+      - "all:LLM AND all:agent"
+
+  github:
+    enabled: true
+    top_n: 10
+    lookback_days: 7
+    min_stars: 25
+    queries:
+      - "bayesian forecasting language:python"
+      - "sports analytics basketball"
+      - "player tracking computer vision"
+      - "llm agents framework"
+      - "mlops feature store"
+    topics: [bayesian, forecasting, sports-analytics, computer-vision, llm, mlops]
+
+  signals:
+    enabled: true
+    top_n: 15
+    lookback_days: 2
+    feeds:
+      - https://hnrss.org/frontpage?points=150
+      - https://jack-clark.net/feed/
+      - https://www.deeplearning.ai/the-batch/feed/
+      - https://huggingface.co/blog/feed.xml

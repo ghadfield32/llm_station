@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "appflowy": {
+      "command": "uv",
+      "args": ["run", "/ABSOLUTE/PATH/appflowy_mcp/main.py"],
+      "env": {
+        "APPFLOWY_BASE_URL": "https://appflowy.your-domain.tld",
+        "APPFLOWY_EMAIL": "you@example.com",
+        "APPFLOWY_PASSWORD": "your-password",
+        "APPFLOWY_WORKSPACE_ID": "your-workspace-id"
+      }
+    },
+    "growthos-files": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/ABSOLUTE/PATH/growth-os"]
+    }
+  }
+}

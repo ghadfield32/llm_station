@@ -1,0 +1,30 @@
+# Drop this into each repo as .pre-commit-config.yaml, then `pre-commit install`.
+# Fast deterministic checks run first; the LLM judge array runs last and BLOCKS
+# the commit (exit 2) on secrets, defensive-coding bloat, or out-of-scope sprawl.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-added-large-files
+      - id: detect-private-key
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.4
+    hooks:
+      - id: ruff
+      - id: ruff-format
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+  # ---- LLM judge array (local hook) ----
+  - repo: local
+    hooks:
+      - id: llm-precommit-judges
+        name: LLM pre-commit judge array
+        entry: scripts/run_precommit_judges.sh
+        language: script
+        pass_filenames: false
+        stages: [commit]
+        verbose: true

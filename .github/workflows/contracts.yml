@@ -1,0 +1,29 @@
+name: contracts
+on:
+  pull_request:
+    paths: [configs/**, src/**, pyproject.toml, .github/workflows/contracts.yml]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e .                                          # installs command_center
+      - run: python -m command_center.cli.validate_config             # configs match contracts
+      - run: python -m command_center.cli.check_cross_refs            # cross-file references resolve
+      - run: python -m command_center.registry.render                 # registry renders cleanly
+      - run: python -m command_center.cli.check_forbidden_providers   # local-only boundary holds
+      - run: for t in L0 L1 L2 L3 L4; do python -m command_center.cli.smoke_mission $t demo smoke; done
+
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev]"
+      - run: ruff check src
+      - run: pytest

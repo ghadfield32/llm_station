@@ -1,0 +1,59 @@
+schema_version: command-center.breakage.v1
+
+# What ripples when a file changes, and which checks must pass. `make impact`
+# reads your git diff and prints exactly this for the files you touched.
+changes:
+  configs/models.yaml:
+    affects: [generated/litellm-config.yaml, LiteLLM routing, judge model choices]
+    required_checks: [make validate, make models, make mission-dryrun]
+    rollout: [make models-canary, "then promote or rollback"]
+
+  configs/judges.yaml:
+    affects: [judge stages, cross-provider pairing, per-judge budgets]
+    required_checks: [make validate, make mission-dryrun]
+    rollout: [direct]
+
+  configs/gates.yaml:
+    affects: [approval policy, mission lifecycle, GitHub write permission]
+    required_checks: [make validate, make mission-dryrun]
+    rollout: [direct]
+
+  configs/environments.yaml:
+    affects: [devcontainers, workspace leases, allowed egress, secret exposure]
+    required_checks: [make validate, make render, make env-smoke]
+    rollout: [direct]
+
+  configs/proactive.yaml:
+    affects: [scheduled DAG/data/repo checks, RCA triggers]
+    required_checks: [make validate, make proactive-smoke]
+    rollout: [direct]
+
+  configs/targets.yaml:
+    affects: [watch inventory, proactive check targets, SLOs]
+    required_checks: [make targets-validate, make cross-refs]
+    rollout: [direct]
+
+  configs/tools.yaml:
+    affects: [tool permissions cited by judges, GitHub/shell/Mirage policy]
+    required_checks: [make tools-validate]
+    rollout: [direct]
+
+  configs/evals.yaml:
+    affects: [routing/judge regression suite, model promotion gate]
+    required_checks: [make evals]
+    rollout: [direct]
+
+  configs/standards.yaml:
+    affects: [CLAUDE.md, AGENTS.md, judge prompts, repo-install output]
+    required_checks: [make validate, make standards-validate, make repo-install]
+    rollout: [reinstall affected repos]
+
+  src/command_center/schemas/contracts.py:
+    affects: [all config validation, generated JSON schema, docs]
+    required_checks: [make schema, make validate, make render]
+    rollout: [direct]
+
+  docker-compose.yml:
+    affects: [control-plane availability, volumes, network exposure]
+    required_checks: [make verify, make up, make health]
+    rollout: [direct]

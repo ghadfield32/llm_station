@@ -1,0 +1,51 @@
+schema_version: command-center.models.v1
+
+# Edit THIS file to change models. Then `make models`. No code touched.
+# Local-only LiteLLM registry. Cloud coding happens through Claude Code and
+# Codex executors, authenticated separately with subscription/OAuth login.
+# Every role below must render to ollama_chat/... via OLLAMA_API_BASE.
+
+roles:
+  triage:
+    - {alias: triage-local, provider: ollama, model: "qwen3-coder:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+
+  local-judge:
+    - {alias: judge-qwen, provider: ollama, model: "qwen3:30b", priority: 1, local: true, vram_gb: 19, license: Apache-2.0}
+    - {alias: judge-devstral, provider: ollama, model: "devstral:24b", priority: 2, local: true, vram_gb: 14, license: Apache-2.0}
+
+  planner:
+    - {alias: planner-local, provider: ollama, model: "qwen3-coder:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+    - {alias: planner-judge, provider: ollama, model: "qwen3:30b", priority: 2, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+
+  coder:
+    - {alias: coder-local, provider: ollama, model: "qwen3-coder:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+
+  architect-judge:
+    - {alias: arch-local, provider: ollama, model: "qwen3-coder:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+    - {alias: arch-judge, provider: ollama, model: "qwen3:30b", priority: 2, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+
+  security-judge:
+    - {alias: security-local, provider: ollama, model: "qwen3:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+    - {alias: security-devstral, provider: ollama, model: "devstral:24b", priority: 2, local: true, monthly_budget_usd: 0, vram_gb: 14, license: Apache-2.0}
+
+# The CLI agents that drive the leased worktree/devcontainer. Distinct from the
+# local `coder` role above: the executor is the harness and uses its own
+# subscription/OAuth login, not LiteLLM provider API keys. The `coder_alias`
+# remains a contract reference so executor defaults stay tied to a real local
+# route for dry-runs and fallback summaries.
+executors:
+  - {name: claude-code, family: anthropic, command: claude, coder_alias: coder-local, priority: 1}
+  - {name: codex-cli, family: openai, command: codex, coder_alias: coder-local, priority: 2}
+
+local_whitelist:
+  - "qwen3-coder:30b"
+  - "qwen3:30b"
+  - "devstral:24b"
+
+# The model scout proposes LOCAL model candidates only. Public leaderboards may
+# be used for discovery, but provider routes are contract-forbidden in roles.
+scout:
+  cadence: monthly
+  sources: [huggingface-open-llm-leaderboard, local-ollama-tags, provider-release-blogs]
+  propose_only: true
+  max_candidates_per_run: 3

@@ -1,0 +1,51 @@
+# Benchmark plan — semble (repository retrieval seam)
+# Written BEFORE implementation (Stage 5). A = baseline (ripgrep/native), B = + semble.
+design:
+  a_baseline: "ripgrep 14.1.1 queries chosen by the operator, as Claude Code would search"
+  b_candidate: "semble index + query, same questions, same repo state"
+  repo_state: "llm_station working tree, 2026-06-12 (uncommitted; no commits exist)"
+  machine: "Windows 11 workstation, Python 3.12.6, CPU only"
+  cache: "report cold (first index) and warm (re-query) where applicable"
+  repetitions: "timing: 3+ per measurement (report median + range + n); recall: single pass (deterministic)"
+
+metrics:
+  retrieval:
+    - recall_at_5 against the gold set (file-level: expected file appears in top 5 results)
+    - irrelevant_results_in_top_5
+    - secret_file_exclusion (.env must NEVER appear in any result)
+    - generated_file_handling (generated/, .venv/ should not dominate results)
+    - stale_index: edit a file, re-query without reindex; does it return stale content silently?
+  efficiency:
+    - index_time_cold (s), reindex_time (s), index_size_on_disk (MB)
+    - query_latency (ms, median of 3)
+    - tokens_proxy: bytes of output an agent must read to locate the answer (A: rg output bytes; B: semble output bytes)
+  reliability:
+    - clean_install_via_uv (pass/fail)
+    - missing/corrupt index behavior (must fail loudly, not return empty-as-success)
+    - one_command_removal (uninstall + delete index artifacts)
+  governance:
+    - files_written_outside_repo (expected: only its own cache/index dir, recorded)
+    - network_calls_at_runtime (expected: none)
+    - api_keys_required (expected: none)
+
+gold_set:  # answers verified present in these files on 2026-06-12
+  - q: "Where are the kanban bridge ready statuses configured?"
+    expect_any: [configs/kanban.yaml, src/command_center/cli/kanban_bridge.py]
+  - q: "Which code refuses agents setting Approved status on mission cards?"
+    expect_any: [appflowy_kanban/growth-os/growthos/actions.py]
+  - q: "Where does validation enforce that L3/L4 risk tiers require approval?"
+    expect_any: [src/command_center/schemas/contracts.py]
+  - q: "How are the LiteLLM virtual keys minted on Windows?"
+    expect_any: [scripts/cc.ps1, Makefile]
+  - q: "Where does the morning brief read bridged mission status from?"
+    expect_any: [appflowy_kanban/growth-os/growthos/brief.py]
+  - q: "Which script enforces that no provider API keys exist?"
+    expect_any: [src/command_center/cli/check_forbidden_providers.py]
+  - q: "Where does Judge Gate get its engineering standards from?"
+    expect_any: [services/judge_gate/app.py, configs/standards.yaml]
+  - q: "How does the ledger prevent two agents leasing the same repo+branch?"
+    expect_any: [services/ledger/app.py]
+  - q: "Where is the list of blocked defensive-coding patterns?"
+    expect_any: [configs/standards.yaml]
+  - q: "Which compose service is pinned by image digest?"
+    expect_any: [docker-compose.yml]

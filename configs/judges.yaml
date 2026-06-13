@@ -1,0 +1,59 @@
+schema_version: command-center.judges.v1
+cross_provider_review: false
+
+# Local-only judge array. Claude Code/Codex are the coding executors; LiteLLM
+# judge/planner aliases stay on Ollama and fail closed if Ollama is unavailable.
+stages:
+  - stage: intake
+    judges:
+      - {name: risk-judge, role_alias: triage, escalation_role: security-judge, max_cost_usd: 0.0}
+
+  - stage: plan
+    judges:
+      - {name: plan-critic, role_alias: planner, escalation_role: architect-judge, max_cost_usd: 0.0}
+      - {name: scope-judge, role_alias: triage, max_cost_usd: 0.0}
+
+  - stage: pre-commit
+    judges:
+      - {name: diff-judge, role_alias: triage, escalation_role: security-judge, max_cost_usd: 0.0}
+      - {name: secret-judge, role_alias: triage, max_cost_usd: 0.0}
+      - {name: defensive-coding-judge, role_alias: triage, escalation_role: security-judge, max_cost_usd: 0.0}
+
+  # Runs DURING implementation when the executor stalls, loops, or starts
+  # writing fallbacks/try-except-pass to "make it pass". A stronger local role
+  # inspects that exact segment, decides the right fix, and only then continues.
+  - stage: stuck-escalation
+    judges:
+      - {name: stuck-detector, role_alias: local-judge, escalation_role: architect-judge, max_cost_usd: 0.0}
+      - {name: segment-fixer, role_alias: architect-judge, max_cost_usd: 0.0}
+
+  # Root-cause loop: local log-scanner runs continuously over run logs; on a real
+  # signal it escalates to the local architect/debugger role.
+  - stage: debug
+    judges:
+      - {name: log-scanner, role_alias: local-judge, escalation_role: security-judge, max_cost_usd: 0.0}
+      - {name: root-cause-debugger, role_alias: architect-judge, max_cost_usd: 0.0}
+
+
+  - stage: pre-push
+    judges:
+      - {name: security-skeptic, role_alias: security-judge, max_cost_usd: 0.0}
+      - {name: scope-judge, role_alias: triage, max_cost_usd: 0.0}
+
+  - stage: architecture
+    judges:
+      - {name: architect-skeptic, role_alias: architect-judge, max_cost_usd: 0.0}
+      - {name: cost-judge, role_alias: triage, max_cost_usd: 0.0}
+
+  # Proactive lane — scheduled checks on already-done work. Local models scan
+  # continuously; real signals open gated missions.
+  - stage: proactive-runtime
+    judges:
+      - {name: freshness-judge, role_alias: local-judge, escalation_role: planner, max_cost_usd: 0.0}
+      - {name: log-scanner, role_alias: local-judge, escalation_role: security-judge, max_cost_usd: 0.0}
+      - {name: data-contract-judge, role_alias: local-judge, escalation_role: planner, max_cost_usd: 0.0}
+
+  - stage: proactive-steward
+    judges:
+      - {name: defensive-coding-judge, role_alias: local-judge, escalation_role: security-judge, max_cost_usd: 0.0}
+      - {name: scope-judge, role_alias: triage, max_cost_usd: 0.0}

@@ -1,0 +1,16 @@
+{
+  "candidate": "semble",
+  "version_pinned": "0.3.4",
+  "install_command": "uv pip install semble==0.3.4",
+  "install_target": ".venv (project venv; NOT added to pyproject.toml - experiment, not adoption)",
+  "dependencies_added": ["model2vec", "vicinity", "bm25s", "tree-sitter==0.25.2", "tree-sitter-language-pack==1.6.2", "pathspec", "orjson", "questionary", "typer", "wcwidth", "joblib", "rich (existing)", "numpy (existing)"],
+  "files_written_outside_repo": [
+    "%LOCALAPPDATA%\\semble\\Cache\\<repo-hash>\\ (index, 18 MB)",
+    "%USERPROFILE%\\.cache\\huggingface\\hub\\models--minishlab--potion-code-16M (one-time model download)"
+  ],
+  "network_destinations": ["pypi.org (install)", "huggingface.co (one-time model fetch, first run only)"],
+  "processes_ports": "none persistent; no ports (stdio CLI only)",
+  "agent_config_modified": false,
+  "semble_install_run": false,
+  "feature_flag": "not wired into any agent; CLI-only experiment"
+}

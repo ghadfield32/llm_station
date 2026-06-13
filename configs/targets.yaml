@@ -1,0 +1,49 @@
+schema_version: command-center.targets.v1
+
+# The canonical inventory of what the system is responsible for. The proactive
+# lane's checks watch these; `make impact` and RCA reference them. Every entry
+# has an owner; high-criticality ones have an SLO; DAGs/assets have checks.
+# Edit this file, then `make targets-validate`. No code touched.
+
+repos:
+  - name: betts_basketball
+    path: /workspaces/betts_basketball
+    owner: geoff
+    criticality: high
+    standards_profile: python_ml_pipeline
+    required_checks: [ruff, pyright, pytest, gitleaks, semgrep]
+    stewardship_schedule: weekly
+
+  - name: command-center
+    path: /workspaces/command-center
+    owner: geoff
+    criticality: high
+    standards_profile: python_service
+    required_checks: [ruff, pyright, pytest, gitleaks]
+    stewardship_schedule: weekly
+
+dags:
+  - name: odds_ingest_daily
+    orchestrator: airflow
+    owner: geoff
+    criticality: high
+    freshness_slo_hours: 24
+    expected_outputs:
+      - reports/odds/source_expansion/source_value_scorecard.parquet
+    checks: [dag_success, partition_freshness, row_count, duplicate_keys, schema_contract]
+    on_fail: open_rca_mission
+
+data_assets:
+  - name: nba_odds_source_scorecard
+    path: reports/odds/source_expansion/source_value_scorecard.parquet
+    owner: geoff
+    criticality: high
+    freshness_slo_hours: 24
+    quality_checks: [not_empty, expected_columns, recommendation_rank_unique, credits_per_call_nonnegative]
+
+services:
+  - name: litellm-gateway
+    owner: geoff
+    criticality: high
+    checks: [health, latency, error_rate]
+    on_fail: ledger_report

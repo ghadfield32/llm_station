@@ -1,0 +1,66 @@
+# ── Secrets (never commit) ────────────────────────────────────────────────
+# Real secrets live only in .env files + your password manager. Examples are tracked.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+**/CREDENTIALS.md
+
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# ── Tooling caches / virtualenvs ──────────────────────────────────────────
+.venv/
+**/.venv/
+.uv-cache/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Runtime state & data dumps (the ledger SQLite is the only runtime state) ─
+*.db
+*.sqlite
+*.sqlite3
+*.tar.gz
+*.tgz
+*.zip
+"updated files"
+updated files
+
+# ── AppFlowy / GrowthOS local state & backups (kept on disk, never pushed) ──
+appflowy_kanban/backups/
+appflowy_kanban/files.zip
+appflowy_kanban/extracted/
+appflowy_kanban/growth-os/_state/
+appflowy_kanban/growth-os/_export/
+
+# ── Disposable generated output (regenerate: `make render` / `make schema`) ─
+generated/litellm-config.yaml
+generated/json-schema/
+generated/*.md
+
+# ── Local staging / scratch ───────────────────────────────────────────────
+_staging/
+
+# ── Capability-evaluation vendored binaries (pinned + re-downloadable; the ──
+#    version + sha256 live in each candidate's install-manifest.json, so the
+#    binary is reproducible and must not be committed as a source artifact). ─
+evaluation/capability-assessment/abtop/bin/
+
+# ── OS / editor noise ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json

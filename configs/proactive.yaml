@@ -1,0 +1,71 @@
+schema_version: command-center.proactive.v1
+
+# Scheduled checks on work that's ALREADY DONE. Two lanes:
+#   runtime_checks   — are the DAGs/data/services still current and correct?
+#   repo_stewardship — is the code still built to standard, or accreting debt?
+# A check OBSERVES, classifies, explains, and (at most) opens a GATED mission.
+# It never edits directly. on_fail is the strongest autonomous action it can take.
+# Edit this file, then `make proactive-validate`. No code touched.
+
+runtime_checks:
+  - name: dag-freshness-daily
+    target: airflow                 # or dagster/prefect — whichever your DAGs run on
+    schedule: "0 8 * * *"
+    owner: geoff
+    max_staleness_hours: 24
+    evidence: [dag_runs, task_logs, output_partitions]
+    judges: [freshness-judge, log-scanner]   # local/cheap first
+    on_fail: open_rca_mission
+    auto_patch_max_risk: L0_read_only          # freshness misses are usually data-source, not code
+
+  - name: data-quality-critical-assets
+    target: data_assets
+    schedule: "0 */6 * * *"
+    owner: geoff
+    checks: [schema, null_rate, row_count, distribution_drift]
+    evidence: [asset_check_results, recent_runs]
+    judges: [data-contract-judge, log-scanner]
+    on_fail: open_rca_mission
+    auto_patch_max_risk: L2_local_edits          # a bad transform may warrant a gated worktree patch
+
+  - name: model-pipeline-perf
+    target: services
+    schedule: "*/30 * * * *"
+    owner: geoff
+    checks: [latency, error_rate, gpu_util, cost]
+    evidence: [metrics, logs]
+    judges: [log-scanner]
+    on_fail: ledger_report           # perf wobble → record, don't auto-open RCA
+    auto_patch_max_risk: L0_read_only
+
+
+  - name: usage-digest-weekly
+    target: litellm-gateway
+    schedule: "0 9 * * 0"
+    owner: geoff
+    checks: [spend_by_role, calls_by_role, escalation_rate, judge_block_rate, budget_headroom]
+    evidence: [litellm_spend_api, ledger_mission_stats]
+    judges: [log-scanner]
+    on_fail: ledger_report          # the digest itself IS the report; anomalies flag here
+    auto_patch_max_risk: L0_read_only
+
+repo_stewardship:
+  - name: repo-standards-weekly
+    target: betts_basketball         # your repos, one entry each
+    schedule: "0 9 * * 1"
+    owner: geoff
+    checks: [structure, tests, docs, defensive_coding, workarounds, dependency_drift, dead_code]
+    evidence: [tree, test_report, ruff_report, semgrep_report]
+    judges: [defensive-coding-judge, scope-judge]
+    on_fail: ledger_report           # findings → report; a patch is a separate gated decision
+    auto_patch_max_risk: L2_local_edits          # may PROPOSE a minimal patch, still passes all gates
+
+  - name: command-center-standards-weekly
+    target: command-center
+    schedule: "30 9 * * 1"
+    owner: geoff
+    checks: [structure, docs, defensive_coding, dependency_drift]
+    evidence: [tree, ruff_report]
+    judges: [defensive-coding-judge, scope-judge]
+    on_fail: ledger_report
+    auto_patch_max_risk: L1_plan_only          # the control plane itself: report/plan only, no auto-patch

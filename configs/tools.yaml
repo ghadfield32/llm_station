@@ -1,0 +1,28 @@
+schema_version: command-center.tools.v1
+
+# Explicit tool permissions. One tier owns each action; dangerous actions are
+# manual-only and can never be auto-allowlisted (the contract rejects it).
+# This gives the LLM judges a concrete policy to cite when they block something.
+# Edit this file, then `make tools-validate`.
+
+tools:
+  github:
+    default_mode: read_only
+    allowed_l3_actions: [push_feature_branch, open_pr, comment_on_own_pr]
+    denied_actions: [merge, force_push, change_repo_settings, administer_secrets, bypass_required_checks]
+    manual_only: [deploy, publish]
+
+  shell:
+    default_mode: read_only
+    allowed_l2: [git, rg, pytest, ruff, pyright, mypy, semgrep, gitleaks]
+    manual_only: [sudo, rm_rf, curl_pipe_bash]
+
+  filesystem:
+    default_mode: read_write           # the leased worktree only; repo_task holds no secrets
+    allowed_l2: [read, write_worktree]
+    denied_actions: [write_outside_worktree, read_env_secrets]
+
+  mirage:
+    default_mode: read_only            # stays read-only until it matures past v0.0.1
+    phase: optional_phase_4
+    denied_mounts: [gmail_write, github_write, production_db, slack_write]

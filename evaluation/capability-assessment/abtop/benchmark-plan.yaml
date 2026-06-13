@@ -1,0 +1,26 @@
+# Benchmark plan — abtop (observability seam)
+# Written BEFORE implementation (Stage 5). A = baseline (no live monitor), B = abtop running read-only.
+design:
+  a_baseline: "tasklist process inspection + retrospective usage_digest.py"
+  b_candidate: "abtop live view + machine-readable output if available"
+  test_conditions: "baseline recorded 2 claude.exe + 3 codex.exe live processes; rerun detection while sessions active"
+  machine: "Windows 11 workstation"
+  repetitions: "detection: 3 samples over a few minutes; overhead: observe CPU/mem of abtop process itself"
+
+metrics:
+  detection:
+    - claude_sessions_detected vs tasklist ground truth
+    - codex_sessions_detected vs tasklist ground truth
+    - false_positives (unrelated node/python procs misattributed)
+  output:
+    - json_mode_available (and parses with python -m json.tool)
+    - fields_stable_across_runs
+  overhead:
+    - abtop_cpu_percent_steady_state
+    - abtop_memory_mb
+  governance:
+    - read_only_confirmed (no writes to agent configs, no hooks, no wrappers)
+    - network_calls (expected: none, or explicitly documented if it reads provider endpoints)
+    - api_keys_required (expected: none — knockout if it needs provider keys)
+
+windows_note: "Windows behavior is a first-class criterion; upstream may be POSIX-first"

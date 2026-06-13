@@ -1,0 +1,65 @@
+[project]
+name = "command-center"
+version = "4.0.0"
+description = "Typed, validated control plane for a self-hosted agent command center"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.10",
+  "pyyaml>=6.0",
+  "httpx>=0.28",
+  "pydantic-settings>=2.2",
+  "tenacity>=8.2",
+]
+
+# Channel transports are optional: the control plane (validate/render/serve) needs none of
+# them. Install with `uv pip install -e ".[gateways]"` to run the chat gateways.
+# Telegram needs only httpx (already core); discord/slack/whatsapp pull their SDKs here.
+[project.optional-dependencies]
+gateways = [
+  "discord-py>=2.4",
+  "slack-bolt>=1.21",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.34",
+]
+dev = [
+  "ruff>=0.6",
+  "mypy>=1.11",
+  "pytest>=8.0",
+]
+
+# Console scripts are only exposed for commands that resolve their own paths and so work from
+# any directory. The config-pipeline commands read `configs/` relative to the repo root and are
+# invoked through `make` or `python -m command_center.cli.<name>` from the repo root (see Makefile).
+[project.scripts]
+cc-gateway = "command_center.channels.__main__:main"
+cc-model-scout = "command_center.registry.model_scout:main"
+cc-usage-digest = "command_center.cli.usage_digest:main"
+cc-verify-env = "command_center.cli.verify_env:main"
+cc-init-env = "command_center.cli.init_env:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+# E702: the CLIs deliberately use compact `cond: print(...); ok=False; continue`
+# guards — that terseness is the house style, not an accident.
+ignore = ["E702"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]   # package __init__ modules re-export their public API
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.12"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

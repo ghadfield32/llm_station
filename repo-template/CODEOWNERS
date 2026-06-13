@@ -1,0 +1,7 @@
+# Your review is mandatory before merge. Sensitive paths called out explicitly.
+*                 @your-username
+/infra/           @your-username
+/.github/         @your-username
+*.tf              @your-username
+/pipelines/       @your-username
+**/secrets*       @your-username

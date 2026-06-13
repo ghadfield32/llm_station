@@ -1,0 +1,81 @@
+schema_version: command-center.standards.v1
+
+# Your engineering values, written ONCE. `make repo-install` renders these into
+# CLAUDE.md (Claude Code) and AGENTS.md (Codex CLI) in each repo, and the Judge
+# Gate reads the same file for judge prompts — so every mission carries them
+# automatically and you never re-type them. Edit here, `make validate`,
+# re-run repo-install on affected repos.
+
+core_principles:
+  - No defensive coding. Fix causes, never paper over symptoms.
+  - All thresholds and parameters derived empirically from data, never hardcoded.
+  - Audit before executing. Validate before any production action.
+  - Minimal diffs. Change exactly what the plan scopes, nothing else.
+  - Tests pin intended behavior. Never weaken a test to make it pass.
+  - Errors propagate clearly. A failure must be loud, attributable, and logged.
+  - Engineering excellence over speed. If a segment can't be done correctly, escalate, don't fall back.
+  - Docs update only when behavior, interfaces, schemas, or runbooks actually changed.
+
+profiles:
+  - name: python_ml_pipeline
+    # Authoritative deep references live in the target repo (betts_basketball):
+    #   docs/backend/PIPELINE_STANDARDS_TEMPLATE.md         (the 11-step pipeline template)
+    #   docs/backend/engineering/DATA_ENGINEERING_PIPELINE.md (§0.x non-negotiables)
+    #   docs/backend/engineering/LOCAL_FLEET_R2_WORKFLOW.md  (two-machine R2 contract)
+    #   docs/backend/engineering/MULTI_SESSION_R2.md         (concurrent-session safety)
+    #   docs/backend/modeling/UNIFIED_SERVING_GUIDE.md       (serving standards)
+    #   docs/backend/modeling/{BAYESIAN,GBDT,CLUSTERING}_*   (per-model-family guides)
+    principles:
+      - Data science mastery; statistical rigor in every modeling choice; validate against ground truth.
+      - Medallion-style staged data flow (bronze hard contracts -> silver -> gold); each stage independently testable and independently callable.
+      - Every pipeline follows PIPELINE_STANDARDS_TEMPLATE.md; its doc opens with a module tree, a stage registry, and a purpose line per stage, then stage-by-stage detail.
+      - Orchestrators expose daily / rebuild / validate modes through a stage registry; a validation suite must reach its PASS threshold before any promotion.
+      - Data contracts checked deterministically before any LLM judges results.
+      - Survivorship and leakage audits on any training/eval split.
+      - Temporal safety on time-ordered data; strict past-only cutoffs (shift(1), expanding windows), the forbidden-features list enforced, one canonical temporal key for internal joins, and the training cutoff documented for forward serving.
+      - Treat the shared artifact store (R2) as a shared production database; validate the changed pipeline to PASS before upload, dry-run the exact domain flags, then verify after upload (object reachable, freshness endpoint shows the new manifest version, affected endpoints smoke-tested).
+      - R2 single-writer lock discipline; one upload at a time across all sessions and DAGs, wait out the upload.lock TTL when blocked, and check which scheduled DAGs are writing before any manual upload (--skip-core unless a core rebuild is intended).
+      - Machine lanes are fail-closed; the desktop 4090 is the production orchestrator and only production R2 writer; the laptop 5080 is the dev/training/frontend lane, read-only from production R2, writing candidates only to .r2_staging; local mirrors hydrate from the R2 manifest (never peer-to-peer) and the manifest is the conflict tiebreaker.
+      - Multi-session git discipline; session/<topic> branches, exact-path staging, check git status for other sessions' in-flight edits before structural moves, laptop pushes code and the desktop pulls + revalidates + promotes.
+      - Dependencies via uv only; uv pip install, then pin an appropriate range in every pyproject.toml that consumes it (root, api, airflow image as applicable), then prove uv sync resolves cleanly, then commit pyproject.toml with the code. Minor-version upper bounds for ML libraries; exact pins only at hard serialization boundaries.
+      - Serving standards per UNIFIED_SERVING_GUIDE; Pydantic response_model on every endpoint, sync handlers for I/O-bound work, DuckDB predicate-pushdown reads over full-frame loads, parameterized queries, serving reads promoted R2 artifacts only.
+      - Atomic writes to shared volumes; write to a sibling temp file and os.replace into place, never truncate a shared artifact in place.
+      - Doc hygiene for cross-session continuity; the pipeline's engineering/projects doc carries an ordered done / next-in-order list so any session knows what's complete and what's left, updated when behavior, stages, or interfaces actually change.
+    blocked_patterns:
+      - swallowed exceptions / try-except-pass
+      - hardcoded fallback values where data-driven values belong
+      - hardcoded validation bounds or thresholds (must be data-derived)
+      - constant imputation that papers over missingness (.fillna(0), .fillna(1.0)); NaN is signal
+      - raw NaN/Inf serialized into API JSON payloads (boundary must emit null)
+      - random train/test splits or current-row features on time-ordered data (leakage)
+      - deleting or force-removing upload.lock, or uploading during another session's lock window
+      - enabling production R2 writes on the dev laptop outside the recorded emergency-writer switch
+      - committing data artifacts (parquet, duckdb, .r2_mirror, .r2_staging, generated reports) or blanket git add -A
+      - pip install without updating pyproject.toml and proving uv sync resolves
+      - redundant null guards on already-validated inputs
+      - dead feature flags and fake retries
+      - out-of-scope rewrites and unrequested abstractions
+    allowed_patterns:
+      - boundary validation at system edges
+      - explicit, minimal failure paths with clear error propagation
+      - tests that pin intended behavior
+      - waiting out lock TTLs and re-hydrating mirrors (slow-but-safe is correct)
+      - NaN as an in-band missingness signal internally (serialized as null at the boundary)
+      - documented narrow dependency exceptions backed by resolver proof and runtime validation
+
+  - name: python_service
+    principles:
+      - Lean contracts; extra="forbid"; one source of truth per concern.
+      - Services hold the minimum state and secrets for their job.
+      - Every config change passes validation before anything runs.
+    blocked_patterns:
+      - swallowed exceptions / try-except-pass
+      - speculative configuration for needs not yet hit
+      - another abstraction layer that prevents no observed failure
+    allowed_patterns:
+      - boundary validation at system edges
+      - explicit failure paths
+
+skill_updates:
+  auto_propose: true          # RCA prevention output may draft skill/prompt edits
+  max_auto_risk: L2_local_edits  # applied only as gated worktree missions, never self-rewrite

@@ -1,0 +1,38 @@
+schema_version: command-center.channels.v1
+
+# Chat transports for the Growth OS / Command Center gateway. Each channel is one
+# more SURFACE, not a new authority: messages route through LiteLLM (local models
+# first) to the same growthos action layer every other surface uses, and none can
+# approve mission cards. Tokens and channel/chat allowlists live ONLY in .env — see
+# docs/channels.md for the env var each transport reads and its setup steps.
+#
+# `model` is a role alias from configs/models.yaml (cross-checked by `make validate`).
+# Turn a channel on by setting enabled: true AND adding its tokens to .env, then
+# `make gateway` (or `make gateway CHANNELS=slack,telegram`).
+
+surface_label: "Growth OS gateway"
+
+channels:
+  - name: discord-main
+    transport: discord
+    enabled: true
+    model: triage
+    description: "Primary Discord bot (DMs from the owner + allowlisted channels)."
+
+  - name: slack-main
+    transport: slack
+    enabled: false
+    model: triage
+    description: "Slack Socket Mode app. Needs SLACK_BOT_TOKEN + SLACK_APP_TOKEN."
+
+  - name: telegram-main
+    transport: telegram
+    enabled: false
+    model: triage
+    description: "Telegram bot (long-poll). Needs TELEGRAM_BOT_TOKEN + allowlist."
+
+  - name: whatsapp-main
+    transport: whatsapp
+    enabled: false
+    model: triage
+    description: "WhatsApp via Meta Cloud API webhook. Needs a public HTTPS webhook."

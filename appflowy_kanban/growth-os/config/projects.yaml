@@ -1,0 +1,32 @@
+# ============================================================================
+# Growth OS project registry — the ONE place a repo is registered for
+# observation (package watching, DAG import, live Airflow health).
+# Dispatch stays in configs/kanban.yaml (the command-center bridge contract);
+# this file owns what the watchers LOOK AT, that file owns what work flows.
+#
+# Adding a repo = add a block here (+ a kanban.yaml section if it should
+# receive mission cards). Validated by growthos/config.py::ProjectsConfig —
+# bad config fails fast at load, never silently degrades a run.
+# ============================================================================
+schema_version: growthos.projects.v1
+
+projects:
+  - name: betts_basketball
+    repo: c:/Users/ghadf/vscode_projects/docker_projects/betts_basketball
+    watch_packages: true
+    dags_dir: api/src/airflow_project/dags
+    airflow:
+      # secrets stay in .env; this file only names the env keys
+      base_url_env: AIRFLOW_BASE_URL
+      username_env: AIRFLOW_USERNAME
+      password_env: AIRFLOW_PASSWORD
+      # where humans go to read full logs (links embedded in error summaries)
+      ui_url: http://localhost:8090
+      # a DAG whose latest run failed gets a Backlog card drafted in this
+      # section (drafting only — dispatch still requires your Approved drag)
+      draft_cards_on_failure: true
+      card_section: DAGs
+
+  - name: llm_station
+    repo: c:/Users/ghadf/vscode_projects/docker_projects/llm_station
+    watch_packages: true

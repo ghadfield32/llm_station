@@ -1,0 +1,25 @@
+schema_version: command-center.gates.v1
+
+# Risk tiers. Hard invariant (enforced by the contract): L3/L4 must require approval.
+tiers:
+  L0_read_only:
+    auto: true
+    requires_approval: false
+    required_stages: [intake]
+  L1_plan_only:
+    auto: true
+    requires_approval: false
+    required_stages: [intake, plan]
+  L2_local_edits:
+    auto: true
+    requires_approval: false
+    required_stages: [intake, plan, pre-commit]
+  L3_external_write:
+    auto: false
+    requires_approval: true
+    required_stages: [pre-push]
+  L4_dangerous:
+    auto: false
+    requires_approval: true
+    required_stages: [architecture, pre-push]
+    forbidden_auto_actions: [merge, deploy, publish_package, rotate_secrets, terraform_apply, delete_data]

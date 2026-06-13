@@ -1,0 +1,271 @@
+{
+  "library": {
+    "view_id": "c6eb835f-c663-4ab3-b01d-9504ce30c8b6",
+    "database_id": "53f696f4-d753-490d-acc7-899df9d64ff9",
+    "primary_field_id": "eGXKU3",
+    "title_column": "Title",
+    "fields": {
+      "Hours": "vZc-ix",
+      "Notes": "k1Am3e",
+      "Status": "co7kL0",
+      "Type": "FroVQr",
+      "Author": "Z6ga4T",
+      "Tier": "4645HA",
+      "Done": "RpYmNq",
+      "Name": "eGXKU3",
+      "Section": "JvlMwf",
+      "Module": "ORNAiB",
+      "Title": "eGXKU3"
+    }
+  },
+  "lessons": {
+    "view_id": "9b81e35f-522a-4e67-98eb-8500657cc45c",
+    "database_id": "f78c71ea-441c-4bb5-8895-d257a0bf4b47",
+    "primary_field_id": "eiDGIt",
+    "title_column": "Lesson",
+    "fields": {
+      "Done": "relwXR",
+      "Confidence": "gt_9K-",
+      "Type": "4cKyBK",
+      "Name": "eiDGIt",
+      "Interval": "HTDYov",
+      "NextReview": "RCLvS5",
+      "Detail": "bPLcN8",
+      "Source": "gzM-15",
+      "Domain": "a1JPvR",
+      "Status": "o_mTrl",
+      "Created": "fP9hV8",
+      "Lesson": "eiDGIt"
+    }
+  },
+  "papers": {
+    "view_id": "05e4f45d-6e18-4789-b388-13ce0f65b660",
+    "database_id": "d2667077-4d8a-4045-ac0d-1063e1054a51",
+    "primary_field_id": "H-zvjD",
+    "title_column": "Title",
+    "fields": {
+      "ArxivID": "gf91i5",
+      "Suggested": "kTx7pC",
+      "URL": "bHYMpD",
+      "Topics": "SoJpks",
+      "Status": "bul1dz",
+      "Name": "H-zvjD",
+      "Score": "70e1bg",
+      "Authors": "PleYVQ",
+      "Published": "gvmQfM",
+      "Abstract": "2dk2hO",
+      "Done": "6kIfeD",
+      "Type": "iiV9Xf",
+      "Title": "H-zvjD"
+    }
+  },
+  "repos": {
+    "view_id": "adb93e04-447c-421d-9040-688aa9f9df5c",
+    "database_id": "2b55b883-2f66-4064-98ae-a43f09afac75",
+    "primary_field_id": "b7ndUL",
+    "title_column": "Name",
+    "fields": {
+      "Type": "I7ViNS",
+      "Stars": "qvmVGo",
+      "Name": "b7ndUL",
+      "Why": "DqF4cQ",
+      "Owner": "yEBMDZ",
+      "Suggested": "EtERms",
+      "Status": "Iwob9S",
+      "Done": "NS0mOy",
+      "Score": "dMA7yr",
+      "Language": "FYsMrk",
+      "URL": "pioWY4",
+      "Topics": "fehqP7",
+      "Updated": "vsspVz"
+    }
+  },
+  "signals": {
+    "view_id": "a39835ed-5ffb-4f38-a1ab-bbc6277f9c55",
+    "database_id": "1a75f30d-cce1-4456-8a89-a90e9224424a",
+    "primary_field_id": "-HA-zf",
+    "title_column": "Headline",
+    "fields": {
+      "URL": "8ZitDb",
+      "Suggested": "6BCjxR",
+      "Name": "-HA-zf",
+      "Done": "Lpah_u",
+      "Type": "ot-jez",
+      "Category": "s4f1z7",
+      "Score": "rRT2CA",
+      "Published": "q5_jLr",
+      "Source": "-YudMZ",
+      "Status": "Bnr6Qw",
+      "Headline": "-HA-zf"
+    }
+  },
+  "notes": {
+    "view_id": "c346b6f2-44fb-48b1-bb6d-0edf7e71fa53",
+    "database_id": "4d3002b3-0b33-4bb2-9c57-6059f9de2181",
+    "primary_field_id": "e-qO_k",
+    "title_column": "Title",
+    "fields": {
+      "Name": "e-qO_k",
+      "Updated": "WEbfrk",
+      "Tags": "0-hEWL",
+      "Type": "aNKUfM",
+      "Done": "17Iwbx",
+      "Title": "e-qO_k"
+    }
+  },
+  "sources": {
+    "view_id": "9ab3e0a5-e538-46fa-9df7-2a93ddf89488",
+    "database_id": "4a0ef638-a119-4bfd-8777-5475d5f6fa1a",
+    "primary_field_id": "mFIgR1",
+    "title_column": "Name",
+    "fields": {
+      "Type": "wvdUAg",
+      "Name": "mFIgR1",
+      "Query": "KpphO7",
+      "Enabled": "5jS3BL",
+      "Kind": "goUsEt",
+      "Done": "1WCG7u"
+    }
+  },
+  "review": {
+    "view_id": "ae33a6f6-6135-4d0a-9af2-817011c30ea4",
+    "database_id": "1a28efb5-0b66-4b22-a498-29650d71d163",
+    "primary_field_id": "MtGTsN",
+    "title_column": "Day",
+    "fields": {
+      "Name": "MtGTsN",
+      "Brief": "3Pp99s",
+      "Focus": "Dsnxxs",
+      "Done": "MsSBJ7",
+      "Date": "cQTpZ5",
+      "Win": "IBw_FT",
+      "Type": "yZDhxe",
+      "Habits": "nYdAh-",
+      "Day": "MtGTsN"
+    }
+  },
+  "mission_intake": {
+    "view_id": "d6286383-b89b-4c2b-8d9f-10c1a7077b4e",
+    "database_id": "81edfd50-3237-4dad-983c-2bbcda9618a5",
+    "primary_field_id": "cv6qNc",
+    "title_column": "Title",
+    "fields": {
+      "Done": "13VOtz",
+      "Name": "cv6qNc",
+      "Type": "UXFn7r",
+      "Risk": "VMgO-i",
+      "Priority": "sEIv2d",
+      "Repo": "BXnvo6",
+      "Due": "UhMqFx",
+      "CardKey": "DVca9N",
+      "MissionID": "mZRkdQ",
+      "Created": "YTX7Ns",
+      "Branch": "qwMXCw",
+      "Target": "13uslZ",
+      "Action": "JLOoLv",
+      "Notes": "Xo0yVX",
+      "Status": "OMO75u",
+      "LastSync": "7FaM1t",
+      "Acceptance": "tudoPF",
+      "Section": "C99UV6",
+      "Title": "cv6qNc"
+    }
+  },
+  "todos": {
+    "view_id": "200a70bb-9d24-4362-9b15-b105f11552a9",
+    "database_id": "cabd7044-8c31-4b67-847e-657f17bb8b3d",
+    "primary_field_id": "xlWKPw",
+    "title_column": "Task",
+    "fields": {
+      "Name": "xlWKPw",
+      "Created": "qCt02A",
+      "Done": "Rt3lHs",
+      "Due": "3OKL1R",
+      "Priority": "yA3qew",
+      "Area": "29q6N9",
+      "Status": "pV12H1",
+      "Notes": "_uTsa6",
+      "Type": "EB_c3P",
+      "Task": "xlWKPw"
+    }
+  },
+  "dags": {
+    "view_id": "77f7f189-59a6-4cc1-9872-d961ff247bf1",
+    "database_id": "8c66a647-207b-40bf-a926-9e64240bb2f6",
+    "primary_field_id": "Vwuogu",
+    "title_column": "Name",
+    "fields": {
+      "NextRun": "bDQBz8",
+      "Type": "1Hy5JX",
+      "LastSeen": "eQ1udB",
+      "Name": "Vwuogu",
+      "Description": "jzfQP7",
+      "DagID": "-wdsid",
+      "Tags": "FaMAuy",
+      "Schedule": "7RjAkP",
+      "Done": "gsn8mX",
+      "Path": "Sd6O_z",
+      "Status": "6S6kxb",
+      "Owners": "Khab9L",
+      "Notes": "boLsun"
+    }
+  },
+  "guidelines": {
+    "view_id": "805be898-31e9-42bf-9d85-8846acba11bb",
+    "database_id": "1b75fe84-85df-44f4-9842-f8bdf9cb21f9",
+    "primary_field_id": "nO-5IO",
+    "title_column": "Name",
+    "fields": {
+      "Done": "metDga",
+      "URL": "DeKsjB",
+      "Source": "Uyehb_",
+      "Notes": "ziqrOi",
+      "Area": "oAmc2-",
+      "Type": "eGt73q",
+      "Name": "nO-5IO",
+      "Status": "HcmF1V",
+      "UpdatedAt": "K-XTvn"
+    }
+  },
+  "packages": {
+    "view_id": "0e6fece1-bce2-497d-907e-af2b84538b56",
+    "database_id": "7b1a1147-3bd6-4027-a088-41e9d45fc33e",
+    "primary_field_id": "_6thM-",
+    "title_column": "Package",
+    "fields": {
+      "LastSeen": "ZXwbB6",
+      "Name": "_6thM-",
+      "Repo": "p4qWu9",
+      "Current": "R6EE-L",
+      "Status": "3_e1al",
+      "Type": "TW1u2X",
+      "Done": "4jXCDG",
+      "Latest": "CnJcNB",
+      "Notes": "sjwr0M",
+      "Severity": "AJBCv_",
+      "Package": "_6thM-"
+    }
+  },
+  "betts_basketball_board": {
+    "view_id": "050e7498-4650-4d6c-805f-59fbed1d8cdf",
+    "database_id": "d5059c56-2c72-4d9c-a1eb-551128645419",
+    "primary_field_id": "iCGwBt",
+    "title_column": "Task",
+    "fields": {
+      "Due": "k6ZYyX",
+      "Action": "qUh8WB",
+      "Notes": "ZU9bQR",
+      "Done": "ESBV9O",
+      "CardKey": "mpfV1i",
+      "Priority": "EX5QoE",
+      "Risk": "ufaGH1",
+      "Status": "noALvK",
+      "Type": "Ha5jEI",
+      "Created": "ArcZX-",
+      "Name": "iCGwBt",
+      "MissionID": "6jPrbD",
+      "Acceptance": "cs_-8j",
+      "Task": "iCGwBt"
+    }
+  }
+}

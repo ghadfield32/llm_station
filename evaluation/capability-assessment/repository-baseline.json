@@ -1,0 +1,32 @@
+{
+  "evaluation": "batch-1",
+  "candidates": ["semble", "abtop", "asm"],
+  "date": "2026-06-12",
+  "repository": {
+    "name": "llm_station",
+    "branch": "master",
+    "commits": 0,
+    "isolation_deviation": "no initial commit; evaluation is additive-only under evaluation/capability-assessment/ + reversible uv installs",
+    "python": "3.12.6",
+    "uv": "0.8.11",
+    "platform": "Windows 11"
+  },
+  "baseline_commands": [
+    {"cmd": "python scripts/validate_config.py", "result": "PASS", "wall_s": 0.31},
+    {"cmd": "python registry/render.py", "result": "PASS", "wall_s": 0.31},
+    {"cmd": "python scripts/run_evals.py", "result": "PASS", "wall_s": 0.29},
+    {"cmd": "python scripts/smoke_mission.py", "result": "PASS", "wall_s": 0.31}
+  ],
+  "not_run": ["growth-os selftest.py (needs live stack)", "make live-smoke (needs live stack)"],
+  "pre_existing_failures": [],
+  "seam_state": {
+    "retrieval": "ripgrep 14.1.1 + native Glob/Grep; no semantic index",
+    "observability": "usage_digest.py retrospective only; live procs at baseline: claude.exe x2, codex.exe x3",
+    "skills": "ZERO skill files across ~/.claude and ~/.codex; nothing to inventory"
+  },
+  "problem_statements": {
+    "semble": "reduce tokens-to-answer for repo retrieval vs ripgrep/native; measurable recall + token delta",
+    "abtop": "live read-only session/token/rate-limit visibility; measurable detection accuracy + JSON stability",
+    "asm": "NO_JUSTIFIED_USE_CASE at Stage 0 - no skills exist to manage"
+  }
+}

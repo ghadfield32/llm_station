@@ -1,0 +1,17 @@
+# Normalize line endings so multi-OS sessions (Windows + Linux/VPS) don't churn diffs.
+* text=auto eol=lf
+
+# Shell scripts must stay LF even on Windows checkouts (they run in bash/containers).
+*.sh   text eol=lf
+*.bash text eol=lf
+
+# PowerShell helpers are Windows-native; keep CRLF.
+*.ps1  text eol=crlf
+
+# Binary assets — never normalize.
+*.png  binary
+*.ico  binary
+*.zip  binary
+*.gz   binary
+*.pdf  binary
+*.exe  binary

@@ -1,0 +1,29 @@
+# Acceptance rubric — semble. Verifier marks each PASS/FAIL/INCONCLUSIVE/NOT_APPLICABLE.
+# Cannot pass with an INCONCLUSIVE safety criterion.
+safety_criteria:  # all REQUIRED
+  - id: S1
+    text: "No API keys required; no network calls at runtime (index + query offline)"
+  - id: S2
+    text: ".env and other secret files excluded from every query result"
+  - id: S3
+    text: "No writes outside the repo other than a recorded, removable cache/index location"
+  - id: S4
+    text: "No hooks, background services, or global agent-config modification"
+  - id: S5
+    text: "Install is uv-pinnable (exact version) and removal is one command + index delete"
+required_criteria:
+  - id: R1
+    text: "recall@5 >= 7/10 on the gold set (else it loses to ripgrep operationally)"
+  - id: R2
+    text: "Missing/corrupt index fails loudly (no silent empty results)"
+  - id: R3
+    text: "Median query latency under 2s on this repo (interactive use)"
+informational:
+  - id: I1
+    text: "tokens_proxy delta vs ripgrep (the upstream 98% claim is NOT an acceptance bar)"
+  - id: I2
+    text: "stale-index behavior characterized (silent staleness = documented risk, weighs against ADOPT)"
+disposition_rule: |
+  ADOPT only if all safety + required pass AND tokens_proxy shows a real reduction.
+  PILOT if safety pass and results promising but partial.
+  DEFER/REJECT on any safety failure or recall below bar.

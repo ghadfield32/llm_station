@@ -1,0 +1,138 @@
+# Command Center — control plane (consolidated). Reach over Tailscale.
+# LiteLLM is pinned by DIGEST (not tag) — see Makefile LITELLM_DIGEST and the
+# README security note re: the March 2026 PyPI compromise. `make verify` checks it.
+
+services:
+
+  hermes:
+    # Optional: the previously suggested nousresearch/hermes-agent image is not
+    # published on Docker Hub. Keep this service out of the default stack until
+    # a real Hermes runtime image or local `ollama launch hermes` bridge is set.
+    profiles: ["hermes"]
+    image: nousresearch/hermes-agent:v0.15.1
+    restart: unless-stopped
+    environment:
+      # Hermes speaks OpenAI-compatible API env names here. The value is the
+      # LiteLLM virtual key, not an OpenAI provider key.
+      - OPENAI_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${HERMES_LITELLM_KEY}
+      - HERMES_DEFAULT_MODEL=planner
+      - DELEGATION_MAX_CONCURRENT_CHILDREN=3
+      - LEDGER_BASE_URL=http://ledger:8090
+    volumes:
+      - hermes_data:/opt/data
+    ports: ["127.0.0.1:9119:9119"]
+    depends_on:
+      litellm: { condition: service_healthy }
+      ledger:  { condition: service_started }
+    networks: [core]
+
+  litellm:
+    # PINNED BY DIGEST. Replace the placeholder with a verified GHCR digest.
+    image: ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0d622ac636b5c9418befaa32e85dfb0186
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - DATABASE_URL=postgresql://litellm:${POSTGRES_PASSWORD}@litellm-db:5432/litellm
+      - STORE_MODEL_IN_DB=True
+      # Local-only model tier. Point to host.docker.internal for local Windows
+      # Ollama, or to the 4090's Tailscale IP from the VPS. There is no cloud
+      # fallback; if Ollama is unavailable, model calls fail closed.
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://host.docker.internal:11434}
+    volumes:
+      - ./generated/litellm-config.yaml:/app/config.yaml:ro
+    ports: ["127.0.0.1:4000:4000"]
+    depends_on:
+      litellm-db: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4000/health/liveliness', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [core]
+
+  litellm-db:
+    image: postgres:16.4-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=litellm
+    volumes:
+      - litellm_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [core]
+
+  ledger:
+    build: ./services/ledger
+    restart: unless-stopped
+    environment:
+      - LEDGER_DB=/data/ledger.db
+      - LEDGER_APPROVAL_SECRET=${LEDGER_APPROVAL_SECRET}
+    volumes:
+      - ledger_data:/data
+    ports: ["127.0.0.1:${LEDGER_HOST_PORT:-8091}:8090"]
+    networks: [core]
+
+  # Judge Gate + judge array (judgectl) — one container, one thing to deploy.
+  judge-gate:
+    build: ./services/judge_gate
+    restart: unless-stopped
+    environment:
+      - LITELLM_BASE_URL=http://litellm:4000/v1
+      - JUDGE_GATE_KEY=${JUDGE_GATE_LITELLM_KEY}
+      - TRIAGE_MODEL=triage
+      - SKEPTIC_MODEL=security-judge
+      - LEDGER_BASE_URL=http://ledger:8090
+      - STANDARDS_CONFIG=/app/standards.yaml
+    volumes:
+      - ./configs/standards.yaml:/app/standards.yaml:ro
+    ports: ["127.0.0.1:8088:8088"]
+    depends_on:
+      litellm: { condition: service_healthy }
+    networks: [core]
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16
+    restart: unless-stopped
+    volumes:
+      - kuma_data:/app/data
+    ports: ["127.0.0.1:3001:3001"]
+    networks: [core]
+
+  # Proactive runner — scheduled checks on already-done work (DAG/data health +
+  # repo stewardship). Shares the Ledger + Judge Gate. Holds NO secrets and has
+  # no write path of its own; the most it does autonomously is open a gated
+  # mission. proactive.yaml is mounted read-only. Invoke on a schedule via host
+  # cron / systemd timer: `docker compose run --rm proactive-runner`.
+  proactive-runner:
+    build: ./services/proactive_runner
+    restart: "no"
+    environment:
+      - LEDGER_BASE_URL=http://ledger:8090
+      - JUDGE_GATE_BASE_URL=http://judge-gate:8088
+      - PROACTIVE_CONFIG=/app/proactive.yaml
+    volumes:
+      - ./configs/proactive.yaml:/app/proactive.yaml:ro
+    depends_on:
+      ledger: { condition: service_started }
+      judge-gate: { condition: service_started }
+    networks: [core]
+
+  # Caddy intentionally omitted — reach everything over Tailscale. If you ever
+  # need public URLs, add a caddy service + Cloudflare Access here.
+
+networks:
+  core: { driver: bridge }
+
+volumes:
+  hermes_data:        # back up: memory + skills
+  litellm_db_data:
+  ledger_data:        # back up: missions, leases, approvals
+  kuma_data:

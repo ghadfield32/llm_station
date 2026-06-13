@@ -1,0 +1,24 @@
+# Acceptance rubric — abtop. Verifier marks each PASS/FAIL/INCONCLUSIVE/NOT_APPLICABLE.
+safety_criteria:  # all REQUIRED
+  - id: S1
+    text: "Strictly read-only: no agent-config writes, no hooks, no wrappers, no background persistence beyond its own foreground process"
+  - id: S2
+    text: "No provider API keys required"
+  - id: S3
+    text: "Network behavior is none or explicitly documented and acceptable (no telemetry phone-home)"
+  - id: S4
+    text: "Pinned install + one-command removal"
+required_criteria:
+  - id: R1
+    text: "Detects the live Claude Code sessions on Windows (>=1 of the running sessions, correctly attributed)"
+  - id: R2
+    text: "Steady-state overhead < 5% CPU and < 200 MB RAM"
+informational:
+  - id: I1
+    text: "Codex detection completeness; token/context estimate plausibility (no ground truth available locally)"
+  - id: I2
+    text: "JSON output stability — feeds the usage-digest/morning-brief idea"
+disposition_rule: |
+  ADOPT for operator use if all safety + required pass.
+  PILOT if Windows detection is partial but the tool is safe.
+  DEFER if Windows is unsupported (re-evaluate at Linux migration).

@@ -1,0 +1,15 @@
+{
+  "candidate": "abtop",
+  "version_pinned": "v0.4.8",
+  "install_method": "direct GitHub release asset download (no installer script, no cargo)",
+  "asset": "abtop-x86_64-pc-windows-msvc.zip",
+  "sha256_zip": "412de34188f12af646b44e28d9958e18bbbb867cab4766d4c829621007f3f454",
+  "location": "evaluation/capability-assessment/abtop/bin/ (NOT on PATH)",
+  "dependencies_added": [],
+  "files_written_outside_repo": [],
+  "network_destinations": ["github.com (asset download only)"],
+  "processes_ports": "none persistent (one-shot --json runs)",
+  "agent_config_modified": false,
+  "setup_flag_run": false,
+  "feature_flag": "not wired into anything; manual one-shot runs only"
+}

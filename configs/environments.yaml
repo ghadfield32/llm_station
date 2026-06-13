@@ -1,0 +1,43 @@
+schema_version: command-center.environments.v1
+
+# One environment per activity. Open this file to answer "what can X access?".
+# Invariant (enforced): repo_task is ephemeral and holds NO secrets.
+environments:
+  - name: cc-control-vps
+    kind: control_plane
+    host: vps
+    persistent: true
+    allowed_egress: [tailscale, provider_apis, github_api]
+    allowed_secrets: [LITELLM_MASTER_KEY, HERMES_LITELLM_KEY, JUDGE_GATE_LITELLM_KEY, LEDGER_APPROVAL_SECRET]
+
+  - name: cc-worker-4090
+    kind: worker
+    host: desktop-4090
+    gpu_required: true
+    persistent: true
+    allowed_egress: [tailscale, litellm, github, package_registries]
+    allowed_secrets: [GITHUB_TOKEN]
+
+  - name: cc-repo-task
+    kind: repo_task
+    host: desktop-4090
+    devcontainer_path: .devcontainer/devcontainer.json
+    image: generated/devcontainers/python-ml
+    max_parallel_tasks: 1
+    persistent: false
+    allowed_egress: [litellm, github, package_registries]
+    allowed_secrets: []
+
+  - name: cc-judge
+    kind: judge
+    host: vps
+    persistent: true
+    allowed_egress: [litellm]
+    allowed_secrets: [JUDGE_GATE_LITELLM_KEY]
+
+  - name: cc-relay
+    kind: relay
+    host: mini-pc
+    persistent: true
+    allowed_egress: [tailscale]
+    allowed_secrets: []
