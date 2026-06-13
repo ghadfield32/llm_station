@@ -79,3 +79,26 @@ def test_scan_rejects_unknown_method(monkeypatch):
     monkeypatch.setattr("sys.argv", ["improvement", "scan", "--method", "bogus"])
     with pytest.raises(SystemExit):
         cli.main()
+
+
+def test_scan_email_dry_run_renders_digest(tmp_path, temp_registry, capsys):
+    rc = cli.cmd_scan(_args(tmp_path, source=["litellm_registry"],
+                            feeds=_model_feed(tmp_path), email=True))
+    out = capsys.readouterr().out
+    assert rc == 0 and "email: rendered" in out
+    assert (tmp_path / "self-improvement-digest.html").exists()   # beside the report
+
+
+def test_scan_board_apply_syncs_card(tmp_path, temp_registry, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "BOARD_OUT", str(tmp_path / "board.json"))
+    rc = cli.cmd_scan(_args(tmp_path, source=["litellm_registry"],
+                            feeds=_model_feed(tmp_path), apply=True, board=True))
+    out = capsys.readouterr().out
+    assert rc == 0 and "board [APPLY]" in out and "created=1" in out
+    assert (tmp_path / "board.json").exists()
+
+
+def test_scan_ping_prints_one_line(tmp_path, temp_registry, capsys):
+    rc = cli.cmd_scan(_args(tmp_path, source=["ledger"], ping=True))
+    out = capsys.readouterr().out
+    assert rc == 0 and "ping: " in out and "Daily self-improvement" in out

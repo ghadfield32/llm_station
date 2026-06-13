@@ -335,8 +335,9 @@ def cmd_scan(args) -> int:
                                       report_url=report_url,
                                       confidence_half_width=pipe.confidence_half_width)
         to = args.email_to or os.environ.get("DISCOVERY_SMTP_TO", "")
+        digest_out = Path(report_out).with_name("self-improvement-digest.html")
         print("email: " + deliver_email(subject, html, to=to, dry_run=not args.apply,
-                                         out_path="generated/self-improvement-digest.html"))
+                                         out_path=digest_out))
     if args.board:
         res = ImprovementsBoard(reg).sync(FileBoardSink(BOARD_OUT), dry_run=not args.apply)
         bmode = "APPLY" if args.apply else "DRY-RUN"
