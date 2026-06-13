@@ -359,6 +359,8 @@ def cmd_scan_validate(args) -> int:
 
 
 def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")   # Windows console Unicode safety (⚠ ▸ 🛠 …)
     ap = argparse.ArgumentParser(prog="improvement")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
