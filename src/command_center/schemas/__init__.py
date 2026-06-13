@@ -32,13 +32,16 @@ CONFIG_CONTRACTS = {
     "configs/channels.yaml": ChannelsConfig,
 }
 
-# The improvement loop's experiment contract. Registered here so the same
-# `make validate` / `make schema` / `make impact` machinery covers it — it is an
-# editable config like any other, not a parallel system. Imported after the dict
-# to keep the import edge one-directional (improvement.schema -> schemas.base).
-from ..improvement.schema import ImprovementConfig  # noqa: E402
+# The improvement loop's contracts. Registered here so the same `make validate` /
+# `make schema` / `make impact` machinery covers them — editable configs like any other,
+# not a parallel system. Imported from improvement.schema (lightweight: it only pulls
+# schemas.base + lifecycle, never the heavy discovery/registry package — avoids a cycle).
+from ..improvement.schema import DiscoveryConfig, ImprovementConfig  # noqa: E402
 
 CONFIG_CONTRACTS["configs/improvement.yaml"] = ImprovementConfig
 # Per-target reference experiments (one per target type) — same contract, validated by
 # the same `make validate`. Kept separate so the main improvement.yaml stays the worked set.
 CONFIG_CONTRACTS["configs/improvement-targets.yaml"] = ImprovementConfig
+# The discovery scan's tunable knobs (ranking/triage/code-health/acceptance) — externalized
+# so no scan decision is an inline literal.
+CONFIG_CONTRACTS["configs/discovery.yaml"] = DiscoveryConfig

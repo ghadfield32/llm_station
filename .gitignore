@@ -56,6 +56,9 @@ generated/*.md
 # ── Local staging / scratch ───────────────────────────────────────────────
 _staging/
 
+# ── Runtime logs (the gateway manager writes gateway.log; regenerated on run) ─
+*.log
+
 # ── Capability-evaluation vendored binaries (pinned + re-downloadable; the ──
 #    version + sha256 live in each candidate's install-manifest.json, so the
 #    binary is reproducible and must not be committed as a source artifact). ─

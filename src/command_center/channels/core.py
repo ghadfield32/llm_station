@@ -20,6 +20,7 @@ budget is exhausted ("Tool budget exhausted").
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -96,11 +97,19 @@ class GatewayConfig:
     litellm_key: str
     max_history: int = 12
     max_rounds: int = 6
+    # Max model turns this gateway runs at once. Sized to the GPU tier's real
+    # parallelism (Ollama serves OLLAMA_NUM_PARALLEL at a time; beyond that
+    # requests just queue and thrash). Excess turns wait on a semaphore rather
+    # than pile onto Ollama. Not a threshold to tune blindly — it mirrors the
+    # backend's actual concurrency (env GATEWAY_MAX_CONCURRENCY, else
+    # OLLAMA_NUM_PARALLEL, else 1 = Ollama's own default).
+    max_concurrency: int = 1
 
     @classmethod
     def build(cls, *, surface: str, model: str,
               max_history: int = 12, max_rounds: int = 6) -> "GatewayConfig":
         e = env()
+        concurrency = e.get("GATEWAY_MAX_CONCURRENCY") or e.get("OLLAMA_NUM_PARALLEL") or "1"
         return cls(
             surface=surface,
             model=model,
@@ -109,6 +118,7 @@ class GatewayConfig:
             litellm_key=e.get("LITELLM_API_KEY") or e.get("LITELLM_MASTER_KEY", ""),
             max_history=max_history,
             max_rounds=max_rounds,
+            max_concurrency=max(1, int(concurrency)),
         )
 
 
@@ -124,6 +134,11 @@ class GatewayCore:
         self.histories: dict[Hashable, deque] = defaultdict(
             lambda: deque(maxlen=cfg.max_history))
         self.http = httpx.AsyncClient(timeout=300)
+        # Busy rules: one in-flight turn per conversation (a shared history
+        # deque can't be mutated by two turns at once), and a global cap so we
+        # never push more concurrent calls at the GPU than it actually serves.
+        self._slots = asyncio.Semaphore(cfg.max_concurrency)
+        self._inflight: set[Hashable] = set()
 
     async def aclose(self) -> None:
         await self.http.aclose()
@@ -141,6 +156,24 @@ class GatewayCore:
         return r.json()["choices"][0]["message"]
 
     async def run_turn(self, conversation_id: Hashable, user_text: str) -> str:
+        """Busy rules wrap the model loop:
+        - one turn per conversation: a second message while the first is still
+          running gets a clear 'still working' reply instead of corrupting the
+          shared history or doubling GPU load.
+        - global slots: turns beyond max_concurrency wait their turn rather
+          than pile onto the GPU. The caller's typing indicator covers the wait.
+        Neither swallows anything — failures inside still surface verbatim."""
+        if conversation_id in self._inflight:
+            return ("still working on your previous message - one moment, then "
+                    "resend if I haven't answered.")
+        self._inflight.add(conversation_id)
+        try:
+            async with self._slots:
+                return await self._run_turn(conversation_id, user_text)
+        finally:
+            self._inflight.discard(conversation_id)
+
+    async def _run_turn(self, conversation_id: Hashable, user_text: str) -> str:
         history = self.histories[conversation_id]
         history.append({"role": "user", "content": user_text})
         messages = [{"role": "system", "content": self.system}, *history]

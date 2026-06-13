@@ -28,6 +28,15 @@ from .sources import (
 from .triage import Triage, TriageDecision, TriageResult
 from .report import render_report
 from .pipeline import ScanPipeline, ScanReport
+from .config import (
+    DiscoveryConfig, RankingKnobs, TriageKnobs, CodeHealthKnobs, AcceptanceKnobs,
+    load_discovery_config,
+)
+from .acceptance import (
+    AcceptanceHarness, AcceptanceResult, DecisionRecord, FeatureLog, LogisticModel,
+    build_records, features_of, label_from_row, roc_auc, score_findings, train_acceptance,
+)
+from .manifest import ReportManifest, build_manifest, write_manifest
 from .dag_support import (
     SOURCE_REGISTRY, build_scanner, scan_one, finish, offline_specs, DEFAULT_REPORT_PATH,
 )
@@ -42,4 +51,10 @@ __all__ = [
     "Triage", "TriageDecision", "TriageResult", "render_report", "ScanPipeline", "ScanReport",
     "SOURCE_REGISTRY", "build_scanner", "scan_one", "finish", "offline_specs",
     "DEFAULT_REPORT_PATH",
+    "DiscoveryConfig", "RankingKnobs", "TriageKnobs", "CodeHealthKnobs", "AcceptanceKnobs",
+    "load_discovery_config",
+    "AcceptanceHarness", "AcceptanceResult", "DecisionRecord", "FeatureLog", "LogisticModel",
+    "build_records", "features_of", "label_from_row", "roc_auc", "score_findings",
+    "train_acceptance",
+    "ReportManifest", "build_manifest", "write_manifest",
 ]

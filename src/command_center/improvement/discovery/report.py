@@ -20,8 +20,8 @@ from .sources import ScanOutcome
 from .triage import TriageDecision, TriageResult
 
 
-def _band(f: Finding) -> str:
-    lo, hi = confidence_band(f)
+def _band(f: Finding, half_width: float) -> str:
+    lo, hi = confidence_band(f, half_width=half_width)
     return f"{lo:.2f}–{hi:.2f}"
 
 
@@ -36,7 +36,8 @@ def render_report(*, date: str, method: str,
                   outcomes: list[ScanOutcome],
                   drafted_ids: set[str],
                   applied: bool = True,
-                  n_capped: int = 0) -> str:
+                  n_capped: int = 0,
+                  confidence_half_width: float = 0.15) -> str:
     n_findings = len(triage_results)
     counts = Counter(r.decision for r in triage_results)
     failed = [o for o in outcomes if not o.ok]
@@ -82,7 +83,8 @@ def render_report(*, date: str, method: str,
         for i, (f, sc) in enumerate(ranked_drafts, 1):
             mark = "" if f.experiment_id in drafted_ids else " ⚠(not written)"
             a(f"| {i} | {f.pillar.value} | {sc:.3f} | {_target(f)} | "
-              f"{f.suggested_risk.value} | {_band(f)} | {f.title}{mark} |")
+              f"{f.suggested_risk.value} | {_band(f, confidence_half_width)} | "
+              f"{f.title}{mark} |")
         a("")
         a("### Evidence & unknowns")
         a("")

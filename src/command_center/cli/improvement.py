@@ -23,6 +23,7 @@ promote) additionally need an --approver and refuse to run as an agent.
   python -m command_center.cli.improvement calibration
   python -m command_center.cli.improvement search --query TEXT
   python -m command_center.cli.improvement scan [--apply] [--feeds feeds.json] [--show-report]
+  python -m command_center.cli.improvement scan-validate
 """
 from __future__ import annotations
 
@@ -321,6 +322,12 @@ def cmd_scan(args) -> int:
     return 0
 
 
+def cmd_scan_validate(args) -> int:
+    """Blocking validation gate for the discovery scan (N/N PASS or non-zero exit)."""
+    from command_center.improvement.discovery.validate import run_gate
+    return 0 if run_gate() else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(prog="improvement")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -363,12 +370,14 @@ def main() -> int:
     p.add_argument("--signals", default=""); p.add_argument("--apply", action="store_true")
     p = add("scan", cmd_scan)
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--method", default="wsjf", choices=["ice", "rice", "wsjf", "voi"])
+    p.add_argument("--method", default=None, choices=["ice", "rice", "wsjf", "voi"],
+                   help="override the ranking method (default: configs/discovery.yaml)")
     p.add_argument("--feeds", default="", help="JSON {source_name: [records...]} for feed sources")
     p.add_argument("--source", action="append", default=[], help="restrict to named source(s)")
-    p.add_argument("--max-cards", type=int, default=20, dest="max_cards")
+    p.add_argument("--max-cards", type=int, default=None, dest="max_cards")
     p.add_argument("--report-out", default="", dest="report_out")
     p.add_argument("--show-report", action="store_true", dest="show_report")
+    add("scan-validate", cmd_scan_validate)
 
     args = ap.parse_args()
     return args.func(args)

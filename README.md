@@ -1,145 +1,154 @@
 # Command Center — v4 (contract-stabilized)
 
-> **Start here:** [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md) is the ordered cold-start (prerequisites → first boot → channels → definition of done). [`docs/MASTER.md`](docs/MASTER.md) is the consolidated system guide — every pipeline stage by stage, the full module tree with purposes, the doc index, and the change log. This README covers the contract model; those docs cover everything.
+A personal LLM **command center** that runs **entirely on your own machine** — no cloud bill
+([Cost](#cost)). You chat with it from Discord/Telegram/Slack, it routes through a **local**
+model (Ollama via LiteLLM), drafts work behind risk gates and cross-provider judges, and
+**cannot approve its own actions** — you do, by dragging a card to Approved.
 
-Runs **entirely on your own machine** — no cloud bill (see [Cost](#cost)). Jump to the **[Quickstart](#quickstart)** to go from clone → AppFlowy boards → chatting with it on Discord/Telegram.
+Kept **lean on purpose** — a command center, not an enterprise platform. The thing that makes
+it repeatable and hard to break is a **typed contract layer**: every editable config validates
+against a Pydantic model before it can do anything ([the idea, in five lines](#the-contract-model)).
 
-Same architecture as v3 (VPS brain · Tailscale · Hermes · LiteLLM · Judge Gate · Ledger · leases · 4090 worker · VS Code tunnel · pre-commit/pre-push judges · GitHub gates), now with a proactive ops lane (DAG/data health + repo stewardship), standards rendering, usage digests, and propose-only model scouting. v4 adds the thing that makes it **repeatable and hard to break**: a **typed contract layer**. Every editable config validates against a Pydantic model before it can do anything, and a breakage map tells you what ripples when you change something.
-
-Kept **lean on purpose** — a personal command center, not an enterprise platform. Contracts exist where they prevent real breakage: models, judges, gates, environments, standards, proactive checks, targets, tools, evals, and the ledger wire format. No schema file is just a typed restatement of trivial config.
-
----
-
-## The contract model (the whole idea in five lines)
-
-```
-YAML in configs/                          = the editable source of truth
-Pydantic in src/command_center/schemas/   = the contract that validates it
-generated/            = disposable rendered output (litellm config, json-schema)
-ledger SQLite         = the only runtime state
-Makefile              = the only interface
-```
-
-Rules: secrets never live in YAML; generated files are never hand-edited; a typo fails at `make validate`, not at 2am.
+> **Deep docs:** [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md) is the annotated cold-start ·
+> [`docs/MASTER.md`](docs/MASTER.md) is the full system guide (every pipeline, the module tree, the change log) ·
+> [`docs/STATUS.md`](docs/STATUS.md) tracks live progress. This README gets you **built and chatting**; those cover everything else.
 
 ---
 
-## Why this is "hard to break" (proven, not asserted)
+## Build it (Quickstart)
 
-`make validate` runs every `configs/*.yaml` through its contract. These bad edits are **rejected before they ship** (all tested):
+Local, end-to-end: **clone → control plane up → chat with it from a channel.** All on your
+machine, no cloud bill. **Needs Docker, [uv](https://docs.astral.sh/uv/), Ollama, and git.**
 
-- a typo'd key (`priorty:`) → rejected (`extra="forbid"`)
-- two models with the same priority in one role → rejected
-- two canaries in one role, or `canary_weight > 1` → rejected
-- a missing risk tier, or **L3/L4 without `requires_approval`** → rejected
-- a `repo_task` environment that is persistent or holds secrets → rejected (isolation invariant)
+### 0 — Prerequisites
 
-The dangerous mistakes — silently broken routing, an approval gate quietly disabled, a sandbox that leaks secrets — can't be committed.
-
----
-
-## Quickstart
-
-Local, end-to-end: **clone → AppFlowy boards → chat with it from a channel.** All on your machine, no cloud bill. Needs **Docker, [uv](https://docs.astral.sh/uv/), Ollama, and git**. (Windows: swap `make X` for `.\scripts\cc.ps1 X`.) The full, annotated version with every option is [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md).
+- **Docker** (the services run here) · **Ollama** (the local model engine, on your host) ·
+  **[uv](https://docs.astral.sh/uv/)** (runs the operator CLI with zero install) · **git**.
+- Run `uv run cc doctor` any time for a green/red preflight (docker daemon, Ollama, ports, `.env`, provider boundary).
 
 ### 1 — Get the code
 
 ```bash
 git clone --recurse-submodules https://github.com/ghadfield32/llm_station.git
 cd llm_station
-uv venv .venv && uv pip install -e ".[gateways]"   # package + chat-channel deps
-make validate                                      # contracts pass → you're set up right
 ```
 
-`--recurse-submodules` pulls **AppFlowy-Cloud** (the self-hosted board server) into `appflowy_kanban/AppFlowy-Cloud`. Already cloned without it? `git submodule update --init --recursive`.
+`--recurse-submodules` pulls **AppFlowy-Cloud** (the self-hosted board server) into
+`appflowy_kanban/AppFlowy-Cloud`. Already cloned without it? `git submodule update --init --recursive`.
 
-### 2 — Bring up the control plane (LiteLLM + Judge Gate + Ledger)
+### 2 — One button: bring up the control plane
 
 ```bash
-make doctor      # green/red preflight: docker, ollama, ports, .env, providers, digest
-make setup       # creates .env, builds service images
-# edit .env: set OLLAMA_API_BASE (local: http://host.docker.internal:11434);
-#            do NOT add OpenAI/Anthropic keys (local-only by contract)
-make models      # pull the default models (24 GB-class) ...
-# ... OR, on a laptop / small GPU / CPU, get a real reply without the big models:
-make models-light   # switches to a qwen3:8b profile and pulls it (~5 GB)
-make first-boot  # one shot: doctor → bootstrap → keys (auto-writes .env) → up → health
-make live-smoke  # proves real local replies through Ollama/LiteLLM
+uv run cc init-env     # create .env with local secrets (edit it: set OLLAMA_API_BASE;
+                       #   local default http://host.docker.internal:11434 is fine.
+                       #   do NOT add OpenAI/Anthropic keys — local-only by contract)
+uv run cc models-light # pull a small model so there's something to route to (~5 GB qwen3:8b).
+                       #   Big-GPU? use `uv run cc models` for the default 24 GB-class profile.
+uv run cc start        # ONE BUTTON: doctor → build → bootstrap → mint keys → up → health → opens the UIs
 ```
 
-`make first-boot` replaces the old 5-step dance (`bootstrap → keys → paste → up → health`) — `make keys` now writes the virtual keys into `.env` for you. Windows: `.\scripts\cc.ps1 first-boot`. `make doctor` tells you up front if a model still needs pulling.
-
-### 3 — Stand up AppFlowy (your boards + the Growth OS curator)
-
-AppFlowy Cloud is the **human surface** — todos, mission cards, papers/repos/signals, a 275-book library. The server is the submodule from step 1; you point the **AppFlowy desktop/mobile app** ([download here](https://appflowy.io)) at it.
+`cc start` does the whole first-boot sequence and opens the **LiteLLM admin** (`:4000/ui`),
+**Ledger** (`:8091`), and **Uptime Kuma** (`:3001`) dashboards. After this, the steady-state
+command is just `uv run cc up` (or `docker compose up -d` — see [Ways to run](#ways-to-run-it)).
 
 ```bash
-make appflowy-init   # scaffolds AppFlowy-Cloud/.env + growth-os/.env from templates (localhost defaults)
-make appflowy-up     # starts the board server + the Growth OS curator
-# then, as appflowy-init prints:
-#   1. open the printed URL and SIGN UP a user (the GoTrue admin can't own a workspace)
-#   2. put that user's creds into appflowy_kanban/growth-os/.env (APPFLOWY_* keys)
-#   3. cd appflowy_kanban/growth-os && python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
-#      .venv/Scripts/python scripts/setup_workspace.py   # creates the 8 databases (idempotent)
+uv run cc live-smoke   # proves real local replies through Ollama → LiteLLM
 ```
 
-Then point the **AppFlowy desktop/mobile app** ([download here](https://appflowy.io)) at the printed URL. `appflowy-init` uses AppFlowy's shipped localhost defaults — fine for local/tailnet; **rotate the secrets before any public exposure**. Full detail (curator config, hourly loop, phone/Tailscale access) is in [`appflowy_kanban/growth-os/README.md`](appflowy_kanban/growth-os/README.md). AppFlowy's free self-host tier = 1 user.
+### 3 — Talk to it from a channel
 
-### 4 — Talk to it from a channel
-
-Pick a transport (Telegram is the easiest — no public webhook). Per-platform token steps are in [`docs/channels.md`](docs/channels.md).
+Telegram is easiest (no public webhook). `cc channel` is guided — it opens the bot-creation page
+if your token is missing, enables the channel, and launches it.
 
 ```bash
-# 1. get a bot token (Telegram: message @BotFather) and put it in .env:
-#      TELEGRAM_BOT_TOKEN=...
-# 2. turn the channel on in configs/channels.yaml:  enabled: true
-# 3. launch it:
-make gateway CHANNELS=telegram      # or: discord / slack / whatsapp
-# dry-run first to see what would start, connecting to nothing:
-python -m command_center.channels --dry-run
+# get a bot token (Telegram: message @BotFather) and put it in .env: TELEGRAM_BOT_TOKEN=...
+uv run cc channel telegram      # guided setup + launch (or: discord / slack / whatsapp)
 ```
 
-Now message your bot: *"what's on my todo board?"* or *"draft a mission card: add retry logic to the odds DAG, L2, repo betts_basketball."* It routes through your local model to the same action layer — and **cannot** approve its own mission cards (you drag the card to Approved; that's the wall).
+Now message your bot: *"what's on my todo board?"* or *"draft a mission card: add retry logic to
+the odds DAG, L2, repo betts_basketball."* It routes through your local model to the action layer —
+and **cannot** approve its own mission cards (you drag the card to Approved; that's the wall).
+
+### 4 — (Optional) Stand up AppFlowy boards
+
+AppFlowy Cloud is the **human surface** — todos, mission cards, a 275-book library. One command
+brings up the board server + the Growth OS curator:
+
+```bash
+uv run cc start --appflowy   # scaffolds both .env files + brings up the board server + curator
+```
+
+Then point the **AppFlowy desktop/mobile app** ([download](https://appflowy.io)) at the printed URL,
+sign up a user, put the creds in `appflowy_kanban/growth-os/.env`, and run `setup_workspace.py`
+(it prints the exact steps). Full detail: [`appflowy_kanban/growth-os/README.md`](appflowy_kanban/growth-os/README.md).
+`appflowy-init` uses AppFlowy's shipped localhost defaults — fine for local/tailnet; **rotate the
+secrets before any public exposure**.
 
 ---
 
-## Ways to run it (make · uv · docker)
+## Ways to run it
 
-`make` is the reference, but it isn't required — pick whatever fits your machine. All four do the same operations:
+`uv run cc` is the recommended driver — **any OS, zero install** — but it isn't the only one. All
+four interfaces do the same operations; pick whatever fits your machine.
 
-| Interface | Best for | Example |
+| Interface | Best for | One-button first boot |
 |---|---|---|
+| **`uv run cc <command>`** | **any OS, zero install** (recommended) | `uv run cc start` |
 | **`make <target>`** | Linux/macOS with GNU Make | `make first-boot` |
 | **`.\scripts\cc.ps1 <target>`** | Windows, no Make | `.\scripts\cc.ps1 first-boot` |
-| **`uv run cc <command>`** | **any OS, zero install** (uv syncs the project, then runs) | `uv run cc first-boot` |
-| **`docker compose up -d`** | pure-Docker, no host Python | renders its own config via the `config-render` service |
+| **`docker compose up -d`** | steady-state control plane | *(see note ↓)* |
 
-The portable **`cc`** command (run `uv run cc help` for the full list) mirrors the Makefile and adds a one-button start:
+**Is `docker compose up -d` one command for everything? No — and here's the honest scope.**
+Docker is the engine, not the entrypoint. One `docker compose up -d`:
 
-```bash
-uv run cc start                 # ONE BUTTON: control plane up → keys → health → opens the UIs
-uv run cc start --appflowy --channel telegram   # also: AppFlowy boards + guided Telegram setup
-uv run cc open                  # open the dashboards (LiteLLM, Ledger, Uptime Kuma) in your browser
-uv run cc channel discord       # guided favorite-channel setup (opens the bot page, enables, launches)
-uv run cc doctor                # the preflight checklist
+- ✅ **renders its own LiteLLM config** (the `config-render` one-shot service — genuinely make-free) and
+- ✅ **starts the control plane** (LiteLLM + Postgres + Ledger + Judge Gate + Uptime Kuma), but it
+- ❌ **needs `.env` to already exist** — Compose interpolates the local secrets; generate them once with `cc init-env`;
+- ❌ **can't mint the virtual key Judge Gate needs on a cold boot** — that key only exists *after* LiteLLM is healthy (first-boot is two-phase: bring up LiteLLM → mint → bring up the rest). `cc start` / `make first-boot` sequence this for you;
+- ❌ **doesn't pull Ollama models** (they live on your host) or **run the chat channels** (a host process).
+
+So: use **`cc start` for the first boot**, then **`docker compose up -d` / `cc up` for every boot after**.
+The portable `cc` command also adds conveniences the raw compose file can't: `cc open` (open the
+dashboards), `cc channel <name>` (guided channel setup), `cc start --appflowy`/`--hermes`. Run
+`uv run cc help` for the full list. The **Hermes** UI is opt-in (`cc start --hermes`) and currently a
+placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/STATUS.md)).
+
+---
+
+## The contract model
+
+The whole idea in five lines:
+
+```text
+YAML in configs/                          = the editable source of truth (you edit these)
+Pydantic in src/command_center/schemas/   = the contract that validates it
+generated/                                = disposable rendered output (litellm config, json-schema)
+ledger SQLite                             = the only runtime state
+cc / make / cc.ps1                        = the interface (same ops, three drivers)
 ```
 
-- **UIs auto-open.** `cc start` (and `cc open`) launch the **LiteLLM admin** (`:4000/ui`), **Ledger** (`:8091`), and **Uptime Kuma** (`:3001`) dashboards. The **Hermes** UI is opt-in (`cc start --hermes`) and currently a placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/STATUS.md)).
-- **Favorite channel, guided.** `cc channel <discord|slack|telegram|whatsapp>` checks your tokens, opens the platform's bot-creation page if they're missing, enables the channel in `configs/channels.yaml`, and launches it. (Token creation is the one step only you can do on the platform.)
-- **AppFlowy, automatic.** `cc start --appflowy` runs `appflowy-init` + `appflowy-up` (scaffolds both `.env`s from templates and brings up the board server + curator).
+**Rules:** secrets never live in YAML; generated files are never hand-edited; a typo fails at
+`cc validate`, not at 2am.
+
+**Why it's hard to break (proven, not asserted).** `cc validate` runs every `configs/*.yaml`
+through its contract. These bad edits are **rejected before they ship** (all tested):
+
+- a typo'd key (`priorty:`) → rejected (`extra="forbid"`)
+- two models with the same priority in one role, or two canaries in one role, or `canary_weight > 1` → rejected
+- a missing risk tier, or **L3/L4 without `requires_approval`** → rejected
+- a `repo_task` environment that is persistent or holds secrets → rejected (isolation invariant)
+
+The dangerous mistakes — silently broken routing, an approval gate quietly disabled, a sandbox that
+leaks secrets — **can't be committed**.
 
 ---
 
 ## Layout
 
-**New here? Read [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md)** — the ordered
-cold-start (prerequisites → first boot → channels). [`docs/MASTER.md`](docs/MASTER.md) is the
-deep system guide; [`docs/channels.md`](docs/channels.md) covers Discord/Slack/Telegram/WhatsApp.
-
-```
+```text
 command-center/
-├── Makefile                 # the operator interface (Windows: scripts/cc.ps1)
-├── pyproject.toml / uv.lock # installable package; extras: [gateways], [dev]
+├── pyproject.toml / uv.lock # installable package (extras: [gateways], [dev]); exposes `cc`
+├── Makefile                 # the make driver (Windows: scripts/cc.ps1; portable: uv run cc)
 ├── docker-compose.yml       # control plane (LiteLLM pinned by digest)
 ├── .env.example
 ├── configs/                 # YAML source of truth (you edit these)
@@ -152,15 +161,15 @@ command-center/
 │   ├── targets.yaml         #   repos/DAGs/data/services to watch
 │   ├── tools.yaml           #   tool permissions judges can cite
 │   ├── evals.yaml           #   model/judge regression suite
-│   ├── breakage.yaml        #   what-breaks-when map (drives `make impact`)
+│   ├── breakage.yaml        #   what-breaks-when map (drives `cc impact`)
 │   └── channels.yaml        #   chat transports -> transport + model (tokens in .env)
 ├── src/command_center/      # the installable package
 │   ├── schemas/             #   Pydantic contracts (base.py + contracts.py)
 │   ├── registry/            #   render.py (validate->litellm), model_scout.py
-│   ├── cli/                 #   make/`python -m` commands (validate, render, evals, …)
+│   ├── cli/                 #   cc / make / `python -m` commands (validate, render, evals, …)
 │   └── channels/            #   core.py + discord/slack/telegram/whatsapp adapters + runner
 ├── generated/               # disposable: litellm-config.yaml, json-schema/
-├── services/                # judge_gate (+ judgectl), ledger (missions/leases/approvals/kill), proactive_runner
+├── services/                # judge_gate (+ judgectl), ledger, proactive_runner
 ├── tests/                   # contract regression tests (pytest; run by CI)
 ├── repo-template/           # per-repo: pre-commit, CI, CODEOWNERS, pre-push gate, devcontainer
 ├── appflowy_kanban/         # Growth OS curator + AppFlowy-Cloud (pinned submodule)
@@ -171,78 +180,95 @@ command-center/
 
 ## The interface (every operation)
 
+Same commands across all three drivers — `uv run cc <x>`, `make <x>`, or `.\scripts\cc.ps1 <x>`.
+Run `uv run cc help` (or `make help`) for the full list. The maintenance loop is always the same:
+**edit a `configs/*.yaml`, run `cc validate`, then the relevant command.**
+
 ```bash
-make setup           # deps + .env + validate + render + build services
-make verify-base     # digest pin + base provider/internal secrets before first boot
-make verify          # digest pin + all runtime keys before full stack
-make validate        # configs match contracts (the safety net)
-make standards-validate
-make schema          # contracts -> generated/json-schema (editor autocomplete)
-make render          # validate + build generated/litellm-config.yaml
-make up / down       # control plane
-make keys            # budgeted LiteLLM virtual keys
-make health          # all services OK?
-make models          # validate+render, pull local tags, restart litellm
-make models-canary ROLE=coder MODEL=ollama_chat/qwen3-coder:30b
-make models-promote ROLE=coder
-make models-rollback ROLE=coder
-make impact          # blast radius of your current git diff
-make model-scout     # leaderboard/API scan -> generated proposal report
-make usage-digest    # LiteLLM spend + Ledger mission summary
-make usage-report    # alias for usage-digest
-make live-smoke      # real Ollama/LiteLLM replies once keys are wired
-make mission-dryrun  # fake L0..L4 missions through gates+judges (no model calls)
-make env-smoke       # validate environments + isolation invariants
-make repo-install REPO=/path/to/repo
-make backup / restore-drill
+# lifecycle
+cc doctor          # green/red preflight
+cc init-env        # create .env with local secrets
+cc start           # ONE BUTTON first boot (+ --appflowy / --channel NAME / --hermes)
+cc up / down       # control plane (steady state)
+cc keys            # mint budgeted LiteLLM virtual keys into .env
+cc health          # all services OK?
+cc open            # open the dashboards (LiteLLM, Ledger, Kuma)
+
+# config (the safety net)
+cc validate        # configs match contracts + cross-refs + render + provider boundary
+cc render          # build generated/litellm-config.yaml
+cc schema          # contracts -> generated/json-schema (editor autocomplete)
+cc impact          # blast radius of your current git diff
+
+# models (local only; promotion stays canary + evals + human approval)
+cc models          # pull the default profile + restart litellm
+cc models-light    # switch to the small-GPU/CPU profile (qwen3:8b)
+cc model-scout     # propose local model candidates -> generated report (never edits configs)
+cc usage-digest    # LiteLLM spend + Ledger mission summary
+
+# safety dry-runs (no model calls)
+cc mission-dryrun  # fake L0..L4 missions through gates+judges
+cc evals           # routing/judge regression suite
+cc live-smoke      # real Ollama/LiteLLM replies once keys are wired
+
+# channels + boards
+cc channel <name>  # guided discord|slack|telegram|whatsapp setup + launch
+cc gateway         # run all enabled channels from configs/channels.yaml
 ```
 
-On Windows, use the native helper for local validation and first-boot commands:
-
-```powershell
-.\scripts\cc.ps1 init-env
-.\scripts\cc.ps1 check
-.\scripts\cc.ps1 verify-base
-.\scripts\cc.ps1 bootstrap
-.\scripts\cc.ps1 verify
-.\scripts\cc.ps1 up
-.\scripts\cc.ps1 model-scout
-.\scripts\cc.ps1 usage-digest
-.\scripts\cc.ps1 live-smoke
-```
-
-Maintenance surface, in full: **edit a `configs/*.yaml`, run `make validate` then the relevant target.** Add a repo: `make repo-install REPO=...`.
+`make` exposes a few extra targets the `cc` wrapper doesn't (`make impact FILES=...`,
+`make repo-install REPO=...`, `make models-canary/-promote/-rollback`, `make backup`, the full
+`improvement-*` experiment loop). See `make help`.
 
 ---
 
-## Everything else (unchanged from v3, still current)
+## How it works (the short version)
 
-- **UI from any device** — `docs/ui-options.md`: Hermes channels (phone), CLI, WebUI/Kanban, VS Code Remote Tunnel + `vscode.dev`, Ledger/LiteLLM/Kuma dashboards, GitHub web/mobile, Codespaces fallback. Agent drives the terminal/worktree; you drive VS Code + dashboards + GitHub.
-- **Kanban-driven work** — `docs/kanban-integration.md`: AppFlowy/GrowthOS stays the human task and learning surface; ready cards become Ledger missions through a dry-run-first bridge, then normal leases, judges, and approvals apply.
-- **Request lifecycle** — intake → ledger+lease → triage → plan → plan-critic → leased-worktree implement → static checks → pre-commit judge array → commit → pre-push cross-provider skeptic → human approval (L3/L4) → push/PR → CI → human merge. Deterministic checks before LLM judges, always. Sample routed responses live in `docs/request-routing-examples.md`.
-- **Judge arrays** — `configs/judges.yaml`: local-first, callable anytime, and fail-closed if Ollama is unavailable. The defensive-coding judge blocks **bloat** (swallowed excepts, redundant guards, hardcoded fallbacks where data-driven values belong, dead flags, fake retries, out-of-scope rewrites) — not legitimate boundary validation.
-- **Per-task isolation** — one mission → one branch → one worktree → one devcontainer → one ledger **lease** (unique index: two agents physically can't lease the same checkout). Pair with `hermes -w`.
-- **Standards everywhere** — `configs/standards.yaml` renders into `CLAUDE.md` and `AGENTS.md` for each onboarded repo and is mounted into Judge Gate. Claude/Codex get the same rules your judges enforce: no defensive coding, empirical thresholds, minimal diffs, data-science rigor, and never weakening tests.
-- **Models/executors** — `docs/model-update.md` and `configs/models.yaml`: LiteLLM is local-only and routes aliases to Ollama. Claude Code is the primary coding executor and Codex CLI is the fallback; both authenticate outside LiteLLM through their own subscription/OAuth login. `make model-scout` can propose local model candidates, but promotion stays canary + evals + human approval.
-- **GitHub safety** — `docs/github-safety.md`: branch protection, scoped PAT → GitHub App, required CI, CODEOWNERS, human-gated deploy environment. The agent can push a feature branch and open a PR; never merge/deploy/publish.
-- **Security** — LiteLLM pinned by **digest** (not pip; the March 2026 PyPI compromise), virtual keys scoped+budgeted, `.env` never in a sandbox.
+The full system — every pipeline stage, the module tree, model lanes, and the change log — is in
+[`docs/MASTER.md`](docs/MASTER.md). The essentials:
 
-Start with [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md) (cold start → phases → daily flow → definition of done). Live progress is tracked in [`docs/STATUS.md`](docs/STATUS.md).
+- **Local-only by contract.** LiteLLM routes aliases to **local Ollama** — no OpenAI/Anthropic/OpenRouter
+  charges, ever (the contract *forbids* provider keys). Claude Code is the primary coding executor,
+  Codex CLI the fallback; both authenticate through their own subscription/login, outside LiteLLM.
+- **Request lifecycle.** intake → ledger + lease → triage → plan → plan-critic → leased-worktree
+  implement → static checks → pre-commit judge array → commit → pre-push cross-provider skeptic →
+  human approval (L3/L4) → push/PR → CI → human merge. **Deterministic checks before LLM judges, always.**
+- **Per-task isolation.** one mission → one branch → one worktree → one devcontainer → one Ledger
+  **lease** (a unique index means two agents physically can't lease the same checkout).
+- **Judge arrays** (`configs/judges.yaml`) are local-first, callable anytime, and fail **closed** if
+  Ollama is down. The defensive-coding judge blocks bloat (swallowed excepts, fake retries, dead flags,
+  out-of-scope rewrites) — not legitimate boundary validation.
+- **Standards everywhere.** `configs/standards.yaml` renders into `CLAUDE.md`/`AGENTS.md` for each
+  onboarded repo and is mounted into Judge Gate — executors get the same rules your judges enforce.
+- **The GitHub wall** ([`docs/github-safety.md`](docs/github-safety.md)). branch protection, scoped
+  PAT → GitHub App, required CI, CODEOWNERS, human-gated deploy. The agent can push a feature branch
+  and open a PR; it can **never** merge/deploy/publish.
+- **Security.** LiteLLM is pinned by **digest** (not pip — the March 2026 PyPI compromise); virtual
+  keys are scoped + budgeted; `.env` never enters a sandbox.
+
+More surfaces: [`docs/ui-options.md`](docs/ui-options.md) (phone, CLI, VS Code Remote Tunnel,
+dashboards) · [`docs/channels.md`](docs/channels.md) (per-platform token steps) ·
+[`docs/kanban-integration.md`](docs/kanban-integration.md) (AppFlowy cards → Ledger missions).
 
 ---
 
 ## Cost
 
-**Running it locally costs $0 in cloud charges** — which is the default and how it runs today. Everything (LiteLLM, Judge Gate, Ledger, AppFlowy, Ollama) is Docker on your own machine:
+**Running it locally costs $0 in cloud charges** — the default, and how it runs today. Everything
+(LiteLLM, Judge Gate, Ledger, AppFlowy, Ollama) is Docker on your own machine:
 
-- **Model calls** route through LiteLLM to **local Ollama** — no OpenAI/Anthropic/OpenRouter API charges, ever (the contract forbids provider keys).
-- **Claude Code / Codex** executor work uses your existing **subscription/login**, not metered API billing.
+- **Model calls** route through LiteLLM to **local Ollama** — no provider API charges, ever.
+- **Claude Code / Codex** executor work uses your existing **subscription/login**, not metered billing.
 - You pay only **your own electricity/hardware**.
 
-The only *optional* recurring cost is a **VPS (~$5–12/mo)** if you later want an always-on "brain" that stays up when your workstation/4090 sleep (Phase 1 in [SETUP-FROM-SCRATCH](docs/SETUP-FROM-SCRATCH.md)). It is not required — skip it and run on one machine.
+The only *optional* recurring cost is a **VPS (~$5–12/mo)** if you later want an always-on "brain"
+that stays up when your workstation/4090 sleep (Phase 1 in [SETUP-FROM-SCRATCH](docs/SETUP-FROM-SCRATCH.md)).
+Not required — skip it and run on one machine.
+
+---
 
 ## Before production
-The local checkout is pinned to a verified LiteLLM digest. When upgrading LiteLLM,
-pull the new image, inspect its immutable digest, replace the pinned digest in
-`docker-compose.yml` and `Makefile`, then rerun `.\scripts\cc.ps1 check` and
-`.\scripts\cc.ps1 live-smoke`.
+
+The checkout is pinned to a verified LiteLLM digest. When upgrading LiteLLM, pull the new image,
+inspect its immutable digest, replace the pinned digest in `docker-compose.yml` and `Makefile`,
+then rerun `cc verify` and `cc live-smoke`.

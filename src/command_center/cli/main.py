@@ -116,6 +116,15 @@ def c_models(a):
     return compose("restart", "litellm")
 
 
+def c_live_smoke(a):
+    """Real local-model replies through Ollama/LiteLLM. Bridges to the same script
+    the Makefile (bash) and cc.ps1 (powershell) use, picking the right one per OS."""
+    if os.name == "nt":
+        return run("powershell", "-ExecutionPolicy", "Bypass",
+                   "-File", "scripts/live_smoke.ps1", *a)
+    return run("bash", "scripts/live_smoke.sh", *a)
+
+
 def c_models_light(a):
     import yaml
     from command_center.schemas import ModelRegistry
@@ -305,6 +314,7 @@ COMMANDS: dict[str, tuple] = {
     "down": (lambda a: compose("down"), "stop the stack"),
     "health": (c_health, "check service health endpoints"),
     "first-boot": (c_first_boot, "one shot: doctor -> build -> bootstrap -> keys -> up -> health"),
+    "live-smoke": (c_live_smoke, "real local model replies through Ollama/LiteLLM"),
     "logs": (lambda a: compose("logs", "-f"), "tail all logs"),
     # models
     "models": (c_models, "render + pull whitelisted local tags + restart litellm"),

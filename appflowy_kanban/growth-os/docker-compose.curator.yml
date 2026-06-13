@@ -34,7 +34,6 @@ services:
                if [ \"$$H\" -ge 6 ] && [ \"$$(cat /app/_state/brief.date 2>/dev/null)\" != \"$$TODAY\" ]; then
                  python -m growthos.brief && echo \"$$TODAY\" > /app/_state/brief.date || true;
                  python -m growthos.guidelines || true;
-                 python -m growthos.packages || true;
                  python -m growthos.retention || true;
                fi;
                sleep 3600;

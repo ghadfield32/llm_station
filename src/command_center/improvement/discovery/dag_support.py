@@ -17,9 +17,11 @@ from ..registry import ExperimentRegistry
 from .charter import ObserverCharter
 from .pillars import Pillar
 from .pipeline import ScanPipeline
+from .config import load_discovery_config
 from .sources import (
-    CodeHealthScanner, DependencyScanner, KanbanScanner, LedgerHealthScanner,
-    ModelRegistryScanner, PapersScanner, ScanOutcome, Scanner, run_scanners,
+    CodeHealthScanner, CodeHealthThresholds, DependencyScanner, KanbanScanner,
+    LedgerHealthScanner, ModelRegistryScanner, PapersScanner, ScanOutcome, Scanner,
+    run_scanners,
 )
 
 DEFAULT_REPORT_PATH = "generated/self-improvement-report.md"
@@ -52,7 +54,9 @@ def build_scanner(spec: dict, registry: ExperimentRegistry,
     name = spec["name"]
     config = spec.get("config", {})
     if kind == "code_health":
-        return CodeHealthScanner(config.get("root", "src"), name=name)
+        knobs = load_discovery_config().code_health
+        return CodeHealthScanner(config.get("root", "src"), name=name,
+                                 thresholds=CodeHealthThresholds.from_config(knobs))
     if kind == "ledger":
         return LedgerHealthScanner(registry)
     if kind not in _FEED_KINDS:

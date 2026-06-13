@@ -1087,3 +1087,10 @@ should preserve.
   Judge Gate + Ledger · leases · 4090 worker · VS Code tunnel ·
   pre-commit/pre-push judge arrays · L0–L4 gates · GitHub branch-protection
   wall.
+- v4 keeps all of it and layers on: the typed contract layer (above), a
+  proactive ops lane (DAG/data health + repo stewardship), standards rendering,
+  usage digests, and propose-only model scouting. Everything the README once
+  filed under "unchanged from v3, still current" lives in this guide now —
+  §6 (the five pipelines), §7 (isolation), §8 (the GitHub wall), §5 (model
+  lanes), and the doc index in §12. The README no longer tracks the v3→v4
+  delta; it points here.

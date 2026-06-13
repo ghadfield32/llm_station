@@ -1,0 +1,29 @@
+# Discovery scan knobs — the daily self-improvement scan's operating point.
+# Validated by DiscoveryConfig (src/command_center/improvement/discovery/config.py).
+# These are the documented config knobs the standards sanction ("a config knob, not in-line
+# magic"); the learned P(accept) ranker (acceptance.py) is the genuinely data-derived layer.
+schema_version: "1.0"
+
+ranking:
+  confidence_band_half_width: 0.15   # reported band around a finding's confidence (shrinks ~1/sqrt(n_sources))
+  default_method: wsjf               # ice | rice | wsjf | voi  (WSJF rescues CVE/debt work)
+
+triage:
+  min_confidence: 0.4                # findings below this are noise
+  cooldown_hours: 168.0              # re-propose window for deferred/inconclusive/expired (7d)
+  max_cards: 20                      # per-run Backlog-card cap (overflow is reported, never dropped)
+
+code_health:
+  max_function_statements: 60        # a function over this many statements is a refactor candidate
+  max_module_lines: 600              # a module over this many lines is a split candidate
+  min_debt_markers: 12               # TODO/FIXME/HACK/XXX count worth a card
+  min_swallowed_excepts: 1           # any broad/bare except that never re-raises is worth surfacing
+  sample_limit: 6                    # evidence locations quoted per finding
+
+acceptance:
+  min_decisions: 40                  # below this many human card decisions, abstain → use the formula
+  holdout_fraction: 0.3              # temporal holdout fraction for champion/challenger
+  min_auc_uplift: 0.02               # the learned ranker must beat the formula by this AUC to win
+  learning_rate: 0.1                 # logistic gradient-descent step
+  max_iterations: 500                # logistic gradient-descent iterations
+  l2: 1.0                            # ridge (L2) regularization strength

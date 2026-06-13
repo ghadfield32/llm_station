@@ -284,3 +284,51 @@ class ImprovementConfig(Strict):
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate experiment_id values in improvement.yaml")
         return self
+
+
+# ---------------------------------------------------------------------------
+# Discovery-scan knobs (configs/discovery.yaml). The CONTRACT lives here — beside the
+# other improvement contracts and importable without pulling the heavy discovery package
+# (charter/registry/...) into `make validate`. The yaml LOADER lives in
+# discovery/config.py. No scan decision is an inline literal; an explicit, documented
+# config knob is the sanctioned form ("a config knob, not in-line magic").
+# ---------------------------------------------------------------------------
+
+class RankingKnobs(Strict):
+    confidence_band_half_width: float = Field(default=0.15, gt=0, lt=1)   # ~1/sqrt(n_sources)
+    default_method: Literal["ice", "rice", "wsjf", "voi"] = "wsjf"
+
+
+class TriageKnobs(Strict):
+    min_confidence: float = Field(default=0.4, ge=0, le=1)     # below this a finding is noise
+    cooldown_hours: float = Field(default=168.0, gt=0)         # re-propose window for soft terminals
+    max_cards: int = Field(default=20, ge=1)                   # per-run card cap (overflow reported)
+
+
+class CodeHealthKnobs(Strict):
+    """Absolute maintainability bounds (documented config knobs): a function over N
+    statements or a module over M lines is a refactor candidate regardless of repo norms."""
+    max_function_statements: int = Field(default=60, ge=1)
+    max_module_lines: int = Field(default=600, ge=1)
+    min_debt_markers: int = Field(default=12, ge=1)
+    min_swallowed_excepts: int = Field(default=1, ge=1)
+    sample_limit: int = Field(default=6, ge=1)
+
+
+class AcceptanceKnobs(Strict):
+    """Governs the learned P(accept) ranker (discovery/acceptance.py). Mirrors the modeling
+    guides' sanctioned documented minimums (e.g. GBDT's sample-size floor)."""
+    min_decisions: int = Field(default=40, ge=1)               # below this, abstain → use formula
+    holdout_fraction: float = Field(default=0.3, gt=0, lt=1)   # temporal holdout for champ/challenger
+    min_auc_uplift: float = Field(default=0.02, ge=0)          # challenger must beat formula by this
+    learning_rate: float = Field(default=0.1, gt=0)            # logistic GD step
+    max_iterations: int = Field(default=500, ge=1)             # logistic GD iterations
+    l2: float = Field(default=1.0, ge=0)                       # ridge penalty (regularization)
+
+
+class DiscoveryConfig(Strict):
+    schema_version: str
+    ranking: RankingKnobs = Field(default_factory=RankingKnobs)
+    triage: TriageKnobs = Field(default_factory=TriageKnobs)
+    code_health: CodeHealthKnobs = Field(default_factory=CodeHealthKnobs)
+    acceptance: AcceptanceKnobs = Field(default_factory=AcceptanceKnobs)

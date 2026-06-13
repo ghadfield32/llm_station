@@ -355,6 +355,7 @@ switch ($Task.ToLowerInvariant()) {
     if ($ShowReport) { $a += "--show-report" }
     Invoke-Python @a
   }
+  "improvement-scan-validate" { Invoke-Python "-m" "command_center.cli.improvement" "scan-validate" }
   "judge-calibration" { Invoke-Python "-m" "command_center.cli.improvement" "calibration" }
   "attention-digest" { Invoke-Python "-m" "command_center.cli.improvement" "attention" }
   default {

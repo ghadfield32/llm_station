@@ -101,6 +101,15 @@ class CodeHealthThresholds:
     min_swallowed_excepts: int = 1        # any swallowed exception is worth surfacing
     sample_limit: int = 6                 # locations quoted as evidence
 
+    @classmethod
+    def from_config(cls, knobs) -> CodeHealthThresholds:
+        """Build from a CodeHealthKnobs (duck-typed, so sources.py stays decoupled from config)."""
+        return cls(max_function_statements=knobs.max_function_statements,
+                   max_module_lines=knobs.max_module_lines,
+                   min_debt_markers=knobs.min_debt_markers,
+                   min_swallowed_excepts=knobs.min_swallowed_excepts,
+                   sample_limit=knobs.sample_limit)
+
 
 _DEBT_RE = re.compile(r"\b(TODO|FIXME|HACK|XXX)\b")
 

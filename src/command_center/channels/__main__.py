@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import logging
 from pathlib import Path
 
 import yaml
@@ -54,6 +55,15 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true",
                         help="list enabled channels and exit without connecting")
     args = parser.parse_args()
+
+    # Configure logging BEFORE any adapter starts. discord.py (and the other
+    # SDKs) emit via the stdlib logging module but only auto-install a handler
+    # under client.run(); the adapters use `await client.start()`, so without
+    # this the gateway runs completely silent — a dead or failing bot leaves no
+    # trace. stderr is unbuffered, so connect/resume/error lines surface live.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     cfg = load_config()
     only = {c.strip() for c in args.channels.split(",") if c.strip()}
