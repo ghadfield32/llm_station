@@ -1,7 +1,9 @@
 name: contracts
 on:
+  push:
+    branches: [main]
   pull_request:
-    paths: [configs/**, src/**, pyproject.toml, .github/workflows/contracts.yml]
+    paths: [configs/**, src/**, tests/**, pyproject.toml, .github/workflows/contracts.yml]
 permissions:
   contents: read
 jobs:

@@ -125,7 +125,7 @@ Ordered by dependency. WS1 gates WS2/WS3; the knowledge-base and Hermes tracks a
 
 ### Track B — knowledge-base completeness (so "add data, stays updated" runs end-to-end)
 5. **Audit the auto-ingest.** Confirm papers/repos/signals feeds are scheduled and actually populating AppFlowy (DBs + sources exist; verify the scheduled curator runs).
-6. **Install the daily self-improvement Airflow wrapper.** The control-plane contract is now defined as `self_improvement_scans.daily-self-improvement-brief`; the remaining work is to place the DAG in the managed Airflow repo with a low-privilege identity that invokes the existing commands and writes only Proposed cards plus one report. See [daily-self-improvement-dag.md](daily-self-improvement-dag.md).
+6. **Install the daily self-improvement Airflow wrapper.** The control-plane contract is defined as `self_improvement_scans.daily-self-improvement-brief`, and the DAG + pipeline + touchpoint CLI are now **implemented in-repo** (`dags/self_improvement_daily.py`, `src/command_center/improvement/discovery/`, `improvement scan`). The remaining work is purely deployment: copy the DAG into the managed Airflow environment under a low-privilege service identity (read-only on Kanban/Ledger/scan artifacts; write only Proposed cards + one report; no GitHub/deploy/secret/promotion scopes). See [daily-self-improvement-dag.md](daily-self-improvement-dag.md).
 7. **Watch the AppFlowy-AI unblock.** In-app AI is license-walled upstream; guidelines feed already watches AppFlowy releases. Until then chat.bat + Claude-via-MCP + Discord cover it. No build.
 
 ### Track C — Hermes (evaluate, don't adopt)

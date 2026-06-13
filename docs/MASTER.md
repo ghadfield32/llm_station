@@ -373,8 +373,8 @@ Three lanes:
   net-new ideas, reliability/observability, and cost. It cannot approve, verify,
   promote, canary, merge, deploy, rotate secrets, or execute experiments.
   Implemented as the observer-only Airflow DAG `self_improvement_daily` (+ the
-  `improvement scan` CLI / Kanban / Discord touchpoints); full design in
-  [self-improvement-dag.md](self-improvement-dag.md).
+  `improvement scan` CLI / Kanban / Discord touchpoints); full design + as-built
+  reference in [daily-self-improvement-dag.md](daily-self-improvement-dag.md).
 
 Stage by stage:
 
@@ -800,7 +800,7 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [model-update.md](model-update.md) | safe model rollout + current local picks |
 | [request-routing-examples.md](request-routing-examples.md) | 8 worked examples: request → route → expected response |
 | [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
-| [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only Airflow wrapper plan for daily improvement report + Proposed cards |
+| [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
 | [breakage-map.md](breakage-map.md) | what breaks when you change something |
 | [environment-map.md](environment-map.md) | environment table + activity mapping |
 | [github-safety.md](github-safety.md) | branch protection commands, PAT/App scopes, deploy gating |
