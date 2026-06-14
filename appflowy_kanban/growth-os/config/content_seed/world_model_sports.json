@@ -1,0 +1,242 @@
+[
+  {
+    "key": "wms-001",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "What is a world model for sports - and why we're building one.",
+    "body": "A world model is a system's internal simulation of how its environment works - enough to predict what happens next. Humans run one constantly; it's how a point guard reads a defense before it rotates.\n\nWorld Model Sports is building that for basketball: a system that perceives the game in 3D from video, understands the state of play, and forecasts what comes next. Not box-score analytics after the fact - a learned model of the game as it unfolds.\n\nThe pieces exist now. Modern computer vision can reconstruct the floor; probabilistic models can forecast from it. Our work is fusing them into one coherent model of the sport.\n\nFollow along as we build it in the open.",
+    "source": "WMS thesis derived from bball_homography_pipeline (perception) + betts_basketball (forecasting)"
+  },
+  {
+    "key": "wms-002",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Perception first: you can't model a game you can't measure.",
+    "body": "Before any forecasting, a world model has to see. Our perception layer takes ordinary basketball video and reconstructs it in three dimensions - detecting players and the ball, segmenting them, estimating depth and 3D pose, and mapping everything onto real court coordinates.\n\nThe output is the game as spatial data: where every body is, in feet, frame by frame. That's the substrate everything else is built on.\n\nMost sports data starts at the box score - the game already compressed into counts. We start one layer earlier, at the geometry of play itself, where the richest signal still lives.\n\nMeasurement is the foundation. We're laying it carefully.",
+    "source": "bball_homography_pipeline - YOLO/SAM/SAM3D/depth + court homography to 3D court coordinates"
+  },
+  {
+    "key": "wms-003",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Why our forecasts come with honest uncertainty, not false confidence.",
+    "body": "When World Model Sports projects an outcome, it doesn't hand you a single confident number. It hands you a distribution - a calibrated range that's appropriately wide when the situation is genuinely uncertain.\n\nWe use Bayesian methods because sports are noisy and overconfidence is expensive. A model that admits 'this is close, here's the spread' is more useful than one that pretends to certainty it doesn't have. Calibration - stated probabilities matching real frequencies - is the standard we hold ourselves to.\n\nIn a field full of confident takes, we'd rather be honestly uncertain and right about how uncertain.\n\nThe number matters less than whether you can trust how sure it is.",
+    "source": "betts_basketball - JAX/NumPyro Bayesian models, calibration as the operative metric"
+  },
+  {
+    "key": "wms-004",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "The box score is a compression. We're working with the original.",
+    "body": "A box score throws away almost everything: the spacing of a possession, the quality of a closeout, the gravity of an off-ball threat, the geometry that made a shot open. It keeps the counts and discards the game.\n\nWorld Model Sports works upstream of that compression. Because we reconstruct play in 3D, we can derive features that never reach the stat sheet - and those features are where the real explanatory power lives.\n\nThe last decade of analytics squeezed insight out of box scores. The next decade comes from the layer beneath them: the game as it's actually played, measured directly.\n\nWe think the biggest gains in sports analytics are still on the floor.",
+    "source": "WMS positioning - spatial features from 3D perception vs box-score statistics"
+  },
+  {
+    "key": "wms-005",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Building in the open: our principles before our product.",
+    "body": "We'd rather tell you how we work than make claims we can't back. So, our standards:\n\nDecisions are data-derived - no magic thresholds, no hardcoded guesses dressed up as analysis. We never leak future information into a forecast; a prediction only sees what was knowable at that moment. We don't ship silent fallbacks that fail quietly. And we build for calibration and honesty over confident headlines.\n\nThese aren't marketing lines - they're the engineering rules every model we publish has to pass. If we ever violate one, hold us to it.\n\nTrust in sports modeling is earned by method, not by bravado. Here's our method, in the open.",
+    "source": "WMS engineering standards - data-derived / temporal safety / no silent fallback / calibration"
+  },
+  {
+    "key": "wms-006",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "From pixels to court coordinates: the transform that makes it real.",
+    "body": "There's a single, unglamorous step that separates 'analyzing a video' from 'analyzing a game': the court homography. It maps what the camera sees to where things actually are on the floor, in real-world units.\n\nOnce that transform is right, broadcast footage becomes measurable space - positions, spacing, velocities, all in feet. Every spatial metric and every forecast we build stands on it.\n\nWe spend disproportionate care on this foundation, because everything downstream inherits its accuracy. Boring, exact foundations are what let the interesting work be trustworthy.\n\nThe least flashy component is often the one the whole system depends on.",
+    "source": "bball_homography_pipeline - court homography as the pixel-to-floor foundation"
+  },
+  {
+    "key": "wms-007",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Temporal integrity: our models can't see the future, by design.",
+    "body": "The most common way sports models fool their builders is leakage - accidentally letting a forecast peek at information that only existed after the moment it's predicting. The backtest looks incredible; the live results don't.\n\nAt World Model Sports, point-in-time correctness is non-negotiable. A prediction is constrained to exactly what was knowable when it would have been made - no future stats, no after-the-fact joins, no hindsight.\n\nIt makes our backtests less flashy and our live results trustworthy. We'll take the second trade every time.\n\nIf a sports model's history looks too perfect, the first question should be: what did it get to see that it shouldn't have?",
+    "source": "betts_basketball - temporal safety / point-in-time correctness as a hard rule"
+  },
+  {
+    "key": "wms-008",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Why 3D matters: basketball is a spatial game, not a list of events.",
+    "body": "Two-dimensional tracking tells you where players are on a flat plan view. But basketball happens in three dimensions - shot arcs, contests at the rim, the vertical battle, body pose under pressure.\n\nOur perception stack reconstructs play in 3D, including body and object pose. That extra dimension isn't a gimmick; it's where a lot of the game's meaning lives. The difference between a contested and an open look is often vertical and postural, not just positional.\n\nA world model of basketball has to model the world the way the game is actually played - in full 3D space.\n\nFlatten the game and you flatten the insight.",
+    "source": "bball_homography_pipeline - SAM3D 3D body/object reconstruction + depth estimation"
+  },
+  {
+    "key": "wms-009",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Our north star: simulate the next moment, not just summarize the last.",
+    "body": "Descriptive analytics tell you what happened. A world model aims higher: given the current state of play, what is likely to happen next - and how does that change if a defender rotates a half-second sooner?\n\nThat predictive, counterfactual capability is the whole point. A system that can simulate forward is one you can ask questions of: lineups, schemes, decisions, all explorable before they're committed.\n\nWe're early, and we're honest about that. But the target is clear - a model of the game you can run forward, not just a report on the game that already ended.\n\nPrediction and 'what if' are the questions worth building toward.",
+    "source": "WMS vision - forward simulation / counterfactual reasoning over game state"
+  },
+  {
+    "key": "wms-010",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Cold start is the hard part. Here's how we handle the unknown player.",
+    "body": "New season, new rookie, new lineup - and almost no data. A naive model either overfits the handful of minutes or refuses to commit.\n\nWe use hierarchical models that borrow strength: an unfamiliar player is informed by the distribution of similar players until they've accumulated enough of their own evidence to stand alone. It's structured humility - start from the archetype, update on reality.\n\nThis is how good scouts already think, formalized into the math. It lets us say something useful on day one without pretending we know more than we do.\n\nThe right prior is just an honest starting point you're prepared to be talked out of.",
+    "source": "betts_basketball - hierarchical Bayesian partial pooling for cold-start"
+  },
+  {
+    "key": "wms-011",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "We're stacking the frontier of computer vision onto a 90-year-old game.",
+    "body": "The perception layer behind World Model Sports uses the current generation of vision models - detection, segmentation, 3D reconstruction, depth, pose - the same class of techniques driving robotics and autonomous systems.\n\nPointing that capability at basketball is newly possible. A few years ago, reconstructing a play in 3D from a single broadcast feed was research; now it's an engineering problem we can actually ship.\n\nThe technology finally caught up to the ambition. We're building at exactly the moment it became feasible to see a game the way a model needs to.\n\nThe tools are ready. The hard, fun work is assembling them into something coherent.",
+    "source": "bball_homography_pipeline - modern CV stack (SAM2/SAM3/SAM3D, YOLO, Detectron2, monopriors)"
+  },
+  {
+    "key": "wms-012",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Data boundaries matter. Where your footage goes is a real question.",
+    "body": "Sports video and the analysis derived from it can be sensitive - competitive, contractual, sometimes personal. So data handling isn't an afterthought for us.\n\nWe design our pipelines to keep sensitive processing local where it should be, and we're deliberate about what ever leaves a controlled environment. 'Should this data leave the building?' is a question we ask before an integration, not after an incident.\n\nIf we're going to ask anyone to trust us with their game film, we have to earn it with how carefully we handle it.\n\nResponsible data practices are part of the product, not a compliance chore.",
+    "source": "WMS data-boundary principle (mirrors llm_station local-first / no-data-leakage stance)"
+  },
+  {
+    "key": "wms-013",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Calibration over hot takes: the metric we actually optimize.",
+    "body": "It's easy to be loud about a prediction. It's hard to be right about how confident you should be. We optimize for the second.\n\nA World Model Sports forecast is judged on calibration - do the things we call 70% likely happen about 70% of the time? A modest, well-calibrated model beats a brash, miscalibrated one because you can actually make decisions against honest numbers.\n\nThat's an unsexy thing to build a company around. It's also the only thing that holds up once real outcomes start arriving.\n\nWe'd rather be quietly trustworthy than loudly wrong.",
+    "source": "betts_basketball - calibration as the headline evaluation metric"
+  },
+  {
+    "key": "wms-014",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Spatial features the stat sheet will never have.",
+    "body": "Because we reconstruct play in 3D, we can compute things no traditional feed contains: the true spacing of a possession, how a defense's geometry shifts, the gravity of an off-ball shooter, the closing speed on a contest.\n\nThese spatial features are often what actually decided a possession - and they're invisible to box-score analytics. Surfacing them is a core part of what a world model unlocks.\n\nWe're not trying to recount the game better. We're trying to measure the parts of it that were always there and never counted.\n\nThe most valuable variables in sports are frequently the ones nobody has been recording.",
+    "source": "WMS - derived spatial features (spacing, gravity, defensive geometry) from 3D perception"
+  },
+  {
+    "key": "wms-015",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Reproducibility is a feature we ship, not a hope we hold.",
+    "body": "A sports model nobody can reproduce is a story, not a result. Our pipelines are containerized and pinned so that 'it builds, every model loads, and the numbers come out the same' is a verified state - on any machine, not just ours.\n\nThis discipline is invisible until it isn't. It's what lets us trust our own historical results, onboard collaborators without a week of setup, and stand behind a number months after we produced it.\n\nWe treat reproducibility as part of the product's integrity. A result you can't rerun is a result you can't really defend.\n\nIf it only works on one laptop, it doesn't work.",
+    "source": "bball_homography_pipeline - pinned, containerized GPU environment with verified model imports"
+  },
+  {
+    "key": "wms-016",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Garbage in, confident garbage out: our obsession with data integrity.",
+    "body": "The least visible failure in sports modeling isn't a bad algorithm - it's good math fed bad or leaked data. So a large share of our effort goes into the unglamorous layer: clean ingestion, point-in-time correctness, schemas that reject malformed inputs at the door.\n\nWe'd rather a pipeline refuse to run than quietly produce a polished, wrong answer. A loud failure you can see beats a confident result you can't trust.\n\nThe model gets the headlines. The data integrity underneath it is what decides whether the headlines mean anything.\n\nWe spend where it's boring because that's where the trust comes from.",
+    "source": "betts_basketball/llm_station standards - fail-fast validation, no leakage, data integrity first"
+  },
+  {
+    "key": "wms-017",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "The analytics frontier moved from counting to perceiving.",
+    "body": "First-wave sports analytics counted things better - efficiency, expected value, lineup math built on box scores. It was a real revolution and it's largely played out.\n\nThe next frontier isn't better counting. It's perception: measuring the game directly from video, in space and in 3D, then modeling from that richer substrate. That's the shift World Model Sports is built around.\n\nWe think the teams and tools that win the next decade will be the ones that see the game computationally, not just tally it.\n\nThe scoreboard was the start. The floor is the frontier.",
+    "source": "WMS positioning - perception-driven analytics as the next wave beyond box-score era"
+  },
+  {
+    "key": "wms-018",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Every claim we publish has to survive an adversarial check.",
+    "body": "It's easy to find a pattern in sports data that's exciting and false. We assume our own findings are guilty until proven innocent.\n\nBefore a result leaves the building, it has to survive verification designed to refute it - out-of-sample tests, checks for leakage, scrutiny of whether the effect is real or an artifact. Things that don't hold up don't get published, however good the story.\n\nGenerating sports 'insights' is cheap. Verifying them is the hard, valuable part, and it's where we put our care.\n\nWe're not trying to be impressive on the first pass. We're trying to be right after the scrutiny.",
+    "source": "WMS verification discipline (mirrors llm_station adversarial-verification standard)"
+  },
+  {
+    "key": "wms-019",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Scale needs orchestration: how we keep the data flowing.",
+    "body": "A live sports model is a lot of moving parts - video ingestion, perception, feature building, model refresh - running on schedules. At that scale the real question isn't whether something will break, but how fast you'll know and how clearly.\n\nWe orchestrate these jobs and instrument them so that when a stage fails, it explains itself: the cause, the exact location, a path to the logs. A broken pipeline files its own incident.\n\nReliability at scale isn't about never failing. It's about failures that surface and explain themselves before they quietly corrupt a downstream result.\n\nObservability is the difference between a system you operate and one that operates you.",
+    "source": "betts_basketball Airflow orchestration + Growth OS failure-summary observer pattern"
+  },
+  {
+    "key": "wms-020",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "We measure the vertical game, not just the floor plan.",
+    "body": "So much of basketball is decided in the air and in body posture - the arc of a shot, the timing of a contest, whether a defender is balanced or beaten. Flat tracking misses all of it.\n\nOur perception reconstructs 3D pose and depth, so the vertical and postural dimensions of play become measurable. A contested versus open shot, a real versus token closeout - these often live in exactly the information a 2D view discards.\n\nIf a world model is going to understand basketball, it has to understand the game in the full space where it's actually contested.\n\nThe game isn't flat. Our model of it shouldn't be either.",
+    "source": "bball_homography_pipeline - 3D pose + depth (SAM3D, monopriors) for vertical/postural signal"
+  },
+  {
+    "key": "wms-021",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "A world model is only as honest as its uncertainty.",
+    "body": "A simulation that's always confident is worse than useless - it's misleading. The value of a world model is that it knows the difference between a situation it understands and one it's guessing at.\n\nThat's why uncertainty is a first-class output for us, not a footnote. Our forecasts widen when the game state is genuinely ambiguous and tighten when the evidence is strong. The model's humility is part of its intelligence.\n\nWe're building a system that can say 'I'm not sure, and here's how unsure' - because in sports, that honesty is exactly what makes the confident calls worth acting on.\n\nKnowing what you don't know is the hardest, most valuable thing a model can do.",
+    "source": "WMS + betts_basketball - uncertainty/posterior as a first-class model output"
+  },
+  {
+    "key": "wms-022",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Features beat models more often than people admit.",
+    "body": "It's tempting to chase the fanciest model architecture. In practice, the bigger wins in sports forecasting come from better features - and better features come from measuring the game more richly in the first place.\n\nThat's the bet underneath World Model Sports: invest in perception so the inputs to our models carry information that simpler features can't. A modest model on rich spatial features will routinely beat a sophisticated model on thin box-score inputs.\n\nWe put our effort upstream, at measurement, because that's where the leverage compounds.\n\nThe model gets the credit. The features do the work.",
+    "source": "WMS thesis - perception-derived features as the leverage point over model complexity"
+  },
+  {
+    "key": "wms-023",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "We're starting with basketball because it's the hardest kind of easy.",
+    "body": "Basketball is bounded - one court, ten players, clear rules - which makes it tractable. But it's also continuous, spatial, and fast, with constant occlusion and meaning packed into geometry, which makes it genuinely hard.\n\nThat combination is ideal for building a world model: constrained enough to make real progress, rich enough that solving it means solving something hard. The methods we develop here - perception, spatial features, calibrated forecasting - generalize toward other sports.\n\nStart where the problem is well-shaped and the payoff is real. Basketball is exactly that.\n\nThe right first problem is one that's solvable and worth solving.",
+    "source": "WMS roadmap - basketball as the tractable, generalizable starting domain"
+  },
+  {
+    "key": "wms-024",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "No black boxes we can't explain. That's a commitment.",
+    "body": "It would be easy to wave at 'AI' and ask you to trust the output. We won't do that.\n\nWe favor methods whose behavior we can interrogate, and we hold ourselves to being able to explain why a model said what it said - what features drove it, how confident it is, what would change its mind. If we can't explain it, we're not ready to publish it.\n\nExplainability isn't a constraint that slows us down; it's what makes the results usable by the people who'd actually act on them.\n\nIn sports, a number you can't question is a number you shouldn't bet on.",
+    "source": "WMS principle - explainable/interrogable models (mirrors Bayesian + contract-driven approach)"
+  },
+  {
+    "key": "wms-025",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Why we'd rather show a wide interval than a precise lie.",
+    "body": "There's commercial pressure in this space to project precision - a single crisp number feels authoritative and sells well. We resist it when the situation doesn't warrant it.\n\nIf a matchup is genuinely a coin flip, our model says so, with an interval that reflects it. Manufacturing false precision to look smarter is a short-term win and a long-term credibility loss.\n\nThe interval is the honest answer. The point estimate is a convenience that sometimes hides how little anyone can really know.\n\nWe're playing a long game, and in the long game, honesty about uncertainty is the moat.",
+    "source": "betts_basketball - interval/posterior reporting over false-precision point estimates"
+  },
+  {
+    "key": "wms-026",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "The pipeline, end to end: video in, understanding out.",
+    "body": "Here's how a World Model Sports analysis flows. Broadcast video comes in. Perception detects and segments players and the ball, reconstructs them in 3D, and maps everything to court coordinates. From that spatial state we derive features the box score never had. Those feed calibrated, uncertainty-aware models that forecast and explain.\n\nEach stage is built to be measured, reproduced, and audited - no silent steps, no leaked future information, no unexplainable jumps.\n\nIt's one ordered pipeline from pixels to understanding, and we're building it in the open, one honest stage at a time.\n\nThis is the spine of the company. Everything else hangs off it.",
+    "source": "WMS architecture - ordered perception -> spatial features -> calibrated forecasting pipeline"
+  },
+  {
+    "key": "wms-027",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "We instrument our own systems as carefully as we model the game.",
+    "body": "A team building a world model of sports had better run its own operation like one. Our infrastructure is observable, contract-validated, and designed to fail loudly - the same standards we hold our sports models to.\n\nIt's a tell, honestly. A group that's sloppy with its own pipelines won't be rigorous with yours. The discipline we bring to a court homography or a calibration check is the same discipline we bring to deployments and data handling.\n\nHow a team builds its tools is a preview of how it'll build your results.\n\nWe try to make that preview a good one.",
+    "source": "WMS operating principle (reflects llm_station contract-driven, observable, fail-loud infra)"
+  },
+  {
+    "key": "wms-028",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Sports are non-stationary. Our models expect the ground to move.",
+    "body": "Rules change, styles evolve, rosters turn over, a coach reinvents a scheme mid-season. A model trained on last year's game and frozen will quietly decay against this year's.\n\nWe build for non-stationarity: models that update as the game shifts, weighted toward what's currently true, with the humility to widen their uncertainty when the world has clearly changed. A static model in a moving sport is a slow failure.\n\nForecasting sports isn't a one-time fit. It's a continuous conversation with a game that keeps changing the rules on you.\n\nThe edge isn't a model you trained. It's a model that keeps learning.",
+    "source": "betts_basketball - non-stationarity handling / continuous model refresh"
+  },
+  {
+    "key": "wms-029",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "What 'world model' really promises: ask the game questions.",
+    "body": "The endgame isn't a prettier dashboard. It's a model you can interrogate. Given the state of a possession: what's the expected outcome? How does it change if this defender steps up sooner, or this shooter relocates? Which lineup geometry actually generates the best looks?\n\nA true world model turns analysis from description into dialogue - a system you can pose counterfactuals to and get calibrated answers from. That's the capability we're building toward, and we're honest that we're on the path, not at the destination.\n\nThe questions are the product. We're building the thing that can answer them.\n\nDescription tells you what happened. A world model lets you ask what if.",
+    "source": "WMS vision - counterfactual querying of game state as the long-term product"
+  },
+  {
+    "key": "wms-030",
+    "pillar": "World Model Sports",
+    "format": "Text",
+    "hook": "Our promise as we build World Model Sports in public.",
+    "body": "We're early, and we'd rather you watch us build honestly than sell you a finished story we don't have yet. So here's the promise.\n\nWe'll show our method, not just our results. Our decisions will be data-derived, our forecasts calibrated and honest about uncertainty, our pipelines leak-free and reproducible. We won't dress up false precision or hide a model behind a buzzword. When we get something wrong, we'll say so.\n\nA world model for sports is a big ambition. We think the only way to earn it is one transparent, rigorous step at a time - in the open, where you can hold us to it.\n\nThis is the start. Thanks for following along.",
+    "source": "WMS founding principles - build-in-public, method-over-claims, data-derived/calibrated/reproducible"
+  }
+]

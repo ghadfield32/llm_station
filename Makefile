@@ -18,7 +18,8 @@ LITELLM_DIGEST ?= ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0
         improvement-run improvement-verify improvement-report improvement-request-promotion \
         improvement-canary improvement-promote improvement-rollback improvement-post-watch \
         improvement-board improvement-propose improvement-scan improvement-scan-validate \
-        knowledge-generate knowledge-validate judge-calibration attention-digest
+        knowledge-generate knowledge-validate judge-calibration attention-digest \
+        kanban-digest kanban-surface-validate kanban-board-snapshot
 
 help:  ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -195,6 +196,15 @@ usage-digest:  ## Write generated/usage-digest.md from LiteLLM + Ledger usage AP
 
 usage-report: usage-digest  ## Alias for usage-digest
 
+kanban-digest:  ## Write generated/kanban-digest.md — agent-surface metrics + tuning verdict (real data)
+	@$(PY) -m command_center.cli.kanban_surface digest --output generated/kanban-digest.md
+
+kanban-surface-validate:  ## Blocking N/N gate for the agent kanban surface (config/leakage/verbs/tuning)
+	@$(PY) -m command_center.cli.kanban_surface validate
+
+kanban-board-snapshot:  ## Write generated/board-snapshot.json for the UI (run on the worker; needs growthos + AppFlowy creds)
+	@$(PY) -m command_center.cli.kanban_surface board-snapshot --output generated/board-snapshot.json
+
 live-smoke:  ## Print real local model replies through Ollama/LiteLLM. TRIAGE=triage PLANNER=planner JUDGE=local-judge
 	@bash scripts/live_smoke.sh $(or $(TRIAGE),triage) $(or $(PLANNER),planner) $(or $(JUDGE),local-judge)
 
@@ -221,6 +231,9 @@ channels-validate:  ## Validate configs/channels.yaml (chat transport registry)
 gateway:  ## Run enabled chat channels from configs/channels.yaml. Installs the gateways extra first.
 	@if [ -n "$(UV)" ]; then uv pip install -e ".[gateways]" --python $(PY) --quiet; else $(PY) -m pip install -e ".[gateways]" --quiet; fi
 	@$(PY) -m command_center.channels $(if $(CHANNELS),--channels $(CHANNELS),)
+
+notify:  ## Push a proactive digest (brief + active missions) to Discord. ARGS=--dry-run to preview.
+	@$(PY) -m command_center.cli.notify $(ARGS)
 
 lint:  ## ruff + mypy over src/ (install the dev extra first: uv pip install -e ".[dev]")
 	@$(PY) -m ruff check src

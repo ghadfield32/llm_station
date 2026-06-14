@@ -57,6 +57,12 @@ generated/litellm-config.yaml
 generated/json-schema/
 generated/*.md
 
+# ── LinkedIn content pipeline runtime state — NEVER commit ──────────────────
+# token store holds the OAuth access token (a secret); ledger/lock are runtime
+generated/linkedin-token.json
+generated/linkedin-published.json
+generated/linkedin-publish.lock
+
 # ── Local staging / scratch ───────────────────────────────────────────────
 _staging/
 

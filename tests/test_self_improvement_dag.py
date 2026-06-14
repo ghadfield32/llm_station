@@ -106,3 +106,10 @@ def test_observer_only_banner_and_human_wall_documented(src):
 def test_idempotency_guards_present(src):
     assert "max_active_runs=1" in src           # no overlapping scans
     assert "catchup=False" in src               # no backfill storms
+
+
+def test_kanban_drafting_is_wired_and_optional(src):
+    # the daily DAG can draft human-gated cards, gated by an env flag (off by default)
+    assert "SELF_IMPROVEMENT_KANBAN" in src
+    assert "draft_kanban=KANBAN" in src
+    assert '"false"' in src                     # default off — opt-in only

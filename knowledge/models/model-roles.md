@@ -9,12 +9,12 @@ tags:
 - models
 - ollama
 - routing
-timestamp: '2026-06-13T19:43:05.390123+00:00'
-last_verified_at: '2026-06-13T19:43:05.390123+00:00'
+timestamp: '2026-06-14T03:03:21.476749+00:00'
+last_verified_at: '2026-06-14T03:03:21.476749+00:00'
 source_system: config
 source_path: configs/models.yaml
 source_revision: null
-source_hash: sha256:b31ab6206c69b7355540af6abb08cc1fcdae4b8ba14c0dcc05697fa58487d863
+source_hash: sha256:438183494d6cad84e842f933fb8c67099f0c6e60c02e054a37462f861a78dce1
 authority: derived
 owner: command-center
 status: current
@@ -25,18 +25,19 @@ generator_version: 0.1.0
 mission_id: null
 experiment_id: null
 supersedes: null
-review_after: '2026-07-13T19:43:05.390123+00:00'
+review_after: '2026-07-14T03:03:21.476749+00:00'
 ---
 
 <!-- generated:start -->
 Local-only model roles (every role must be `provider: ollama, local: true`).
 
-- **triage** → ``
-- **local-judge** → ``
-- **planner** → ``
-- **coder** → ``
-- **architect-judge** → ``
-- **security-judge** → ``
+- **triage** → `qwen3-coder:30b`
+- **chat** → `qwen3:30b`
+- **local-judge** → `qwen3:30b, devstral:24b`
+- **planner** → `qwen3:30b, devstral:24b`
+- **coder** → `qwen3-coder:30b`
+- **architect-judge** → `qwen3-coder:30b, qwen3:30b`
+- **security-judge** → `qwen3:30b, devstral:24b`
 <!-- generated:end -->
 
 ## Human notes

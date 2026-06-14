@@ -153,6 +153,7 @@ The config files and their contracts:
 | `configs/channels.yaml` | chat transports (Discord/Slack/Telegram/WhatsApp) → transport + model alias |
 | `configs/improvement.yaml` | self-improvement experiment definitions (+ `improvement-targets.yaml` per-target refs) |
 | `configs/discovery.yaml` | daily-scan knobs: ranking / triage / code-health / acceptance (no inline literals) |
+| `configs/agent_surface.yaml` | agent-kanban knobs: board-state re-injection cadence/size, fuzzy addressing, tuning bounds (`AgentSurfaceConfig`) |
 
 ---
 
@@ -187,8 +188,9 @@ Access (on the do-not-build list by default).
 | **Judge Gate** | Risk classification + the judge arrays. Mounts `configs/standards.yaml`, so every judge cites the same rules rendered into repo instructions. |
 | **Ledger (SQLite)** | Missions, leases, signed approvals, the kill switch, the audit log. What makes "keep working while I'm away" safe rather than just possible. |
 | **Proactive Runner** | Scheduled checks on already-done work. Holds no secrets; its strongest autonomous act is opening a gated mission. |
-| **Discord Gateway** | Discord ↔ LiteLLM (`triage`) ↔ the Growth OS action layer. Fail-fast without `DISCORD_BOT_TOKEN`. |
+| **Discord Gateway** | Discord ↔ LiteLLM (`chat`) ↔ the Growth OS action layer. Fail-fast without `DISCORD_BOT_TOKEN`. The `chat` role is qwen3 (instruct), **not** qwen3-coder — chat surfaces narrate before tool calls, and qwen3-coder's Ollama native parser drops those calls (see §14, 2026-06-13). |
 | Uptime Kuma + restic | Health monitoring and backups. |
+| *(optional profile `ui`)* **Agent Kanban UI** | First-party Cline-styled board + observability over the Ledger (missions kanban) and the agent-call log (metrics). **Read-only** — no write path; approve/kill stay in the signed Ledger endpoints, which it links out to. Loopback + Tailscale + password; `configs/ui.yaml` (`agent_kanban_ui`), repurposed from the deferred Hermes WebUI. React/Vite SPA built + served single-container by a FastAPI backend. |
 | *(optional profile)* Hermes | **Not adopted — evaluated 2026-06-13 → DEFER.** Hermes Agent is real now (v0.16.0, PyPI/official image); the old "phantom image" note is stale. An isolated spike (see change log + `evaluation/capability-assessment/hermes/DECISION.md`) found cross-session memory works but is just a local `MEMORY.md` (not beyond-stack) and self-improving skills did not auto-fire. LiteLLM + Ollama + the action layer serve its role; revisit only if autonomous skill self-improvement materializes. |
 
 ### The worker (4090 / currently the same workstation)
@@ -224,7 +226,7 @@ closed**.
 
 | Lane | Runs | Auth | Provider API charge |
 |---|---|---|---:|
-| **LiteLLM local gateway** | `triage`, `planner`, `local-judge`, `security-judge`, `architect-judge`, `coder` aliases | `HERMES_LITELLM_KEY` / `JUDGE_GATE_LITELLM_KEY` (virtual keys you mint) | $0 |
+| **LiteLLM local gateway** | `triage`, `chat`, `planner`, `local-judge`, `security-judge`, `architect-judge`, `coder` aliases | `HERMES_LITELLM_KEY` / `JUDGE_GATE_LITELLM_KEY` (virtual keys you mint) | $0 |
 | **Ollama on the 4090/host** | the actual model runtime behind LiteLLM | none | $0 |
 | **Claude Code executor** | primary coding missions in leased worktrees | Claude subscription/OAuth login | $0 |
 | **Codex executor** | fallback coding missions | ChatGPT login | $0 |
@@ -237,10 +239,15 @@ Hard rules, all enforced by validation and the live smoke test:
 - The executor CLIs are **not generic APIs** for the gateway — they are
   controlled subprocesses that work only inside leased worktrees, behind the
   same pre-commit/pre-push gates.
-- Local role meanings: `triage` first-pass risk sorting; `planner` plans and
-  validation plans; `local-judge` continuous cheap judging; `security-judge`
-  local security/scope skeptic; `architect-judge` high-effort planning/debug;
-  `coder` dry-runs and fallback summaries (not the executor auth path).
+- Local role meanings: `triage` first-pass risk sorting; `chat` the
+  conversational gateway surface (Discord/Slack/…), qwen3 instruct so tool calls
+  parse even when the model narrates first; `planner` plans + validation plans,
+  also qwen3 (Hermes tool-calls through it, so it must be tool-robust);
+  `local-judge` continuous cheap judging; `security-judge` local security/scope
+  skeptic; `architect-judge` high-effort planning/debug; `coder` dry-runs and
+  fallback summaries (not the executor auth path). **Tool-using roles (chat,
+  planner) must not use qwen3-coder** — its Ollama native tool parser drops
+  prose-prefixed calls; `make validate` enforces this (`check_tool_safe_roles`).
 
 Two Ollama gotchas worth pinning: agents need **≥64k context** (Ollama
 defaults to 4,096 — raise `num_ctx`), and Ollama serves **one request at a
@@ -434,6 +441,78 @@ Current local picks: `qwen3-coder:30b` · `qwen3:30b` · `devstral:24b`.
 The contract rejects `scout.propose_only: false` and any provider route, so
 "swap to the leaderboard top" is structurally impossible.
 
+### 6.6 The LinkedIn content pipeline (Claude-Code-authored → human-gated → shipped)
+
+A content operation for two LinkedIn accounts — **geoffhadfield32** (personal
+profile) and **World Model Sports LLC** (company Page) — that lives entirely
+inside the existing AppFlowy stack and ships through LinkedIn's **official**
+Posts API (no scraper, no third-party scheduler, content never leaves the box).
+Validated by `ContentConfig` (`configs/content.yaml`).
+
+One ordered, single-direction pipeline (idempotent by a stable per-row `Key`):
+
+```
+1. Source assembly   real artifacts only — repo commits, library/papers, project
+                     state. Each post records its derivation in the Source column.
+2. Draft (Claude Code)  authors posts grounded in step 1; upserts as "In Queue".
+                        No local LLM, no autonomous loop — Claude Code is the only
+                        thing that writes content (per the user's rule).
+3. Review + approve (human)  edit text, set ScheduledFor, drag In Queue → In
+                             Progress. The drag IS the approval (same human-gate
+                             philosophy as the kanban bridge; the agent cannot
+                             self-approve). This gate is also the data-leakage
+                             control — nothing private reaches a public post
+                             without a human moving it.
+4. Publish (mechanical)  `cc linkedin-publish --apply` (q15min via schtasks) posts
+                         every In Progress row whose ScheduledFor <= now and PostURN
+                         is empty, using the right author URN (member vs organization),
+                         then stamps PostURN + PublishedAt + Status=Completed back on
+                         the same row. No LLM in this path.
+```
+
+Three board columns, exactly as asked: **In Queue → In Progress → Completed**
+(boards `geoffhadfield32_content`, `world_model_sports_content`, created from the
+`content_template` in `growth-os/config/schema.yaml` by `new_content_board.py`).
+
+Discipline (same standards as the rest of the system):
+
+- **No fake values / no silent fallback** — a publish failure leaves the row In
+  Progress and retries; a media/non-text row is refused loudly (image posting is
+  not wired yet) rather than dropped to text; a row is never marked Completed
+  without a real PostURN from LinkedIn.
+- **Temporal safety** — a row publishes only when `ScheduledFor <= now`; future
+  rows are untouched.
+- **No double-post** — a durable `PublishLedger` (`generated/linkedin-published.json`,
+  gitignored, same role as the bridge's `kanban-imported.json`) records each Key
+  PUBLISHING → PUBLISHED around the POST. A post whose AppFlowy writeback failed is
+  *reconciled* on the next run, never re-sent; an ambiguous send (timeout) becomes
+  `RECONCILE_REQUIRED` and is surfaced, never auto-retried. A single-process lock
+  (`generated/linkedin-publish.lock`, OS advisory, no stale-timeout to guess) stops
+  two scheduler runs touching the same row. Only `None`/`FAILED` (a definitive
+  LinkedIn rejection — no post created) are eligible to (re)publish.
+- **No data leakage** — official API direct from this host; secrets (incl. the
+  OAuth token store) live only in gitignored `.env`/`generated/`, named-not-stored
+  in `content.yaml`; the human gate bounds what ships.
+- **Data-derived + least privilege** — endpoints/scopes/version/statuses are
+  config, not literals; the LinkedIn-Version header has no code default (so the
+  live value is explicit and must be checked vs LinkedIn's current "Latest" — it
+  sunsets ~12 months after release); scopes are posting-only (no email/read).
+
+**One publishing path (no external MCP).** `command_center.cli.linkedin_publish`
+is the *only* component allowed to publish. `.mcp.json` deliberately registers **no
+LinkedIn posting MCP**: an external one (e.g. `souravdasbiswas/linkedin-mcp-server`)
+would be a second publish route that can post personal content *without* completing
+the In Queue → In Progress board lifecycle, plus a second OAuth/token store — both
+rejected. The `stickerdaniel` scraper cannot post at all (read-only, ban risk).
+Claude Code needs no MCP to run the publisher (it edits the queue and invokes the
+CLI); if conversational control is wanted later, wrap *our own* publisher in a thin
+MCP — never add an independent publisher.
+
+**Setup is a runbook + a self-check.** The ordered go-live steps are in
+[linkedin-setup.md](linkedin-setup.md); `cc linkedin-publish --preflight` reads the
+real local state (config, boards, env-key presence, token validity — no secrets
+printed) and names the single next action, so the runbook is self-verifying.
+
 ---
 
 ## 7. Environments and isolation
@@ -608,6 +687,35 @@ Claude Code interactive `/login` · the one-time AppFlowy UI clicks REST can't
 do (per-view filters/sorts, delete blank starter rows) · Linux migration when
 the prod box revives. Full checklist: [STATUS.md](STATUS.md) + [SETUP-FROM-SCRATCH.md](SETUP-FROM-SCRATCH.md) §12.
 
+**LinkedIn content pipeline (2026-06-13) — see §6.6.**
+Done by Claude Code (built + verified live against AppFlowy): both content boards
+created with the 3-column kanban (`geoffhadfield32_content`,
+`world_model_sports_content`) · `ContentConfig` + `configs/content.yaml` wired into
+`cc validate` · `command_center.linkedin` client + `cc linkedin-publish`
+(dry-run/--apply/--login) · durable anti-double-post ledger + single-process lock
+(6 safety tests) · 30 days × 2 accounts (60 real, source-attributed drafts) seeded
+as **In Queue** · publisher gate proven (0 due while nothing is approved) ·
+`.mcp.json` keeps a single publish path (no external posting MCP).
+Remaining is all yours (I cannot fake credentials). Full ordered runbook:
+[linkedin-setup.md](linkedin-setup.md); `cc linkedin-publish --preflight` tells you
+the next step at any time. Summary, in order — **personal and the WMS Page are
+separate permission + live-smoke gates; install the scheduler LAST**:
+
+1. Create the LinkedIn Developer app (own it with the WMS Page + verify it; redirect
+   `http://localhost:3000/callback`; products: OpenID + Share on LinkedIn, and
+   *Community Management API* for the Page — LinkedIn-reviewed). `LINKEDIN_*` → `.env`.
+2. Confirm `configs/content.yaml` `linkedin.version` is LinkedIn's current Latest
+   (202605 as of 2026-06-13; sunsets ~12 mo) → `cc validate`.
+3. `cc linkedin-publish --login` (personal scopes). ~60-day token; expiry printed each run.
+4. Approve ONE personal draft (In Queue → In Progress, due now) → `--account
+   geoffhadfield32_content --apply`; confirm live + Completed + PostURN.
+5. After Community Management approval: Page URN → `LINKEDIN_WMS_ORG_URN`,
+   `--login --include-org`, repeat the smoke for `world_model_sports_content`.
+6. One-time AppFlowy UI: each Board view **Group by → Status**; delete the 3 blank
+   starter rows per grid.
+7. ONLY after both smokes pass: schedule `linkedin-publish --apply` (Task Scheduler,
+   q15min, run-if-logged-out + restart-on-fail + rotating log; see the runbook).
+
 ---
 
 ## 10. The operator interface
@@ -672,6 +780,7 @@ llm_station/
 ├── docker-compose.yml          control-plane stack; LiteLLM pinned by immutable digest
 ├── pyproject.toml / uv.lock    Python env (uv-managed; new deps via `uv add`)
 ├── .env / .env.example         secrets — never in YAML, never committed, no provider keys
+├── .mcp.json                   project MCP servers for Claude Code (empty by design — single LinkedIn publish path is cc linkedin-publish, no external posting MCP)
 │
 ├── configs/                    YAML SOURCE OF TRUTH (you edit these; see §2 table)
 │   ├── models.yaml             role → ranked local model candidates (ollama-only)
@@ -685,10 +794,12 @@ llm_station/
 │   ├── tools.yaml              tool permissions the judges can cite
 │   ├── evals.yaml              routing/judge regression suite (model-promotion gate)
 │   ├── kanban.yaml             bridge dispatch contract: sections, ceilings, ready statuses
+│   ├── content.yaml            LinkedIn content pipeline: accounts, statuses, official-API endpoints (ContentConfig)
 │   ├── ui.yaml                 WebUI safety defaults (ledger-governed external writes)
 │   ├── channels.yaml           chat transports → transport + model alias (tokens stay in .env)
 │   ├── improvement.yaml        experiment definitions (worked set) + improvement-targets.yaml (per-target refs)
-│   └── discovery.yaml          daily-scan knobs: ranking/triage/code-health/acceptance (DiscoveryConfig)
+│   ├── discovery.yaml          daily-scan knobs: ranking/triage/code-health/acceptance (DiscoveryConfig)
+│   └── agent_surface.yaml      agent-kanban knobs: re-injection cadence/size, fuzzy addressing, tuning (AgentSurfaceConfig)
 │
 ├── src/command_center/         INSTALLABLE PACKAGE (uv pip install -e .; run via `make`/`python -m`)
 │   ├── schemas/                PYDANTIC CONTRACTS that validate the YAML
@@ -709,12 +820,20 @@ llm_station/
 │   │   ├── smoke_mission.py    `make mission-dryrun` (fake L0–L4, no model calls)
 │   │   ├── usage_digest.py     LiteLLM spend + Ledger summary → usage-digest.md
 │   │   ├── kanban_bridge.py    Approved cards → Ledger missions (+CardKey writeback)
+│   │   ├── linkedin_publish.py In Progress + due content rows → LinkedIn Posts API (--preflight/--login/--apply; ledger-dedup; stamps Completed)
 │   │   ├── improvement.py      improvement-loop + daily-scan operator CLI (scan, scan-validate, …)
-│   │   └── knowledge.py        OKF knowledge-bundle CLI (generate, validate)
+│   │   ├── knowledge.py        OKF knowledge-bundle CLI (generate, validate)
+│   │   └── kanban_surface.py   agent-kanban digest + N/N gate (make kanban-digest / kanban-surface-validate)
 │   ├── channels/               CHAT TRANSPORTS — one authority, many surfaces
-│   │   ├── core.py             transport-agnostic GatewayCore.run_turn() (LiteLLM tool loop)
+│   │   ├── core.py             transport-agnostic GatewayCore.run_turn() (LiteLLM tool loop; re-injects board_state)
+│   │   ├── board_state.py      harness-owned live board re-injected each turn (Cline focus-chain; fail-loud)
 │   │   ├── discord.py · slack.py · telegram.py · whatsapp.py   thin per-platform adapters
 │   │   └── __main__.py         runner: configs/channels.yaml → launch enabled adapters
+│   ├── linkedin/               OFFICIAL LinkedIn API (no scraping): client.py (OAuth + text post member/org) + ledger.py (durable anti-double-post + process lock)
+│   ├── kanban/                 AGENT KANBAN SURFACE — observability + data-derived tuning (reads the agent-call log spine)
+│   │   ├── metrics.py          real metrics from _export/agent_calls.jsonl (redundant-call rate, verb adoption)
+│   │   ├── features.py · tuning.py   pre-decision features (no leakage) · abstaining champion/challenger ratio learner
+│   │   └── digest.py · validate.py   Markdown digest · blocking N/N PASS gate
 │   ├── improvement/            SELF-IMPROVEMENT SUBSYSTEM (experiment loop + daily observer scan)
 │       ├── lifecycle.py        experiment state machine (Canary/Promoted are human-only)
 │       ├── registry.py         experiment records on ledger.db — the enforcement point
@@ -747,8 +866,11 @@ llm_station/
 │   │                           approvals, events, kill switch — the only runtime state
 │   ├── judge_gate/             risk classification + judge arrays; mounts standards.yaml
 │   │   └── judgectl.py         CLI for invoking judges from hooks/scripts
-│   └── proactive_runner/       thin scheduler for configs/proactive.yaml checks;
-│                               holds no secrets; max action = open a gated mission
+│   ├── proactive_runner/       thin scheduler for configs/proactive.yaml checks;
+│   │                           holds no secrets; max action = open a gated mission
+│   └── agent_kanban_ui/        OPTIONAL Phase-4 (profile `ui`): read-only FastAPI over
+│                               Ledger + agent-call log; web/ = React/Vite SPA (Cline-styled
+│                               board + observability), built + served single-container
 │
 ├── scripts/                    non-Python wrappers: cc.ps1 (Windows), live_smoke.{ps1,sh}
 ├── dags/                       Airflow DAGs: self_improvement_daily.py (observer-only daily scan)
@@ -790,21 +912,27 @@ appflowy_kanban/growth-os/
 │   ├── guidelines.py    daily: standards.yaml mirror + release feeds
 │   ├── retention.py     daily: Inbox rows older than retention.days → Archived
 │   ├── brief.py         daily: morning brief + LLM overview + Mission worklog
-│   └── assistant.py     chat.bat brain: Ollama tool-calling loop with
-│                        repeat-call breaker + forced final answer
-├── agent/growthos_mcp.py    MCP registration over actions (Claude; stdio or --http)
+│   ├── assistant.py     chat.bat brain: Ollama tool-calling loop with
+│   │                    repeat-call breaker + forced final answer
+│   └── observability.py CENTRALIZED agent-call log: every tool call on every surface
+│                        (Discord/MCP/assistant) → one JSONL + `python -m growthos.observability` monitor
+├── agent/growthos_mcp.py    MCP registration over actions (Claude; stdio or --http; logged)
 ├── scripts/
 │   ├── setup_workspace.py   create/RECONCILE databases from schema.yaml
 │   ├── create_views.py      Board/Calendar views (idempotent)
 │   ├── import_books.py      data/book-checklist.md → library (never clobbers triage)
 │   ├── import_dags.py       dag files → dags board (static inventory)
 │   ├── new_project.py       stamp per-project board + validated kanban.yaml section
+│   ├── new_content_board.py create/RECONCILE the LinkedIn content boards from content_template
+│   ├── seed_content.py      content_seed/*.json → In Queue rows (clobber-safe, 1/day)
 │   ├── seed_workspace.py    sources mirror + starter todos
-│   └── selftest.py          22 live checks across the whole system (target: 100%)
+│   ├── selftest.py          22 live checks across the whole system (target: 100%)
+│   └── test_abilities.py    abilities/routing exercise: each tool ≥5 ways + the approval wall
 ├── config/
-│   ├── schema.yaml          database shapes (first select = board grouping)
+│   ├── schema.yaml          database shapes (first select = board grouping); incl. content_template
 │   ├── sources.yaml         feeds, interest weights, scoring, retention
 │   ├── projects.yaml        ★ OBSERVE registry: repos the watchers watch
+│   ├── content_seed/        Claude-authored LinkedIn drafts (geoffhadfield32.json, world_model_sports.json)
 │   └── databases.json       generated id map — reconcile via setup_workspace, never hand-edit
 └── docker-compose.curator.yml   the always-on watcher loop
 ```
@@ -826,6 +954,7 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [MASTER.md](MASTER.md) | **this doc** — the consolidated system guide |
 | [SETUP-FROM-SCRATCH.md](SETUP-FROM-SCRATCH.md) | **cold-start** — every prerequisite, first boot, and per-channel enablement, in order |
 | [channels.md](channels.md) | chat transports (Discord/Slack/Telegram/WhatsApp): architecture + per-platform setup + how to add a new one |
+| [linkedin-setup.md](linkedin-setup.md) | **LinkedIn content pipeline runbook** — ordered go-live steps (app → OAuth → live smoke → schedule) + daily operation; `--preflight` self-check |
 | [STATUS.md](STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | multi-session git safety, engineering standards, the uv dependency workflow |
 | [backend/](backend/) | reference standards copied from the betts pipeline (data-engineering, R2/fleet, modeling, serving) — see the N/A note in §13 |
@@ -836,6 +965,7 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
 | [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
 | [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
+| [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
 | [knowledge-format.md](knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
 | [breakage-map.md](breakage-map.md) | what breaks when you change something |
 | [environment-map.md](environment-map.md) | environment table + activity mapping |
@@ -868,7 +998,11 @@ second model gateway (LiteLLM is it) · a separate channel *service* (channels
 are thin transports onto the action layer) · agent-side approval or
 agent-installed scheduled self-dispatch (twice classifier-blocked — the wall
 catching its own builder is the system working) · public exposure (tailnet
-only) · another abstraction layer unless it prevents a failure actually hit.
+only) · a third coding-agent executor (Cline CLI / etc.) — Claude Code is
+primary, Codex the cross-provider fallback; a new executor brings no
+gates/judges/ledger/leases and would have to be wrapped in them to be safe
+(Cline + Ollama evaluated 2026-06-13 → DEFER, watch-list only) · another
+abstraction layer unless it prevents a failure actually hit.
 
 The system is a handful of trusted layers with strong contracts, not more
 agents. That's the whole design.
@@ -908,6 +1042,415 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-13 — durable cross-conversation memory (built + proven), embedder VRAM budget, router decision
+
+Executes the `memory_state` design the multi-turn analysis pre-specced (see the entry below
+and [agent-multiturn-and-memory.md](agent-multiturn-and-memory.md)). The board already carried
+durable *work state* across conversations (board_state); this adds durable *conversational*
+memory the same way.
+
+- **Memory subsystem — built, tested, proven live (not yet wired).** New
+  [growthos/memory.py](../appflowy_kanban/growth-os/growthos/memory.py) +
+  [config/memory.yaml](../appflowy_kanban/growth-os/config/memory.yaml): `remember(fact)` /
+  `forget(fact)` intent verbs (siblings of `stage_card`/`reject_card` — the agent saves a
+  *curated* fact by explicit intent; nothing is auto-harvested from raw conversation, so there
+  is **no leak surface**) plus a `collect_memory_state` re-injection that mirrors `board_state`.
+  Backed by a per-owner SQLite store with the real local `nomic-embed-text` (reused from
+  score.py). It keys on a **stable owner, not the conversation id** — that is what makes recall
+  cross-conversation (a fresh conversation has a new id but the same owner) and it survives a
+  restart. Retrieval is `cosine × recency-decay`, top-k — no relevance threshold; **fails loud**
+  if the embedder is down (no keyword/recency degrade). Every knob is required in `memory.yaml`
+  (no hidden code default). 21 hermetic tests ([test_memory.py](../tests/test_memory.py)) + a
+  live real-embedding proof: a fact saved in conversation A is recalled in a **fresh** conversation
+  B, survives a store restart, is superseded by `forget`, and is project-scoped — with **no
+  cross-project or cross-owner leak**.
+- **Wiring staged, not applied.** The two touchpoints (`core.py` memory_state injection,
+  `assistant.py` verb registration) are the agent-surface session's hot files (core.py was being
+  edited minute-by-minute), so the ~10-line, pattern-anchored patch is staged in
+  [memory-integration-patch.md](memory-integration-patch.md) to apply once that session lands.
+  Coordination rule held — none of their files were touched.
+- **Embedder charged against the GPU budget (applied).**
+  [vram.py](../src/command_center/registry/vram.py) gained `resident_weight_gb` (data-derived
+  from `/api/ps` ground-truth → `/api/tags` weights + the CUDA baseline, **never a hardcoded GB**)
+  and a `reserved_gb` term threaded through the fit math; `model-fit --reserve-model
+  nomic-embed-text` now sizes chat models *after* the resident embedder. 5 new tests. Live: the
+  embedder reserves **1.1 GB** (0.3 GB weights + the CUDA baseline) — small enough that it does
+  not flip any verdict; a 30B-Q4's fit stays context-bound (it holds ~29k ctx on the 24 GB card
+  with the embedder resident, and is NO at the full 65k default). The gate now charges for the
+  embedder instead of assuming it free — the number is data-derived, not asserted.
+- **Router decision — keep the spine, defer the pre-router.** The stack already runs the two
+  strategies the current router literature rates highest: domain routing (the `roles` map) and
+  cascading (stuck-escalation, local → Claude Code/Codex on *observed* failure). LiteLLM stays the
+  gateway. A learned complexity *pre-router* (wrap `ulab-uiuc/LLMRouter` or RouteLLM, trained on
+  the escalation + Ledger outcome logs already being collected) is **deferred until it can beat the
+  cascade on a temporal holdout** under the existing promotion wall — abstain-until-better, can only
+  improve on the baseline, never regress. No build now; collect the signal first.
+- **Left, in order:** (1) apply the staged wiring patch when the agent-surface session lands, then
+  run the post-apply two-conversation check; (2) optional — give `memory_state` its own
+  refresh cadence + thread a per-conversation project context; (3) accumulate escalation data, then
+  add the pre-router only once it beats the cascade. No defensive code, no hardcoded thresholds, no
+  fabricated values, no data leakage at any step.
+
+### 2026-06-13 — Chat bot full-capability pass: research comprehension (`read_item`), capability-tiered prompt, proactive updates (`cc notify`)
+
+Once the tool-call leak was fixed (entry below), made the bot able to do work at
+**every tier**, not just board hygiene. Data-derived scope: grepped which tools
+each capability needs; only three real gaps existed (the repo-work loop was
+already wired end-to-end). Nothing breaches the approval wall — the bot still only
+DRAFTS and MONITORS; executors complete gated missions.
+
+- **Understand papers/repos (`read_item`).** New read-only tool in
+  `growthos/actions.py` (+ `TOOL_FNS`): returns ONE row's full detail (abstract,
+  score, curator "suggested-for", url) so the bot can actually explain/triage an
+  item, not just list titles. Exact match → else closest candidates (never a
+  silent guess). Verified live end-to-end: asked to explain a paper, the bot
+  called `read_item` and summarized it + flagged it suggested for betts_basketball.
+- **Capability-tiered system prompt (`channels/core.py build_system`).** Rewrote
+  the terse prompt to enumerate all four tiers (boards · research · awareness ·
+  repo work) and HOW to drive repo work: `add_mission_card(section, action,
+  acceptance, risk, repo)` → human drags to Approved → gated Ledger mission →
+  executor (Claude Code/Codex) completes it → `mission_status` to track. A model
+  only uses abilities its prompt names. Verified: asked to fix a failing betts DAG,
+  the bot drafted a card (section DAGs, repo betts_basketball, measurable
+  acceptance, L2) with the approve-to-dispatch handoff — write intercepted, no
+  junk card on the board.
+- **Proactive updates (`cli/notify.py`, `cc notify` / `make notify`).** Channels
+  are reactive; this is the one job that messages YOU: composes the daily brief
+  headline + active Ledger missions and posts to your Discord channel. "Active" =
+  `board_state.LIVE_COLUMNS["missions"]` (one source of truth, no re-listed
+  literal). Fail-loud on missing creds / unreachable Ledger (never a fake
+  all-clear). Run it on a host schedule like the kanban bridge. Verified: real
+  push of a 1237-char digest (2 active missions) to the channel.
+- **Repo-work loop confirmed already wired:** "Betts Basketball" is a kanban
+  section (`configs/kanban.yaml`) → repo `betts_basketball`; the bridge turns an
+  Approved card into a gated mission an executor runs. The bot's part (draft +
+  monitor) is what the prompt now teaches.
+- Tests: `tests/test_actions_intent.py` (+read_item), `tests/test_notify.py` (5).
+  Full suite 541 pass (1 pre-existing flake, passes in isolation, untouched code).
+- **Follow-ups resolved (2026-06-13):** (1) **`cc notify` schedule — documented**
+  as a run-yourself `schtasks`/cron one-liner in `docs/channels.md`, mirroring the
+  kanban-bridge/snapshot tasks; agents do not self-install host persistence (§13),
+  so the one command is yours to run. (2) **`read_item` extended to `notes`** —
+  verified live; its valid set is now `STATUSES | {notes}` (`READABLE_DBS`), since
+  notes is a real content board with no Status workflow. (3) **kanban.yaml risk
+  strings — no change needed:** `RiskTier` values literally ARE `L0_read_only`…
+  `L4_dangerous`, so kanban.yaml's `L2_local_edits` is the canonical enum value
+  (the bridge also accepts the agent's short `L2`); shortening it would break the
+  `KanbanSection` contract. Not a defect — the earlier note was speculative.
+- **Only genuinely-open item:** you run the `cc notify` schtasks one-liner once to
+  make the daily push automatic (until then it's `cc notify` on demand).
+
+### 2026-06-13 — Discord bot leaked raw `<function=..>` XML — root-caused to qwen3-coder's Ollama tool parser; chat surfaces moved to a `chat` (qwen3) role
+
+**Symptom.** The Discord bot replied with raw tool-call markup
+(`I found "Alan Turing: The Enigma"… <function=book_note><parameter=…>…</tool_call>`)
+instead of acting on the kanban. The local AppFlowy assistant never had this.
+
+**Root cause (reproduced, not guessed).** Discord routed through role `triage` →
+`ollama_chat/qwen3-coder:30b`. qwen3-coder's Ollama Modelfile carries
+`RENDERER/PARSER qwen3-coder` (a compiled-in native parser for its
+`<tool_call><function=..><parameter=..>` XML); its Go template has **no** tool
+handling. When the model writes a sentence of narration *before* the call
+(which it does naturally), that native parser fails to extract the block, dumps
+prose+XML into `message.content`, and returns `tool_calls: []`. `core.py` then
+treats the markup as a final answer and sends it to Discord. qwen3 / devstral
+use Ollama's Go-template tool path, which parses calls regardless of surrounding
+prose. The local assistant works because it runs **qwen3:8b**, not qwen3-coder.
+Measured, narration induced: qwen3-coder **7/8** (Ollama) and **6/6** (full
+LiteLLM path) leaked; qwen3:30b **0/8**. Fix verified e2e via `model=chat`: **0/4**.
+
+**Scope — which roles actually tool-call (data-derived).** Grepped every model
+call: only `channels/core.py` (chat) and Hermes (`HERMES_DEFAULT_MODEL=planner`)
+pass `tools` through LiteLLM. `judge_gate` uses JSON-mode completion (no tools);
+no local code tool-calls `coder`/`architect-judge`/`security-judge`. So qwen3-coder
+is correct for those (plain completion) and only the **chat** and **planner**
+roles needed to move off it. `triage` (judge-gate JSON) is unchanged.
+
+**Fix (data-derived, no patching).**
+- `configs/models.yaml`: new `chat` role → `qwen3:30b` (tool-robust, fits 4090);
+  `planner` moved off qwen3-coder → `qwen3:30b` (+ `devstral:24b` cross-family
+  failover) because Hermes tool-calls through it. Both documented off-limits to
+  qwen3-coder. `triage`/`coder`/judges keep qwen3-coder (no tool-calling).
+- `configs/channels.yaml`: all chat channels `model: triage` → `model: chat`.
+- `channels/core.py`: final answers run through `_clean()` (strip `<think>`,
+  parity with the assistant); a **fail-loud tripwire** (`_leaked_tool_call`) now
+  refuses to forward unparsed tool-call markup — it logs the evidence and returns
+  a diagnostic naming the cause + fix, so a future fragile-model regression is
+  loud, never silent.
+- `cli/check_cross_refs.py`: new `check_tool_safe_roles` makes the fix
+  self-enforcing — `make validate` FAILS if a chat channel's role or `planner` is
+  ever backed by a qwen3-coder-family model (prefix match, so future tags too).
+- Rendered + restarted LiteLLM (`chat` + new `planner` live in `/v1/models`);
+  `make validate` green. Verified live (narration induced) via `model=chat` and
+  `model=planner`: **0 leaks, 23 tool calls parsed**. Tests:
+  `tests/test_gateway_toolcall.py` (5) + `tests/test_tool_safe_roles.py` (5).
+  Everything stays local (qwen3/devstral on Ollama) — fail-closed invariant kept.
+
+### 2026-06-13 — LinkedIn content pipeline (two AppFlowy content boards + official-API publisher)
+
+A Claude-Code-authored content operation for **geoffhadfield32** (personal) and
+**World Model Sports LLC** (company Page), shipping through LinkedIn's **official**
+Posts API — no scraper, no third-party scheduler, content never leaves the box.
+Full design in §6.6; what's left (all user-credential prerequisites) in §9.
+
+- **Boards.** `content_template` added to `growth-os/config/schema.yaml`; new
+  `scripts/new_content_board.py` (create + reconcile, mirrors `new_project.py`)
+  stamped `geoffhadfield32_content` and `world_model_sports_content` — Grid +
+  Board view, 3 columns **In Queue → In Progress → Completed** (the only kanban
+  the user asked for). A `Key` field round-trips the writeback `pre_hash`.
+- **Contract.** `ContentConfig` (+ `ContentSource`/`ContentStatuses`/`LinkedInApi`/
+  `LinkedInAccount`) in `schemas/contracts.py`, file `configs/content.yaml`, wired
+  into `cc validate`. Endpoints/scopes/statuses are config; the LinkedIn-Version
+  header has **no code default** (always explicit). `.env.example` gains the
+  `LINKEDIN_*` keys; secrets are named-not-stored.
+- **Client + publisher.** `src/command_center/linkedin/` (3-legged OAuth + text
+  post for member & organization authors; raises loudly, never fakes a publish)
+  and `cli/linkedin_publish.py` (dry-run default · `--login` · `--apply`). Mirrors
+  the kanban bridge: reads each board, ships only `In Progress` rows with
+  `ScheduledFor <= now` and empty `PostURN`, stamps `Completed` + `PostURN` +
+  `PublishedAt` by `Key`. Temporal-safe; failures stay In Progress and retry.
+- **Seed.** 60 real, **source-attributed** drafts (30/account, derived from
+  llm_station, betts_basketball, bball_homography_pipeline, Growth OS curriculum)
+  in `config/content_seed/*.json`, loaded by `scripts/seed_content.py` (clobber-safe
+  insert-only, 1/day) as **In Queue**. Verified live: 30+30 rows, publisher reports
+  **0 due** (the human approval gate holds).
+- **One path, no external MCP.** `.mcp.json` registers **no** posting MCP — the sole
+  publish path is `linkedin_publish`. An external posting MCP would be a second route
+  bypassing the board gate + a second token store; the `stickerdaniel` scraper can't
+  post anyway. Future conversational control = a thin MCP over *our* publisher.
+
+**Hardening pass (same day, after external review):**
+
+- **LinkedIn-Version fix.** `202506` is **June 2025** (YYYYMM), sunset 2026-06-15 —
+  corrected to **`202605`** (current Latest). Comment now flags the YEAR+MONTH format
+  and the ~12-month sunset; it must be re-checked before going live.
+- **Anti-double-post.** New `linkedin/ledger.py` — a durable `PublishLedger`
+  (`generated/linkedin-published.json`) marks each Key PUBLISHING→PUBLISHED around the
+  POST, so a post whose AppFlowy writeback failed is reconciled, never re-sent; an
+  ambiguous send (timeout) → `RECONCILE_REQUIRED`, never auto-retried. A
+  `ProcessLock` (OS advisory, no stale timeout) stops overlapping scheduler runs.
+  `tests/test_linkedin_publish.py` 6/6 (gate, temporal safety, ledger, lock).
+- **Least privilege + secrets.** Scopes trimmed to posting-only (dropped `email`,
+  `r_*_social`); the OAuth token store + ledger + lock added to `.gitignore`
+  (token = secret). `--apply` prints token expiry each run (60-day token).
+
+### 2026-06-14 — agent kanban surface: Phase 6 usability round 3 (drag-and-drop)
+
+- **Drag-and-drop on the Boards kanban.** Cards drag between columns; dropping calls the governed `move_item`
+  and the live board refreshes. The card-details dropdown does the same (the earlier "won't let me" was the
+  absence of drag, not a backend bug — `Ready -> In Progress` verified working). **The wall holds through drag**:
+  dropping onto `Approved` is refused with a clear message (human-only), shown as a toast. Verified live:
+  drag→In Progress reflected on the live board; Approved drop refused; reverted.
+- **Clarity** — Missions is labeled the gated execution lane (open → Ledger to approve/kill); Boards →
+  mission_intake is where you move work freely; a live/snapshot label on the board. SPA recompiled clean.
+
+### 2026-06-13 — agent kanban surface: Phase 6 usability round 2 (formatting + detail)
+
+- **Stack-health topbar.** New `/api/status` runs real liveness probes (Ledger; + LiteLLM + AppFlowy when the
+  console is on) — live: `{ledger: ok, litellm: ok, appflowy: ok}`. The topbar shows a colored dot per hop +
+  last-updated + a manual refresh button. A hop is "ok" only if it answered (no fabrication).
+- **Nav counts** for quick orientation; **persistent chat** (the Chat view stays mounted so the conversation
+  survives view switches); **Escape** closes any drawer.
+- **Richer mission drawer** — colored event timeline with timestamps, an Approvals section, and an "Open in
+  Ledger to approve / kill" link for L3/L4 / awaiting-approval (the signed path stays in the Ledger UI).
+  `test_agent_kanban_ui` 15/15; ruff clean; SPA recompiled clean.
+
+### 2026-06-13 — agent kanban surface: Phase 6 fix+polish (from the live visual pass)
+
+- **Governed writes now work.** The visual pass surfaced two real bugs: the in-app channel logs every tool call
+  (like Discord) but the agent-call log was mounted `:ro` (→ `Read-only file system`), and AppFlowy was unreachable
+  from the container (growth-os/.env `localhost:8081` = the container, not the host). Fixed: log mount `:rw`;
+  `APPFLOWY_BASE_URL=host.docker.internal:8081` (the Ollama pattern). Verified live: `stage_card -> Ready`,
+  `move_item -> Backlog`, HTTP 200, board reverted.
+- **Observable agent chain.** `load_tool_layer(surface)` records each channel's calls under its own surface; in-app
+  calls now show as `app` in Activity (verified). `/api/action` routed through the logged dispatch (was bypassing
+  the log).
+- **Adjust any board, see it at once.** `board_view` carries each board's full legal statuses; the card drawer
+  gains a "Move to…" dropdown (→ `move_item`) for EVERY board + quick verb buttons for cards/todos. `/api/boards/live`
+  (console-only) reads AppFlowy live so a write reflects immediately; the drawer refreshes after each action.
+- **Chat polish.** Cleaner tool-call rendering (verb + arg) + a clear button. `test_agent_kanban_ui` 14/14; ruff
+  clean; SPA recompiled clean (caught a missing import before merge).
+
+### 2026-06-13 — agent kanban surface: Phase 6.4–6.6 (the console becomes a channel — chat, writes, streaming, SMS)
+
+- **In-app chat + governed writes + model pick (6.4).** The UI is now a first-class **channel**: `/api/chat`
+  embeds the same `GatewayCore` Discord uses, so you talk to the agent in-app and it moves/assigns tasks through
+  the **governed action layer**; `/api/action` exposes the governed verbs directly (card action buttons). You
+  **pick the model role per turn** (validated against `models.yaml` — no free-form model). Gated by
+  `KANBAN_UI_CHAT_ENABLED`: off ⇒ the read-only board deployment holds **no creds**; on ⇒ the full console mounts
+  growth-os + `.env` (the trust fork). **L3/L4 approve/kill never reach the browser** — the action verbs refuse
+  Approved structurally. **Live-verified**: the in-app agent answered "1 mission awaiting approval" correctly from
+  the injected board state, and `approve_card` was refused (400).
+- **Live streaming (6.5).** New `GatewayCore.run_turn_events` async-generator + `/api/chat/stream` (SSE) stream
+  each step — round / tool call / tool result / final — so you watch the LLM work live. **Verified**: events
+  stream as they happen.
+- **SMS + multi-channel (6.6).** New `channels/sms.py` (Twilio webhook → `GatewayCore` → REST reply); `sms` added
+  to the `ChannelSpec` transport literal (the runner auto-dispatches it); a disabled `sms-main` in `channels.yaml`.
+  Agents are now reachable from Discord/Slack/Telegram/WhatsApp/**SMS** + **in-app**. **Phone access** = the
+  responsive console over Tailscale (6.1). SMS needs Twilio creds + a public webhook to run (like WhatsApp).
+- **Standards held:** writes governed (no Approved/L3/L4 in the browser); model list + router data-derived from
+  config; chat gated so the secure read-only default holds no creds; SSE errors surfaced as events, never
+  swallowed; fail-loud throughout. `test_agent_kanban_ui` 19/19; `make validate` green; ruff clean; SPA recompiled
+  clean. Remaining polish (tracker §8): per-board move UI for the long-tail boards, token-level streaming, SMS
+  live test once Twilio creds exist.
+
+### 2026-06-13 — agent kanban surface: Phase 6.1–6.3 (operator console — redesign, deep detail, router)
+
+- **Console redesign (6.1).** The UI is now a left-nav multi-view console — **Missions · Boards · Router ·
+  Observability · Activity** — responsive for phone (`@media` collapses the nav, stacks columns, full-width
+  drawer), with per-view filtering (free-text + risk). Rebuilt + live on `127.0.0.1:8787`.
+- **Deep detail (6.2).** `actions.board_view` now carries every scalar card field; clicking ANY item opens a
+  drawer — missions show status/risk + the event timeline, AppFlowy cards show **all fields** (where it is, what
+  it is). Snapshot regenerated against live AppFlowy (cards carry CardKey/Section/Risk/Acceptance/Action/…).
+- **Router / agent-chain (6.3).** New `/api/models` reads `models.yaml` + `judges.yaml` (configs mounted RO) —
+  live: **7 roles, 2 executors, 9 judge stages**, all data-derived (no hardcoded model names). The mission drawer
+  surfaces the per-mission routing chain from `model_call`/`judge_verdict` Ledger events.
+- **Standards:** still **read-only** (writes/chat are the planned 6.4 fork); router/lanes data-derived from real
+  config + real events; fail-loud (missing config/snapshot = loud 503). `test_agent_kanban_ui` 12/12; ruff clean;
+  SPA recompiled clean (caught + fixed two TS strict errors before merge). Plan for 6.4 (in-app chat + governed
+  writes + model pick), 6.5 (live streaming), 6.6 (SMS/multi-channel): tracker §8.
+
+### 2026-06-13 — agent kanban surface: Phase 5 (parity — AppFlowy breadth + Cline depth)
+
+- **Parity review.** Measured the surface against the two yardsticks (AppFlowy availability+databases,
+  Cline look&feel for agent use) and closed the gaps. Full review + per-use-case verdicts in
+  [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) §6.
+- **5.1 — regression fixed.** Dropping `set_status` (Phase 2) had removed the agent's ability to triage
+  papers/repos/signals and update library/lessons status. New title-addressed `move_item(database, title,
+  status)` restores action on **every** board with statuses — loud validation, harness owns the key, Approved
+  still structurally refused. Dedicated verbs remain the ergonomic path for cards/todos. (`test_actions_intent` 13/13.)
+- **5.2 — AppFlowy database breadth in the UI, with NO creds in the UI container.** `actions.board_view()` +
+  `board_state.all_boards_json()` produce a structured read of every board; `make kanban-board-snapshot` runs on
+  the **worker** (where AppFlowy creds live) and writes `generated/board-snapshot.json`; the UI mounts that file
+  **read-only** and serves `/api/boards` (frontend board tabs: mission_intake/todos/dags + research inboxes).
+  Snapshot freshness shown; missing snapshot = loud 503. Resolves the creds-in-container tradeoff (same pattern as
+  the agent-call log). Per-board fail-loud.
+- **5.3 — Cline depth.** `/api/activity` (recent agent actions, newest-first, from the agent-call log) drives an
+  activity feed; mission cards are now clickable → a **detail drawer** (`/api/mission/{id}` status/risk/events with
+  per-kind tags). (`test_agent_kanban_ui` 10/10.)
+- **Standards held:** every read fail-loud; snapshot per-board errors recorded never hidden; UI stays read-only
+  (no write path); no new deps. `make validate` + `make kanban-surface-validate` + full pytest + ruff green.
+- **Live-verified.** Snapshot CLI now self-bootstraps growth-os (sys.path + CWD at the growth-os root) so
+  `make kanban-board-snapshot` produces real data — ran it: 6 boards, 0 errors (dags 87, papers 68, repos 55,
+  signals 56, cards 12, todos 8). Freshness via a **user-run** schtasks/cron (agents don't self-schedule, §13).
+  `docker compose --profile ui up agent-kanban-ui` built (SPA compiled) + healthy on 127.0.0.1:8787; all
+  `/api/*` endpoints returned live data and `/` served the built SPA. Only a human eyeball at the URL remains.
+
+### 2026-06-13 — agent kanban surface: Phase 4 (first-party Cline-styled web UI)
+
+- **The styling, combined.** New optional service `services/agent_kanban_ui/` fills the
+  already-budgeted Phase-4 WebUI slot — repurposed from the deferred Hermes WebUI. A FastAPI
+  backend serves a React/Vite/TypeScript SPA (Cline-style dark board: missions grouped into
+  status columns with risk-colored cards + an observability panel) **single-container** (the SPA
+  is built in a node stage and served as static assets), behind loopback/Tailscale/password.
+- **Read-only by construction.** It reads the **Ledger** (missions = the execution kanban) and the
+  **agent-call log** (metrics, via the same `command_center.kanban.metrics` as `make kanban-digest`,
+  so UI and CLI can't disagree). There is **no write path**: approving/killing stays in the signed
+  Ledger endpoints (the HMAC secret is never given to the UI), so `external_write_policy:
+  governed_by_ledger` holds by construction. AppFlowy stays the human staging surface. Ledger-down
+  is a loud 502, never an empty board.
+- **Wiring.** `configs/ui.yaml` block + `WebUIConfig` field renamed `hermes_webui` → `agent_kanban_ui`
+  (contract unchanged); `docker-compose.yml` service behind `profiles: ["ui"]` (loopback-bound,
+  agent-call log mounted read-only, healthcheck); multi-stage Dockerfile (node build → python serve).
+  Backend `tests/test_agent_kanban_ui.py` 5/5 (grouping, unknown-status disclosure, 502-not-empty,
+  metrics reuse, read-only). `make validate` + `make ui-validate` green; ruff clean. The SPA build
+  runs in the Docker node stage (authored this session; not npm-built here).
+
+### 2026-06-13 — agent kanban surface: Phases 1–3 (the function half — harness-owned state, intent verbs, observability)
+
+- **Phase 1 — the harness owns board state.** New `src/command_center/channels/board_state.py`
+  re-injects the live board (open cards/todos/missions, grouped by column, overflow disclosed) into
+  BOTH agent loops every turn ([channels/core.py](../src/command_center/channels/core.py),
+  growthos `assistant.py`) so the model never calls `list_*` just to remember the board — the Cline
+  focus-chain pattern. Fail-loud: an unreadable source renders an explicit `ERROR:` line, never an
+  empty/stale block. Cadence/size/fuzzy knobs are externalized to a new validated `configs/agent_surface.yaml`
+  (`AgentSurfaceConfig`, in `make validate`). `tests/test_board_state.py` 7/7.
+- **Phase 2 — intent verbs replace generic CRUD.** `actions.py` gains `stage_card/block_card/reject_card`
+  and `start_todo/finish_todo/block_todo`, addressed by title (the harness owns the board, the canonical
+  column, and key resolution — `_resolve()` fuzzy-matches with a data-derived ratio and returns candidates
+  on a miss, never a silent guess). Generic `set_status` dropped from BOTH agent surfaces (assistant
+  `TOOL_FNS` + MCP registrations); it stays for the bridge/scripts. Approved remains structurally human-only.
+  `tests/test_actions_intent.py` 7/7.
+- **Phase 3 — observability + data-derived tuning.** The existing agent-call log (`growthos.observability`
+  → `_export/agent_calls.jsonl`) is reused as the event spine — no parallel store. New
+  `src/command_center/kanban/` computes real metrics (redundant-call rate, intent-verb adoption, error/latency),
+  a champion–challenger `fuzzy_min_ratio` learner that **abstains below the decision floor** (mirrors the
+  discovery scan's `acceptance.py`; temporal split, no leakage), a Markdown digest, and a blocking N/N gate.
+  `make kanban-digest` + `make kanban-surface-validate` (6/6 PASS — the gate caught a real verb→terminal-column
+  bug before merge). `tests/test_kanban_surface.py` 9/9.
+- **Standards.** All knobs in `configs/agent_surface.yaml` (no literals); decisions data-derived or honestly
+  abstaining (no fabricated cadence); fail-loud (no silent fallbacks); no leakage (pre-decision features only);
+  AppFlowy/Ledger keep write-authority. `make validate` green · full suite green · ruff clean · mypy
+  baseline-consistent. Tracker: [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+  **Phase 4 (the first-party Cline-styled web UI in the repurposed WebUI slot) is the remaining, separable lift.**
+
+### 2026-06-13 — agent kanban surface: Phase 0 (decision + tracker + doc reconcile)
+
+- **Direction set.** The fix for "agents don't drive the AppFlowy board well" is to invert who owns board
+  state (adopt Cline's harness-owned-state + intent-verb pattern), keep AppFlowy/Ledger as the data/authority
+  layer, add a data-derived observability lane, and put a first-party Cline-styled board + observability UI in
+  the **already-budgeted** Phase-4 WebUI slot (`configs/ui.yaml` / `WebUIConfig`) — repurposed from the
+  now-deferred Hermes WebUI/Kanban. Not a §13 "another abstraction layer": it fixes a failure actually hit and
+  adds no competing authority boundary. Ordered plan + standards-conformance matrix:
+  [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+- **Doc reconcile.** Stale Hermes-WebUI references corrected to the first-party repurpose:
+  `configs/ui.yaml` comment, [ui-options.md](ui-options.md) dashboard table, [ecosystem.md](ecosystem.md)
+  banner. The `WebUIConfig` contract (loopback/password/`governed_by_ledger`/single-container) is unchanged;
+  the block key renames to `agent_kanban_ui` in Phase 4. Docs-only; no code/config-value change yet.
+
+### 2026-06-13 — Cline CLI + Ollama evaluated → DEFER (watch-list)
+
+- **Cline CLI (Ollama `ollama launch cline`) assessed against the stack → DEFER.**
+  Cline is an *executor* (read repo / edit files / run commands / diffs, plus a
+  local per-task kanban) — a peer to Claude Code and Codex CLI, **not** to
+  Command Center. As a replacement for the control plane it's a strict
+  downgrade: it brings none of the L0–L4 wall, Judge Gate, Ledger/leases,
+  one-mission→one-worktree isolation, proactive/RCA lane, or the kanban→Ledger
+  bridge (its kanban has no approval wall). As an alternate *executor* it's only
+  marginally interesting and is Phase-4 "only when a need is actually hit"
+  territory — Claude Code already covers primary coding, the `coder` alias covers
+  local. Its `--model …:cloud` path would also break the no-provider-keys,
+  fail-closed local-only contract. Less differentiated than the Hermes spike,
+  which was already deferred — so an easier DEFER by the same yardstick. Recorded
+  in §13. No code, config, or dependency change.
+
+### 2026-06-13 — agent abilities verified + centralized agent-call logging
+
+- **One action layer, three surfaces, all logged.** Confirmed the Discord agent, the MCP/Claude
+  agent, and the local `chat.bat` assistant all dispatch through the *same* 20-tool layer
+  (`growthos/actions.py`); the model picks the tool. New `growthos/observability.py` wraps every
+  surface's dispatch so **every tool call is recorded** (surface · tool · truncated/secret-safe
+  args · ok/error · latency) to one JSONL; `python -m growthos.observability` is the live monitor.
+- **Abilities proven.** `book_note` exercised live on *Alan Turing: The Enigma* (5 dated notes,
+  persisted + read back). New `scripts/test_abilities.py` drives each query tool ≥5 ways and the
+  approval wall ≥5 ways through the logged dispatch — **25/25 PASS, 9 tools routed, every Approved
+  attempt refused**. Hermetic test `tests/test_agent_observability.py` (4/4).
+- **Board layout — resolved (no destructive flatten).** The queue→in-progress→complete flow is
+  delivered by the agent-kanban-surface session as lifecycle *intent verbs* (`stage_card`,
+  `start_todo`, `finish_todo`, `block`/`reject`) over the existing statuses, so the semantic boards
+  keep their lifecycles and the wall is now *structural* — there is **no `approve` verb**. Verified:
+  `test_actions_intent.py` (14) + `test_abilities.py` (23/23: query tools routed, wall holds, all
+  24 tools logged).
+- **Self-improve daily → human-gated Kanban card.** New `discovery/kanban.py` +
+  `improvement scan --kanban` drafts the top findings as `mission_intake` Backlog cards (Section =
+  Command Center, risk mapped from the finding's tier to L0–L4, fails loud on an unmappable tier —
+  no fallback); the daily DAG drafts them each morning behind `SELF_IMPROVEMENT_KANBAN` (off by
+  default). Observer-only — a human drags to Approved → the bridge opens a gated mission → applied.
+  Proven live (a "remove swallowed exceptions" card on the board). Tests: `test_discovery_kanban.py`
+  + `test_dag_support.py`; tracker [SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md).
+- **Multi-turn + cross-conversation memory — proven & assessed.** A live 6-message conversation
+  through the shared `GatewayCore` (`model: chat` → `qwen3:30b`): read 13 cards → drafted a card →
+  **recalled it with no tool call** (within-conversation memory) → "stage *that* card" → "reject it"
+  (context resolution + the structural wall, no `approve` verb), then a *fresh* conversation id that
+  could **not** recall the draft and answered from the re-injected board instead. That pins the model:
+  board/work state is durable & shared across conversations (via `board_state` over one AppFlowy
+  board), but conversation history is per-conversation `deque(12)`, in-memory, lost on restart. All
+  four channel adapters (discord/slack/telegram/whatsapp) wire to this same core + `chat` role, so the
+  proof covers every channel; only Discord is live. Assessment + tiered, data-derived recommendation
+  (instrument first via the agent-call log; `memory_state` re-injection if cross-chat reference shows
+  up; persisted histories for restart-durability — no leakage, no hardcoded thresholds):
+  [agent-multiturn-and-memory.md](agent-multiturn-and-memory.md).
 
 ### 2026-06-13 — OKF knowledge bundle + dashboards on the tailnet
 

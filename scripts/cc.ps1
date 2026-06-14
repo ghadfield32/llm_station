@@ -218,6 +218,15 @@ switch ($Task.ToLowerInvariant()) {
   "usage-report" {
     Invoke-Python "-m" "command_center.cli.usage_digest" "--output" "generated/usage-digest.md"
   }
+  "kanban-digest" {
+    Invoke-Python "-m" "command_center.cli.kanban_surface" "digest" "--output" "generated/kanban-digest.md"
+  }
+  "kanban-surface-validate" {
+    Invoke-Python "-m" "command_center.cli.kanban_surface" "validate"
+  }
+  "kanban-board-snapshot" {
+    Invoke-Python "-m" "command_center.cli.kanban_surface" "board-snapshot" "--output" "generated/board-snapshot.json"
+  }
   "live-smoke" {
     $SmokeArgs = @("-ExecutionPolicy", "Bypass", "-File", "scripts/live_smoke.ps1")
     if ($Role) { $SmokeArgs += @("-TriageAlias", $Role) }

@@ -325,7 +325,9 @@ COMMANDS: dict[str, tuple] = {
                                    "generated/usage-digest.md", *a), "spend + mission summary"),
     # channels
     "gateway": (lambda a: pym("command_center.channels", *a), "run enabled chat channels (configs/channels.yaml)"),
+    "notify": (lambda a: pym("command_center.cli.notify", *a), "push a proactive digest (brief + active missions) to Discord (--dry-run)"),
     "kanban-bridge": (lambda a: pym("command_center.cli.kanban_bridge", *a), "AppFlowy cards -> Ledger missions"),
+    "linkedin-publish": (lambda a: pym("command_center.cli.linkedin_publish", *a), "publish approved+due LinkedIn content rows (--login | --apply)"),
     # appflowy
     "appflowy-init": (lambda a: pym("command_center.cli.appflowy_init"), "scaffold AppFlowy + growth-os .env"),
     "appflowy-up": (c_appflowy_up, "start the AppFlowy board server + curator"),

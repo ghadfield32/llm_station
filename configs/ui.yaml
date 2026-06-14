@@ -1,17 +1,23 @@
 schema_version: command-center.ui.v1
 
-# Human UI surfaces. The WebUI (nesquena/hermes-webui) is an optional Phase-4
-# convenience layer over the SAME Hermes agent — it is NOT the policy layer.
-# External writes still flow through the Ledger/Judge Gate/GitHub gates; the
-# contract forbids declaring otherwise, and forbids public exposure without a
-# password. Edit this file, then `make ui-validate`.
+# Human UI surfaces. The Phase-4 WebUI slot is an optional convenience layer —
+# it is NOT the policy layer: external writes still flow through the Ledger/Judge
+# Gate/GitHub gates, the contract forbids declaring otherwise, and forbids public
+# exposure without a password. Edit this file, then `make ui-validate`.
+#
+# 2026-06-13: this slot hosts the FIRST-PARTY agent kanban + observability surface
+# over AppFlowy/Ledger (services/agent_kanban_ui), repurposed from the deferred
+# Hermes WebUI (see MASTER.md change log — Cline/Hermes DEFER). Tracker:
+# docs/backend/projects/AGENT_KANBAN_SURFACE.md. The WebUIConfig contract
+# (loopback/password/governed-by-ledger guarantees) is unchanged — the board is
+# read-mostly and every write still flows through the action layer / Ledger gates.
 
-hermes_webui:
+agent_kanban_ui:
   enabled: false                       # turn on in Phase 4, after the core works
   host: 127.0.0.1                      # loopback only; reach over Tailscale
   port: 8787
   password_required: true             # mandatory once host != loopback
-  container_mode: single              # single avoids the #681 two-container tool-location limit
+  container_mode: single              # single-container: SPA built + served by the FastAPI backend
   workspace_mount: /workspace
-  external_write_policy: governed_by_ledger   # never webui_direct
+  external_write_policy: governed_by_ledger   # never webui_direct — the UI cannot set Approved
   shell_approval_policy: human_only_for_dangerous

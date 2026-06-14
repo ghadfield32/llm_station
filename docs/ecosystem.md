@@ -1,5 +1,13 @@
 # Ecosystem — Hermes, Ollama, WebUI, and what's load-bearing
 
+> **Reconciliation note (2026-06-13).** Hermes Agent was **evaluated → DEFER** (MASTER.md change log),
+> and the Cline CLI was likewise deferred. As a result the **WebUI/Kanban sections below are historical**:
+> the Phase-4 WebUI slot (`configs/ui.yaml`) is being repurposed from `nesquena/hermes-webui` + Hermes
+> Kanban to a **first-party agent kanban + observability** surface over AppFlowy/Ledger. The contract
+> guarantees (loopback/Tailscale, password, `governed_by_ledger`, single-container) are unchanged. Current
+> direction + tracker: `docs/backend/projects/AGENT_KANBAN_SURFACE.md`. The Ollama gotchas and the
+> `local-ai-server` verdict below still apply.
+
 This answers three questions: how Ollama-Hermes relates to Hermes open source, whether
 `nesquena/hermes-webui` fits (and works with the Ollama-launched Hermes), and whether
 `RamiKrispin/local-ai-server` helps. Short version: **hybrid ecosystem, nothing replaced.**

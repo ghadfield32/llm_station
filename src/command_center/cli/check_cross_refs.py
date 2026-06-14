@@ -27,6 +27,31 @@ def check_judge_routing(judges: dict, roles: set) -> list:
     return problems
 
 
+def check_tool_safe_roles(models: dict, channels: dict) -> list:
+    """A TOOL-USING role must not be backed by a model whose Ollama tool parser
+    drops a call the model prefixes with prose. Only the qwen3-coder family is
+    known-broken: it ships a native RENDERER/PARSER (its Go template has no tool
+    handling) and leaks such calls to the user as raw `<function=..>` XML
+    (reproduced 7/8; MASTER.md §14, 2026-06-13). Tool users in this system: every
+    chat channel's role, plus `planner` (Hermes tool-calls through it,
+    HERMES_DEFAULT_MODEL). qwen3 / devstral parse tool calls robustly. Returns a
+    list of tool-unsafe-routing messages (empty = all tool roles are safe)."""
+    role_models = {role: [c.get("model", "") for c in cands]
+                   for role, cands in (models.get("roles") or {}).items()}
+    tool_using = {ch.get("model") for ch in channels.get("channels", [])}
+    tool_using.add("planner")                 # Hermes' default tool-calling model
+    problems = []
+    for role in sorted(r for r in tool_using if r):
+        bad = sorted({m for m in role_models.get(role, [])
+                      if m.startswith("qwen3-coder")})
+        if bad:
+            problems.append(
+                f"role '{role}' is used for tool-calling but is backed by {bad}, "
+                f"whose Ollama parser drops prose-prefixed tool calls; route it to "
+                f"a tool-robust model (qwen3/devstral — configs/models.yaml `chat:`)")
+    return problems
+
+
 def main() -> int:
     targets = yaml.safe_load(open("configs/targets.yaml"))
     proactive = yaml.safe_load(open("configs/proactive.yaml"))
@@ -86,6 +111,12 @@ def main() -> int:
             print(f"  DANGLING: channel '{ch.get('name')}' uses model '{ch.get('model')}' "
                   f"which is not a role in models.yaml")
             ok = False
+
+    # a tool-using role must not be backed by a model whose Ollama tool parser
+    # drops prose-prefixed calls (see check_tool_safe_roles)
+    for msg in check_tool_safe_roles(models, channels):
+        print(f"  TOOL-UNSAFE: {msg}")
+        ok = False
 
     # every judge's role_alias + escalation_role must route to a real role, so the
     # cheap->strong / stuck-escalation chain can never point at a nonexistent model

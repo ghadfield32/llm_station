@@ -8,6 +8,7 @@ a slug derived from the title (recomputed here, callers just pass titles).
 """
 from __future__ import annotations
 
+import difflib
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -110,6 +111,178 @@ def set_status(database: str, key: str, status: str) -> str:
             key = _slug(prefix, key)
     n = client().upsert(database, [{"pre_hash": key, "cells": {"Status": status}}])
     return f"updated {len(n)} row(s) in {database}"
+
+
+# --------------------------------------------------------- intent verbs --
+# Agents move work by INTENT, not by typing a database name + an exact column
+# string. Each verb addresses a row by its human title; the harness owns the
+# (board, column, key) bookkeeping. This is the agent-facing surface (set_status
+# stays for the bridge/scripts but is not exposed as an agent tool). Approved is
+# never a verb — staging to Approved is a human drag, structurally.
+
+def _row_key(database: str, cells: dict) -> str:
+    """The pre_hash a row was created with, per board — the only valid upsert key."""
+    if database == "mission_intake":
+        return cells.get("CardKey") or _slug("card", cells.get("Name", ""))
+    prefix = {"todos": "todo", "library": "book",
+              "lessons": "lesson", "notes": "note"}.get(database)
+    if prefix:
+        return _slug(prefix, cells.get("Name", ""))
+    return cells.get(KEY_FIELD.get(database, "URL"), "")
+
+
+def _resolve(database: str, title: str):
+    """Resolve a human title to (key, name, cells). An exact (case-insensitive)
+    name wins; otherwise the single best fuzzy match at/above the configured ratio
+    wins. If nothing is confident or two rows tie above the ratio, return a string
+    listing candidates so the agent retries with an exact title — never a silent
+    best-guess. The ratio is data-derived (configs/agent_surface.yaml), not a literal."""
+    rows = [c for c in _rows(database) if c.get("Name")]
+    for c in rows:
+        if c.get("Name", "").lower() == title.lower():
+            return _row_key(database, c), c["Name"], c
+    from command_center.channels.board_state import load_agent_surface_config
+    ratio = load_agent_surface_config().addressing.fuzzy_min_ratio
+    scored = sorted(
+        ((difflib.SequenceMatcher(None, title.lower(), c["Name"].lower()).ratio(), c)
+         for c in rows), key=lambda t: t[0], reverse=True)
+    if scored and scored[0][0] >= ratio and (
+            len(scored) == 1 or scored[1][0] < ratio):
+        best = scored[0][1]
+        return _row_key(database, best), best["Name"], best
+    near = [c["Name"] for _, c in scored[:5]]
+    return (f"no confident match for {title!r} in {database}; candidates: "
+            f"{near or '(board empty)'} - retry with an exact title")
+
+
+def _move(database: str, title: str, status: str, note: str = "") -> str:
+    """Resolve `title` and set its Status (+ append a dated note, clobber-safe)."""
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, cells = resolved
+    new_cells: dict = {"Status": status}
+    if note:
+        existing = cells.get("Notes", "") or ""
+        new_cells["Notes"] = f"{existing}\n[{date.today().isoformat()}] {note}".strip()
+    client().upsert(database, [{"pre_hash": key, "cells": new_cells}])
+    return f"{name!r} -> {status}" + (f" (noted: {note})" if note else "")
+
+
+def stage_card(title: str) -> str:
+    """Stage a mission card to Ready (the human then drags Ready->Approved to
+    dispatch a gated Ledger mission). Address it by its title."""
+    return _move("mission_intake", title, "Ready")
+
+
+def block_card(title: str, reason: str = "") -> str:
+    """Mark a mission card Blocked, recording why. Address it by its title."""
+    return _move("mission_intake", title, "Blocked", note=reason)
+
+
+def reject_card(title: str, reason: str = "") -> str:
+    """Reject a mission card (won't be done), recording why. By title."""
+    return _move("mission_intake", title, "Rejected", note=reason)
+
+
+def start_todo(task: str) -> str:
+    """Move a todo to In Progress. Address it by its task title."""
+    return _move("todos", task, "In Progress")
+
+
+def finish_todo(task: str) -> str:
+    """Mark a todo Done. Address it by its task title."""
+    return _move("todos", task, "Done")
+
+
+def block_todo(task: str, reason: str = "") -> str:
+    """Mark a todo Blocked, recording why. Address it by its task title."""
+    return _move("todos", task, "Blocked", note=reason)
+
+
+def move_item(database: str, title: str, status: str) -> str:
+    """Move ANY board row to a new status by its title — the long-tail boards
+    without a dedicated verb: papers/repos/signals triage, library, lessons. The
+    harness resolves the row and validates the status against that board LOUDLY,
+    so the model never has to know row keys. For mission cards use stage/block/
+    reject_card; for todos use start/finish/block_todo; for DAGs use update_dag."""
+    allowed = STATUSES.get(database)
+    if not allowed:
+        return (f"unknown board {database!r}; boards with statuses: "
+                f"{sorted(STATUSES)}")
+    if database == "mission_intake" and status == "Approved":
+        return ("refused: approving mission cards is human-only - drag the card "
+                "to Approved on the board. Use stage_card to move it to Ready.")
+    if status not in allowed:
+        return f"invalid status {status!r} for {database}; allowed: {allowed}"
+    return _move(database, title, status)
+
+
+# Compact per-board meta shown on a UI card (besides the title + status column).
+_BOARD_META = {
+    "mission_intake": ["Risk", "Section", "Priority"],
+    "todos": ["Area", "Priority"],
+    "dags": ["Schedule"],
+    "papers": ["Score"], "repos": ["Score"], "signals": ["Score"],
+    "library": ["Tier"], "lessons": ["Domain"],
+}
+
+
+def board_view(database: str) -> dict:
+    """Read-only structured view of an ENTIRE board: every row grouped by its
+    Status into the board's canonical columns (an unfamiliar status is still
+    shown, never dropped). For a UI/snapshot — agents use list_*/the verbs."""
+    cols = STATUSES.get(database)
+    if not cols:
+        return {"board": database,
+                "error": f"unknown board; have {sorted(STATUSES)}"}
+    groups: dict[str, list] = {c: [] for c in cols}
+    metas = _BOARD_META.get(database, [])
+    for c in _rows(database):
+        st = c.get("Status", "") or "(none)"
+        meta = " · ".join(str(c[m]) for m in metas if c.get(m))
+        # full scalar fields travel with the card so the UI can show ALL of them
+        # in the detail drawer (where it is, what it is) — not just title + meta.
+        fields = {k: v for k, v in c.items()
+                  if isinstance(v, (str, int, float)) and v != "" and k != "Name"}
+        groups.setdefault(st, []).append(
+            {"title": c.get("Name", ""), "meta": meta, "fields": fields})
+    return {"board": database,
+            "statuses": cols,   # full legal columns — the UI's "Move to…" targets
+            "columns": [{"name": col, "cards": rows}
+                        for col, rows in groups.items() if rows]}
+
+
+# Boards read_item can fetch a row from: every status board plus `notes` (a real
+# content board that has rows but no Status workflow, so it's absent from STATUSES).
+# Derived from the canonical status set, not a hand-listed literal.
+READABLE_DBS = set(STATUSES) | {"notes"}
+
+
+def read_item(database: str, title: str) -> dict | str:
+    """Full detail of ONE row so you can actually explain or triage it — a paper's
+    abstract, a repo's summary, its score and 'suggested for' note, status, url.
+    Returns EVERY non-empty field of the matching row (read-only; nothing is
+    truncated, so you see the real content). Match is by title, case-insensitive;
+    on a miss the closest titles come back so you retry with an exact one — never a
+    silent best-guess. database: papers, repos, signals, library, lessons, todos,
+    dags, mission_intake, or notes. Find the title first with search/list_inbox if
+    you don't have it."""
+    if database not in READABLE_DBS:
+        return f"unknown board {database!r}; have {sorted(READABLE_DBS)}"
+    rows = [c for c in _rows(database) if c.get("Name")]
+    match = next((c for c in rows
+                  if c.get("Name", "").lower() == title.lower()), None)
+    if match is None:
+        scored = sorted(
+            ((difflib.SequenceMatcher(None, title.lower(),
+                                      c["Name"].lower()).ratio(), c) for c in rows),
+            key=lambda t: t[0], reverse=True)
+        near = [c["Name"] for _, c in scored[:5]]
+        return (f"no item titled {title!r} in {database}; closest: "
+                f"{near or '(board empty)'} - retry with an exact title")
+    return {k: v for k, v in match.items()
+            if isinstance(v, (str, int, float)) and str(v).strip()}
 
 
 # ------------------------------------------------------------------ todos --

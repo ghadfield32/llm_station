@@ -86,14 +86,25 @@ def scan_one(spec: dict, registry: ExperimentRegistry, fetch: Fetch | None = Non
 
 def finish(outcome_dicts: list[dict], registry: ExperimentRegistry, *, date: str, now_iso: str,
            apply: bool = True, method: str = "wsjf", max_cards: int = 20,
-           report_path: str = DEFAULT_REPORT_PATH) -> dict:
+           report_path: str = DEFAULT_REPORT_PATH, draft_kanban: bool = False,
+           kanban_top: int = 3, card_drafter: Callable[..., str] | None = None) -> dict:
     """Stages 2–5 over the mapped scan outcomes: classify → rank → draft Proposed cards →
-    emit one report. Observer-only — the only writes are through the ObserverCharter."""
+    emit one report. Observer-only — the only writes are through the ObserverCharter.
+
+    When `draft_kanban` is set (and applying), the top findings are also drafted as human-gated
+    `mission_intake` cards (Backlog) so the daily DAG "reports + lets you apply if approved". The
+    card drafter is injectable (tests pass a fake); it defaults to the live add_mission_card."""
     outcomes = [ScanOutcome.from_dict(d) for d in outcome_dicts]
     charter = ObserverCharter(registry, report_path=report_path)
     pipe = ScanPipeline(charter, method=method, max_cards=max_cards)
     report = pipe.run_from_outcomes(outcomes, date=date, now_iso=now_iso, apply=apply)
-    return report.to_dict()
+    result = report.to_dict()
+    if apply and draft_kanban:
+        from .kanban import draft_self_improvement_cards, growthos_card_drafter
+        drafter = card_drafter if card_drafter is not None else growthos_card_drafter()
+        cards = draft_self_improvement_cards(report, draft_card=drafter, top_n=kanban_top)
+        result["kanban_cards"] = [c["experiment_id"] for c in cards]
+    return result
 
 
 def offline_specs() -> list[dict]:

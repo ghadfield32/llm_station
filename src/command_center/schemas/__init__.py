@@ -8,10 +8,12 @@ from .contracts import (
     ProactiveCheck, SelfImprovementScan, ProactiveConfig,
     RepoTarget, DagTarget, DataAssetTarget, ServiceTarget, TargetsConfig,
     KanbanSource, KanbanSection, KanbanConfig,
+    ContentSource, ContentStatuses, LinkedInApi, LinkedInAccount, ContentConfig,
     ToolPolicy, ToolsConfig,
     EvalCase, EvalsConfig, EvalSuiteRef,
     StandardsProfile, SkillUpdatePolicy, StandardsConfig, ScoutSpec,
     WebUIConfig, UIConfig,
+    BoardStateKnobs, AddressingKnobs, TuningKnobs, AgentSurfaceConfig,
     ChannelSpec, ChannelsConfig,
     MissionOpen, JudgeVerdict,
 )
@@ -25,11 +27,13 @@ CONFIG_CONTRACTS = {
     "configs/proactive.yaml": ProactiveConfig,
     "configs/targets.yaml": TargetsConfig,
     "configs/kanban.yaml": KanbanConfig,
+    "configs/content.yaml": ContentConfig,
     "configs/tools.yaml": ToolsConfig,
     "configs/evals.yaml": EvalsConfig,
     "configs/standards.yaml": StandardsConfig,
     "configs/ui.yaml": UIConfig,
     "configs/channels.yaml": ChannelsConfig,
+    "configs/agent_surface.yaml": AgentSurfaceConfig,
 }
 
 # The improvement loop's contracts. Registered here so the same `make validate` /

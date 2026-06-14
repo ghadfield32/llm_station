@@ -6,6 +6,51 @@ liners. Newest notes at the top of each topic. Full design lives in
 fast "has this been done?" index. Dates are when the line was written.
 
 ## Channels / gateways (Discord, Slack, Telegram, WhatsApp)
+- CAPABILITY 06-13: full-capability pass so the bot works at every tier, not just
+  board hygiene. Scope data-derived (grepped tool usage); repo-work loop was
+  already wired, so only 3 real gaps. Wall intact (bot DRAFTS+MONITORS only).
+- ADD 06-13: `read_item(database, title)` (actions.py + TOOL_FNS) — read-only full
+  detail of ONE row (abstract/score/suggested-for/url) so the bot can EXPLAIN a
+  paper/repo, not just list titles. Exact→else candidates (no silent guess).
+  Verified live: bot called read_item, summarized a paper + flagged betts relevance.
+- ADD 06-13: capability-tiered `build_system` (core.py) — enumerates boards /
+  research / awareness / repo-work tiers + HOW to drive repo work (add_mission_card
+  → Approved drag → gated mission → executor → mission_status). Verified: asked to
+  fix a failing betts DAG, bot drafted a DAGs/betts_basketball card w/ measurable
+  acceptance + L2 + approve-handoff (write intercepted, no junk card).
+- ADD 06-13: `cc notify` / `make notify` (cli/notify.py) — proactive Discord push
+  of brief headline + active Ledger missions (active = board_state.LIVE_COLUMNS,
+  no literal). Fail-loud on missing creds/Ledger. Verified: real 1237-char push.
+- DONE 06-13: `cc notify` schedule DOCUMENTED (run-yourself schtasks/cron one-liner
+  in docs/channels.md, mirrors kanban-bridge/snapshot) — agents don't self-install
+  host persistence (§13), so you run the one command. Only open item is running it.
+- DONE 06-13: `read_item` extended to `notes` (READABLE_DBS = STATUSES|{notes});
+  verified live. kanban.yaml risk strings = NO change: RiskTier values ARE
+  L0_read_only..L4_dangerous, so `L2_local_edits` is canonical (shortening breaks
+  the KanbanSection contract); earlier "tidy" note was speculative.
+- ROOT-CAUSED+FIXED 06-13: Discord replied with raw `<function=..>` XML instead
+  of acting. Cause: channels used role `triage`=qwen3-coder; its Ollama native
+  `PARSER qwen3-coder` DROPS a tool call when the model narrates before it
+  (prose+XML land in `content`, `tool_calls` empty) → `core.py` forwards it.
+  Measured (narration induced): qwen3-coder 7/8 (ollama) + 6/6 (litellm) leak;
+  qwen3:30b 0/8. NOT a LiteLLM bug (passthrough is faithful) — model/parser only.
+- FIX 06-13: new `chat` role (qwen3:30b, tool-robust, off-limits to qwen3-coder)
+  in models.yaml; channels.yaml all `triage`→`chat`; rendered + restarted litellm
+  (`chat` live in /v1/models). Verified e2e via model=chat: 0/4 leak, tools fire.
+- FIX 06-13: `core.py` finals run `_clean()` (strip `<think>`, parity w/ assistant);
+  fail-loud `_leaked_tool_call` tripwire refuses to forward unparsed tool-call
+  markup (logs evidence, returns diagnostic naming cause+fix) — future fragile-model
+  regression is loud, never silent.
+- FIX 06-13: `planner` moved off qwen3-coder → qwen3:30b (+devstral failover) —
+  Hermes (HERMES_DEFAULT_MODEL=planner) tool-calls through it, same parser bug.
+  Scope is data-derived: grepped all model calls — only core.py(chat) + Hermes(planner)
+  pass tools; judge_gate is JSON-mode (no tools); triage/coder/judges keep qwen3-coder.
+- FIX 06-13: `check_cross_refs.check_tool_safe_roles` makes it self-enforcing —
+  `make validate` FAILS if a channel role or `planner` is backed by a qwen3-coder
+  (prefix match). Verified live: model=chat + model=planner 0 leaks / 23 calls.
+  Tests: test_gateway_toolcall.py (5) + test_tool_safe_roles.py (5); validate green.
+  (full suite: 503 pass; test_verifier flakes only under full-suite load — passes
+  in isolation + in a 47-test batch; unrelated, touches no changed code.)
 - DONE 06-13: bot busy rules in `channels/core.py` — one in-flight turn per
   conversation (2nd concurrent msg gets "still working" reply, no history
   corruption / no doubled GPU call) + global `max_concurrency` semaphore

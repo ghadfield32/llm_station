@@ -1,0 +1,4 @@
+{
+  "//": "Project MCP servers for Claude Code. DELIBERATELY NO LinkedIn posting MCP is registered. The ONE sanctioned publish path is command_center.cli.linkedin_publish (official API; personal + org Page; due-time scheduling; durable anti-double-post ledger; board approval gate). An external posting MCP (e.g. souravdasbiswas/linkedin-mcp-server) would be a SECOND publish route that can post personal content WITHOUT completing the AppFlowy In Queue -> In Progress lifecycle, and a second OAuth/token store - both rejected. The stickerdaniel scraper cannot post at all (read-only, account-restriction risk). If conversational control is wanted later, wrap OUR OWN publisher in a thin MCP - never add an independent publisher. Claude Code does not need an MCP to run the publisher: it edits the AppFlowy queue and invokes `cc linkedin-publish`.",
+  "mcpServers": {}
+}

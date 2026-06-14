@@ -5,13 +5,16 @@ All web UIs bind to 127.0.0.1 on the VPS; reach them over **Tailscale** (`http:/
 ## Web dashboards (Tailscale)
 | Service | Port | What you do |
 |---|---|---|
-| Hermes WebUI | 8787 | chat, file browser, approvals — `nesquena/hermes-webui` (MIT, mature); optional Phase 4, governed by `configs/ui.yaml` |
-| Hermes Kanban | (first-party) | multi-agent task board across profiles |
+| Agent Kanban UI | 8787 | first-party Cline-styled board + observability over AppFlowy/Ledger; optional Phase 4, governed by `configs/ui.yaml`. **Read-mostly** — writes flow through the Ledger/action-layer gates; the UI cannot set Approved |
 | Ledger UI | 8091 | missions: status, risk, diffs, leases, approvals, **kill** |
 | LiteLLM Admin | 4000/ui | spend, budgets, rotate virtual keys |
 | Uptime Kuma | 3001 | health of all nodes/services |
 
-> The WebUI auto-detects your `~/.hermes` and uses your existing models — works whether Hermes was installed manually or via `ollama launch hermes`. Run single-container (avoids the #681 two-container tool-location limit), behind Tailscale, with `HERMES_WEBUI_PASSWORD` set. It's a convenience UI, not the policy layer — external writes still go through the Ledger/gates. See `docs/ecosystem.md`.
+> **2026-06-13:** the Phase-4 WebUI slot was repurposed from the deferred Hermes WebUI/Kanban
+> (see MASTER.md change log — Cline/Hermes DEFER) to a **first-party agent kanban + observability**
+> surface over AppFlowy/Ledger. Tracker: `docs/backend/projects/AGENT_KANBAN_SURFACE.md`. It runs
+> single-container behind Tailscale with a password set; it is a convenience UI, **not** the policy
+> layer — external writes still go through the Ledger/gates (`external_write_policy: governed_by_ledger`).
 
 ## From the 5080 laptop (your front end)
 - VS Code Desktop + **Remote Tunnel** into the 4090 worktree — same files the agent edits.

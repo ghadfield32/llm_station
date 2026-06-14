@@ -139,6 +139,58 @@ services:
       judge-gate: { condition: service_started }
     networks: [core]
 
+  # First-party agent kanban + observability UI (configs/ui.yaml: agent_kanban_ui).
+  # OPTIONAL Phase-4 convenience layer — `--profile ui` to start it. READ-ONLY: it
+  # reads the Ledger (missions kanban) + the agent-call log (metrics, mounted RO),
+  # and has no write path. Loopback-bound; reach over Tailscale; put a password in
+  # front before exposing beyond loopback (the contract forbids otherwise).
+  agent-kanban-ui:
+    profiles: ["ui"]
+    build:
+      context: .
+      dockerfile: services/agent_kanban_ui/Dockerfile
+    restart: unless-stopped
+    environment:
+      - LEDGER_BASE_URL=http://ledger:8090
+      - GROWTHOS_AGENT_LOG=/logs/agent_calls.jsonl
+      - KANBAN_BOARD_SNAPSHOT=/snapshot/board-snapshot.json
+      - KANBAN_UI_CONFIGS=/app/configs
+      - LEDGER_UI_URL=${LEDGER_UI_URL:-}
+      # Chat + governed writes turn the UI into a channel. 1 here = full console;
+      # remove it (and the growth-os/.env mounts below) for a creds-free read-only
+      # board deployment. L3/L4 approve/kill never reach here.
+      - KANBAN_UI_CHAT_ENABLED=1
+      - LITELLM_BASE_URL=http://litellm:4000/v1
+      # AppFlowy runs as a separate stack on the HOST (not in this compose), so the
+      # action layer reaches it via host.docker.internal (the Ollama pattern). This
+      # env overrides growth-os/.env's localhost:8081 (growthos Settings: env > .env).
+      - APPFLOWY_BASE_URL=${APPFLOWY_UI_BASE_URL:-http://host.docker.internal:8081}
+    volumes:
+      # the agent-call log: read for metrics AND written by the in-app channel
+      # (every surface logs its own tool calls). RW when chat is on; for a
+      # read-only board deployment this can be :ro (the read-only app never writes).
+      - ./appflowy_kanban/growth-os/_export:/logs
+      # board snapshot produced by `make kanban-board-snapshot` on the worker —
+      # mounted read-only so the UI never holds AppFlowy credentials
+      - ./generated:/snapshot:ro
+      # model lanes + judge stages for the Router view (read-only; no secrets)
+      - ./configs:/app/configs:ro
+      # CHAT/CONSOLE ONLY (remove for read-only): the action layer + GatewayCore.
+      # The trust fork — the container gains AppFlowy creds + the LiteLLM key.
+      # Writes still go through the governed verbs (Approved structurally refused).
+      - ./appflowy_kanban/growth-os:/app/appflowy_kanban/growth-os
+      - ./.env:/app/.env:ro
+    ports: ["127.0.0.1:${KANBAN_UI_PORT:-8787}:8787"]
+    depends_on:
+      ledger: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8787/api/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [core]
+
   # Caddy intentionally omitted — reach everything over Tailscale. If you ever
   # need public URLs, add a caddy service + Cloudflare Access here.
 

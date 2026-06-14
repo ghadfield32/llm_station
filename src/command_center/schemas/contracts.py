@@ -474,6 +474,91 @@ class KanbanConfig(Strict):
         return self
 
 
+# ---- content.yaml ----------------------------------------------------------
+# The LinkedIn content pipeline. Claude Code drafts posts onto per-account
+# AppFlowy boards (config/databases.json); a human approves by dragging In Queue
+# -> In Progress; command_center.cli.linkedin_publish ships approved + due rows
+# to LinkedIn's official Posts API. Same env-key-by-name discipline as
+# KanbanSource / AirflowCfg: secrets live in .env, this only NAMES the keys.
+class ContentSource(Strict):
+    """AppFlowy connection for the content boards (auth + databases.json map)."""
+    kind: Literal["appflowy"] = "appflowy"
+    growthos_root: str = "appflowy_kanban/growth-os"
+    database_map_path: str = "config/databases.json"
+    base_url_env: str = "APPFLOWY_BASE_URL"
+    workspace_id_env: str = "APPFLOWY_WORKSPACE_ID"
+    email_env: str = "APPFLOWY_EMAIL"
+    password_env: str = "APPFLOWY_PASSWORD"
+
+
+class ContentStatuses(Strict):
+    """The three board columns, named here so the publisher holds no string
+    literals. `approved` is the only status the publisher will ship (the human
+    drag into it IS the approval); `done` is stamped back after publish."""
+    queue: str = "In Queue"
+    approved: str = "In Progress"
+    done: str = "Completed"
+
+
+class LinkedInApi(Strict):
+    """Official LinkedIn API endpoints/scopes. `version` is the required
+    LinkedIn-Version header (YYYYMM); it has no default so the live value is
+    always explicit in content.yaml rather than a stale literal in code."""
+    api_base: str = "https://api.linkedin.com"
+    posts_path: str = "/rest/posts"
+    userinfo_url: str = "https://api.linkedin.com/v2/userinfo"
+    auth_base: str = "https://www.linkedin.com/oauth/v2"
+    version: str
+    client_id_env: str = "LINKEDIN_CLIENT_ID"
+    client_secret_env: str = "LINKEDIN_CLIENT_SECRET"
+    redirect_uri_env: str = "LINKEDIN_REDIRECT_URI"
+    token_store: str = "generated/linkedin-token.json"
+    publish_ledger: str = "generated/linkedin-published.json"   # durable dedupe (anti double-post)
+    lock_path: str = "generated/linkedin-publish.lock"          # single-process guard
+    # How many days before the ~60-day access token expires to start warning
+    # loudly (LinkedIn issues no refresh token to standard apps, so a human must
+    # re-run --login). Externalized so the reminder lead time isn't a buried literal.
+    token_warn_days: int = Field(default=14, ge=1)
+    # Least-privilege: only what posting needs. userinfo (for the member URN)
+    # needs openid+profile; member posting needs w_member_social; org posting
+    # needs w_organization_social. No email, no r_*_social (read) scopes.
+    member_scopes: list[str] = ["openid", "profile", "w_member_social"]
+    organization_scopes: list[str] = ["w_organization_social"]
+
+
+class LinkedInAccount(Strict):
+    board: str                                   # AppFlowy board name in databases.json
+    author: Literal["member", "organization"]
+    org_urn_env: str = ""                        # required iff author == organization
+    cadence: Literal["daily"] = "daily"
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.author == "organization" and not self.org_urn_env:
+            raise ValueError(f"account '{self.board}': organization author needs org_urn_env")
+        if self.author == "member" and self.org_urn_env:
+            raise ValueError(f"account '{self.board}': member author must not set org_urn_env")
+        return self
+
+
+class ContentConfig(Strict):
+    schema_version: str
+    source: ContentSource = ContentSource()
+    statuses: ContentStatuses = ContentStatuses()
+    linkedin: LinkedInApi
+    accounts: list[LinkedInAccount] = []
+    dry_run_default: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        boards = [a.board for a in self.accounts]
+        if len(boards) != len(set(boards)):
+            raise ValueError("duplicate account board names")
+        if self.statuses.approved == self.statuses.done:
+            raise ValueError("statuses.approved and statuses.done must differ")
+        return self
+
+
 # ---- tools.yaml ------------------------------------------------------------
 # Explicit tool permissions the judges can cite. One tier owns each action.
 # The same L3/L4 discipline as gates.yaml: dangerous actions are manual-only,
@@ -577,9 +662,11 @@ class EvalsConfig(Strict):
 
 
 # ---- ui.yaml ---------------------------------------------------------------
-# Human UI surfaces (Hermes WebUI + dashboards). The WebUI is a CONVENIENCE layer,
-# never the policy layer: external writes still flow through the Ledger/gates, and
-# the contract forbids exposing it publicly without a password. Phase 4 optional.
+# Human UI surfaces. The Phase-4 WebUI slot now hosts the FIRST-PARTY agent kanban +
+# observability surface over AppFlowy/Ledger (repurposed from the deferred Hermes
+# WebUI — see MASTER.md change log). Still a CONVENIENCE layer, never the policy
+# layer: external writes flow through the Ledger/gates (external_write_policy must
+# stay governed_by_ledger), and public exposure without a password is forbidden.
 class WebUIConfig(Strict):
     enabled: bool = False
     host: str = "127.0.0.1"                        # loopback; reach over Tailscale
@@ -606,7 +693,67 @@ class WebUIConfig(Strict):
 
 class UIConfig(Strict):
     schema_version: str
-    hermes_webui: WebUIConfig = WebUIConfig()
+    agent_kanban_ui: WebUIConfig = WebUIConfig()
+
+
+# ---- agent_surface.yaml -----------------------------------------------------
+# Knobs for the agent kanban surface: how the harness re-injects canonical board
+# state into the agent loop, how it resolves cards by title, and how the cadence
+# learner is bounded. Every value here is externalized so no agent-loop decision
+# is an inline literal — and the cadence is data-derived (the Phase-3 learner in
+# command_center.kanban.tuning takes over from these defaults once it beats them
+# on logged outcomes, abstaining below `tuning.min_decisions`). See
+# docs/backend/projects/AGENT_KANBAN_SURFACE.md.
+BoardName = Literal["mission_intake", "todos", "missions"]
+
+
+class BoardStateKnobs(Strict):
+    """The harness owns board state and re-injects it as a single source of truth
+    each turn (the Cline focus-chain pattern). Fail-loud: a fetch error surfaces
+    into context, never an empty/stale block."""
+    enabled: bool = True
+    # within one user turn, re-inject after this many tool rounds (0 = only at
+    # turn start). The board is always injected at the start of a turn.
+    refresh_every_rounds: int = Field(default=3, ge=0)
+    # rows shown per column/status group; overflow is disclosed explicitly as
+    # "(+N more)" — a bounded view, never a silent truncation.
+    max_items_per_group: int = Field(default=12, ge=1)
+    boards: list[BoardName] = ["mission_intake", "todos", "missions"]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.boards:
+            raise ValueError("board_state.boards must list at least one board")
+        if len(set(self.boards)) != len(self.boards):
+            raise ValueError(f"board_state.boards has duplicates: {self.boards}")
+        return self
+
+
+class AddressingKnobs(Strict):
+    """The harness resolves cards/todos by title (the model never sees row keys).
+    A unique match above the ratio wins; otherwise the agent gets candidates back
+    and must retry — no silent best-guess."""
+    fuzzy_min_ratio: float = Field(default=0.6, gt=0.0, le=1.0)
+
+
+class TuningKnobs(Strict):
+    """Bounds for the cadence learner (command_center.kanban.tuning), mirroring the
+    discovery scan's AcceptanceKnobs: it abstains to the config defaults below the
+    decision floor, splits temporally, and only adopts a learned cadence when it
+    beats the configured one by `min_auc_uplift` on held-out turns."""
+    min_decisions: int = Field(default=40, ge=1)
+    holdout_fraction: float = Field(default=0.3, gt=0.0, lt=1.0)
+    min_auc_uplift: float = Field(default=0.02, ge=0.0)
+    learning_rate: float = Field(default=0.1, gt=0.0)
+    max_iterations: int = Field(default=500, ge=1)
+    l2: float = Field(default=1.0, ge=0.0)
+
+
+class AgentSurfaceConfig(Strict):
+    schema_version: str
+    board_state: BoardStateKnobs = Field(default_factory=BoardStateKnobs)
+    addressing: AddressingKnobs = Field(default_factory=AddressingKnobs)
+    tuning: TuningKnobs = Field(default_factory=TuningKnobs)
 
 
 # ---- standards.yaml ---------------------------------------------------------
@@ -661,7 +808,7 @@ class StandardsConfig(Strict):
 # name; this file only declares which transports are on and which model they speak.
 class ChannelSpec(Strict):
     name: str                                     # unique label, e.g. "discord-main"
-    transport: Literal["discord", "slack", "telegram", "whatsapp"]
+    transport: Literal["discord", "slack", "telegram", "whatsapp", "sms"]
     enabled: bool = True
     model: str                                    # a models.yaml role alias (e.g. "triage")
     max_history: int = Field(default=12, ge=1, le=200)

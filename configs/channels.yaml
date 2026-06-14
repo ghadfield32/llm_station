@@ -9,6 +9,11 @@ schema_version: command-center.channels.v1
 # `model` is a role alias from configs/models.yaml (cross-checked by `make validate`).
 # Turn a channel on by setting enabled: true AND adding its tokens to .env, then
 # `make gateway` (or `make gateway CHANNELS=slack,telegram`).
+#
+# Chat surfaces use the `chat` role, NOT `triage`. `triage` is qwen3-coder, whose
+# Ollama native tool parser drops a tool call when the model narrates before it,
+# leaking raw `<function=..>` XML to the user (verified). `chat` is qwen3 (instruct),
+# whose Ollama template parses tool calls reliably. See configs/models.yaml `chat:`.
 
 surface_label: "Growth OS gateway"
 
@@ -16,23 +21,29 @@ channels:
   - name: discord-main
     transport: discord
     enabled: true
-    model: triage
+    model: chat
     description: "Primary Discord bot (DMs from the owner + allowlisted channels)."
 
   - name: slack-main
     transport: slack
     enabled: false
-    model: triage
+    model: chat
     description: "Slack Socket Mode app. Needs SLACK_BOT_TOKEN + SLACK_APP_TOKEN."
 
   - name: telegram-main
     transport: telegram
     enabled: false
-    model: triage
+    model: chat
     description: "Telegram bot (long-poll). Needs TELEGRAM_BOT_TOKEN + allowlist."
 
   - name: whatsapp-main
     transport: whatsapp
     enabled: false
-    model: triage
+    model: chat
     description: "WhatsApp via Meta Cloud API webhook. Needs a public HTTPS webhook."
+
+  - name: sms-main
+    transport: sms
+    enabled: false
+    model: chat
+    description: "SMS via Twilio webhook. Needs TWILIO_* creds + a public HTTPS webhook."

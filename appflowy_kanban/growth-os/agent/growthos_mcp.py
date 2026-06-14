@@ -19,35 +19,47 @@ sys.path.insert(0, str(REPO_ROOT))
 from mcp.server.fastmcp import FastMCP    # noqa: E402
 
 from growthos import actions  # noqa: E402
+from growthos.observability import logged  # noqa: E402
 
 mcp = FastMCP("growthos")
 
+
+def _reg(fn):
+    # register the tool, wrapped so every MCP/Claude call is recorded to the agent-call log
+    return mcp.tool()(logged(fn, "mcp"))
+
 # triage
-mcp.tool()(actions.list_inbox)
-mcp.tool()(actions.search)
-mcp.tool()(actions.set_status)
+_reg(actions.list_inbox)
+_reg(actions.search)
+_reg(actions.move_item)        # title-addressed status move for the long-tail boards
 # todos / kanban
-mcp.tool()(actions.add_todo)
-mcp.tool()(actions.list_todos)
-mcp.tool()(actions.update_todo)
+_reg(actions.add_todo)
+_reg(actions.list_todos)
+_reg(actions.update_todo)
+_reg(actions.start_todo)
+_reg(actions.finish_todo)
+_reg(actions.block_todo)
 # betts basketball dags (board + live Airflow)
-mcp.tool()(actions.list_dags)
-mcp.tool()(actions.update_dag)
-mcp.tool()(actions.dag_health)
+_reg(actions.list_dags)
+_reg(actions.update_dag)
+_reg(actions.dag_health)
 # mission cards (approval-gated work intake) + execution visibility
-mcp.tool()(actions.add_mission_card)
-mcp.tool()(actions.list_cards)
-mcp.tool()(actions.mission_status)
+_reg(actions.add_mission_card)
+_reg(actions.list_cards)
+_reg(actions.mission_status)
+_reg(actions.stage_card)        # -> Ready (human then drags to Approved)
+_reg(actions.block_card)
+_reg(actions.reject_card)
 # project readiness + network liveness
-mcp.tool()(actions.project_status)
-mcp.tool()(actions.network_health)
+_reg(actions.project_status)
+_reg(actions.network_health)
 # capture
-mcp.tool()(actions.add_lesson)
-mcp.tool()(actions.add_book)
-mcp.tool()(actions.add_note)
-mcp.tool()(actions.book_note)
-mcp.tool()(actions.review_lesson)
-mcp.tool()(actions.latest_brief)
+_reg(actions.add_lesson)
+_reg(actions.add_book)
+_reg(actions.add_note)
+_reg(actions.book_note)
+_reg(actions.review_lesson)
+_reg(actions.latest_brief)
 
 if __name__ == "__main__":
     if "--http" in sys.argv:

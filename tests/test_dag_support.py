@@ -105,6 +105,36 @@ def test_finish_dry_run_writes_nothing(tmp_path):
     assert report_path.exists() is False
 
 
+def test_finish_drafts_kanban_cards_with_injected_drafter(tmp_path):
+    reg = _reg(tmp_path)
+    calls = []
+
+    def fake_card(**kw):
+        calls.append(kw)
+        return "drafted 1 card(s) in Backlog"
+
+    res = finish([_outcome("A"), _outcome("B")], reg, date="2026-06-13", now_iso=NOW, apply=True,
+                 draft_kanban=True, kanban_top=1, card_drafter=fake_card,
+                 report_path=str(tmp_path / "r.md"))
+    assert len(calls) == 1                              # kanban_top=1
+    assert calls[0]["section"] == "Command Center" and calls[0]["risk"] in {"L0", "L1", "L2"}
+    assert len(res["kanban_cards"]) == 1               # surfaced in the result
+
+
+def test_finish_no_kanban_by_default(tmp_path):
+    res = finish([_outcome("A")], _reg(tmp_path), date="2026-06-13", now_iso=NOW, apply=True,
+                 report_path=str(tmp_path / "r.md"))
+    assert "kanban_cards" not in res                   # off unless explicitly enabled
+
+
+def test_finish_dry_run_never_drafts_kanban(tmp_path):
+    calls = []
+    res = finish([_outcome("A")], _reg(tmp_path), date="2026-06-13", now_iso=NOW, apply=False,
+                 draft_kanban=True, card_drafter=lambda **kw: calls.append(kw),
+                 report_path=str(tmp_path / "r.md"))
+    assert calls == [] and "kanban_cards" not in res   # dry-run draws no cards
+
+
 def test_finish_surfaces_failed_source(tmp_path):
     reg = _reg(tmp_path)
     failed = ScanOutcome("arxiv", Pillar.FULL_IDEA, [], error="ConnectionError: down").to_dict()

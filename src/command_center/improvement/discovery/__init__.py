@@ -37,6 +37,7 @@ from .acceptance import (
     build_records, features_of, label_from_row, roc_auc, score_findings, train_acceptance,
 )
 from .manifest import ReportManifest, build_manifest, write_manifest
+from .kanban import draft_self_improvement_cards, growthos_card_drafter
 from .dag_support import (
     SOURCE_REGISTRY, build_scanner, scan_one, finish, offline_specs, DEFAULT_REPORT_PATH,
 )
@@ -57,4 +58,5 @@ __all__ = [
     "build_records", "features_of", "label_from_row", "roc_auc", "score_findings",
     "train_acceptance",
     "ReportManifest", "build_manifest", "write_manifest",
+    "draft_self_improvement_cards", "growthos_card_drafter",
 ]

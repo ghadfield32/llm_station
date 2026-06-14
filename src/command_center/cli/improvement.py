@@ -346,6 +346,21 @@ def cmd_scan(args) -> int:
     if args.ping:
         from command_center.improvement.discovery.delivery import render_ping
         print("ping: " + render_ping(rep, board_url=board_url, report_url=report_url))
+    if args.kanban:
+        # "report daily + apply if approved": draft the top findings as human-gated mission cards
+        from command_center.improvement.discovery import (
+            draft_self_improvement_cards, growthos_card_drafter)
+
+        def _dry(**kw):
+            return f"[dry-run] would draft to Backlog: {kw['title']}"
+
+        drafter = growthos_card_drafter() if args.apply else _dry
+        cards = draft_self_improvement_cards(rep, draft_card=drafter, top_n=args.kanban_top)
+        kmode = "APPLY" if args.apply else "DRY-RUN"
+        print(f"kanban [{kmode}]: {len(cards)} self-improvement card(s) -> "
+              "mission_intake (Backlog, human-gated)")
+        for c in cards:
+            print(f"  • {c['title']} -> {c['result'][:72]}")
     if args.apply:                                   # remember what was shown for tomorrow's diff
         snap.parent.mkdir(parents=True, exist_ok=True)
         snap.write_text(json.dumps(rep.drafted_ids), encoding="utf-8")
@@ -416,6 +431,10 @@ def main() -> int:
     p.add_argument("--board", action="store_true",
                    help="sync Proposed cards to the Kanban board")
     p.add_argument("--ping", action="store_true", help="print a one-line chat-channel nudge")
+    p.add_argument("--kanban", action="store_true",
+                   help="draft top findings as human-gated mission_intake cards (Backlog)")
+    p.add_argument("--kanban-top", type=int, default=3, dest="kanban_top",
+                   help="how many top findings to draft as cards (default 3)")
     p.add_argument("--feature-log", default="", dest="feature_log",
                    help="acceptance feature-log path (default data/discovery/card_features.jsonl)")
     add("scan-validate", cmd_scan_validate)
