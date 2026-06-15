@@ -97,6 +97,13 @@ class LiveModelBenchmarkHarness(Harness):
         invalid_samples: list[float] = []
         latency_samples: list[float] = []
         tps_samples: list[float] = []
+        tag_samples: dict[str, list[float]] = {
+            tag: [] for tag in (
+                self.suite.metric_policy.primary
+                + self.suite.metric_policy.hard_non_regression
+                + self.suite.metric_policy.supporting
+            )
+        }
         failures: list[str] = []
         lines = [
             f"# role={role} benchmark_role={self.role} suite={self.suite_key} "
@@ -111,19 +118,42 @@ class LiveModelBenchmarkHarness(Harness):
                 text = generated["response"]
                 lower = text.lower()
                 expected_ok = all(term.lower() in lower for term in case.expected_contains)
+                json_valid = True
+                json_values_ok = True
+                if case.required_json_keys or case.expected_json_values:
+                    try:
+                        parsed = json.loads(text)
+                    except json.JSONDecodeError:
+                        parsed = None
+                    if not isinstance(parsed, dict):
+                        json_valid = False
+                        json_values_ok = False
+                    else:
+                        missing_keys = [
+                            key for key in case.required_json_keys if key not in parsed
+                        ]
+                        json_valid = not missing_keys
+                        json_values_ok = all(
+                            parsed.get(key) == value
+                            for key, value in case.expected_json_values.items()
+                        )
                 forbidden_hits = [
                     term for term in case.forbidden_contains if term.lower() in lower
                 ]
-                invalid = not bool(text.strip())
+                invalid = not bool(text.strip()) or not json_valid
                 unsafe = bool(forbidden_hits) if case.safety else False
-                success = expected_ok and not forbidden_hits and not invalid
+                success = expected_ok and json_values_ok and not forbidden_hits and not invalid
 
                 success_samples.append(1.0 if success else 0.0)
                 unsafe_samples.append(1.0 if unsafe else 0.0)
                 invalid_samples.append(1.0 if invalid else 0.0)
                 latency_samples.append(latency_ms)
+                for tag in case.metric_tags:
+                    tag_samples[tag].append(1.0 if success else 0.0)
                 if unsafe:
                     failures.append(f"{case.id}: forbidden marker present")
+                if invalid:
+                    failures.append(f"{case.id}: invalid structured response")
                 eval_count = generated.get("eval_count")
                 eval_duration = generated.get("eval_duration")
                 if isinstance(eval_count, int) and isinstance(eval_duration, int) and eval_duration > 0:
@@ -135,6 +165,8 @@ class LiveModelBenchmarkHarness(Harness):
                         f"prompt_sha256={_sha(case.prompt)}",
                         f"output_sha256={_sha(text)}",
                         f"expected_ok={expected_ok}",
+                        f"json_valid={json_valid}",
+                        f"json_values_ok={json_values_ok}",
                         f"forbidden_hits={len(forbidden_hits)}",
                         f"invalid={invalid}",
                         f"latency_ms={latency_ms:.3f}",
@@ -157,6 +189,10 @@ class LiveModelBenchmarkHarness(Harness):
         if tps_samples:
             metrics["tokens_per_second"] = statistics.mean(tps_samples)
             samples["tokens_per_second"] = tps_samples
+        for tag, values in tag_samples.items():
+            if values:
+                metrics[tag] = statistics.mean(values)
+                samples[tag] = values
         lines.append("# metrics=" + json.dumps(metrics, sort_keys=True))
         return MeasureResult(
             metric_values=metrics,

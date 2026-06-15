@@ -75,9 +75,10 @@ local_whitelist:
 
 # The model scout proposes candidates and annotates each with VRAM fit on the
 # 4090 (WS1 gate). Discovery is keyless-first; provider routes stay forbidden in
-# roles. artificial-analysis runs only if AA_API_KEY is set (optional tiebreaker).
+# roles. curated-openweight is the versioned provenance-clean source; artificial-analysis
+# runs only if AA_API_KEY is set (optional tiebreaker).
 scout:
   cadence: monthly
-  sources: [aider-polyglot, local-ollama-tags, artificial-analysis]
+  sources: [aider-polyglot, local-ollama-tags, curated-openweight, artificial-analysis]
   propose_only: true
   max_candidates_per_run: 10

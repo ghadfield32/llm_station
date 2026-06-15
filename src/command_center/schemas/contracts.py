@@ -4,6 +4,7 @@ into ten modules would be ceremony, not clarity. Each top-level class maps to on
 configs/*.yaml file.
 """
 from __future__ import annotations
+import re
 from typing import Literal
 from pydantic import Field, model_validator
 from .base import Strict, RiskTier, Decision, Provider, EnvKind
@@ -102,6 +103,101 @@ class ModelRegistry(Strict):
             # review degenerates and an Anthropic/OpenAI outage stalls all coding
             if len(self.executors) > 1 and len({e.family for e in self.executors}) < 2:
                 raise ValueError("executor fallback chain must span at least two provider families")
+        return self
+
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+class CuratedScoutIdentity(Strict):
+    model_family: str
+    release_id: str
+    source_model_id: str
+    source_model_url: str
+    source_model_payload_sha256: str
+    ollama_tag: str
+    ollama_digest: str
+    parameter_size: str
+    quantization: str
+    license: str
+    context_length: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        fields = (
+            "model_family", "release_id", "source_model_id", "source_model_url",
+            "source_model_payload_sha256", "ollama_tag", "ollama_digest",
+            "parameter_size", "quantization", "license",
+        )
+        for field in fields:
+            if not getattr(self, field):
+                raise ValueError(f"curated scout identity missing {field}")
+        if not _SHA256_RE.match(self.source_model_payload_sha256):
+            raise ValueError("source_model_payload_sha256 must be a lowercase sha256 hex digest")
+        if not _SHA256_RE.match(self.ollama_digest):
+            raise ValueError("ollama_digest must be a lowercase sha256 hex digest")
+        return self
+
+
+class CuratedScoutBenchmark(Strict):
+    name: str
+    version: str
+    metric: str
+    score: float
+    score_definition: str
+    evaluation_date: str
+    candidate_roles: list[str]
+    source_url: str
+    retrieval_timestamp: str
+    source_payload_sha256: str
+
+    @model_validator(mode="after")
+    def _checks(self):
+        fields = (
+            "name", "version", "metric", "score_definition", "evaluation_date",
+            "source_url", "retrieval_timestamp", "source_payload_sha256",
+        )
+        for field in fields:
+            if not getattr(self, field):
+                raise ValueError(f"curated scout benchmark missing {field}")
+        if not self.candidate_roles:
+            raise ValueError("curated scout benchmark must declare candidate_roles")
+        if len(self.candidate_roles) != len(set(self.candidate_roles)):
+            raise ValueError("curated scout benchmark candidate_roles contains duplicates")
+        if not _SHA256_RE.match(self.source_payload_sha256):
+            raise ValueError("source_payload_sha256 must be a lowercase sha256 hex digest")
+        return self
+
+
+class CuratedScoutRecord(Strict):
+    record_id: str
+    identity: CuratedScoutIdentity
+    open_weight_evidence: str
+    benchmark: CuratedScoutBenchmark
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.record_id:
+            raise ValueError("curated scout record_id is required")
+        if not self.open_weight_evidence:
+            raise ValueError("curated scout record must include open_weight_evidence")
+        return self
+
+
+class CuratedModelScoutConfig(Strict):
+    schema_version: str
+    records: list[CuratedScoutRecord]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.model-scout-curated-openweight.v1":
+            raise ValueError(
+                "schema_version must be command-center.model-scout-curated-openweight.v1")
+        if not self.records:
+            raise ValueError("curated model scout config must define at least one record")
+        ids = [record.record_id for record in self.records]
+        if len(ids) != len(set(ids)):
+            raise ValueError("curated model scout config contains duplicate record_id values")
         return self
 
 

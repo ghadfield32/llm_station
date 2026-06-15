@@ -39,7 +39,9 @@ _EXCLUDE_DIRS = frozenset({
 _MODEL_SCOUT_EVIDENCE_FIELDS = (
     "source", "source_url", "metric", "candidate", "open_weight_evidence",
     "license", "ollama_tag", "digest", "quant", "native_context",
-    "parameter_size", "vram_fit",
+    "parameter_size", "vram_fit", "candidate_roles", "benchmark_name",
+    "benchmark_version", "evaluation_date", "retrieval_timestamp",
+    "source_payload_sha256", "source_model_id",
 )
 _MODEL_SCOUT_LOCAL_FIELDS = (
     "ollama_tag", "digest", "quant", "native_context", "parameter_size", "vram_fit",
@@ -338,7 +340,11 @@ class ModelRegistryScanner(FeedScanner):
             f"candidate_roles={','.join(str(role) for role in roles)}",
             f"open_weight={record.get('open_weight_evidence')}",
         ]
-        for key in ("license", "ollama_tag", "digest", "quant", "native_context", "vram_fit"):
+        for key in (
+            "license", "ollama_tag", "digest", "quant", "native_context",
+            "vram_fit", "benchmark_name", "benchmark_version", "evaluation_date",
+            "retrieval_timestamp", "source_payload_sha256", "source_model_id",
+        ):
             if record.get(key) is not None:
                 evidence_bits.append(f"{key}={record[key]}")
         evidence_completeness, missing_evidence = _presence_ratio(
@@ -383,6 +389,17 @@ class ModelRegistryScanner(FeedScanner):
                 "parameter_size": record.get("parameter_size"),
                 "params_b": record.get("params_b"),
                 "vram_fit": record.get("vram_fit"),
+                "model_family": record.get("model_family"),
+                "release_id": record.get("release_id"),
+                "source_model_id": record.get("source_model_id"),
+                "source_model_url": record.get("source_model_url"),
+                "source_model_payload_sha256": record.get("source_model_payload_sha256"),
+                "benchmark_name": record.get("benchmark_name"),
+                "benchmark_version": record.get("benchmark_version"),
+                "score_definition": record.get("score_definition"),
+                "evaluation_date": record.get("evaluation_date"),
+                "retrieval_timestamp": record.get("retrieval_timestamp"),
+                "source_payload_sha256": record.get("source_payload_sha256"),
                 "evidence_completeness": evidence_completeness,
                 "local_readiness": local_readiness,
                 "missing_evidence_fields": missing_evidence,

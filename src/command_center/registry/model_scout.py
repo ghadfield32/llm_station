@@ -9,6 +9,8 @@ Discovery is keyless-first. Sources (declared in models.yaml `scout.sources`):
   - aider-polyglot     : Aider's polyglot coding leaderboard (public YAML, no key).
                          The coding-quality signal that ranks candidates.
   - local-ollama-tags  : models already installed via Ollama (guaranteed runnable).
+  - curated-openweight : version-controlled scored open-weight records that
+                         join to exact installed Ollama tag/digest.
   - artificial-analysis: OPTIONAL. Used only if AA_API_KEY is set in the env;
                          otherwise skipped with a note. Never required.
 
@@ -34,12 +36,17 @@ import httpx
 import yaml
 
 from command_center.registry import vram
-from command_center.schemas import EnvironmentsConfig, ModelRegistry
+from command_center.schemas import (
+    CuratedModelScoutConfig,
+    EnvironmentsConfig,
+    ModelRegistry,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 MODELS = ROOT / "configs" / "models.yaml"
 ENVIRONMENTS = ROOT / "configs" / "environments.yaml"
 DEFAULT_OUTPUT = ROOT / "generated" / "model-scout-report.md"
+CURATED_OPENWEIGHT = ROOT / "configs" / "model-scout-curated-openweight.yaml"
 
 AIDER_POLYGLOT_URL = (
     "https://raw.githubusercontent.com/Aider-AI/aider/main/"
@@ -49,7 +56,9 @@ ARTIFICIAL_ANALYSIS_URL = "https://artificialanalysis.ai/api/v2/data/llms/models
 DEFAULT_FIT_CTX = 65536
 WORKER_ENV = "cc-worker-4090"
 
-KNOWN_SOURCES = {"aider-polyglot", "local-ollama-tags", "artificial-analysis"}
+KNOWN_SOURCES = {
+    "aider-polyglot", "local-ollama-tags", "curated-openweight", "artificial-analysis",
+}
 
 
 def load_registry() -> ModelRegistry:
@@ -144,6 +153,114 @@ def fetch_ollama_local() -> list[dict[str, Any]]:
     return out
 
 
+def _tag_records_by_name(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_name: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        name = rec.get("name")
+        if not isinstance(name, str) or not name:
+            raise RuntimeError("Ollama /api/tags record missing name")
+        if name in by_name:
+            raise RuntimeError(f"Ollama /api/tags returned duplicate model tag {name!r}")
+        by_name[name] = rec
+    return by_name
+
+
+def _details(rec: dict[str, Any], tag: str) -> dict[str, Any]:
+    details = rec.get("details")
+    if not isinstance(details, dict):
+        raise RuntimeError(f"Ollama tag {tag!r} has no details mapping")
+    return details
+
+
+def _assert_equal(label: str, expected: Any, observed: Any, tag: str) -> None:
+    if expected != observed:
+        raise RuntimeError(
+            f"curated-openweight identity mismatch for {tag!r}: "
+            f"{label} expected {expected!r}, observed {observed!r}"
+        )
+
+
+def _validate_roles(registry: ModelRegistry, record_id: str, roles: list[str]) -> None:
+    known = set(registry.roles)
+    unknown = [role for role in roles if role not in known]
+    if unknown:
+        raise RuntimeError(
+            f"curated-openweight record {record_id!r} declares unknown candidate_roles {unknown}"
+        )
+
+
+def fetch_curated_openweight() -> list[dict[str, Any]]:
+    """Versioned, strict source for scored open-weight candidates.
+
+    This source is intentionally small and local. It joins a curated public
+    benchmark record to the exact installed Ollama tag/digest, and fails loudly
+    on any mismatch instead of guessing by display name.
+    """
+    raw = yaml.safe_load(CURATED_OPENWEIGHT.read_text(encoding="utf-8"))
+    cfg = CuratedModelScoutConfig.model_validate(raw)
+    registry = load_registry()
+    licenses = _license_by_model(registry)
+    local = _tag_records_by_name(vram.ollama_tag_records())
+    out: list[dict[str, Any]] = []
+    for record in cfg.records:
+        identity = record.identity
+        benchmark = record.benchmark
+        _validate_roles(registry, record.record_id, benchmark.candidate_roles)
+        tag = identity.ollama_tag
+        if tag not in local:
+            raise RuntimeError(
+                f"curated-openweight record {record.record_id!r} requires local tag {tag!r}"
+            )
+        rec = local[tag]
+        details = _details(rec, tag)
+        _assert_equal("ollama_digest", identity.ollama_digest, rec.get("digest"), tag)
+        _assert_equal("parameter_size", identity.parameter_size,
+                      details.get("parameter_size"), tag)
+        _assert_equal("quantization", identity.quantization,
+                      details.get("quantization_level"), tag)
+        if identity.context_length is not None:
+            _assert_equal("context_length", identity.context_length,
+                          details.get("context_length"), tag)
+        configured_license = licenses.get(tag)
+        if configured_license is not None and configured_license != identity.license:
+            raise RuntimeError(
+                f"curated-openweight identity mismatch for {tag!r}: license expected "
+                f"{identity.license!r}, configs/models.yaml has {configured_license!r}"
+            )
+        out.append({
+            "id": tag,
+            "name": tag,
+            "source": "curated-openweight",
+            "source_url": benchmark.source_url,
+            "source_metric": benchmark.metric,
+            "source_score": benchmark.score,
+            "coding_score": benchmark.score if "coder" in benchmark.candidate_roles else None,
+            "candidate_roles": list(benchmark.candidate_roles),
+            "edit_format": None,
+            "ollama_tag": tag,
+            "open_weight": True,
+            "open_weight_evidence": record.open_weight_evidence,
+            "license": identity.license,
+            "digest": rec.get("digest"),
+            "size_bytes": rec.get("size"),
+            "parameter_size": details.get("parameter_size"),
+            "quant": details.get("quantization_level"),
+            "native_context": details.get("context_length"),
+            "model_family": identity.model_family,
+            "release_id": identity.release_id,
+            "source_model_id": identity.source_model_id,
+            "source_model_url": identity.source_model_url,
+            "source_model_payload_sha256": identity.source_model_payload_sha256,
+            "benchmark_name": benchmark.name,
+            "benchmark_version": benchmark.version,
+            "score_definition": benchmark.score_definition,
+            "evaluation_date": benchmark.evaluation_date,
+            "retrieval_timestamp": benchmark.retrieval_timestamp,
+            "source_payload_sha256": benchmark.source_payload_sha256,
+        })
+    return out
+
+
 def fetch_artificial_analysis() -> list[dict[str, Any]]:
     """OPTIONAL AA Data API (open-weights only). Empty unless AA_API_KEY is set."""
     key = os.environ.get("AA_API_KEY")
@@ -178,6 +295,7 @@ def fetch_artificial_analysis() -> list[dict[str, Any]]:
 FETCHERS = {
     "aider-polyglot": fetch_aider_polyglot,
     "local-ollama-tags": fetch_ollama_local,
+    "curated-openweight": fetch_curated_openweight,
     "artificial-analysis": fetch_artificial_analysis,
 }
 
@@ -258,6 +376,17 @@ def discovery_feed_records(candidates: list[dict[str, Any]]) -> list[dict[str, A
             "parameter_size": c.get("parameter_size"),
             "params_b": c.get("params_b"),
             "vram_fit": c.get("vram_fit"),
+            "model_family": c.get("model_family"),
+            "release_id": c.get("release_id"),
+            "source_model_id": c.get("source_model_id"),
+            "source_model_url": c.get("source_model_url"),
+            "source_model_payload_sha256": c.get("source_model_payload_sha256"),
+            "benchmark_name": c.get("benchmark_name"),
+            "benchmark_version": c.get("benchmark_version"),
+            "score_definition": c.get("score_definition"),
+            "evaluation_date": c.get("evaluation_date"),
+            "retrieval_timestamp": c.get("retrieval_timestamp"),
+            "source_payload_sha256": c.get("source_payload_sha256"),
         })
     return records
 
@@ -355,6 +484,33 @@ def render_report(registry: ModelRegistry, candidates: list[dict[str, Any]],
             f"{_short_digest(c.get('digest'))} | {_cell(c.get('parameter_size') or c.get('params_b'))} | "
             f"{_cell(c.get('native_context'))} | {_cell(c.get('quant'))} | {_cell(c.get('vram_fit'))} |"
         )
+
+    evidence_candidates = [
+        c for c in candidates
+        if c.get("benchmark_name") or c.get("source_payload_sha256")
+    ]
+    if evidence_candidates:
+        lines += [
+            "",
+            "## Candidate Source Evidence",
+            "",
+            "| candidate | roles | benchmark | source | retrieved | payload hash | release | model card hash |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        for c in evidence_candidates:
+            roles = ",".join(str(role) for role in c.get("candidate_roles", []))
+            benchmark = " ".join(
+                str(x) for x in (c.get("benchmark_name"), c.get("benchmark_version"))
+                if x
+            )
+            source = c.get("source_url") or "unknown"
+            lines.append(
+                f"| `{_cell(c['id'])}` | {_cell(roles)} | {_cell(benchmark)} | "
+                f"{_cell(source)} | {_cell(c.get('retrieval_timestamp'))} | "
+                f"{_short_digest(c.get('source_payload_sha256'))} | "
+                f"{_cell(c.get('release_id'))} | "
+                f"{_short_digest(c.get('source_model_payload_sha256'))} |"
+            )
 
     lines += [
         "",

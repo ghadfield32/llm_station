@@ -296,8 +296,11 @@ class ModelBenchmarkDefaults(Strict):
 class ModelBenchmarkCase(Strict):
     id: str
     prompt: str
+    metric_tags: list[str] = Field(default_factory=list)
     expected_contains: list[str] = Field(default_factory=list)
     forbidden_contains: list[str] = Field(default_factory=list)
+    required_json_keys: list[str] = Field(default_factory=list)
+    expected_json_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
     safety: bool = False
 
     @model_validator(mode="after")
@@ -306,9 +309,24 @@ class ModelBenchmarkCase(Strict):
             raise ValueError("benchmark case id is required")
         if not self.prompt:
             raise ValueError(f"benchmark case {self.id!r} prompt is required")
-        if not self.expected_contains and not self.forbidden_contains:
+        if not self.metric_tags:
+            raise ValueError(f"benchmark case {self.id!r} must declare metric_tags")
+        if len(self.metric_tags) != len(set(self.metric_tags)):
+            raise ValueError(f"benchmark case {self.id!r} has duplicate metric_tags")
+        if (not self.expected_contains and not self.forbidden_contains
+                and not self.required_json_keys and not self.expected_json_values):
             raise ValueError(
-                f"benchmark case {self.id!r} must define expected_contains or forbidden_contains")
+                f"benchmark case {self.id!r} must define expected_contains, "
+                "forbidden_contains, required_json_keys, or expected_json_values")
+        if self.expected_json_values:
+            missing = [
+                key for key in self.expected_json_values
+                if key not in self.required_json_keys
+            ]
+            if missing:
+                raise ValueError(
+                    f"benchmark case {self.id!r} expected_json_values keys must also "
+                    f"appear in required_json_keys: {missing}")
         return self
 
 
@@ -316,6 +334,7 @@ class ModelMetricPolicy(Strict):
     primary: list[str]
     hard_non_regression: list[str]
     supporting: list[str] = Field(default_factory=list)
+    directions: dict[str, MetricDirection]
 
     @model_validator(mode="after")
     def _checks(self):
@@ -326,6 +345,12 @@ class ModelMetricPolicy(Strict):
         names = self.primary + self.hard_non_regression + self.supporting
         if len(names) != len(set(names)):
             raise ValueError("model metric policy contains duplicate metric names")
+        missing = [name for name in names if name not in self.directions]
+        if missing:
+            raise ValueError(f"model metric policy missing directions for {missing}")
+        extra = [name for name in self.directions if name not in names]
+        if extra:
+            raise ValueError(f"model metric policy directions contains unknown metrics {extra}")
         return self
 
 
@@ -341,6 +366,19 @@ class ModelBenchmarkSuite(Strict):
             raise ValueError("model benchmark suite role is required")
         if not self.cases:
             raise ValueError(f"model benchmark suite {self.role!r} has no cases")
+        known_metrics = (
+            self.metric_policy.primary
+            + self.metric_policy.hard_non_regression
+            + self.metric_policy.supporting
+        )
+        unknown_tags = sorted({
+            tag for case in self.cases for tag in case.metric_tags
+            if tag not in known_metrics
+        })
+        if unknown_tags:
+            raise ValueError(
+                f"model benchmark suite {self.role!r} cases reference unknown metric_tags "
+                f"{unknown_tags}")
         return self
 
 

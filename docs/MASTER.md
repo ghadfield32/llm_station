@@ -445,30 +445,49 @@ What is done:
    Ollama tag with installed weights. Aider polyglot rows remain useful public
    coding-score context, but they are filtered out of the open-weight feed unless
    another source supplies open-weight provenance.
-2. Local Ollama candidates now carry source provenance from `/api/tags` and
+2. `curated-openweight` is now a version-controlled scored source for candidates
+   whose public benchmark evidence can be joined to an exact local Ollama
+   identity. A curated record must declare model family, release id, source model
+   id, source model URL and payload hash, Ollama tag, Ollama digest, parameter
+   size, quantization, context length, license, benchmark name/version, score
+   definition, evaluation date, source URL, retrieval timestamp, source payload
+   hash, and justified candidate roles.
+3. The curated source performs a strict identity join against the installed
+   `/api/tags` record. Digest, parameter size, quantization, context, configured
+   license, and candidate role names must match exactly. Mismatches fail loudly;
+   no closest-name matching, parameter inference, license inference, or role
+   expansion is allowed.
+4. Local Ollama candidates now carry source provenance from `/api/tags` and
    `/api/show`: Ollama tag, digest, quant, parameter size, native context,
    VRAM-fit verdict, max fitting context, and headroom. Missing metadata is
    recorded as unknown/error; no digest, license, context, or fit value is
    fabricated.
-3. `make model-scout` now writes both the human report
+5. `make model-scout` now writes both the human report
    `generated/model-scout-report.md` and the machine feed
    `generated/model-scout-feed.json`. The daily scan can consume that feed with
    `make improvement-scan FEEDS=generated/model-scout-feed.json`.
-4. The daily scan understands `model_scout_candidate` records. It drafts only
+6. The daily scan understands `model_scout_candidate` records. It drafts only
    `Proposed` `model` experiments for scored open-weight candidates, and it
    carries declared candidate roles so a coding score can draft a coder
    benchmark without implying planner, judge, or routing superiority. It states
    that local role-specific A/B is required before any routing recommendation.
-5. `configs/model-benchmarks.yaml` is validated by `cc validate` and defines the
+7. `configs/model-benchmarks.yaml` is validated by `cc validate` and defines the
    role-specific benchmark suites plus each suite's metric policy. Prompts,
-   metric names, and expected/forbidden markers live in config, not in code.
-6. `command_center.improvement.live_model_benchmark` is registered as a live
+   metric names, expected/forbidden markers, structured JSON expectations, and
+   metric tags live in config, not in code.
+8. `command_center.improvement.live_model_benchmark` is registered as a live
    model A/B harness. It requires explicit experiment parameters for role,
    suite, baseline model, candidate model, suite path, and local Ollama endpoint.
    It stores only hashes, booleans, latency, token-rate data when Ollama reports
    it, metrics, and equivalence metadata in Ledger artifacts; it does not retain
    raw prompts or model outputs.
-7. The human wall is unchanged: scout and scan can propose only; benchmark
+9. `command_center.improvement.model_baselines` builds baseline-only experiments
+   from the current incumbents in `configs/models.yaml`. It requires an explicit
+   local endpoint, derives runtime budget from configured suite size, repetitions,
+   timeout, and generation limits, records artifacts in the Ledger only when
+   `--apply` is used, and never writes live benchmark experiments into
+   `configs/improvement.yaml`.
+10. The human wall is unchanged: scout and scan can propose only; benchmark
    runner can only move to awaiting verification; canary and promotion remain
    human-only.
 
@@ -530,29 +549,69 @@ Metric policy for open-weight model upgrades:
     executes generated code must use the repo's isolation path before its result
     can be treated as promotion-grade evidence.
 
-Current limitation:
+Current evidence and boundary:
 
-- The latest live scout run produced no scored open-weight feed records because
-  the configured keyless scored source, Aider polyglot, does not prove
-  open-weight status, and the installed local Ollama tags are unscored. The
-  installed local tags still get provenance and fit data in the scout report.
+- The latest scout run used sources `aider-polyglot`, `local-ollama-tags`,
+  `curated-openweight`, and `artificial-analysis`. `artificial-analysis` was
+  skipped because `AA_API_KEY` was not intentionally set. The report contained
+  five candidates and the machine feed contained one scored, provenance-resolved,
+  role-bound record.
+- The feed record is `devstral:24b` for the `coder` role only. It carries
+  Apache-2.0 license evidence, Ollama tag `devstral:24b`, digest
+  `9bd74193e93935e9d8564d88607b220a9d341c4a36b748cffcbd9ad4f47a9ca9`,
+  quant `Q4_K_M`, parameter size `23.6B`, native context `131072`, SWE-bench
+  Verified score `46.8`, Mistral source payload hash
+  `ef183a2ddb914a564c5131de082569b477c648a2a5c7c77eade732ccf1a6bdf9`, and
+  Hugging Face model-card payload hash
+  `c84d253789fe8a9d9e4e2fdfaba9302e7723a49130c35ba55be5a5523556cdc1`.
+- The daily scan consumed `generated/model-scout-feed.json` and drafted one
+  `Proposed` model experiment. No candidate was moved to Canary, Verified, or
+  Promoted.
+- The same scout evidence reports `devstral:24b` as `NO @ 64k` on the current
+  24 GB budget, with max fitting context around 49k and negative 64k headroom.
+  Therefore the first challenger A/B must either use a candidate that fits the
+  declared evaluated context or explicitly declare a lower-context coder
+  specialization before running.
+- A real local Ollama incumbent-baseline pass has been recorded in the Ledger
+  with one repetition for each production role. This is a pilot distribution,
+  not enough for promotion-grade statistical evidence.
+
+Incumbent baseline pilot, recorded from local Ollama:
+
+| role | incumbent | task success | invalid response | median latency ms | note |
+| --- | --- | ---: | ---: | ---: | --- |
+| triage | `qwen3-coder:30b` | 0.000 | 0.000 | 2899.819 | Structured output was parseable, but all role metrics failed. |
+| chat | `qwen3:30b` | 0.000 | 1.000 | 3469.380 | JSON/tool-call contract failed. |
+| planner | `qwen3:30b` | 0.000 | 1.000 | 3518.636 | Structured plan contract failed. |
+| coder | `qwen3-coder:30b` | 0.667 | 0.000 | 3688.417 | Passed core patch reasoning, failed no-fake/no-fallback/test-awareness tags. |
+| local-judge | `qwen3:30b` | 0.500 | 0.500 | 3413.881 | One labeled judgment passed, one failed or malformed. |
+| security-judge | `qwen3:30b` | 0.000 | 1.000 | 14014.187 | Security judgment contract failed. |
+| architect-judge | `qwen3-coder:30b` | 1.000 | 0.000 | 3129.806 | Pilot passed the configured architecture cases. |
+
+The baseline artifacts are stored under
+`data/improvement/EXP-model-baseline-*/baseline-*/` as redacted stdout,
+`metrics.json`, and `equivalence.json`. Artifact inspection found no raw prompt
+or model-output markers from the benchmark fixtures.
 
 Remaining order:
 
-1. Add or ingest a scored open-weight source with explicit provenance, for
-   example an Artificial Analysis feed when `AA_API_KEY` is intentionally set or
-   a curated local feed with license/tag/digest fields.
-2. Run role-specific local A/B baselines for the current incumbents so the board
-   has real incumbent distributions for planner, coder, judge, long-context, and
-   terminal-style work instead of only public scores.
-3. Pull any candidate that is not already local and rerun `make model-scout` so
-   `/api/tags` and `/api/show` provide real provenance.
-4. Register a bounded live model benchmark experiment against
+1. Decide whether the first candidate A/B is a 64k-context coder comparison or a
+   declared lower-context coder specialization. This decision must be explicit in
+   the experiment definition; do not silently use a smaller context.
+2. If lower-context specialization is approved, add the evaluated context to the
+   live benchmark parameters and rerun scout/fit evidence at that context.
+3. If 64k is required, add or ingest another scored open-weight source whose
+   exact installed candidate fits the 64k machine budget.
+4. Increase incumbent baseline repetitions according to a declared precision or
+   minimum-detectable-change plan derived from pilot variance and resource
+   budget. If pilot evidence is insufficient, record the result as inconclusive.
+5. Register one bounded live coder benchmark against
    `command_center.improvement.live_model_benchmark`; run baseline, candidate,
-   and independent verification.
-5. If verified, manually start a canary with `make models-canary`, compare
-   canary telemetry, then manually promote or roll back.
-6. Keep Mission 2 routing artifacts separate: model discovery can inform
+   and independent verification on identical fixtures.
+6. If verified, manually start a canary with `make models-canary`, compare
+   canary telemetry against the preregistered plan, then manually promote or
+   roll back.
+7. Keep Mission 2 routing artifacts separate: model discovery can inform
    routing, but it does not replace the typed Ledger route-decision work.
 
 ---
@@ -730,17 +789,21 @@ Models are data in `configs/models.yaml` (local-only: every role must use
 1. make model-scout      → generated/model-scout-report.md + generated/model-scout-feed.json
 2. make improvement-scan FEEDS=generated/model-scout-feed.json
 3. Confirm the role's incumbent baseline distribution exists in Ledger; run the
-   role suite first if it does not
-4. Register a bounded live model benchmark experiment if the scan drafts a
+   role suite first if it does not:
+   uv run python -m command_center.improvement.model_baselines --reps <derived> --base-url-env OLLAMA_BASE_URL --apply
+4. Confirm candidate machine fit at the declared evaluated context. If the
+   candidate does not fit, either reject it for that role/context or declare a
+   lower-context specialization before testing.
+5. Register a bounded live model benchmark experiment if the scan drafts a
    scored open-weight candidate
-5. Run baseline → candidate → independent verification; artifacts land in Ledger
-6. Edit configs/models.yaml with a verified local Ollama candidate
-7. make validate && make evals
-8. make models           → render + pull local tags + restart LiteLLM
-9. make models-canary ROLE=… MODEL=ollama_chat/<tag>   → small traffic slice
-10. make live-smoke       → real local replies
-11. compare task success · unsafe output · invalid response · runtime metrics · canary telemetry
-12. make models-promote ROLE=…   or   make models-rollback ROLE=…
+6. Run baseline → candidate → independent verification; artifacts land in Ledger
+7. Edit configs/models.yaml with a verified local Ollama candidate
+8. make validate && make evals
+9. make models           → render + pull local tags + restart LiteLLM
+10. make models-canary ROLE=… MODEL=ollama_chat/<tag>   → small traffic slice
+11. make live-smoke       → real local replies
+12. compare task success · unsafe output · invalid response · runtime metrics · canary telemetry
+13. make models-promote ROLE=…   or   make models-rollback ROLE=…
 ```
 
 Current local picks: `qwen3-coder:30b` · `qwen3:30b` · `devstral:24b`.
@@ -1354,6 +1417,38 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-15 — Curated open-weight source and real incumbent baselines
+
+- **What changed.** Added the `curated-openweight` scout source and
+  `configs/model-scout-curated-openweight.yaml` as the first scored,
+  provenance-resolved source. The source joins public benchmark evidence to an
+  exact installed Ollama tag and digest, then exports only role-bound Proposed
+  candidates.
+- **Source provenance.** The first curated record is `devstral:24b` for the
+  `coder` role. It records license, Ollama tag, digest, quant, parameter size,
+  native context, benchmark name/version, score definition, retrieval timestamp,
+  source payload hash, source model id, source model URL, and model-card payload
+  hash. Negative tests cover digest mismatch, unknown role, and license
+  conflict.
+- **Scout-to-scan proof.** The latest scout report contained five candidates and
+  the feed contained one scored open-weight record. The daily scan consumed
+  `generated/model-scout-feed.json` and produced one `Proposed` model experiment
+  only. No candidate was promoted, verified, or canaried.
+- **Real LLM baselines.** Added `command_center.improvement.model_baselines` and
+  recorded one local Ollama pilot baseline for each role: triage, chat, planner,
+  coder, local-judge, security-judge, and architect-judge. Ledger artifacts were
+  written as redacted stdout, metric summaries, and equivalence metadata.
+- **Privacy check.** Baseline artifacts were scanned for raw prompt/output
+  fixture markers; none were found in the Ledger artifacts.
+- **Validation.** `uv run cc validate`, focused model-scout/live-benchmark/
+  baseline/discovery tests (33 tests), full `uv run pytest` (577 tests), and
+  `uv run ruff check src tests` passed. The full test run reported one existing
+  Starlette/httpx deprecation warning in `tests/test_agent_kanban_ui.py`.
+- **Current blocker.** `devstral:24b` is scored and provenance-clean, but the
+  current 64k fit check says `NO @ 64k` on the 24 GB budget. The next A/B must
+  either use an explicitly declared lower-context coder specialization or choose
+  a different scored candidate that fits the declared context.
 
 ### 2026-06-15 — Trusted metric policy for open-weight LLM upgrades
 

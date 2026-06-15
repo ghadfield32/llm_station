@@ -4,7 +4,64 @@ No network: the one fetch test monkeypatches httpx.get with a canned payload.
 """
 from types import SimpleNamespace
 
+import pytest
+import yaml
+
 from command_center.registry import model_scout as scout
+from command_center.schemas import CuratedModelScoutConfig
+
+
+def _ollama_record(name="devstral:24b", digest="d" * 64,
+                   parameter_size="23.6B", quant="Q4_K_M", context=131072):
+    return {
+        "name": name,
+        "size": 14333928046,
+        "digest": digest,
+        "details": {
+            "parameter_size": parameter_size,
+            "quantization_level": quant,
+            "context_length": context,
+        },
+    }
+
+
+def _curated_payload(*, digest="d" * 64, roles=None, license="Apache-2.0"):
+    return {
+        "schema_version": "command-center.model-scout-curated-openweight.v1",
+        "records": [{
+            "record_id": "devstral-test",
+            "identity": {
+                "model_family": "devstral",
+                "release_id": "devstral-small-2505",
+                "source_model_id": "mistralai/Devstral-Small-2505",
+                "source_model_url": "https://example.test/model",
+                "source_model_payload_sha256": "a" * 64,
+                "ollama_tag": "devstral:24b",
+                "ollama_digest": digest,
+                "parameter_size": "23.6B",
+                "quantization": "Q4_K_M",
+                "license": license,
+                "context_length": 131072,
+            },
+            "open_weight_evidence": "explicit Apache-2.0 source plus local digest",
+            "benchmark": {
+                "name": "SWE-bench Verified",
+                "version": "test fixture",
+                "metric": "swe_bench_verified_percent",
+                "score": 46.8,
+                "score_definition": "percent resolved",
+                "evaluation_date": "2025-05-21",
+                "candidate_roles": roles or ["coder"],
+                "source_url": "https://example.test/benchmark",
+                "retrieval_timestamp": "2026-06-15T14:01:34-04:00",
+                "source_payload_sha256": "b" * 64,
+            },
+        }],
+    }
+
+
+def _write_curated(path, payload):
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
 
 
 def test_fetcher_keys_match_known_sources():
@@ -27,7 +84,11 @@ def test_annotate_fit_uninstalled_is_unknown_not_fabricated():
 
 def _registry(sources):
     return SimpleNamespace(
-        scout=SimpleNamespace(sources=sources, max_candidates_per_run=10)
+        scout=SimpleNamespace(sources=sources, max_candidates_per_run=10),
+        roles={
+            "coder": [SimpleNamespace(model="devstral:24b", license="Apache-2.0")],
+            "planner": [],
+        },
     )
 
 
@@ -105,3 +166,62 @@ def test_discovery_feed_records_require_open_weight_and_score():
     assert records[0]["record_type"] == "model_scout_candidate"
     assert records[0]["model"] == "open-scored"
     assert records[0]["candidate_roles"] == ["coder"]
+
+
+def test_curated_openweight_source_joins_exact_local_identity(tmp_path, monkeypatch):
+    path = tmp_path / "curated.yaml"
+    _write_curated(path, _curated_payload())
+    monkeypatch.setattr(scout, "CURATED_OPENWEIGHT", path)
+    monkeypatch.setattr(scout, "load_registry", lambda: _registry(["curated-openweight"]))
+    monkeypatch.setattr(scout.vram, "ollama_tag_records", lambda: [_ollama_record()])
+
+    rows = scout.fetch_curated_openweight()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["id"] == "devstral:24b"
+    assert row["source"] == "curated-openweight"
+    assert row["coding_score"] == 46.8
+    assert row["candidate_roles"] == ["coder"]
+    assert row["digest"] == "d" * 64
+    assert row["source_payload_sha256"] == "b" * 64
+
+
+def test_curated_openweight_source_rejects_digest_mismatch(tmp_path, monkeypatch):
+    path = tmp_path / "curated.yaml"
+    _write_curated(path, _curated_payload(digest="c" * 64))
+    monkeypatch.setattr(scout, "CURATED_OPENWEIGHT", path)
+    monkeypatch.setattr(scout, "load_registry", lambda: _registry(["curated-openweight"]))
+    monkeypatch.setattr(scout.vram, "ollama_tag_records", lambda: [_ollama_record()])
+
+    with pytest.raises(RuntimeError, match="ollama_digest"):
+        scout.fetch_curated_openweight()
+
+
+def test_curated_openweight_source_rejects_unknown_role(tmp_path, monkeypatch):
+    path = tmp_path / "curated.yaml"
+    _write_curated(path, _curated_payload(roles=["judge"]))
+    monkeypatch.setattr(scout, "CURATED_OPENWEIGHT", path)
+    monkeypatch.setattr(scout, "load_registry", lambda: _registry(["curated-openweight"]))
+    monkeypatch.setattr(scout.vram, "ollama_tag_records", lambda: [_ollama_record()])
+
+    with pytest.raises(RuntimeError, match="unknown candidate_roles"):
+        scout.fetch_curated_openweight()
+
+
+def test_curated_openweight_source_rejects_license_conflict(tmp_path, monkeypatch):
+    path = tmp_path / "curated.yaml"
+    _write_curated(path, _curated_payload(license="Other-License"))
+    monkeypatch.setattr(scout, "CURATED_OPENWEIGHT", path)
+    monkeypatch.setattr(scout, "load_registry", lambda: _registry(["curated-openweight"]))
+    monkeypatch.setattr(scout.vram, "ollama_tag_records", lambda: [_ollama_record()])
+
+    with pytest.raises(RuntimeError, match="license expected"):
+        scout.fetch_curated_openweight()
+
+
+def test_curated_openweight_config_rejects_wrong_schema_version():
+    payload = _curated_payload()
+    payload["schema_version"] = "command-center.model-scout-curated-openweight.v0"
+
+    with pytest.raises(ValueError, match="schema_version"):
+        CuratedModelScoutConfig.model_validate(payload)

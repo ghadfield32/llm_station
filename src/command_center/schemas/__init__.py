@@ -2,6 +2,7 @@
 from .base import Strict, RiskTier, Decision, Provider, EnvKind
 from .contracts import (
     ModelCandidate, ModelRegistry, ExecutorSpec,
+    CuratedModelScoutConfig,
     JudgeSpec, JudgeStage, JudgeConfig,
     TierPolicy, GatesConfig,
     EnvironmentSpec, EnvironmentsConfig,
@@ -21,6 +22,7 @@ from .contracts import (
 # Map each config file to its top-level contract — used by validate + impact tools.
 CONFIG_CONTRACTS = {
     "configs/models.yaml": ModelRegistry,
+    "configs/model-scout-curated-openweight.yaml": CuratedModelScoutConfig,
     "configs/judges.yaml": JudgeConfig,
     "configs/gates.yaml": GatesConfig,
     "configs/environments.yaml": EnvironmentsConfig,
