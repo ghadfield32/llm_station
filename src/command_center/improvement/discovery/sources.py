@@ -36,6 +36,29 @@ _EXCLUDE_DIRS = frozenset({
     ".git", ".venv", "venv", "__pycache__", "node_modules", "generated",
     "data", "evaluation", "docs", ".mypy_cache", ".ruff_cache", ".pytest_cache",
 })
+_MODEL_SCOUT_EVIDENCE_FIELDS = (
+    "source", "source_url", "metric", "candidate", "open_weight_evidence",
+    "license", "ollama_tag", "digest", "quant", "native_context",
+    "parameter_size", "vram_fit",
+)
+_MODEL_SCOUT_LOCAL_FIELDS = (
+    "ollama_tag", "digest", "quant", "native_context", "parameter_size", "vram_fit",
+)
+
+
+def _present(value) -> bool:
+    return value is not None and value != ""
+
+
+def _model_scout_value(record: dict, key: str):
+    if key == "source":
+        return record.get("source_name") or record.get("source")
+    return record.get(key)
+
+
+def _presence_ratio(record: dict, fields: tuple[str, ...]) -> tuple[float, list[str]]:
+    missing = [key for key in fields if not _present(_model_scout_value(record, key))]
+    return ((len(fields) - len(missing)) / len(fields), missing)
 
 
 class Scanner(ABC):
@@ -279,6 +302,8 @@ class ModelRegistryScanner(FeedScanner):
         super().__init__(name, Pillar.UPDATED_METRICS, fetch)
 
     def _classify(self, record: dict) -> Finding | None:
+        if record.get("record_type") == "model_scout_candidate":
+            return self._classify_model_scout(record)
         cand, inc = float(record["candidate"]), float(record["incumbent"])
         better = cand > inc if record.get("direction", "increase") == "increase" else cand < inc
         if not better:
@@ -296,6 +321,73 @@ class ModelRegistryScanner(FeedScanner):
             suggested_target_type=TargetType.ROUTING, suggested_risk=RiskTier.L2,
             unknowns="cost/latency tradeoff and whether the public benchmark matches our tasks",
             detail={"cost_per_mtok": record.get("cost_per_mtok"), "lift": lift})
+
+    def _classify_model_scout(self, record: dict) -> Finding | None:
+        if record.get("open_weight") is not True or record.get("candidate") is None:
+            return None
+        score = float(record["candidate"])
+        model = str(record["model"])
+        metric = str(record.get("metric") or "coding_score")
+        roles = record.get("candidate_roles")
+        if not isinstance(roles, list) or not roles:
+            raise RuntimeError(
+                f"model_scout_candidate {model!r} must declare candidate_roles")
+        evidence_bits = [
+            f"source={record.get('source_name') or record.get('source')}",
+            f"{metric}={score}",
+            f"candidate_roles={','.join(str(role) for role in roles)}",
+            f"open_weight={record.get('open_weight_evidence')}",
+        ]
+        for key in ("license", "ollama_tag", "digest", "quant", "native_context", "vram_fit"):
+            if record.get(key) is not None:
+                evidence_bits.append(f"{key}={record[key]}")
+        evidence_completeness, missing_evidence = _presence_ratio(
+            record, _MODEL_SCOUT_EVIDENCE_FIELDS)
+        local_readiness, missing_local = _presence_ratio(record, _MODEL_SCOUT_LOCAL_FIELDS)
+        # The ranking values below are evidence-derived. They describe how ready
+        # this record is for a local benchmark, not whether the model is better.
+        benchmark_effort = 1.0 + float(len(missing_local))
+        return Finding(
+            pillar=Pillar.UPDATED_METRICS,
+            source=self.name,
+            title=f"benchmark open-weight model {model}",
+            claim=(f"{model} has public {metric}={score}; run local role-specific "
+                   "A/B before any routing recommendation"),
+            evidence=f"{self.name}: " + "; ".join(evidence_bits),
+            confidence=evidence_completeness,
+            impact=evidence_completeness,
+            ease=local_readiness,
+            reach=float(len(roles)),
+            effort=benchmark_effort,
+            time_criticality=0.0,
+            risk_reduction=0.0,
+            voi_value=evidence_completeness,
+            voi_prob=local_readiness,
+            cost=benchmark_effort,
+            suggested_target_type=TargetType.MODEL,
+            target_ref="command_center.improvement.live_model_benchmark",
+            suggested_risk=RiskTier.L2,
+            unknowns="whether this model beats current local role incumbents on live local tasks",
+            detail={
+                "record_type": "model_scout_candidate",
+                "model": model,
+                "metric": metric,
+                "score": score,
+                "candidate_roles": [str(role) for role in roles],
+                "source_url": record.get("source_url"),
+                "license": record.get("license"),
+                "ollama_tag": record.get("ollama_tag"),
+                "digest": record.get("digest"),
+                "quant": record.get("quant"),
+                "native_context": record.get("native_context"),
+                "parameter_size": record.get("parameter_size"),
+                "params_b": record.get("params_b"),
+                "vram_fit": record.get("vram_fit"),
+                "evidence_completeness": evidence_completeness,
+                "local_readiness": local_readiness,
+                "missing_evidence_fields": missing_evidence,
+                "missing_local_fields": missing_local,
+            })
 
 
 class DependencyScanner(FeedScanner):

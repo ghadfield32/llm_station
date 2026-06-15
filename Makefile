@@ -185,8 +185,8 @@ models-rollback:  ## Revert canary for ROLE=
 	@$(COMPOSE) restart litellm && echo "rolled back $(ROLE)"
 
 model-scout:  ## Propose model candidates from configured sources. Never edits configs.
-	@$(PY) -m command_center.registry.model_scout --output generated/model-scout-report.md || true
-	@echo "review generated/model-scout-report.md, then edit configs/models.yaml manually if warranted"
+	@$(PY) -m command_center.registry.model_scout --output generated/model-scout-report.md --feed-output generated/model-scout-feed.json || true
+	@echo "review generated/model-scout-report.md; daily scan feed is generated/model-scout-feed.json"
 
 model-fit:  ## Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
 	@$(PY) -m command_center.cli.model_fit $(if $(CTX),--ctx $(CTX),) $(if $(MODEL),--model $(MODEL),) $(if $(ENV),--env $(ENV),) $(if $(VRAM),--vram-gb $(VRAM),)

@@ -1,0 +1,98 @@
+schema_version: continuous-upgrade.experiment.v1
+experiment_id: mission-1-config-derived-judge-routing
+capability: config-derived Judge Gate routing
+state: INDEPENDENT_VERIFICATION_PASSED
+created_at: '2026-06-14'
+risk_tier: L2_local_edits
+implementation_status: implemented_isolated
+promotion_status: not_requested
+hypothesis: Moving Judge Gate classify routing from inline service constants to validated configuration preserves current behavior and improves auditability.
+baseline:
+  owner: services/judge_gate/app.py
+  route_map:
+    L0_read_only: triage
+    L1_plan_only: planner
+    L2_local_edits: coder
+    L3_external_write: coder
+    L4_dangerous: architect-judge
+candidate:
+  owner: validated configuration plus schema
+  constraints:
+    - no second model gateway
+    - no second mission ledger
+    - no provider API keys
+    - no global hooks
+    - no MCP registration
+    - no raw transcript retention
+    - no hidden eval leakage
+    - no silent fallback
+fixtures:
+  positive:
+    - id: route_l0_readonly
+      risk: L0_read_only
+      expected_alias: triage
+    - id: route_l1_plan
+      risk: L1_plan_only
+      expected_alias: planner
+    - id: route_l2_local_edits
+      risk: L2_local_edits
+      expected_alias: coder
+    - id: route_l3_external_write
+      risk: L3_external_write
+      expected_alias: coder
+    - id: route_l4_dangerous
+      risk: L4_dangerous
+      expected_alias: architect-judge
+  negative:
+    - id: missing_risk_route
+      expected: validation_or_startup_failure
+    - id: dangling_route_alias
+      expected: validation_failure
+    - id: provider_route_in_role
+      expected: forbidden_provider_failure
+    - id: l3_l4_without_approval
+      expected: gate_validation_failure
+required_commands:
+  - uv run cc validate
+  - uv run cc mission-dryrun
+  - uv run cc evals
+  - uv run pytest tests/test_routing.py tests/test_safety_boundaries.py tests/test_sealed_evals.py tests/test_improvement_lifecycle.py
+metrics:
+  - name: route_parity
+    kind: deterministic_fixture
+    required: true
+    acceptance: all positive route fixtures resolve to expected_alias
+  - name: missing_route_rejection
+    kind: deterministic_fixture
+    required: true
+    acceptance: missing route fails validation or service startup
+  - name: dangling_alias_rejection
+    kind: deterministic_fixture
+    required: true
+    acceptance: unknown role alias fails validation
+  - name: provider_boundary
+    kind: existing_validation
+    required: true
+    acceptance: forbidden-provider gate remains PASS
+  - name: approval_boundary
+    kind: existing_validation
+    required: true
+    acceptance: L3 and L4 still require approval
+  - name: secret_privacy_boundary
+    kind: inspection_or_test
+    required: true
+    acceptance: no secrets, tokens, raw transcripts, hidden evals, or secret-bearing diffs persisted
+unknown_values_policy: record unknown; do not estimate
+rollback:
+  file: ROLLBACK.md
+verifier:
+  independent_context_required: true
+  latest_result: PASS
+  latest_result_reason: final narrow verifier re-check found no remaining stale future-work or pending-verifier text; mission remains unpromoted pending human approval
+  allowed_results:
+    - PASS
+    - PASS_WITH_LIMITATIONS
+    - INSUFFICIENT_EVIDENCE
+    - FAIL
+    - SECURITY_BLOCK
+    - ARCHITECTURE_BLOCK

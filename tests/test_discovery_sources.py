@@ -110,6 +110,50 @@ def test_model_registry_only_proposes_when_candidate_beats_incumbent():
     assert all("worse" not in t for t in titles)
 
 
+def test_model_registry_accepts_open_weight_model_scout_record():
+    feed = [{
+        "record_type": "model_scout_candidate",
+        "model": "open-coder:q4",
+        "provider": "ollama",
+        "metric": "coding_score",
+        "candidate": 76.0,
+        "direction": "increase",
+        "source_name": "artificial-analysis",
+        "source_url": "https://example.test/models",
+        "candidate_roles": ["coder"],
+        "open_weight": True,
+        "open_weight_evidence": "explicit upstream open-weight flag",
+        "license": "Apache-2.0",
+        "ollama_tag": "open-coder:q4",
+        "digest": "sha256:abc",
+        "quant": "Q4_K_M",
+        "native_context": 32768,
+        "vram_fit": "FITS",
+    }]
+    findings = ModelRegistryScanner(lambda: feed).scan()
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.suggested_target_type.value == "model"
+    assert f.target_ref == "command_center.improvement.live_model_benchmark"
+    assert "local role-specific A/B" in f.claim
+    assert f.detail["ollama_tag"] == "open-coder:q4"
+    assert f.detail["candidate_roles"] == ["coder"]
+    assert f.detail["evidence_completeness"] < 1.0
+    assert "parameter_size" in f.detail["missing_evidence_fields"]
+    assert f.detail["local_readiness"] < 1.0
+
+
+def test_model_registry_skips_unverified_model_scout_record():
+    feed = [{
+        "record_type": "model_scout_candidate",
+        "model": "closed-top",
+        "metric": "coding_score",
+        "candidate": 99.0,
+        "open_weight": None,
+    }]
+    assert ModelRegistryScanner(lambda: feed).scan() == []
+
+
 def test_dependency_scanner_critical_outranks_minor_under_wsjf():
     feed = [
         {"package": "lib-a", "current": "1.0", "latest": "1.1", "severity": "none"},

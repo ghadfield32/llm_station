@@ -216,8 +216,12 @@ def _client(base_url: str) -> httpx.Client:
     return httpx.Client(base_url=base_url, timeout=30)
 
 
-def ollama_tags(base_url: str = DEFAULT_OLLAMA_BASE) -> dict[str, int]:
-    """name -> on-disk size in bytes for every installed model."""
+def ollama_tag_records(base_url: str = DEFAULT_OLLAMA_BASE) -> list[dict]:
+    """Raw model records from Ollama /api/tags.
+
+    This is the provenance source for local model discovery: name, digest, size,
+    and details are whatever Ollama reports. Shape errors fail loudly.
+    """
     try:
         with _client(base_url) as c:
             r = c.get("/api/tags")
@@ -228,7 +232,13 @@ def ollama_tags(base_url: str = DEFAULT_OLLAMA_BASE) -> dict[str, int]:
     models = data.get("models")
     if not isinstance(models, list):
         raise VramError("Ollama /api/tags returned an unexpected shape (no 'models' list)")
-    return {m["name"]: int(m["size"]) for m in models if "name" in m and "size" in m}
+    return [m for m in models if isinstance(m, dict)]
+
+
+def ollama_tags(base_url: str = DEFAULT_OLLAMA_BASE) -> dict[str, int]:
+    """name -> on-disk size in bytes for every installed model."""
+    return {m["name"]: int(m["size"]) for m in ollama_tag_records(base_url)
+            if "name" in m and "size" in m}
 
 
 def ollama_show(name: str, base_url: str = DEFAULT_OLLAMA_BASE) -> dict:

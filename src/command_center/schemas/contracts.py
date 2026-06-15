@@ -132,6 +132,7 @@ class JudgeConfig(Strict):
 class TierPolicy(Strict):
     auto: bool
     requires_approval: bool
+    default_route_alias: str
     required_stages: list[str]
     forbidden_auto_actions: list[str] = []
 

@@ -40,7 +40,11 @@ CONFIG_CONTRACTS = {
 # `make schema` / `make impact` machinery covers them — editable configs like any other,
 # not a parallel system. Imported from improvement.schema (lightweight: it only pulls
 # schemas.base + lifecycle, never the heavy discovery/registry package — avoids a cycle).
-from ..improvement.schema import DiscoveryConfig, ImprovementConfig  # noqa: E402
+from ..improvement.schema import (  # noqa: E402
+    DiscoveryConfig,
+    ImprovementConfig,
+    ModelBenchmarksConfig,
+)
 
 CONFIG_CONTRACTS["configs/improvement.yaml"] = ImprovementConfig
 # Per-target reference experiments (one per target type) — same contract, validated by
@@ -49,3 +53,4 @@ CONFIG_CONTRACTS["configs/improvement-targets.yaml"] = ImprovementConfig
 # The discovery scan's tunable knobs (ranking/triage/code-health/acceptance) — externalized
 # so no scan decision is an inline literal.
 CONFIG_CONTRACTS["configs/discovery.yaml"] = DiscoveryConfig
+CONFIG_CONTRACTS["configs/model-benchmarks.yaml"] = ModelBenchmarksConfig

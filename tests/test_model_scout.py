@@ -71,3 +71,37 @@ def test_gather_sorts_scored_before_unscored():
     ]
     cands.sort(key=lambda c: (c["coding_score"] is None, -(c["coding_score"] or 0)))
     assert [c["coding_score"] for c in cands] == [40.0, 10.0, None]
+
+
+def test_open_weight_filter_omits_unverified_sources(monkeypatch):
+    monkeypatch.setattr(scout, "gpu_budget_gb", lambda: None)
+    monkeypatch.setattr(scout.vram, "ollama_tags", lambda: {"local-open:latest": 1})
+    monkeypatch.setitem(scout.FETCHERS, "aider-polyglot", lambda: [
+        {"id": "closed-top", "source": "aider-polyglot", "coding_score": 99.0,
+         "ollama_tag": None, "open_weight": None}
+    ])
+    monkeypatch.setitem(scout.FETCHERS, "local-ollama-tags", lambda: [
+        {"id": "local-open:latest", "source": "local-ollama-tags", "coding_score": None,
+         "ollama_tag": "local-open:latest", "open_weight": True}
+    ])
+    reg = _registry(["aider-polyglot", "local-ollama-tags"])
+    candidates, _errors, notes, _installed = scout.gather(
+        reg, offline=False, ctx=32768, max_candidates=10)
+    assert [c["id"] for c in candidates] == ["local-open:latest"]
+    assert any("open-weight filter" in n for n in notes)
+
+
+def test_discovery_feed_records_require_open_weight_and_score():
+    records = scout.discovery_feed_records([
+        {"id": "open-scored", "open_weight": True, "coding_score": 77.0,
+         "source": "artificial-analysis", "open_weight_evidence": "explicit",
+         "ollama_tag": "open-scored:q4", "candidate_roles": ["coder"]},
+        {"id": "open-unscored", "open_weight": True, "coding_score": None,
+         "source": "local-ollama-tags"},
+        {"id": "unknown-scored", "open_weight": None, "coding_score": 99.0,
+         "source": "aider-polyglot"},
+    ])
+    assert len(records) == 1
+    assert records[0]["record_type"] == "model_scout_candidate"
+    assert records[0]["model"] == "open-scored"
+    assert records[0]["candidate_roles"] == ["coder"]

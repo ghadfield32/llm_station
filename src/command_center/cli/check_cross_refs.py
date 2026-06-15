@@ -27,6 +27,22 @@ def check_judge_routing(judges: dict, roles: set) -> list:
     return problems
 
 
+def check_gate_routes(gates: dict, roles: set) -> list:
+    """Every risk tier's default Judge Gate classify route must resolve to a
+    real models.yaml role. This keeps request routing in validated config rather
+    than in a service-local fallback table."""
+    problems = []
+    for tier, policy in (gates.get("tiers") or {}).items():
+        ref = policy.get("default_route_alias")
+        if not ref:
+            problems.append(f"gate tier '{tier}' missing default_route_alias")
+        elif ref not in roles:
+            problems.append(
+                f"gate tier '{tier}' default_route_alias '{ref}' "
+                f"is not a role in models.yaml")
+    return problems
+
+
 def check_tool_safe_roles(models: dict, channels: dict) -> list:
     """A TOOL-USING role must not be backed by a model whose Ollama tool parser
     drops a call the model prefixes with prose. Only the qwen3-coder family is
@@ -122,6 +138,12 @@ def main() -> int:
     # cheap->strong / stuck-escalation chain can never point at a nonexistent model
     judges = yaml.safe_load(open("configs/judges.yaml"))
     for msg in check_judge_routing(judges, roles):
+        print(f"  DANGLING: {msg}")
+        ok = False
+
+    # every risk tier's default classify route must also resolve to a real role.
+    gates = yaml.safe_load(open("configs/gates.yaml"))
+    for msg in check_gate_routes(gates, roles):
         print(f"  DANGLING: {msg}")
         ok = False
 

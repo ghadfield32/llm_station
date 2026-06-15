@@ -254,6 +254,307 @@ defaults to 4,096 — raise `num_ctx`), and Ollama serves **one request at a
 time by default** (set `OLLAMA_NUM_PARALLEL` and `OLLAMA_KEEP_ALIVE=-1` so
 parallel judge calls don't queue or thrash reloads).
 
+### 5.1 External routing reference — Puppetmaster is BORROW_PATTERN_ONLY
+
+Reviewed 2026-06-14 from the pasted Puppetmaster README plus its upstream
+GitHub/PyPI docs and this repo's live contracts/tests. Decision: **do not
+install or adopt Puppetmaster as a runtime router in this stack**. It is useful
+as a reference for auditable routing and typed worker artifacts, but a wholesale
+install would introduce a second supervisor/model registry/hook layer next to
+LiteLLM, Judge Gate, the Ledger, and the approval wall. Its cloud/API
+cost-router mode also conflicts with the local-only boundary above.
+
+What is already done here:
+
+1. **Local-only role contract** — `configs/models.yaml` roles must be
+   `provider: ollama`, `local: true`; provider API keys are rejected by
+   validation and forbidden-provider checks.
+2. **Executor routing contract** — Claude Code is the primary leased-worktree
+   executor; Codex is the cross-provider fallback/verifier path; local models
+   do not become primary coding executors.
+3. **Model discovery gate** — `model-scout` is propose-only and annotates
+   candidates with real VRAM fit; promotion still requires validate, evals,
+   canary, comparison, and a human tap.
+4. **Routing improvement target** — the coded improvement loop already has a
+   `routing` target with `routing_accuracy`, `routing_regret`, and
+   `unsafe_downgrades`; it can evaluate routing changes without adding a third
+   party runtime.
+
+Borrow from Puppetmaster as patterns only:
+
+- emit a typed `ROUTING` artifact for each non-trivial route decision;
+- record the picked role/executor, required capability, source config hashes,
+  observed token/cost fields when LiteLLM supplies them, and rejected
+  alternatives with concrete rejection reasons;
+- classify failures before retry/escalation: Ollama unavailable, model missing,
+  model OOM/context-fit failure, invalid JSON/truncation, tool-parser failure,
+  executor missing, timeout, auth/session failure, and human-approval-required;
+- store worker/judge outputs as typed artifacts with evidence references,
+  confidence, outcome, and sha256 so follow-up reads reuse artifacts instead of
+  rerunning models.
+
+Do **not** borrow:
+
+- global hooks, MCP auto-invocation, or prompt-submit interception;
+- cloud provider/API routes, OpenAI/Anthropic/OpenRouter keys, or a cloud
+  fallback;
+- a second model registry outside `configs/models.yaml`;
+- a second job/artifact store outside the Ledger;
+- silent fallback. A missing model, unsafe route, missing artifact field, or
+  unavailable service fails loud and leaves an event; it does not fabricate a
+  route, cost, metric, or success.
+
+Data/privacy rule for any borrowed artifact shape: record only bounded,
+operator-useful metadata and references. Do not persist raw chat transcripts,
+secret-bearing environment values, `.env` content, provider tokens, full diffs
+that may contain secrets, or hidden eval content. Evidence should be a path,
+hash, mission id, config hash, redacted excerpt, or deterministic check result
+unless a human explicitly approves retaining the full artifact.
+
+Ordered next work (do not skip ahead):
+
+1. **Done now — document the decision.** This section is the reference point:
+   Puppetmaster is pattern material, not a runtime dependency.
+2. **Done 2026-06-14 — make Judge Gate routing data-derived.** The inline
+   `services/judge_gate/app.py` risk→alias table has been replaced by
+   `configs/gates.yaml` `default_route_alias` values, required by schema,
+   cross-checked against `configs/models.yaml`, and loaded by Judge Gate at
+   startup. Missing or dangling aliases fail loudly; no inline defaults, fake
+   costs, or hidden fallbacks.
+3. **Add Ledger routing artifacts.** Add a small typed event/artifact for route
+   decisions using only the fields above. The artifact should cite source
+   config hashes and real LiteLLM usage fields when present; when usage is
+   absent, say `unknown` rather than estimating dollars.
+4. **Measure before learning.** Feed the new artifacts into the existing
+   `routing` improvement target only after there is a declared fixture set or a
+   pre-registered statistical plan. Until then the deterministic harness stays
+   the baseline; do not invent thresholds or train on leaked outcomes.
+5. **Then consider a one-mission adapter spike.** Only if artifacts show a real
+   routing/work-reuse problem the current stack cannot solve, run a
+   Ledger-invoked Puppetmaster adapter experiment with hooks disabled, no
+   provider keys, no global installs, and rollback evidence. That experiment
+   must pass the external capability-evaluation loop before any pilot.
+
+### 5.2 External AI-agent idea intake — broad prompt first
+
+Use [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md) when
+the candidate is broader than a single obvious dependency bump: ClawCodex,
+Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, dbt Wizard,
+BigQuery Graph / ADK / A2UI / BigSet, agentcookie, or a generic multi-agent
+framework. The goal is to decide whether there is a measured gap and a safe
+capability to extract before any install, pilot, hook, daemon, provider key, or
+control-plane change.
+
+What is already done:
+
+1. The broad prompt exists and starts from the implemented stack, not stale
+   brainstorming assumptions.
+2. The narrower [capability-evaluation-loop.md](capability-evaluation-loop.md)
+   now points back to the broad prompt for wide candidate sweeps.
+3. The no-build list below now rejects candidate bundles that lack a measured
+   gap, control-plane overlap matrix, threat model, and pre-registered
+   experiment plan.
+4. The first read-only routing/performance pass is complete:
+   [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md).
+   Verdict: improve routing natively first; pilot `codebase-memory-mcp` only as
+   a manual read-only retrieval benchmark; keep Puppetmaster, MAPPA, Agno/GitWiki,
+   A2UI, Docker Model Runner, and dbt skills as patterns/conditional pilots;
+   reject control-plane/runtime adoption for ClawCodex, OpenClaw, generic
+   agent frameworks, BigSet, agentcookie, and SIA-in-production.
+
+Remaining order for this candidate batch:
+
+1. Mission 1 is complete through final independent verification:
+   Judge Gate classify routing is now config-derived from `configs/gates.yaml`
+   and cross-checked against `configs/models.yaml`.
+2. Add typed Ledger route artifacts and route failure classes before learning
+   from routing. Missing usage/cost data is `unknown`, not estimated.
+3. Run a pre-registered read-only `codebase-memory-mcp` benchmark against
+   `rg`, Semble, and native agent search. Binary-only/manual invocation first;
+   no auto-install, MCP registration, hooks, skills, instruction edits, or UI
+   daemon before it wins.
+4. Add deterministic post-run attribution inspired by MAPPA only after route
+   artifacts exist.
+5. Evaluate Git/Markdown knowledge projection against OKF/AppFlowy only after
+   recurring-query gold cases exist.
+6. Benchmark Docker Model Runner only behind LiteLLM, and only if Ollama
+   throughput/context/reproducibility becomes a measured bottleneck.
+7. Promote anything only through the existing improvement/verification/GitHub
+   wall; no candidate may become its own evaluator or source of truth.
+
+### 5.3 Continuous upgrade loop — Mission 1 verified
+
+The continuous capability upgrade prompt is now active as a bounded evidence
+program, not permission to keep adding tools. Current cycle:
+**config-derived Judge Gate routing**.
+
+What is done:
+
+1. Baseline captured in
+   [evaluation/continuous-upgrade/BASELINE.md](../evaluation/continuous-upgrade/BASELINE.md)
+   and
+   [evaluation/continuous-upgrade/baseline.json](../evaluation/continuous-upgrade/baseline.json).
+2. Capability state register created:
+   [evaluation/continuous-upgrade/capability-register.md](../evaluation/continuous-upgrade/capability-register.md).
+3. Mission 1 evidence created with gap, experiment, machine-readable config,
+   threat/privacy/authority review, and rollback:
+   [GAP.md](../evaluation/continuous-upgrade/mission-1-config-derived-judge-routing/GAP.md),
+   [EXPERIMENT.md](../evaluation/continuous-upgrade/mission-1-config-derived-judge-routing/EXPERIMENT.md),
+   [experiment.yaml](../evaluation/continuous-upgrade/mission-1-config-derived-judge-routing/experiment.yaml),
+   [THREAT_PRIVACY_AUTHORITY.md](../evaluation/continuous-upgrade/mission-1-config-derived-judge-routing/THREAT_PRIVACY_AUTHORITY.md),
+   [ROLLBACK.md](../evaluation/continuous-upgrade/mission-1-config-derived-judge-routing/ROLLBACK.md).
+4. Baseline commands passed before implementation: `uv run cc validate`,
+   `uv run cc mission-dryrun`, `uv run cc evals`, and
+   `uv run pytest tests/test_routing.py tests/test_safety_boundaries.py
+   tests/test_sealed_evals.py tests/test_improvement_lifecycle.py` (39 passed).
+5. The AI packages/tools notes were reconciled as inventory, not implementation
+   truth. In particular, Hermes is not the active coordinator; it remains a
+   previously deferred candidate per the existing evaluation record.
+
+Current state:
+
+- Config-derived Judge Gate routing: `INDEPENDENT_VERIFICATION_PASSED`.
+- Implementation status: implemented in isolation.
+- Promotion status: not requested; not promoted.
+- Independent verifier status: initial verifier result was `FAIL` because this
+  status section and `experiment.yaml` were stale, not because of a functional,
+  security, or architecture block. The first re-check returned
+  `PASS_WITH_LIMITATIONS` because older backlog text in this file was stale;
+  after that text was corrected, the final narrow re-check returned `PASS`.
+- Security posture: no new provider keys, daemons, MCP registrations, hooks,
+  raw transcripts, hidden eval access, global config writes, second gateway,
+  second ledger, or second scheduler.
+
+Remaining order:
+
+1. Do not promote Mission 1 automatically. Human approval remains required for
+   promotion.
+2. If accepted, include Mission 1 in the next reviewed commit/PR with the
+   evidence artifacts.
+3. Start Mission 2 next: typed Ledger routing artifacts.
+
+### 5.4 Open-weight model discovery and benchmark loop
+
+This is now the ordered path for finding better local/open-weight LLMs without
+letting a leaderboard or scheduled scan change production routing.
+
+What is done:
+
+1. `model-scout` now emits an open-weight-only candidate set by default. A source
+   row is kept only when it has explicit open-weight evidence or is a local
+   Ollama tag with installed weights. Aider polyglot rows remain useful public
+   coding-score context, but they are filtered out of the open-weight feed unless
+   another source supplies open-weight provenance.
+2. Local Ollama candidates now carry source provenance from `/api/tags` and
+   `/api/show`: Ollama tag, digest, quant, parameter size, native context,
+   VRAM-fit verdict, max fitting context, and headroom. Missing metadata is
+   recorded as unknown/error; no digest, license, context, or fit value is
+   fabricated.
+3. `make model-scout` now writes both the human report
+   `generated/model-scout-report.md` and the machine feed
+   `generated/model-scout-feed.json`. The daily scan can consume that feed with
+   `make improvement-scan FEEDS=generated/model-scout-feed.json`.
+4. The daily scan understands `model_scout_candidate` records. It drafts only
+   `Proposed` `model` experiments for scored open-weight candidates, and it
+   carries declared candidate roles so a coding score can draft a coder
+   benchmark without implying planner, judge, or routing superiority. It states
+   that local role-specific A/B is required before any routing recommendation.
+5. `configs/model-benchmarks.yaml` is validated by `cc validate` and defines the
+   role-specific benchmark suites plus each suite's metric policy. Prompts,
+   metric names, and expected/forbidden markers live in config, not in code.
+6. `command_center.improvement.live_model_benchmark` is registered as a live
+   model A/B harness. It requires explicit experiment parameters for role,
+   suite, baseline model, candidate model, suite path, and local Ollama endpoint.
+   It stores only hashes, booleans, latency, token-rate data when Ollama reports
+   it, metrics, and equivalence metadata in Ledger artifacts; it does not retain
+   raw prompts or model outputs.
+7. The human wall is unchanged: scout and scan can propose only; benchmark
+   runner can only move to awaiting verification; canary and promotion remain
+   human-only.
+
+Metric policy for open-weight model upgrades:
+
+1. Use **open-weight** as the enforceable gate. "Open source" may be recorded as
+   an additional governance note, but the routing lane requires locally runnable
+   weights plus explicit provenance. A high public score without open-weight
+   evidence is capability context only.
+2. There is no single "best LLM" score. The board is role-specific:
+   - triage/planner: structured-output validity, instruction adherence,
+     tool-call correctness, escalation quality, and bounded task completion;
+   - coder: issue-resolution rate, patch-apply success, test pass rate,
+     edit-format compliance, compile/lint success, diff minimality, and
+     rollback frequency;
+   - local judge: labeled-case calibration, missed-defect rate, false-block
+     rate, safety-missed-defect rate, and bias checks for position/verbosity;
+   - long-context repo reader: effective context length, retrieval-at-length,
+     multi-hop repo reasoning, latency growth by context, and failure shape
+     (omission, contradiction, truncation, or tool misuse);
+   - terminal agent: terminal task pass rate, command ordering, stderr/error
+     handling, isolation behavior, and no secret exfiltration.
+3. Every role uses the same metric hierarchy:
+   - **Primary metrics** decide whether the role actually improves.
+   - **Hard non-regression metrics** cover reliability, safety, structured
+     output validity, data handling, and canary regressions.
+   - **Supporting metrics** cover speed, VRAM headroom, context cost, token
+     throughput, cold/warm load behavior, and concurrency stability.
+4. Source trust is explicit:
+   - benchmark-only source: useful for public capability context, not enough for
+     eligibility or promotion;
+   - provenance-only source: proves license/tag/digest/quant/local install, not
+     superiority;
+   - promotion-grade evidence: local role-specific A/B artifacts plus
+     validation, evals, canary telemetry, independent verification, and human
+     approval.
+5. Public benchmarks are proxy evidence. Prefer continuously refreshed or
+   contamination-aware suites for discovery and tracking. Static benchmark
+   saturation or leakage is a reason to reduce trust, not to invent a score.
+6. Promotion evidence is incumbent-relative. A candidate can become
+   recommendable only by beating the current role incumbent on the same suite,
+   machine, quant, context settings, and run protocol, with bootstrap/confidence
+   evidence when stochasticity matters. Universal thresholds such as "promote if
+   score > X" are not allowed in the model-upgrade lane.
+7. Acceptable outcomes are **Pareto improvement** (better on at least one
+   primary metric and not worse on hard non-regression metrics) or **contextual
+   specialization** (better for a declared workload slice without unacceptable
+   regressions elsewhere). Both remain proposed recommendations until the human
+   promotion wall.
+8. Local runtime evidence is first-class: time to first token, prompt processing
+   throughput, steady-state output tokens/sec, cold-load and warm-load time,
+   VRAM fit/headroom, OOM rate, context-window scaling cost, concurrency failure
+   rate, and repeatability across restarts/quant variants.
+9. Privacy rule: model benchmarks use synthetic or public tasks first; raw
+   prompts and outputs are not retained by the live harness; artifacts store
+   hashes, metric summaries, case ids, and equivalence metadata. External
+   evaluation traffic or raw transcript retention requires explicit approval.
+10. Risky coding, terminal, or repo-writing evals run isolated. A benchmark that
+    executes generated code must use the repo's isolation path before its result
+    can be treated as promotion-grade evidence.
+
+Current limitation:
+
+- The latest live scout run produced no scored open-weight feed records because
+  the configured keyless scored source, Aider polyglot, does not prove
+  open-weight status, and the installed local Ollama tags are unscored. The
+  installed local tags still get provenance and fit data in the scout report.
+
+Remaining order:
+
+1. Add or ingest a scored open-weight source with explicit provenance, for
+   example an Artificial Analysis feed when `AA_API_KEY` is intentionally set or
+   a curated local feed with license/tag/digest fields.
+2. Run role-specific local A/B baselines for the current incumbents so the board
+   has real incumbent distributions for planner, coder, judge, long-context, and
+   terminal-style work instead of only public scores.
+3. Pull any candidate that is not already local and rerun `make model-scout` so
+   `/api/tags` and `/api/show` provide real provenance.
+4. Register a bounded live model benchmark experiment against
+   `command_center.improvement.live_model_benchmark`; run baseline, candidate,
+   and independent verification.
+5. If verified, manually start a canary with `make models-canary`, compare
+   canary telemetry, then manually promote or roll back.
+6. Keep Mission 2 routing artifacts separate: model discovery can inform
+   routing, but it does not replace the typed Ledger route-decision work.
+
 ---
 
 ## 6. Stage by stage — the five pipelines
@@ -426,15 +727,20 @@ Models are data in `configs/models.yaml` (local-only: every role must use
 `provider: ollama`, `local: true`).
 
 ```
-1. make model-scout      → generated/model-scout-report.md (ranked, propose-only)
-2. Edit configs/models.yaml with a local Ollama candidate
-3. make validate         → license / priority / canary rules
-4. make evals            → routing/judge regression suite
-5. make models           → render + pull local tags + restart LiteLLM
-6. make models-canary ROLE=… MODEL=ollama_chat/<tag>   → small traffic slice
-7. make live-smoke       → real local replies
-8. compare cost · latency · false blocks · missed issues
-9. make models-promote ROLE=…   or   make models-rollback ROLE=…
+1. make model-scout      → generated/model-scout-report.md + generated/model-scout-feed.json
+2. make improvement-scan FEEDS=generated/model-scout-feed.json
+3. Confirm the role's incumbent baseline distribution exists in Ledger; run the
+   role suite first if it does not
+4. Register a bounded live model benchmark experiment if the scan drafts a
+   scored open-weight candidate
+5. Run baseline → candidate → independent verification; artifacts land in Ledger
+6. Edit configs/models.yaml with a verified local Ollama candidate
+7. make validate && make evals
+8. make models           → render + pull local tags + restart LiteLLM
+9. make models-canary ROLE=… MODEL=ollama_chat/<tag>   → small traffic slice
+10. make live-smoke       → real local replies
+11. compare task success · unsafe output · invalid response · runtime metrics · canary telemetry
+12. make models-promote ROLE=…   or   make models-rollback ROLE=…
 ```
 
 Current local picks: `qwen3-coder:30b` · `qwen3:30b` · `devstral:24b`.
@@ -740,7 +1046,8 @@ make render             # configs → generated/litellm-config.yaml
 make impact             # blast radius of your git diff (breakage.yaml)
 
 # models
-make model-scout        # discovery report, never auto-promotes
+make model-scout        # discovery report + scan feed, never auto-promotes
+make improvement-scan FEEDS=generated/model-scout-feed.json  # Proposed cards only
 make models             # render + pull local tags + restart
 make models-canary ROLE=… MODEL=…  /  models-promote ROLE=…  /  models-rollback ROLE=…
 make evals              # routing/judge regression suite
@@ -977,6 +1284,8 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [autonomy-idea-map.md](autonomy-idea-map.md) | channels/brain/knowledge/wall picture + autonomy phases |
 | [growth-os-engineering.md](growth-os-engineering.md) | Growth OS living engineering reference (module tree, standards, cross-session rules) |
 | [capability-evaluation-loop.md](capability-evaluation-loop.md) | reusable mission brief for evaluating external tools/repos/skills — staged, evidence-first, L2-capped, with command-center mapping |
+| [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md) | broad copy-paste prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, multi-agent frameworks, and similar ideas before any install/adoption |
+| [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md) | read-only one-by-one verdicts for the broad candidate batch, focused on routing/performance impact and ordered next work |
 | [improvement-loop.md](improvement-loop.md) | **the coded improvement loop** — lifecycle, runner, promotion/canary/rollback, operator CLI (the system improves itself, human-gated) |
 | [experiment-registry.md](experiment-registry.md) | the experiment tables added to the one `ledger.db` — schema, events, negative-result memory, migration |
 | [independent-verification.md](independent-verification.md) | the verifier that checks the work: separation, reproduction, sealed evals, self-verification prevention |
@@ -1001,7 +1310,10 @@ catching its own builder is the system working) · public exposure (tailnet
 only) · a third coding-agent executor (Cline CLI / etc.) — Claude Code is
 primary, Codex the cross-provider fallback; a new executor brings no
 gates/judges/ledger/leases and would have to be wrapped in them to be safe
-(Cline + Ollama evaluated 2026-06-13 → DEFER, watch-list only) · another
+(Cline + Ollama evaluated 2026-06-13 → DEFER, watch-list only) · Puppetmaster
+as a second runtime/router/hook layer (borrow routing-artifact patterns only;
+see §5.1) · a candidate zoo/tool bundle without a measured gap, control-plane
+overlap matrix, threat model, and pre-registered experiment plan · another
 abstraction layer unless it prevents a failure actually hit.
 
 The system is a handful of trusted layers with strong contracts, not more
@@ -1042,6 +1354,297 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-15 — Trusted metric policy for open-weight LLM upgrades
+
+- **What changed.** Reviewed the trusted-metrics attachment against the current
+  open-weight discovery loop and added the role-specific metric board to §5.4:
+  triage/planner, coder, local judge, long-context repo reader, and terminal
+  agent are evaluated separately rather than collapsed into one "best model"
+  number.
+- **Metric hierarchy.** The model-upgrade lane now documents primary metrics,
+  hard non-regression metrics, and supporting runtime metrics. Promotion
+  evidence must be incumbent-relative and role-specific; public leaderboard
+  scores remain proxy evidence.
+- **Source trust.** The doc now separates benchmark-only, provenance-only, and
+  promotion-grade evidence. A source can suggest what to test, but only local
+  A/B artifacts plus validate/evals/canary telemetry/independent verification
+  and human approval can justify a routing change.
+- **Privacy and leakage control.** The benchmark rule is explicit: synthetic or
+  public tasks first, hashes instead of raw prompts/outputs, local-only traffic
+  unless explicitly approved, and isolated execution for risky coding or
+  terminal evals.
+- **Code alignment.** Model-scout scan findings no longer invent fixed
+  confidence/priority constants for open-weight candidates. The finding derives
+  confidence/readiness from the actual provenance fields present and still only
+  drafts a Proposed live benchmark.
+- **Validation.** `uv run cc validate`, focused live model/discovery/model-scout
+  tests (25 tests), broader improvement/discovery tests (77 tests),
+  and `ruff check` on the touched source/tests passed. A temp model-scout JSON
+  and feed run succeeded; the feed stayed empty because no scored open-weight
+  source is currently configured.
+- **Remaining order.** Add a scored open-weight source with explicit provenance,
+  collect incumbent baseline distributions by role, then benchmark candidates
+  against those incumbents before any canary or human promotion decision.
+
+### 2026-06-15 — Open-weight model discovery feed and live benchmark harness
+
+- **What changed.** `model-scout` now defaults to an open-weight candidate
+  filter, writes `generated/model-scout-feed.json` for the daily scan, and adds
+  provenance fields for local Ollama tags: license when known from
+  `configs/models.yaml`, tag, digest, size, quant, parameter size, native
+  context, VRAM fit, max fitting context, and headroom. Candidates without
+  explicit/local weight evidence are filtered out of the feed. Local tags
+  without causal-LM attention metadata are not treated as LLM candidates.
+- **Self-improvement link.** `ModelRegistryScanner` now accepts
+  `model_scout_candidate` feed records and drafts only `Proposed` model
+  experiments for scored open-weight candidates. It does not claim that a model
+  is better until a local role-specific benchmark runs.
+- **Benchmark path.** Added validated `configs/model-benchmarks.yaml` and the
+  `command_center.improvement.live_model_benchmark` harness. Live benchmark
+  experiments must declare role, suite, baseline model, candidate model, suite
+  path, and local Ollama endpoint in structured experiment parameters. Runner
+  artifacts store redacted logs, metric summaries, and equivalence metadata in
+  the Ledger; raw prompts and model outputs are not retained.
+- **Validation.** `uv run cc validate` passed. Focused tests passed:
+  `uv run pytest tests/test_model_scout.py tests/test_discovery_sources.py
+  tests/test_live_model_benchmark.py` (25 tests). A temp live scout JSON/feed
+  run succeeded; its feed was empty because the available scored source did not
+  prove open-weight status and installed local tags were unscored.
+- **Decision.** Scout, scan, benchmark, canary, and promotion remain ordered and
+  human-gated. No provider route, provider key, auto-promotion, fake score,
+  hidden fallback, or raw transcript retention was introduced.
+
+### 2026-06-14 — Continuous upgrade loop Mission 1 implemented + validation passed
+
+- **What changed.** Created the continuous-upgrade evidence set under
+  `evaluation/continuous-upgrade/`: baseline, machine-readable baseline,
+  capability register, and Mission 1 artifacts for config-derived Judge Gate
+  routing (`GAP.md`, `EXPERIMENT.md`, `experiment.yaml`,
+  `THREAT_PRIVACY_AUTHORITY.md`, `ROLLBACK.md`, `RESULTS.md`,
+  `VERIFIER_REPORT.md`). Implemented Mission 1 by moving Judge Gate classify
+  route aliases into `configs/gates.yaml`, requiring them in the gates schema,
+  cross-checking them against `configs/models.yaml`, and making Judge Gate load
+  the route map from mounted config at startup.
+- **Baseline.** Current branch is `feat/agent-kanban-surface` at
+  `da28b6dd7f864e62b177bc2b9cd90d19049877de` with a dirty worktree. Baseline
+  commands passed before implementation: `uv run cc validate`; `uv run cc
+  mission-dryrun`; `uv run cc evals`; focused pytest for routing, safety,
+  sealed evals, and improvement lifecycle = 39 passed. Full suite, live smoke,
+  and Growth OS selftest were not run in this pass and are not claimed.
+- **Validation.** Post-change `uv run cc validate`, `uv run cc mission-dryrun`,
+  and `uv run cc evals` passed. Focused route/Judge Gate startup tests passed
+  (16 tests); wider focused safety/sealed-eval/improvement tests passed
+  (50 tests); `ruff check src services tests` passed; `mypy` passed for the
+  touched schema file; full `uv run pytest` passed (562 tests, one existing
+  Starlette/httpx deprecation warning). Broad `mypy src` still has existing
+  repo-wide typing issues and is not claimed as passing.
+- **Decision.** Mission 1 is `INDEPENDENT_VERIFICATION_PASSED`, not promoted.
+  The first independent verifier found the implementation/security acceptable
+  but returned `FAIL` because status docs were stale; the first re-check
+  returned `PASS_WITH_LIMITATIONS`; after the remaining stale backlog text was
+  corrected, the final narrow re-check returned `PASS`.
+  No external router, provider key, hook, daemon, MCP registration, fake metric,
+  hidden fallback, raw transcript retention, or sealed-eval exposure was
+  introduced.
+- **Reconciliation.** The uploaded AI packages/tools notes are treated as
+  inventory. MASTER remains implementation truth: Hermes is deferred, LiteLLM
+  remains the only model gateway, Ledger remains the state authority, and Judge
+  Gate remains the review/classification service.
+
+### 2026-06-14 — Routing/performance candidate batch evaluated
+
+- **What changed.** Added
+  [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md),
+  a read-only, one-by-one evaluation of Puppetmaster, codebase-memory-mcp,
+  Semble, abtop, asm, ClawCodex, Agno/GitWiki, SIA, MAPPA, generic multi-agent
+  frameworks, dbt Wizard / dbt Agent Skills, OpenClaw / Docker Model Runner,
+  Google ADK, BigQuery Agent Analytics, A2UI, BigSet, agentcookie,
+  Git/Markdown knowledge, verifier loops, and Hermes/WebUI ideas against this
+  system's routing/performance path.
+- **Decision.** No external runtime/router/control plane should be adopted for
+  core routing. The first native routing fix is complete: Judge Gate's inline
+  risk-to-alias route table now comes from validated config. The remaining
+  ordered work is to add typed Ledger route artifacts, classify failures, and
+  feed measured artifacts into the existing `routing` improvement target only
+  after a benchmark plan exists.
+- **Conditional pilots.** `codebase-memory-mcp` is the only new external tool
+  worth a performance benchmark now, and only in binary-only/manual/read-only
+  mode with no auto config, MCP registration, hooks, instruction edits, or UI
+  daemon. abtop stays opt-in/read-only; Semble stays blocked on its measured
+  large-repo/symlink/pinning issues.
+- **Pattern-only decisions.** Borrow artifact/failure ideas from Puppetmaster,
+  per-event attribution from MAPPA, branch-reviewed knowledge projection from
+  Agno/GitWiki, declarative UI ideas from A2UI, and backend benchmark ideas from
+  Docker Model Runner. Reject or defer control-plane/runtime adoption for
+  ClawCodex, OpenClaw, generic agent frameworks, SIA-in-production, BigSet, and
+  agentcookie.
+
+### 2026-06-14 — Broad AI-agent idea evaluation prompt added
+
+- **What changed.** Added
+  [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md), a
+  copy-paste mission prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA,
+  codebase-memory-mcp, dbt Wizard, RamiKrispin/local-ai-server, BigQuery Graph /
+  ADK / A2UI / BigSet, agentcookie, and generic multi-agent frameworks against
+  this system before any install or adoption.
+- **Baseline preserved.** The prompt treats this repo's current contracts as the
+  source of truth: `configs/*.yaml` + Pydantic validation, LiteLLM as the single
+  model gateway, Ollama as the local runtime, Claude Code primary with Codex as
+  fallback/verifier, Judge Gate, Ledger, Growth OS/AppFlowy, GitHub wall,
+  one-worktree leases, and the human-gated improvement loop. It corrects stale
+  "Hermes as primary" assumptions from older brainstorming notes.
+- **Data discipline.** No hardcoded thresholds, fake values, optimistic
+  estimates, silent fallbacks, provider keys, global hooks, raw transcript
+  retention, production secrets, or hidden eval leakage. Unknown values stay
+  `unknown`; metrics, sample counts, budgets, and stop rules must be declared in
+  the experiment contract or benchmark plan before a run.
+- **Order of work.** Phase 0 inventory/baseline; Phase 1 read-only experiment
+  plans; Phase 2 isolated pilots; Phase 3 feature-flag integration; Phase 4
+  monitored canary; Phase 5 human promotion; Phase 6 cleanup/negative-result
+  memory. Use [capability-evaluation-loop.md](capability-evaluation-loop.md) for
+  the detailed staged execution once a broad idea is selected.
+
+### 2026-06-14 — Kanban row powers extended + validated across agent surfaces
+
+- **What changed.** Added three real, schema-derived Kanban powers to the shared
+  `growthos.actions` layer and exposed them through the local assistant,
+  GatewayCore channel tools, MCP, and the in-app console governed action list:
+  `annotate_item(database, title, note)` appends dated Notes without clobbering;
+  `set_item_field(database, title, field, value)` changes real schema fields
+  such as Section, Area, Priority, Risk, Due, Tags, Pillar, Format, Module,
+  Action, Acceptance, and Owners; `remove_item_field_value(database, title,
+  field, value)` removes one exact value from grouped text fields such as Tags,
+  Topics, Owners, and Media without clearing the field.
+- **How it stays careful.** Field names, field types, and select options are
+  read from `appflowy_kanban/growth-os/config/schema.yaml` (including
+  `*_board` and `*_content` templates), not invented in prompts. Status/column
+  movement remains routed through `move_item` or lifecycle verbs. Approval,
+  row-key, writeback, and generated fields (`Status`, `CardKey`, `Key`,
+  `MissionID`, `LastSync`, `Created`, etc.) are not editable through the generic
+  field tool. If a row's stable key cannot be determined, the write refuses
+  rather than risking a duplicate row.
+- **Honest boundary.** This does **not** pretend to change AppFlowy board
+  view-layout/group-by/visual formatting: the current REST client writes row
+  fields, not view settings, and existing setup scripts already document that
+  board grouping must be set in the UI. Blank field clearing is also not
+  claimed because the current client intentionally drops empty writes; removing
+  a free-text grouping is supported only when another grouped value remains,
+  while select fields must be changed to another valid option.
+- **Validation.** Focused tests passed: `pytest tests/test_actions_intent.py
+  tests/test_agent_kanban_ui.py` = 42 passed. Broader surface tests passed:
+  `pytest tests/test_gateway_toolcall.py tests/test_memory.py
+  tests/test_board_state.py tests/test_kanban_surface.py
+  tests/test_tool_safe_roles.py tests/test_actions_intent.py
+  tests/test_agent_kanban_ui.py` = 89 passed. Full suite passed: 555 passed.
+  `ruff check` passed on all touched code/tests.
+  `uv run cc validate` passed (config validation, cross-refs, render,
+  forbidden-provider gate). Live/read-only abilities smoke passed 24/24 via the
+  shared logged dispatch (`scripts/test_abilities.py`): all five hops live,
+  field-edit verbs present, no approve verb, and 31 tools wrapped by the
+  agent-call log. Structural exposure check passed: assistant tools + GatewayCore
+  dispatch both include memory and all three Kanban field verbs; in-app governed
+  actions include all three field verbs. Live read-only GatewayCore multi-turn
+  check passed: one conversation recalled a marker on turn 2 with zero tools; a
+  fresh conversation abstained with zero tools; no board or memory writes.
+- **Tracker synced.** The detailed agent-kanban tracker now carries the same
+  row-power contract and honest AppFlowy REST boundary:
+  [AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+- **Scratch hygiene.** The sandbox-created `.codex_tmp/` pytest directory was
+  ACL-owned by the sandbox identity and could not be deleted by the normal user;
+  it is now ignored as local scratch so it cannot pollute git status or
+  repo-corpus hash tests.
+- **Left in order.** (1) Verify AppFlowy REST support for clearing values and
+  view-layout/group-by changes before adding those powers. (2) If verified, add
+  a narrow view-layout tool with explicit schema/API evidence and tests. (3)
+  Feed real action outcomes into the existing data-derived Kanban tuning path;
+  no speculative learner or fake threshold before that signal exists.
+
+### 2026-06-14 — Puppetmaster reviewed as a routing reference, not adopted
+
+- **Decision.** Added §5.1: Puppetmaster is **BORROW_PATTERN_ONLY** for
+  auditable routing artifacts, rejected-route reasons, failure classification,
+  and typed worker outputs. It is **not** adopted as a runtime router because
+  that would duplicate LiteLLM/Judge Gate/Ledger authority, add hooks/MCP
+  auto-invocation, and re-open provider-API routing this repo forbids.
+- **Safety/data boundary.** The borrowed artifact shape may store bounded
+  metadata, config hashes, real LiteLLM usage fields when present, redacted
+  evidence references, outcome, confidence, and sha256. It must not retain raw
+  transcripts, secrets, `.env` content, provider tokens, hidden eval content,
+  or full secret-bearing diffs.
+- **Ordered backlog.** Mission 1 is complete: Judge Gate's risk→alias mapping is
+  now data-derived from validated configs. The next work is linear: add Ledger
+  routing artifacts; then feed those artifacts into the existing `routing`
+  improvement target once a declared fixture/statistical plan exists; only then
+  consider a one-mission Puppetmaster adapter spike with hooks disabled and no
+  provider keys. No defensive fallback, fake cost, invented threshold, or
+  speculative learner is permitted along that path.
+- **Checks run before this doc update.** `uv run cc validate` passed;
+  `pytest tests/test_routing.py tests/test_model_scout.py tests/test_vram.py`
+  passed (29 tests); `pytest tests/test_all_target_types.py
+  tests/test_improvement_lifecycle.py tests/test_promotion.py
+  tests/test_experiment_runner.py` passed (47 tests).
+
+### 2026-06-14 — durable memory WIRED into the live gateway + validated 8/8 (deep + cross-conversation)
+
+Applied the wiring the 2026-06-13 entry below built + staged, and validated it live end-to-end.
+Memory now works through the real gateway — the cross-conversation gap from the multi-turn proof
+is closed in production.
+
+- **Wired at the root, mirroring `board_state`.** `core.py` loads `self.memory_cfg` once in
+  `__init__` (right after `load_tool_layer` puts growthos on the path, like `self.board_knobs`) and
+  re-injects via `_memory_messages(query) -> list[dict]` at turn start + mid-loop on memory's **own**
+  refresh cadence (guarded against a 0 cadence exactly like the board's `refresh and …`).
+  `assistant.py` registers the `remember`/`forget` verbs in `TOOL_FNS` + a SYSTEM instruction;
+  `collect_memory_state(query, cfg)` takes the config (loaded once, not per call). No defensive code:
+  fail-loud-render mirrors `board_state`, the cadence guard mirrors the board's, the embedder fails
+  loud, the store is per-owner + curated-only. Patch doc marked applied:
+  [memory-integration-patch.md](memory-integration-patch.md).
+- **Live-validated 8/8** (real `qwen3:30b` + `nomic-embed-text` + AppFlowy board). **S1**: remembered
+  in conversation A → recalled "black, no sugar" in a **fresh** conversation B → `forget` propagated to
+  D. **S2**: a 7-turn conversation recalled focus + deadline at turn 7. **S3**: facts saved in **three
+  different conversations** all recalled in a 4th. **S4**: recall used **zero tools** (pure
+  re-injection, confirmed via `run_turn_events`). The store held only curated facts (no transcripts),
+  with the agent self-tagging facts to the `betts_basketball` project. **Definitive deep proof**: a
+  fact stated at turn 1, after enough turns to evict it from the `deque(12)` rolling window, was still
+  recalled in the same conversation — `in_deque=False` + recall succeeded + fact in store ⇒ provably
+  from memory, not history.
+- **Hygiene.** The S2 agent over-eagerly staged 2 mission cards + 1 todo on the real board (it read
+  failing-DAG context and acted); **reverted** to Backlog/Todo (the pre-existing `geo_social_pipeline`
+  Ready card left untouched). **No memory leak**: tests isolated `memory.db` to a temp dir
+  (`GROWTHOS_STATE_DIR` verified to take effect); production `_state/memory.db` has **0 rows**.
+- **Gates.** ruff clean on all applied files; 39 hermetic tests green (21 memory + 18 vram); full
+  suite exit 0; `core.py` adds no new mypy errors (the growthos imports match the pre-existing
+  pattern; only the pre-existing line-73 `logged` typing remains, not mine).
+- **Backlog (worked 2026-06-14; ordered, each with its real blocker — nothing built speculatively):**
+  1. **Per-conversation project scoping — DEFERRED (no data-derived source yet; not a fabrication).**
+     The store + `retrieve(project=…)` support it and are tested, but there is no clean source for a
+     conversation's *active project* today: the channels are general-purpose (no inherent project); a
+     per-channel `project` config would touch ~6 agent-surface files for a feature **no channel uses**
+     (dormant ⇒ speculative); inferring it from the text is guessy; and an agent `focus(project)` verb
+     can't work because the tool layer is conversation-agnostic (tools get `name`+`args`, never the
+     `conversation_id`). Meanwhile **relevance already separates projects softly** — a betts fact won't
+     surface for an unrelated query — so `project=None` is *correct* for general channels. **Activation
+     path when wanted:** introduce a project-specific channel, add an optional `project` to its
+     `channels.yaml` spec, thread it `GatewayConfig → collect_memory_state(project=spec.project or None)`.
+     That is an operator/product decision (which channel is project-scoped), not code I should invent.
+  2. **Sharing-vs-acting — PARTIALLY ADDRESSED 2026-06-14.** Refined the memory SYSTEM instruction
+     (`assistant.py`): "simply sharing a fact is NOT a request to create/stage/change a board card or
+     todo — remember it and reply; touch the board only when the user asks." A live re-run of the exact
+     S2 trigger now made **zero board writes** (vs S2 staging cards) — suggestive, but one turn is noisy
+     (LLM variance) and proactive `remember` stays model-dependent (explicit "remember X" is the reliable
+     path, proven 8/8). The broader board action-bias is still the **agent-surface session's** persona to
+     fully tune.
+  3. **Learned retrieval-weight tuner — BLOCKED on a usefulness signal.** A tuner needs
+     `(query, injected facts, was-it-useful)`; the **usefulness label is not logged and has no clean
+     source** (no explicit feedback; `forget` is only weak negative signal). Prerequisite, in order:
+     define + log a usefulness signal, let it accrue, *then* the abstain-until-it-beats-the-config-
+     baseline tuner (same discipline as the cadence learner). Building it now would be a learner with no
+     signal — not done.
+  4. **Router learned pre-router — DEFERRED** (data-gated; the cascade covers it until escalation data
+     justifies it), per the prior router decision. Unchanged.
+  No defensive code, no hardcoded thresholds, no fabricated values, no leakage at any step — and,
+  deliberately, **no speculative plumbing for sources that don't exist yet.**
 
 ### 2026-06-13 — durable cross-conversation memory (built + proven), embedder VRAM budget, router decision
 
@@ -1234,6 +1837,15 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
 - **Least privilege + secrets.** Scopes trimmed to posting-only (dropped `email`,
   `r_*_social`); the OAuth token store + ledger + lock added to `.gitignore`
   (token = secret). `--apply` prints token expiry each run (60-day token).
+
+### 2026-06-14 — agent kanban surface: Phase 6 usability round 4 (inline field editing)
+
+- **Edit any field from the card drawer.** Each field gets an inline `edit` (→ governed `set_item_field`) and an
+  "+ Note" box (→ `annotate_item`, clobber-safe), built on the field-editing verbs a concurrent session added.
+  Adjust Priority/Area/Risk/Due/Tags/etc. on any board at any time. Verified live: `Priority=P3` set; **Status
+  edit refused** ("use move_item"); **invalid `P9` rejected** with the data-derived allowed set
+  `['P0','P1','P2','P3']`; note added; reverted. The wall holds (Status/keys not editable here; protected fields
+  server-refused). Frontend-only (uses existing `/api/action`); SPA recompiled clean.
 
 ### 2026-06-14 — agent kanban surface: Phase 6 usability round 3 (drag-and-drop)
 

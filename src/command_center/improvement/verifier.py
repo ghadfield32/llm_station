@@ -28,7 +28,7 @@ from .evals import SealedEvalStore, SealedAccessDenied
 from .events import EventRecord, ExperimentEventType
 from .lifecycle import Actor, ExperimentStatus
 from .registry import ExperimentRegistry, file_sha256
-from .runner import compare_metrics, HARNESSES
+from .runner import build_harness, compare_metrics, HARNESSES
 from .schema import ExperimentDefinition
 
 _RETRIEVAL_REF = "command_center.improvement.retrieval_strategies"
@@ -149,7 +149,7 @@ class IndependentVerifier:
                 detail=f"no verifier harness for target_ref {defn.target_ref!r}"))
             return self._finalize(report, defn)
         is_retrieval = defn.target_ref == _RETRIEVAL_REF
-        repro_mr = factory(self.repo_root).measure("candidate", reps)
+        repro_mr = build_harness(factory, self.repo_root, defn).measure("candidate", reps)
         repro = repro_mr.metric_values
 
         # C1 — deterministic metrics must reproduce EXACTLY (that is what catches a

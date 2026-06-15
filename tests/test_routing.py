@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from command_center.schemas import ModelRegistry
-from command_center.cli.check_cross_refs import check_judge_routing
+from command_center.cli.check_cross_refs import check_gate_routes, check_judge_routing
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +26,10 @@ def _registry() -> ModelRegistry:
 
 def _judges() -> dict:
     return yaml.safe_load((REPO_ROOT / "configs/judges.yaml").read_text(encoding="utf-8"))
+
+
+def _gates() -> dict:
+    return yaml.safe_load((REPO_ROOT / "configs/gates.yaml").read_text(encoding="utf-8"))
 
 
 def test_executor_primary_is_claude_with_codex_cross_provider_fallback():
@@ -70,6 +74,35 @@ def test_stuck_escalation_routes_to_a_stronger_existing_local_judge():
 def test_all_judge_routes_resolve_against_models_yaml():
     roles = set((_registry().roles or {}).keys())
     assert check_judge_routing(_judges(), roles) == []
+
+
+def test_all_gate_default_routes_resolve_against_models_yaml():
+    roles = set((_registry().roles or {}).keys())
+    assert check_gate_routes(_gates(), roles) == []
+
+
+def test_gate_default_routes_preserve_current_classify_policy():
+    tiers = _gates()["tiers"]
+    assert tiers["L0_read_only"]["default_route_alias"] == "triage"
+    assert tiers["L1_plan_only"]["default_route_alias"] == "planner"
+    assert tiers["L2_local_edits"]["default_route_alias"] == "coder"
+    assert tiers["L3_external_write"]["default_route_alias"] == "coder"
+    assert tiers["L4_dangerous"]["default_route_alias"] == "architect-judge"
+
+
+def test_check_gate_routes_flags_a_dangling_default_route():
+    bad = {"tiers": {"L0_read_only": {"default_route_alias": "ghost-role"}}}
+    problems = check_gate_routes(bad, roles={"triage", "architect-judge"})
+    assert len(problems) == 1
+    assert "ghost-role" in problems[0]
+    assert "default_route_alias" in problems[0]
+
+
+def test_check_gate_routes_flags_a_missing_default_route():
+    bad = {"tiers": {"L0_read_only": {}}}
+    problems = check_gate_routes(bad, roles={"triage", "architect-judge"})
+    assert len(problems) == 1
+    assert "missing default_route_alias" in problems[0]
 
 
 def test_check_judge_routing_flags_a_dangling_escalation():

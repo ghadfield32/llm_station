@@ -1,0 +1,90 @@
+{
+  "schema_version": "continuous-upgrade.baseline.v1",
+  "captured_at": "2026-06-14",
+  "scope": "mission-1-config-derived-judge-gate-routing-preimplementation",
+  "source_prompt_hashes": {
+    "continuous_capability_prompt": "748E31D49CA56962BAC1303DB7F9A8D5E29F9182E7CB1A471AC5191E6BFE22E2",
+    "ai_system_packages_notes": "BB0EA280A7F2337D00653FAEB461FFBBA93AAAF3E00587D041FD189CFBA2992D"
+  },
+  "repository": {
+    "branch": "feat/agent-kanban-surface",
+    "commit": "da28b6dd7f864e62b177bc2b9cd90d19049877de",
+    "worktree_dirty": true,
+    "dirty_status_before_artifacts": [
+      "M .gitignore",
+      "M appflowy_kanban/growth-os/agent/growthos_mcp.py",
+      "M appflowy_kanban/growth-os/growthos/actions.py",
+      "M appflowy_kanban/growth-os/growthos/assistant.py",
+      "M appflowy_kanban/growth-os/scripts/test_abilities.py",
+      "M docs/MASTER.md",
+      "M docs/backend/projects/AGENT_KANBAN_SURFACE.md",
+      "M docs/capability-evaluation-loop.md",
+      "M services/agent_kanban_ui/app.py",
+      "M src/command_center/channels/core.py",
+      "M tests/test_actions_intent.py",
+      "M tests/test_agent_kanban_ui.py",
+      "?? docs/agent-ideas-evaluation-prompt.md",
+      "?? docs/routing-performance-candidate-evaluation-2026-06-14.md"
+    ]
+  },
+  "environment": {
+    "os": "Microsoft Windows NT 10.0.26200.0",
+    "powershell": "7.5.5",
+    "python": "3.12.6",
+    "uv": "0.8.11",
+    "docker": "29.0.1",
+    "ollama": "0.30.8"
+  },
+  "lock_state": {
+    "uv_lock_present": true,
+    "uv_lock_sha256": "D24F4DB82AE39597EB20A83436DAEC66C9E8B981914DD0E57855A5C1F9285F53"
+  },
+  "hashes": {
+    "configs/models.yaml": "438183494D6CAD84E842F933FB8C67099F0C6E60C02E054A37462F861A78DCE1",
+    "configs/judges.yaml": "1282478E1B9C5C18765B942B80E3D390DB44982878D46D89D213A47AB01A7B65",
+    "configs/gates.yaml": "44DE8B265452105A5819475E9D96950125AD2A291A3D91D1ADB72867F2596B55",
+    "services/judge_gate/app.py": "02EDBACA6E526C8AD9B141796CFDE28A944CADE80497BE19FCFF328DB128B71E"
+  },
+  "baseline_commands": [
+    {
+      "command": "uv run cc validate",
+      "result": "PASS",
+      "summary": "17 config files validated; cross-refs PASS; rendered 7 roles; forbidden providers PASS"
+    },
+    {
+      "command": "uv run cc mission-dryrun",
+      "result": "PASS",
+      "summary": "L0-L4 dry-runs PASS; L3/L4 require approval"
+    },
+    {
+      "command": "uv run cc evals",
+      "result": "PASS",
+      "summary": "6 eval cases PASS"
+    },
+    {
+      "command": "uv run pytest tests/test_routing.py tests/test_safety_boundaries.py tests/test_sealed_evals.py tests/test_improvement_lifecycle.py",
+      "result": "PASS",
+      "summary": "39 passed"
+    }
+  ],
+  "not_run": [
+    "full pytest suite",
+    "live LiteLLM/Ollama smoke",
+    "growth-os selftest.py"
+  ],
+  "confirmed_gap": {
+    "capability": "config-derived Judge Gate routing",
+    "current_owner": "services/judge_gate/app.py",
+    "current_seam": "inline ROUTE mapping from Risk enum values to LiteLLM role aliases",
+    "why_gap_exists": "routing policy is in service code rather than validated config-derived data",
+    "hardcoded_values": {
+      "L0_READONLY": "triage",
+      "L1_PLAN": "planner",
+      "L2_LOCAL_CHANGE": "coder",
+      "L3_EXTERNAL_WRITE": "coder",
+      "L4_DANGEROUS": "architect-judge"
+    }
+  },
+  "current_capability_state": "EXPERIMENT_PREREGISTERED",
+  "next_action": "implement Mission 1 after the preregistered experiment and rollback plan"
+}

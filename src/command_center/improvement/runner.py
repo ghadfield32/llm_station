@@ -22,6 +22,7 @@ from __future__ import annotations
 import statistics
 import subprocess
 import time
+from inspect import signature
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -187,10 +188,24 @@ class JudgeHarness(Harness):
 
 
 # target_ref -> harness factory. New experiments register here.
-HARNESSES: dict[str, Callable[[str | Path], Harness]] = {
+HARNESSES: dict[str, Callable[..., Harness]] = {
     "command_center.improvement.retrieval_strategies": RetrievalHarness,
     "command_center.improvement.calibration": JudgeHarness,
 }
+
+
+def build_harness(factory: Callable, repo_root: str | Path,
+                  defn: ExperimentDefinition) -> Harness:
+    """Instantiate a registered harness.
+
+    Existing deterministic harnesses take only repo_root. Live harnesses may
+    declare a second ExperimentDefinition parameter so their model tags, role,
+    and benchmark suite come from the experiment contract.
+    """
+    params = list(signature(factory).parameters)
+    if len(params) >= 2:
+        return factory(repo_root, defn)
+    return factory(repo_root)
 
 
 def _git_commit(root: str | Path) -> str:
@@ -348,7 +363,7 @@ class ExperimentRunner:
             raise RuntimeError(
                 f"no measurement harness registered for target_ref {defn.target_ref!r}; "
                 f"known: {sorted(HARNESSES)}")
-        return factory(self.repo_root)
+        return build_harness(factory, self.repo_root, defn)
 
     def _defn(self, experiment_id: str) -> ExperimentDefinition:
         raw = self.reg.definition(experiment_id)
@@ -555,3 +570,4 @@ class ExperimentRunner:
 # the bottom so HARNESSES + Harness + MeasureResult are already defined. This is what
 # makes every target type runnable through the same machinery as retrieval + judge.
 from . import harness_library  # noqa: E402,F401
+from . import live_model_benchmark  # noqa: E402,F401

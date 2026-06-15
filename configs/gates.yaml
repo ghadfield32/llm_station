@@ -5,21 +5,26 @@ tiers:
   L0_read_only:
     auto: true
     requires_approval: false
+    default_route_alias: triage
     required_stages: [intake]
   L1_plan_only:
     auto: true
     requires_approval: false
+    default_route_alias: planner
     required_stages: [intake, plan]
   L2_local_edits:
     auto: true
     requires_approval: false
+    default_route_alias: coder
     required_stages: [intake, plan, pre-commit]
   L3_external_write:
     auto: false
     requires_approval: true
+    default_route_alias: coder
     required_stages: [pre-push]
   L4_dangerous:
     auto: false
     requires_approval: true
+    default_route_alias: architect-judge
     required_stages: [architecture, pre-push]
     forbidden_auto_actions: [merge, deploy, publish_package, rotate_secrets, terraform_apply, delete_data]
