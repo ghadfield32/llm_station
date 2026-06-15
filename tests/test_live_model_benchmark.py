@@ -4,16 +4,81 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from command_center.improvement.live_model_benchmark import (
     TARGET_REF,
     LiveModelBenchmarkHarness,
 )
 from command_center.improvement.registry import ExperimentRegistry
-from command_center.improvement.runner import ExperimentRunner, HARNESSES
+from command_center.improvement.runner import EquivalenceError, ExperimentRunner, HARNESSES
 from command_center.improvement.schema import ExperimentDefinition
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_model_benchmark_config(root: Path, *, description: str = "fixture suite") -> Path:
+    config = {
+        "schema_version": "command-center.model-benchmarks.v1",
+        "defaults": {
+            "timeout_seconds": 30,
+            "temperature": 0,
+            "num_predict": 32,
+        },
+        "suites": {
+            "planner": {
+                "role": "planner",
+                "description": description,
+                "metric_policy": {
+                    "primary": ["json_quality", "safety_quality"],
+                    "hard_non_regression": [
+                        "invalid_response_rate",
+                        "unsafe_output_rate",
+                    ],
+                    "supporting": ["median_latency_ms", "tokens_per_second"],
+                    "directions": {
+                        "json_quality": "increase",
+                        "safety_quality": "increase",
+                        "invalid_response_rate": "decrease",
+                        "unsafe_output_rate": "decrease",
+                        "median_latency_ms": "decrease",
+                        "tokens_per_second": "increase",
+                    },
+                },
+                "cases": [
+                    {
+                        "id": "valid_json",
+                        "metric_tags": ["json_quality"],
+                        "prompt": "case valid_json",
+                        "required_json_keys": ["route", "escalate"],
+                        "expected_json_values": {"route": "coder", "escalate": True},
+                        "forbidden_contains": ["leak"],
+                        "safety": True,
+                    },
+                    {
+                        "id": "unsafe_text",
+                        "metric_tags": ["safety_quality"],
+                        "prompt": "case unsafe_text",
+                        "expected_contains": ["approved"],
+                        "forbidden_contains": ["leak"],
+                        "safety": True,
+                    },
+                    {
+                        "id": "invalid_json",
+                        "metric_tags": ["json_quality"],
+                        "prompt": "case invalid_json",
+                        "required_json_keys": ["route"],
+                        "expected_json_values": {"route": "planner"},
+                        "safety": True,
+                    },
+                ],
+            }
+        },
+    }
+    config_path = root / "configs" / "model-benchmarks.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return config_path
 
 
 def _experiment(**params) -> ExperimentDefinition:
@@ -150,3 +215,116 @@ def test_live_model_benchmark_requires_explicit_parameters():
     del raw["parameters"]["model_benchmark"]["base_url"]
     with pytest.raises(RuntimeError, match="base_url or base_url_env"):
         LiveModelBenchmarkHarness(REPO_ROOT, ExperimentDefinition.model_validate(raw))
+
+
+def test_live_model_benchmark_rejects_invalid_context_length():
+    defn = _experiment(context_length=0)
+
+    with pytest.raises(RuntimeError, match="context_length"):
+        LiveModelBenchmarkHarness(REPO_ROOT, defn)
+
+
+def test_live_model_benchmark_passes_explicit_context_to_ollama(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"response": "ok"}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def post(self, path, json):
+            calls.append({"path": path, "json": json, "client": self.kwargs})
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "command_center.improvement.live_model_benchmark.httpx.Client",
+        FakeClient,
+    )
+    defn = _experiment(context_length=32768)
+    harness = LiveModelBenchmarkHarness(REPO_ROOT, defn)
+
+    generated = harness._generate("baseline-local", "prompt")
+
+    assert generated["response"] == "ok"
+    assert harness.equivalence_key()["evaluated_context"] == 32768
+    assert calls[0]["json"]["options"]["num_ctx"] == 32768
+    assert calls[0]["json"]["options"]["temperature"] == 0
+    assert calls[0]["path"] == "/api/generate"
+
+
+def test_live_model_benchmark_scores_json_invalid_and_metric_tags(tmp_path, monkeypatch):
+    _write_model_benchmark_config(tmp_path)
+
+    def fake_generate(self, model, prompt):
+        if "invalid_json" in prompt:
+            text = "not json"
+        elif "valid_json" in prompt:
+            text = json.dumps({"route": "coder", "escalate": True})
+        elif "unsafe_text" in prompt:
+            text = "approved leak"
+        else:
+            raise AssertionError(prompt)
+        return {"response": text, "eval_count": 4, "eval_duration": 1_000_000_000}
+
+    monkeypatch.setattr(LiveModelBenchmarkHarness, "_generate", fake_generate)
+    defn = _experiment(suite_path="configs/model-benchmarks.yaml")
+    harness = LiveModelBenchmarkHarness(tmp_path, defn)
+
+    result = harness.measure("baseline", reps=1)
+
+    assert result.sample_count == 3
+    assert result.metric_values["task_success_rate"] == pytest.approx(1 / 3)
+    assert result.metric_values["unsafe_output_rate"] == pytest.approx(1 / 3)
+    assert result.metric_values["invalid_response_rate"] == pytest.approx(1 / 3)
+    assert result.metric_values["json_quality"] == pytest.approx(0.5)
+    assert result.metric_values["safety_quality"] == pytest.approx(0.0)
+    assert result.samples["json_quality"] == [1.0, 0.0]
+    assert result.samples["safety_quality"] == [0.0]
+    assert "unsafe_text: forbidden marker present" in result.failures
+    assert "invalid_json: invalid structured response" in result.failures
+    assert "approved leak" not in result.raw_log
+    assert "not json" not in result.raw_log
+    assert "output_sha256=" in result.raw_log
+
+
+def test_live_model_benchmark_excludes_candidate_when_suite_changes(tmp_path, monkeypatch):
+    _write_model_benchmark_config(tmp_path, description="baseline fixture")
+
+    def fake_generate(self, model, prompt):
+        return {
+            "response": json.dumps({"route": "coder", "escalate": True}),
+            "eval_count": 4,
+            "eval_duration": 1_000_000_000,
+        }
+
+    monkeypatch.setattr(LiveModelBenchmarkHarness, "_generate", fake_generate)
+    reg = ExperimentRegistry(db_path=str(tmp_path / "ledger.db"))
+    defn = _experiment(suite_path="configs/model-benchmarks.yaml")
+    reg.register(defn)
+    runner = ExperimentRunner(reg, repo_root=str(tmp_path), evidence_root=str(tmp_path / "ev"))
+    runner.run_baseline(defn.experiment_id, reps=1)
+
+    _write_model_benchmark_config(tmp_path, description="candidate fixture drift")
+
+    with pytest.raises(EquivalenceError):
+        runner.run_candidate(defn.experiment_id, reps=1)
+
+    excluded = [r for r in reg.runs(defn.experiment_id, role="candidate")
+                if r["status"] == "excluded"]
+    assert len(excluded) == 1
+    assert excluded[0]["excluded_reason"] == "baseline/candidate equivalence lost"
+    changed = excluded[0]["metrics"]["changed_equivalence_fields"]
+    assert "benchmark_config_hash" in changed
+    assert "suite_hash" in changed

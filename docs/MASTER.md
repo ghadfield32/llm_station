@@ -487,7 +487,21 @@ What is done:
    timeout, and generation limits, records artifacts in the Ledger only when
    `--apply` is used, and never writes live benchmark experiments into
    `configs/improvement.yaml`.
-10. The human wall is unchanged: scout and scan can propose only; benchmark
+10. `command_center.improvement.model_metric_audit` reruns live incumbent suites
+    into an isolated audit Ledger/evidence directory and checks metric/sample
+    math, expected sample counts, artifact presence, and redaction. It is for
+    proving the benchmark machinery, not for promotion.
+11. `command_center.improvement.model_candidate_audit` runs one isolated
+    baseline/candidate/verifier audit for an explicit role and context. The
+    evaluated context must be supplied directly or derived from current VRAM fit
+    evidence with explicit `fit_ctx` and `gpu_budget_gb` inputs. The live harness
+    passes that context to Ollama as `num_ctx` and stores it in the equivalence
+    key.
+12. The runner's comparison recommendation now requires at least one required
+    non-safety metric to improve in the good direction before it can say
+    `promote`. Passing by tie/no-regression returns `revise`, even when all hard
+    gates pass.
+13. The human wall is unchanged: scout and scan can propose only; benchmark
    runner can only move to awaiting verification; canary and promotion remain
    human-only.
 
@@ -593,19 +607,46 @@ The baseline artifacts are stored under
 `metrics.json`, and `equivalence.json`. Artifact inspection found no raw prompt
 or model-output markers from the benchmark fixtures.
 
+Deep live audit evidence:
+
+- `uv run python -m command_center.improvement.model_metric_audit --reps 2
+  --base-url-env OLLAMA_BASE_URL` ran all seven production roles against local
+  Ollama in an isolated audit Ledger. Every role produced the expected sample
+  count; every metric value matched its stored sample vector; every audit
+  artifact passed the raw-prompt/base-URL redaction checks.
+- The two-repetition audit confirmed the same broad quality shape as the pilot:
+  coder stayed at task_success_rate `0.667`, architect-judge stayed at `1.000`,
+  chat/planner remained invalid-response dominated, and security/local-judge
+  still need prompt/format work before their metrics are useful for promotion.
+- `devstral:24b` was then audited as a lower-context coder candidate with
+  `qwen3-coder:30b` as incumbent. The evaluated context was derived from live
+  fit evidence: `min(qwen3-coder:30b max_ctx_fits=40806, devstral:24b
+  max_ctx_fits=50257) = 40806`; this value was passed to Ollama as `num_ctx`
+  and stored in the equivalence key.
+- The isolated coder candidate audit completed baseline, candidate, statistics,
+  independent verifier, and artifact checks. It produced `recommendation=revise`
+  with note `no required non-safety metric improved`: task_success_rate tied at
+  `0.667`, invalid/unsafe rates tied at `0.000`, but Devstral was materially
+  slower on this small suite (`tokens_per_second` about `51.2` vs `143.1` for
+  the incumbent; median latency about `5863 ms` vs `3598 ms`).
+- The independent verifier reproduced the candidate metrics and verified the
+  candidate artifacts by hash. This is evidence that the harness works at the
+  lower context, not evidence to canary or promote Devstral.
+
 Remaining order:
 
-1. Decide whether the first candidate A/B is a 64k-context coder comparison or a
-   declared lower-context coder specialization. This decision must be explicit in
-   the experiment definition; do not silently use a smaller context.
-2. If lower-context specialization is approved, add the evaluated context to the
-   live benchmark parameters and rerun scout/fit evidence at that context.
-3. If 64k is required, add or ingest another scored open-weight source whose
+1. Treat the Devstral lower-context coder result as `revise`, not promote. The
+   next useful Devstral work is richer coder fixtures plus more repetitions only
+   if there is a real hypothesis for a narrower specialization.
+2. If 64k is required, add or ingest another scored open-weight source whose
    exact installed candidate fits the 64k machine budget.
-4. Increase incumbent baseline repetitions according to a declared precision or
+3. Increase incumbent baseline repetitions according to a declared precision or
    minimum-detectable-change plan derived from pilot variance and resource
    budget. If pilot evidence is insufficient, record the result as inconclusive.
-5. Register one bounded live coder benchmark against
+4. Repair chat/planner/judge prompt-format contracts or role prompts before
+   using their current benchmark pass rates for promotion decisions; the audit
+   shows malformed structured output dominates several roles.
+5. Register any future live model experiment against
    `command_center.improvement.live_model_benchmark`; run baseline, candidate,
    and independent verification on identical fixtures.
 6. If verified, manually start a canary with `make models-canary`, compare
@@ -791,19 +832,24 @@ Models are data in `configs/models.yaml` (local-only: every role must use
 3. Confirm the role's incumbent baseline distribution exists in Ledger; run the
    role suite first if it does not:
    uv run python -m command_center.improvement.model_baselines --reps <derived> --base-url-env OLLAMA_BASE_URL --apply
-4. Confirm candidate machine fit at the declared evaluated context. If the
+4. Audit the benchmark machinery before trusting model quality claims:
+   uv run python -m command_center.improvement.model_metric_audit --reps <pilot> --base-url-env OLLAMA_BASE_URL
+5. Confirm candidate machine fit at the declared evaluated context. If the
    candidate does not fit, either reject it for that role/context or declare a
    lower-context specialization before testing.
-5. Register a bounded live model benchmark experiment if the scan drafts a
+6. For an audit-only lower-context candidate check, use an explicit context or
+   derive one from fit evidence:
+   uv run python -m command_center.improvement.model_candidate_audit --role <role> --baseline-model <incumbent> --candidate-model <candidate> --reps <pilot> --base-url-env OLLAMA_BASE_URL --derive-context-from-fit --fit-ctx <ctx> --gpu-budget-gb <gb>
+7. Register a bounded live model benchmark experiment if the scan drafts a
    scored open-weight candidate
-6. Run baseline → candidate → independent verification; artifacts land in Ledger
-7. Edit configs/models.yaml with a verified local Ollama candidate
-8. make validate && make evals
-9. make models           → render + pull local tags + restart LiteLLM
-10. make models-canary ROLE=… MODEL=ollama_chat/<tag>   → small traffic slice
-11. make live-smoke       → real local replies
-12. compare task success · unsafe output · invalid response · runtime metrics · canary telemetry
-13. make models-promote ROLE=…   or   make models-rollback ROLE=…
+8. Run baseline → candidate → independent verification; artifacts land in Ledger
+9. Edit configs/models.yaml with a verified local Ollama candidate
+10. make validate && make evals
+11. make models           → render + pull local tags + restart LiteLLM
+12. make models-canary ROLE=… MODEL=ollama_chat/<tag>   → small traffic slice
+13. make live-smoke       → real local replies
+14. compare task success · unsafe output · invalid response · runtime metrics · canary telemetry
+15. make models-promote ROLE=…   or   make models-rollback ROLE=…
 ```
 
 Current local picks: `qwen3-coder:30b` · `qwen3:30b` · `devstral:24b`.
@@ -1417,6 +1463,43 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-15 — Deep live model audit and metric-gate hardening
+
+- **What changed.** Hardened baseline/candidate equivalence so the runner now
+  compares the full harness-owned equivalence key, not only retrieval-specific
+  corpus fields. A changed live benchmark config, suite hash, endpoint hash,
+  model id, commit, or evaluated context now excludes the candidate run.
+- **Metric correctness.** Added direct tests for JSON scoring, invalid-response
+  scoring, forbidden-marker safety, metric-tag aggregation, redacted stdout, and
+  prompt-leak rejection. Added `model_metric_audit` to rerun live incumbent
+  suites in an isolated audit Ledger and verify sample counts, metric/sample
+  math, artifacts, and redaction.
+- **Context correctness.** Added explicit `model_benchmark.context_length`
+  support to the live harness. When present, it is passed to Ollama as `num_ctx`
+  and stored in the equivalence key. Invalid context values fail before any run.
+- **Candidate audit.** Added `model_candidate_audit` for one isolated
+  role/incumbent/candidate check. It requires either an explicit context or
+  explicit fit-derived inputs (`fit_ctx` and `gpu_budget_gb`) and never edits
+  routing, starts canary, or promotes.
+- **Real LLM evidence.** Ran `model_metric_audit` with `reps=2` across all seven
+  roles on local Ollama. Every audit passed sample-count, metric math, artifact,
+  and redaction checks. Then ran an isolated coder audit:
+  `qwen3-coder:30b` vs `devstral:24b`, context `40806` derived from current
+  VRAM fit evidence. The candidate tied task success and safety metrics but was
+  slower, so the result is `revise`, not promotion evidence. The independent
+  verifier reproduced candidate metrics and verified candidate artifacts by hash.
+- **Recommendation gate.** Fixed the comparison recommendation so `promote`
+  requires a real positive improvement on at least one required non-safety
+  metric. Passing only by tie/no-regression now returns `revise`.
+- **Validation.** `uv run cc validate`, focused model/runner/discovery tests
+  (51 tests), full `uv run pytest` (586 tests), and `uv run ruff check src
+  tests` passed. The full test run still reports one existing Starlette/httpx
+  deprecation warning in `tests/test_agent_kanban_ui.py`.
+- **Current next step.** Do not canary Devstral from this evidence. Either add
+  richer coder fixtures and a declared specialization hypothesis, or find a
+  scored open-weight candidate that fits the required context and can show a
+  measured primary-metric improvement.
 
 ### 2026-06-15 — Curated open-weight source and real incumbent baselines
 

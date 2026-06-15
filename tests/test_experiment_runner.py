@@ -86,6 +86,23 @@ def test_compare_revise_when_required_misses_but_safety_ok():
     assert cmp.recommendation == "revise"
 
 
+def test_compare_revise_when_required_metrics_only_tie():
+    raw = yaml.safe_load((REPO_ROOT / "configs/improvement.yaml").read_text(encoding="utf-8"))
+    exp = copy.deepcopy(raw["experiments"][0])
+    exp["experiment_id"] = "EXP-tie-is-not-promotion"
+    for metric in exp["metrics"]:
+        if metric["name"] == "recall_at_5":
+            metric["minimum_improvement"] = 0.0
+            metric["maximum_regression"] = 0.0
+    defn = ExperimentDefinition.model_validate(exp)
+
+    cmp = compare_metrics(defn, _baseline_vals(), dict(_baseline_vals()))
+
+    assert cmp.safety_ok and cmp.all_required_pass
+    assert cmp.recommendation == "revise"
+    assert cmp.note == "no required non-safety metric improved"
+
+
 # ---- full baseline -> candidate via stub ------------------------------------
 
 def test_runner_records_runs_events_and_evidence(tmp_path):

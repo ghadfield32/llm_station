@@ -314,15 +314,22 @@ def compare_metrics(defn: ExperimentDefinition, baseline: dict, candidate: dict)
         results.append(_evaluate_metric(md, b, c))
     safety_ok = all(m.passed for m in results if m.safety)
     all_required_pass = all(m.passed for m in results if m.required)
+    material_improvement = any(
+        m.required and not m.safety and m.meets_improvement and m.good_delta > 1e-12
+        for m in results
+    )
+    note = ""
     if not safety_ok:
         rec = "reject"
-    elif all_required_pass:
+    elif all_required_pass and material_improvement:
         rec = "promote"
     else:
         rec = "revise"
+        if all_required_pass and not material_improvement:
+            note = "no required non-safety metric improved"
     return ComparisonResult(experiment_id=defn.experiment_id, metrics=results,
                             all_required_pass=all_required_pass, safety_ok=safety_ok,
-                            recommendation=rec)
+                            recommendation=rec, note=note)
 
 
 # ---- the runner -------------------------------------------------------------
@@ -450,19 +457,30 @@ class ExperimentRunner:
 
         harness = self._harness(defn)
         eq_key = harness.equivalence_key()
-        # equivalence: candidate MUST run over the same basis as the baseline
-        if (eq_key.get("corpus_hash") != baseline_eq.get("corpus_hash")
-                or eq_key.get("gold_set_hash") != baseline_eq.get("gold_set_hash")):
+        # Equivalence: candidate MUST run over the same declared measurement
+        # basis as the baseline. The key is owned by the harness, so this covers
+        # retrieval corpora, live-model suite hashes, endpoints, model ids, and
+        # commit identity without hardcoding target-specific fields here.
+        if eq_key != baseline_eq:
             run_id = f"{experiment_id}-candidate-excluded-{iteration}"
+            changed_fields = sorted({
+                key for key in set(eq_key) | set(baseline_eq)
+                if eq_key.get(key) != baseline_eq.get(key)
+            })
             self.reg.record_run(
                 run_id=run_id, experiment_id=experiment_id, role="candidate",
                 status="excluded", iteration=iteration,
-                excluded_reason="baseline/candidate equivalence lost (corpus or gold set changed)",
-                metrics={"eq_key": eq_key, "baseline_eq": baseline_eq})
+                excluded_reason="baseline/candidate equivalence lost",
+                metrics={
+                    "eq_key": eq_key,
+                    "baseline_eq": baseline_eq,
+                    "changed_equivalence_fields": changed_fields,
+                })
             self.reg.append_event(EventRecord(
                 kind=ExperimentEventType.DETERMINISTIC_GATE_FAILED.value,
                 experiment_id=experiment_id, actor_role="runner",
-                action="equivalence lost between baseline and candidate"))
+                action="equivalence lost between baseline and candidate",
+                detail={"changed_equivalence_fields": changed_fields}))
             self._to_inconclusive(experiment_id, "equivalence lost")
             raise EquivalenceError(
                 "baseline and candidate are not measured over an equivalent basis")

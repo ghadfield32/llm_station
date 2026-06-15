@@ -36,6 +36,15 @@ def _required(mapping: dict[str, Any], key: str) -> str:
     return value
 
 
+def _optional_positive_int(mapping: dict[str, Any], key: str) -> int | None:
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int) or value < 1:
+        raise RuntimeError(f"model_benchmark.{key} must be a positive integer")
+    return value
+
+
 class LiveModelBenchmarkHarness(Harness):
     """Measure two declared local Ollama models on a configured role suite."""
 
@@ -50,6 +59,7 @@ class LiveModelBenchmarkHarness(Harness):
         self.candidate_model = _required(params, "candidate_model")
         self.config_path = self.repo_root / _required(params, "suite_path")
         self.base_url = self._resolve_base_url(params)
+        self.context_length = _optional_positive_int(params, "context_length")
 
         raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
         self.config = ModelBenchmarksConfig.model_validate(raw)
@@ -84,6 +94,7 @@ class LiveModelBenchmarkHarness(Harness):
             "role": self.role,
             "baseline_model": self.baseline_model,
             "candidate_model": self.candidate_model,
+            "evaluated_context": self.context_length,
             "base_url_sha256": _sha(self.base_url),
             "commit": _git_commit(self.repo_root),
         }
@@ -213,6 +224,8 @@ class LiveModelBenchmarkHarness(Harness):
                 "num_predict": defaults.num_predict,
             },
         }
+        if self.context_length is not None:
+            payload["options"]["num_ctx"] = self.context_length
         try:
             with httpx.Client(base_url=self.base_url, timeout=defaults.timeout_seconds) as client:
                 response = client.post("/api/generate", json=payload)
