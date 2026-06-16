@@ -683,6 +683,11 @@ the question is broader than one model, one UI feature, or one external tool:
 registered desktop repo work autonomously, route local models cheaply, notify me,
 and prove it did not leak data?"
 
+The attachment-driven reconciliation is recorded in
+[autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md).
+It keeps the current single-control-plane architecture and treats the proposal
+as a hardening checklist, not a replacement stack.
+
 The prompt ties together the current implementation, the external idea
 evaluation prompt, the coded improvement loop, the AppFlowy/Growth OS surface,
 repo-task isolation, channel notification, and the model-upgrade lane. It is
@@ -709,6 +714,23 @@ Rules that prompt must preserve: no provider fallback, no fake metrics, no
 hardcoded thresholds, no guessed prices/statuses/model fit, no raw secret or
 private transcript retention, no agent self-approval, and no promotion without
 validate, evals, canary telemetry, independent verification, and human approval.
+
+Current ordered hardening gaps from the attachment:
+
+1. Add canonical event schemas for forecast, action, verification, rollback,
+   route decision, repo action, Kanban mutation, desktop observation/action,
+   model call, and notification events.
+2. Add a repo registration manifest before broader autonomous repo mutation:
+   remote, branch policy, auth mode, devcontainer, CI commands, secret policy,
+   CODEOWNERS requirement, and risk ceiling.
+3. Add a desktop target manifest before any GUI automation: allowed windows,
+   allowed actions, forbidden actions, verifier, TTL, human takeover, and
+   rollback/block policy.
+4. Add a generic completion verifier and loop breaker that compares forecasts to
+   observed state and refuses `DONE` without evidence.
+5. Add proposed continuous canaries only after the event contracts exist. Any
+   numeric guard must come from local baseline data or a pre-registered plan,
+   not architecture-note example targets.
 
 ---
 
@@ -1436,6 +1458,7 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
 | [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
 | [whole-system-validation-prompt.md](whole-system-validation-prompt.md) | reusable end-to-end validation prompt for self-improvement, AppFlowy kanban control, registered repo autonomy, notifications, local model routing, forecast-before-action checks, and privacy |
+| [autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md) | attachment reconciliation for the autonomous pipeline proposal: what this repo already covers, what remains, and the ordered hardening path for events, repo manifests, desktop rights, completion verification, and canaries |
 | [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
 | [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
 | [knowledge-format.md](knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
@@ -1519,6 +1542,29 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-16 — Autonomous pipeline attachment reconciled
+
+- **What changed.** Added
+  [autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md)
+  to reconcile the attached autonomous pipeline proposal against the current
+  Command Center + Growth OS implementation. The decision is to keep the
+  existing single-control-plane architecture and use the proposal as a
+  hardening checklist, not to adopt a second supervisor or runtime stack.
+- **What is already covered.** The current repo already has one action layer,
+  one approval wall, one mission Ledger, one Kanban bridge, local-only model
+  routing, open-weight model discovery, proposal-only self-improvement, and
+  branch-protected repo execution boundaries.
+- **What remains.** The review names the missing contracts in order: canonical
+  event schemas, repo registration manifests, desktop target rights manifests,
+  generic completion verification and loop breaking, system-validation evidence
+  runner, no-op canaries, telemetry decision, GitHub App production auth review,
+  and only-then external runtime evaluation.
+- **Prompt update.** The whole-system validation prompt now checks these gaps
+  explicitly and preserves the API-first desktop automation order: direct API,
+  browser automation, OS accessibility, then screenshot-only as last resort.
+  Example KPI numbers from architecture notes are planning context only; they
+  are not gates unless derived from local evidence or a pre-registered plan.
 
 ### 2026-06-16 — Whole-system validation prompt added
 

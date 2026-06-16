@@ -48,7 +48,8 @@ Read these in order:
    `docs/daily-self-improvement-dag.md`, `docs/kanban-integration.md`,
    `docs/channels.md`, `docs/model-routing.md`, `docs/model-update.md`,
    `docs/agent-multiturn-and-memory.md`, and
-   `docs/whole-system-validation-prompt.md` if present.
+   `docs/autonomous-pipeline-gap-review-2026-06-16.md` if present.
+   Then read `docs/whole-system-validation-prompt.md` if present.
 3. `configs/*.yaml`, plus the Pydantic contracts under
    `src/command_center/schemas/` and `src/command_center/improvement/schema.py`.
 4. `Makefile` and available CLI entry points.
@@ -98,9 +99,15 @@ Hold these throughout the run:
 - Any threshold, budget, repetition count, statistical stop rule, or canary
   guard must come from config, a pre-registered experiment plan, observed pilot
   variance, or explicit human approval.
+- Do not import example KPI numbers from architecture notes as gates. Treat
+  them as planning context until local baseline data or a pre-registered plan
+  turns them into real acceptance criteria.
 - Deterministic checks run before LLM judges.
 - A model or judge verdict cannot override a failed deterministic check.
 - The producing agent cannot be the only evaluator.
+- Desktop automation order is strict: direct API first, browser automation
+  second, OS-native accessibility third, screenshot-only control last. A lower
+  observability option needs a recorded reason.
 
 ### 2. Evidence package
 
@@ -143,7 +150,10 @@ Build a current baseline before changing anything:
 8. Enumerate improvement experiments and targets from
    `configs/improvement.yaml` and `configs/improvement-targets.yaml`.
 9. Enumerate model benchmark suites from `configs/model-benchmarks.yaml`.
-10. Record which live services are reachable: Docker, Ledger, LiteLLM, Ollama,
+10. Enumerate canonical event schemas, repo manifests, and desktop target
+    manifests if they exist. If they do not exist, record the gap; do not infer
+    them from loose docs.
+11. Record which live services are reachable: Docker, Ledger, LiteLLM, Ollama,
     AppFlowy, Growth OS, and enabled notification channels.
 
 For every service that is not reachable, record `blocked` plus the exact command
@@ -307,7 +317,10 @@ revert or move the row to the expected final test state.
 Prove:
 
 - a repo must be registered before autonomous work targets it;
+- the registered repo has a validated execution manifest or the missing
+  manifest is recorded as a blocker;
 - repo-task environments are ephemeral and secret-free;
+- devcontainer and CI commands are declared before mutation;
 - a mission gets a lease, branch/worktree, standards render, deterministic
   checks, local judges, progress events, and final status;
 - the agent cannot modify unregistered repos or jump outside the leased
@@ -327,6 +340,25 @@ uv run pytest tests/test_control.py tests/test_ledger_rest.py tests/test_safety_
 Use a scratch registered repo or a harmless fixture repo for live worktree
 tests. Do not use a production repo for mutation tests unless the user has
 explicitly approved that target and scope.
+
+#### E2. Desktop rights and UI automation
+
+Prove before any live desktop action:
+
+- a desktop target manifest exists for the requested surface, or the run blocks
+  before action;
+- allowed windows, allowed actions, forbidden actions, verifier, TTL, and human
+  takeover policy validate;
+- allowed and forbidden actions do not overlap;
+- clipboard reads, password-field reads, system settings changes, and file
+  deletes are denied by default;
+- API automation is preferred over browser automation, browser over OS-native
+  accessibility, and OS-native accessibility over screenshot-only control;
+- every desktop completion claim has verifier evidence.
+
+Live desktop tests should start with browser-only staging rights and a staging
+board/card. If no desktop manifest exists, record that as the current gap rather
+than improvising a GUI action.
 
 #### F. Channels and progress notification
 
@@ -381,10 +413,38 @@ Prove fail-closed behavior with deliberate missing inputs:
 - provider route in model config is rejected;
 - missing model benchmark JSON mode is rejected;
 - missing candidate provenance is rejected from the open-weight feed;
+- missing repo execution manifest blocks autonomous repo mutation;
+- missing desktop rights manifest blocks GUI action;
 - failed deterministic checks block model/judge approval.
 
 Use existing tests where possible. If a gap is found, add a focused test before
 changing implementation.
+
+#### H2. Canonical events, forecasts, and completion verification
+
+Prove or record the gap for:
+
+- `mission.forecast`
+- `mission.action`
+- `mission.verification`
+- `mission.rollback`
+- `route.decision`
+- `repo.action`
+- `kanban.mutation`
+- `desktop.observation`
+- `desktop.action`
+- `model.call`
+- `notification.sent`
+
+Each event family should have a versioned schema, privacy classification, input
+artifact hashes, output artifact hashes, source authority, actor, risk tier,
+trace id, result, and approval/rollback references when applicable. If the
+schemas do not exist yet, list them as the next ordered work before adding more
+autonomy.
+
+Completion verification must compare forecast to observed state and require
+evidence references before `DONE`. Repeated action triples or unchanged state
+hashes should force a strategy change or `BLOCKED`, not a fabricated success.
 
 #### I. Privacy and leakage audit
 
