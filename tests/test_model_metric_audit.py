@@ -9,7 +9,7 @@ from command_center.improvement.live_model_benchmark import LiveModelBenchmarkHa
 from command_center.improvement.registry import ExperimentRegistry
 
 
-def _planner_fake_generate(self, model, prompt):
+def _planner_fake_generate(self, model, prompt, **kwargs):
     if "numbered steps" in prompt:
         text = "1. inspect\n2. test\n3. review"
     elif "approval boundary" in prompt:

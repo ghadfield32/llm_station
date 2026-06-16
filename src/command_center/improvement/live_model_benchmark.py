@@ -124,7 +124,11 @@ class LiveModelBenchmarkHarness(Harness):
         for case in self.suite.cases:
             for rep in range(reps):
                 started = time.perf_counter()
-                generated = self._generate(model, case.prompt)
+                generated = self._generate(
+                    model,
+                    case.prompt,
+                    response_format=case.response_format,
+                )
                 latency_ms = (time.perf_counter() - started) * 1000.0
                 text = generated["response"]
                 lower = text.lower()
@@ -213,7 +217,8 @@ class LiveModelBenchmarkHarness(Harness):
             samples=samples,
         )
 
-    def _generate(self, model: str, prompt: str) -> dict[str, Any]:
+    def _generate(self, model: str, prompt: str, *,
+                  response_format: str | None = None) -> dict[str, Any]:
         defaults = self.config.defaults
         payload = {
             "model": model,
@@ -226,6 +231,8 @@ class LiveModelBenchmarkHarness(Harness):
         }
         if self.context_length is not None:
             payload["options"]["num_ctx"] = self.context_length
+        if response_format == "json":
+            payload["format"] = "json"
         try:
             with httpx.Client(base_url=self.base_url, timeout=defaults.timeout_seconds) as client:
                 response = client.post("/api/generate", json=payload)

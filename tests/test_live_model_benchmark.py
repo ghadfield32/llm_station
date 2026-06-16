@@ -48,6 +48,7 @@ def _write_model_benchmark_config(root: Path, *, description: str = "fixture sui
                 "cases": [
                     {
                         "id": "valid_json",
+                        "response_format": "json",
                         "metric_tags": ["json_quality"],
                         "prompt": "case valid_json",
                         "required_json_keys": ["route", "escalate"],
@@ -65,6 +66,7 @@ def _write_model_benchmark_config(root: Path, *, description: str = "fixture sui
                     },
                     {
                         "id": "invalid_json",
+                        "response_format": "json",
                         "metric_tags": ["json_quality"],
                         "prompt": "case invalid_json",
                         "required_json_keys": ["route"],
@@ -172,7 +174,7 @@ def test_live_model_harness_registered():
 
 
 def test_live_model_benchmark_records_redacted_ledger_artifacts(tmp_path, monkeypatch):
-    def fake_generate(self, model, prompt):
+    def fake_generate(self, model, prompt, **kwargs):
         if model == "baseline-local":
             return {"response": "not enough evidence", "eval_count": 3,
                     "eval_duration": 1_000_000_000}
@@ -224,6 +226,17 @@ def test_live_model_benchmark_rejects_invalid_context_length():
         LiveModelBenchmarkHarness(REPO_ROOT, defn)
 
 
+def test_model_benchmark_json_cases_require_explicit_json_format(tmp_path):
+    config_path = _write_model_benchmark_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    del config["suites"]["planner"]["cases"][0]["response_format"]
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    defn = _experiment(suite_path="configs/model-benchmarks.yaml")
+
+    with pytest.raises(ValueError, match="response_format"):
+        LiveModelBenchmarkHarness(tmp_path, defn)
+
+
 def test_live_model_benchmark_passes_explicit_context_to_ollama(monkeypatch):
     calls = []
 
@@ -255,19 +268,20 @@ def test_live_model_benchmark_passes_explicit_context_to_ollama(monkeypatch):
     defn = _experiment(context_length=32768)
     harness = LiveModelBenchmarkHarness(REPO_ROOT, defn)
 
-    generated = harness._generate("baseline-local", "prompt")
+    generated = harness._generate("baseline-local", "prompt", response_format="json")
 
     assert generated["response"] == "ok"
     assert harness.equivalence_key()["evaluated_context"] == 32768
     assert calls[0]["json"]["options"]["num_ctx"] == 32768
     assert calls[0]["json"]["options"]["temperature"] == 0
+    assert calls[0]["json"]["format"] == "json"
     assert calls[0]["path"] == "/api/generate"
 
 
 def test_live_model_benchmark_scores_json_invalid_and_metric_tags(tmp_path, monkeypatch):
     _write_model_benchmark_config(tmp_path)
 
-    def fake_generate(self, model, prompt):
+    def fake_generate(self, model, prompt, **kwargs):
         if "invalid_json" in prompt:
             text = "not json"
         elif "valid_json" in prompt:
@@ -302,7 +316,7 @@ def test_live_model_benchmark_scores_json_invalid_and_metric_tags(tmp_path, monk
 def test_live_model_benchmark_excludes_candidate_when_suite_changes(tmp_path, monkeypatch):
     _write_model_benchmark_config(tmp_path, description="baseline fixture")
 
-    def fake_generate(self, model, prompt):
+    def fake_generate(self, model, prompt, **kwargs):
         return {
             "response": json.dumps({"route": "coder", "escalate": True}),
             "eval_count": 4,

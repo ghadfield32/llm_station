@@ -4,7 +4,7 @@ from command_center.improvement import model_candidate_audit
 from command_center.improvement.live_model_benchmark import LiveModelBenchmarkHarness
 
 
-def _coder_fake_generate(self, model, prompt):
+def _coder_fake_generate(self, model, prompt, **kwargs):
     if "x + 1" in prompt:
         text = "return x + 1"
     elif "empty list" in prompt:

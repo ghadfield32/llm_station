@@ -296,6 +296,7 @@ class ModelBenchmarkDefaults(Strict):
 class ModelBenchmarkCase(Strict):
     id: str
     prompt: str
+    response_format: Literal["json"] | None = None
     metric_tags: list[str] = Field(default_factory=list)
     expected_contains: list[str] = Field(default_factory=list)
     forbidden_contains: list[str] = Field(default_factory=list)
@@ -318,6 +319,15 @@ class ModelBenchmarkCase(Strict):
             raise ValueError(
                 f"benchmark case {self.id!r} must define expected_contains, "
                 "forbidden_contains, required_json_keys, or expected_json_values")
+        has_json_checks = bool(self.required_json_keys or self.expected_json_values)
+        if has_json_checks and self.response_format != "json":
+            raise ValueError(
+                f"benchmark case {self.id!r} uses JSON checks and must declare "
+                "response_format: json")
+        if self.response_format == "json" and not has_json_checks:
+            raise ValueError(
+                f"benchmark case {self.id!r} declares response_format: json but has no "
+                "JSON checks")
         if self.expected_json_values:
             missing = [
                 key for key in self.expected_json_values

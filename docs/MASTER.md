@@ -475,33 +475,38 @@ What is done:
    role-specific benchmark suites plus each suite's metric policy. Prompts,
    metric names, expected/forbidden markers, structured JSON expectations, and
    metric tags live in config, not in code.
-8. `command_center.improvement.live_model_benchmark` is registered as a live
+8. Structured-output benchmark cases must declare `response_format: json` when
+   they use `required_json_keys` or `expected_json_values`. Validation rejects
+   JSON-scored cases without that declaration, and it also rejects `json` mode
+   on cases that have no JSON checks. The live harness passes declared JSON mode
+   to Ollama as `format: "json"`; there is no permissive parser fallback.
+9. `command_center.improvement.live_model_benchmark` is registered as a live
    model A/B harness. It requires explicit experiment parameters for role,
    suite, baseline model, candidate model, suite path, and local Ollama endpoint.
    It stores only hashes, booleans, latency, token-rate data when Ollama reports
    it, metrics, and equivalence metadata in Ledger artifacts; it does not retain
    raw prompts or model outputs.
-9. `command_center.improvement.model_baselines` builds baseline-only experiments
+10. `command_center.improvement.model_baselines` builds baseline-only experiments
    from the current incumbents in `configs/models.yaml`. It requires an explicit
    local endpoint, derives runtime budget from configured suite size, repetitions,
    timeout, and generation limits, records artifacts in the Ledger only when
    `--apply` is used, and never writes live benchmark experiments into
    `configs/improvement.yaml`.
-10. `command_center.improvement.model_metric_audit` reruns live incumbent suites
+11. `command_center.improvement.model_metric_audit` reruns live incumbent suites
     into an isolated audit Ledger/evidence directory and checks metric/sample
     math, expected sample counts, artifact presence, and redaction. It is for
     proving the benchmark machinery, not for promotion.
-11. `command_center.improvement.model_candidate_audit` runs one isolated
+12. `command_center.improvement.model_candidate_audit` runs one isolated
     baseline/candidate/verifier audit for an explicit role and context. The
     evaluated context must be supplied directly or derived from current VRAM fit
     evidence with explicit `fit_ctx` and `gpu_budget_gb` inputs. The live harness
     passes that context to Ollama as `num_ctx` and stores it in the equivalence
     key.
-12. The runner's comparison recommendation now requires at least one required
+13. The runner's comparison recommendation now requires at least one required
     non-safety metric to improve in the good direction before it can say
     `promote`. Passing by tie/no-regression returns `revise`, even when all hard
     gates pass.
-13. The human wall is unchanged: scout and scan can propose only; benchmark
+14. The human wall is unchanged: scout and scan can propose only; benchmark
    runner can only move to awaiting verification; canary and promotion remain
    human-only.
 
@@ -582,9 +587,11 @@ Current evidence and boundary:
   `Proposed` model experiment. No candidate was moved to Canary, Verified, or
   Promoted.
 - The same scout evidence reports `devstral:24b` as `NO @ 64k` on the current
-  24 GB budget, with max fitting context around 49k and negative 64k headroom.
-  Therefore the first challenger A/B must either use a candidate that fits the
-  declared evaluated context or explicitly declare a lower-context coder
+  24 GB budget. The current fit-derived candidate audit records
+  `devstral:24b max_ctx_fits=50257` and `qwen3-coder:30b
+  max_ctx_fits=40806`; both are below the requested 64k context on the 24 GB
+  budget. Therefore challenger A/B runs must either use a candidate that fits
+  the declared evaluated context or explicitly declare a lower-context
   specialization before running.
 - A real local Ollama incumbent-baseline pass has been recorded in the Ledger
   with one repetition for each production role. This is a pilot distribution,
@@ -614,10 +621,17 @@ Deep live audit evidence:
   Ollama in an isolated audit Ledger. Every role produced the expected sample
   count; every metric value matched its stored sample vector; every audit
   artifact passed the raw-prompt/base-URL redaction checks.
-- The two-repetition audit confirmed the same broad quality shape as the pilot:
-  coder stayed at task_success_rate `0.667`, architect-judge stayed at `1.000`,
-  chat/planner remained invalid-response dominated, and security/local-judge
-  still need prompt/format work before their metrics are useful for promotion.
+- The two-repetition audit now runs JSON-scored cases through explicit Ollama
+  JSON mode. This proved the protocol path but did not hide model failures:
+  `chat` and `planner` still had invalid_response_rate `1.000`; `local-judge`
+  and `security-judge` had invalid_response_rate `0.750`; `triage`, `coder`,
+  and `architect-judge` had invalid_response_rate `0.000`.
+- Role quality remains uneven under the real local models: `coder`
+  task_success_rate `0.667`; `architect-judge` `1.000`; `security-judge`
+  `0.250`; `local-judge` `0.250`; `triage`, `chat`, and `planner` `0.000`.
+  This is benchmark evidence that the structured-output roles need prompt,
+  protocol, or role-model work before their current pass rates can support any
+  promotion decision.
 - `devstral:24b` was then audited as a lower-context coder candidate with
   `qwen3-coder:30b` as incumbent. The evaluated context was derived from live
   fit evidence: `min(qwen3-coder:30b max_ctx_fits=40806, devstral:24b
@@ -626,9 +640,10 @@ Deep live audit evidence:
 - The isolated coder candidate audit completed baseline, candidate, statistics,
   independent verifier, and artifact checks. It produced `recommendation=revise`
   with note `no required non-safety metric improved`: task_success_rate tied at
-  `0.667`, invalid/unsafe rates tied at `0.000`, but Devstral was materially
-  slower on this small suite (`tokens_per_second` about `51.2` vs `143.1` for
-  the incumbent; median latency about `5863 ms` vs `3598 ms`).
+  `0.667`, invalid/unsafe rates tied at `0.000`, and Devstral did not improve
+  the required non-safety metrics. Runtime evidence also favored the incumbent
+  on this small suite: `tokens_per_second` about `51.3` for Devstral vs `160.0`
+  for qwen3-coder, and median latency about `5890 ms` vs `3465 ms`.
 - The independent verifier reproduced the candidate metrics and verified the
   candidate artifacts by hash. This is evidence that the harness works at the
   lower context, not evidence to canary or promote Devstral.
@@ -643,17 +658,57 @@ Remaining order:
 3. Increase incumbent baseline repetitions according to a declared precision or
    minimum-detectable-change plan derived from pilot variance and resource
    budget. If pilot evidence is insufficient, record the result as inconclusive.
-4. Repair chat/planner/judge prompt-format contracts or role prompts before
+4. Debug structured-output role behavior as its own Proposed experiment:
+   compare prompt wording, Ollama JSON mode behavior, role model, and context
+   settings on synthetic/public cases only. Do not add a parser fallback or
+   accept raw prose for JSON-scored cases; a malformed or empty response remains
+   a failed sample.
+5. Repair chat/planner/judge prompt-format contracts or role prompts before
    using their current benchmark pass rates for promotion decisions; the audit
-   shows malformed structured output dominates several roles.
-5. Register any future live model experiment against
+   shows malformed or empty structured output dominates several roles.
+6. Register any future live model experiment against
    `command_center.improvement.live_model_benchmark`; run baseline, candidate,
    and independent verification on identical fixtures.
-6. If verified, manually start a canary with `make models-canary`, compare
+7. If verified, manually start a canary with `make models-canary`, compare
    canary telemetry against the preregistered plan, then manually promote or
    roll back.
-7. Keep Mission 2 routing artifacts separate: model discovery can inform
+8. Keep Mission 2 routing artifacts separate: model discovery can inform
    routing, but it does not replace the typed Ledger route-decision work.
+
+### 5.5 Whole-system validation prompt
+
+Use [whole-system-validation-prompt.md](whole-system-validation-prompt.md) when
+the question is broader than one model, one UI feature, or one external tool:
+"can this entire pipeline keep improving itself, control AppFlowy safely, run
+registered desktop repo work autonomously, route local models cheaply, notify me,
+and prove it did not leak data?"
+
+The prompt ties together the current implementation, the external idea
+evaluation prompt, the coded improvement loop, the AppFlowy/Growth OS surface,
+repo-task isolation, channel notification, and the model-upgrade lane. It is
+explicitly forecast-first: before each state-changing action, the agent records
+the expected state change, allowed fields, expected events, privacy boundary, and
+rollback plan; after the action it compares observed state to the forecast and
+classifies any drift.
+
+Required output from that prompt:
+
+1. A single evidence package under `evaluation/system-validation/<run-id>/`.
+2. Scenario proofs for contracts, local-only routing, self-improvement,
+   AppFlowy kanban control, registered repo autonomy, notifications, memory and
+   knowledge reuse, fail-closed behavior, and privacy.
+3. A validation ladder ending in `cc validate`, mission dry-run, evals,
+   improvement/kanban/channel/provider gates, ruff, pytest, and `git diff
+   --check`, plus live checks only when services and credentials are actually
+   available.
+4. A final `PASS`, `PASS_WITH_BLOCKERS`, or `FAIL` report with evidence paths.
+5. A `docs/MASTER.md` update recording what was proven, what remains, and the
+   next ordered work.
+
+Rules that prompt must preserve: no provider fallback, no fake metrics, no
+hardcoded thresholds, no guessed prices/statuses/model fit, no raw secret or
+private transcript retention, no agent self-approval, and no promotion without
+validate, evals, canary telemetry, independent verification, and human approval.
 
 ---
 
@@ -1380,6 +1435,7 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [request-routing-examples.md](request-routing-examples.md) | 8 worked examples: request → route → expected response |
 | [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
 | [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
+| [whole-system-validation-prompt.md](whole-system-validation-prompt.md) | reusable end-to-end validation prompt for self-improvement, AppFlowy kanban control, registered repo autonomy, notifications, local model routing, forecast-before-action checks, and privacy |
 | [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
 | [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
 | [knowledge-format.md](knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
@@ -1463,6 +1519,50 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
+
+### 2026-06-16 — Whole-system validation prompt added
+
+- **What changed.** Added
+  [whole-system-validation-prompt.md](whole-system-validation-prompt.md), a
+  reusable mission prompt for proving the whole pipeline rather than one
+  subsystem: self-improvement, AppFlowy kanban control, registered desktop repo
+  autonomy, progress notification, local-only model routing, memory/knowledge
+  reuse, fail-closed behavior, and privacy.
+- **Forecast-first testing.** The prompt requires every state-changing action to
+  record expected state, expected events, allowed fields, expected no-change
+  boundaries, privacy boundary, and rollback plan before execution, then compare
+  observed state to the forecast and classify drift.
+- **No hidden shortcuts.** It preserves the existing constraints: no provider
+  fallback, no fake metrics, no hardcoded thresholds, no guessed prices/statuses
+  or model fit, no raw secret/private transcript retention, no agent
+  self-approval, and no promotion without validate/evals/canary telemetry,
+  independent verification, and human approval.
+- **Next use.** The next broad readiness pass should run this prompt and produce
+  a single evidence package under `evaluation/system-validation/<run-id>/`, then
+  update this MASTER section and the remaining-order list with the exact gaps.
+
+### 2026-06-16 — Explicit JSON model-benchmark protocol and live audit refresh
+
+- **What changed.** JSON-scored live model benchmark cases now require
+  `response_format: json` in `configs/model-benchmarks.yaml`; validation rejects
+  missing JSON mode for JSON checks and rejects JSON mode on non-JSON cases. The
+  live harness sends declared JSON cases to Ollama with `format: "json"` and
+  still stores only hashes, booleans, runtime metrics, and equivalence metadata.
+- **Real LLM evidence.** Re-ran the isolated metric audit with `reps=2` after
+  the protocol change. Sample counts, metric/sample math, artifacts, and
+  redaction all passed. The audit exposed real role failures rather than hiding
+  them: `chat` and `planner` invalid_response_rate stayed at `1.000`; `local-
+  judge` and `security-judge` were `0.750`; `triage`, `coder`, and
+  `architect-judge` were `0.000`.
+- **Candidate evidence refreshed.** Re-ran the lower-context coder audit for
+  `qwen3-coder:30b` vs `devstral:24b` under the current benchmark config hash.
+  Context was fit-derived at `40806`. The result remains `revise`: required
+  quality metrics tied, safety held, Devstral did not improve any required
+  non-safety metric, and runtime evidence favored qwen3-coder on this suite.
+- **Current next step.** Structured-output role behavior is now the next
+  Proposed experiment: compare prompt/protocol/model/context variants on
+  synthetic or public cases, keep malformed/empty JSON-mode responses as failed
+  samples, and do not add permissive parser fallbacks.
 
 ### 2026-06-15 — Deep live model audit and metric-gate hardening
 
