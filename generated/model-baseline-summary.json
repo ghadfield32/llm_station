@@ -1,0 +1,218 @@
+{
+  "applied": true,
+  "reps": 1,
+  "roles": [
+    {
+      "equivalence": {
+        "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+        "baseline_model": "qwen3-coder:30b",
+        "benchmark_config": "configs/model-benchmarks.yaml",
+        "benchmark_config_hash": "a7d6372817c77cdf753208a47a6767c8185755af33d0c7f881bd7af1cdeaba39",
+        "candidate_model": "__NO_CHALLENGER_SELECTED__",
+        "commit": "c5267ffe509934fb5e22b99d58f3306ae337bdae",
+        "role": "triage",
+        "suite": "triage",
+        "suite_hash": "8745113505c0b93a5455fad03d5f955b58f3a917faf50553f58e7fc81e7b144a"
+      },
+      "experiment_id": "EXP-model-baseline-triage",
+      "incumbent_model": "qwen3-coder:30b",
+      "metric_values": {
+        "escalation_quality": 0.0,
+        "invalid_response_rate": 0.0,
+        "median_latency_ms": 2899.8190999991493,
+        "risk_tier_classification_quality": 0.0,
+        "secret_handling_safety": 0.0,
+        "task_success_rate": 0.0,
+        "tokens_per_second": 125.54323445788134,
+        "unsafe_downgrade_avoidance": 0.0,
+        "unsafe_output_rate": 0.0
+      },
+      "role": "triage",
+      "run_id": "EXP-model-baseline-triage-baseline-fe979d25",
+      "status": "baseline_recorded",
+      "wall_seconds": 30.04932060000283
+    },
+    {
+      "equivalence": {
+        "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+        "baseline_model": "qwen3:30b",
+        "benchmark_config": "configs/model-benchmarks.yaml",
+        "benchmark_config_hash": "a7d6372817c77cdf753208a47a6767c8185755af33d0c7f881bd7af1cdeaba39",
+        "candidate_model": "__NO_CHALLENGER_SELECTED__",
+        "commit": "c5267ffe509934fb5e22b99d58f3306ae337bdae",
+        "role": "chat",
+        "suite": "chat",
+        "suite_hash": "b02e9eb9e606b5efc62c4fb5b5ee808aacafb7ca326ff75a7632b8783bd13272"
+      },
+      "experiment_id": "EXP-model-baseline-chat",
+      "incumbent_model": "qwen3:30b",
+      "metric_values": {
+        "correct_tool_selection": 0.0,
+        "instruction_adherence": 0.0,
+        "invalid_response_rate": 1.0,
+        "median_latency_ms": 3469.3796999999904,
+        "no_unrequested_board_write": 0.0,
+        "task_success_rate": 0.0,
+        "tokens_per_second": 188.7485935664814,
+        "unknown_stop_behavior": 0.0,
+        "unsafe_output_rate": 0.0,
+        "valid_tool_arguments": 0.0
+      },
+      "role": "chat",
+      "run_id": "EXP-model-baseline-chat-baseline-d6846c3f",
+      "status": "baseline_recorded",
+      "wall_seconds": 29.060303099999146
+    },
+    {
+      "equivalence": {
+        "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+        "baseline_model": "qwen3:30b",
+        "benchmark_config": "configs/model-benchmarks.yaml",
+        "benchmark_config_hash": "a7d6372817c77cdf753208a47a6767c8185755af33d0c7f881bd7af1cdeaba39",
+        "candidate_model": "__NO_CHALLENGER_SELECTED__",
+        "commit": "c5267ffe509934fb5e22b99d58f3306ae337bdae",
+        "role": "local-judge",
+        "suite": "local-judge",
+        "suite_hash": "bea3cbd173aa75b605572bcb8840444af8aaf9e9d32f1a8f808b766ebde109dc"
+      },
+      "experiment_id": "EXP-model-baseline-local-judge",
+      "incumbent_model": "qwen3:30b",
+      "metric_values": {
+        "correct_disposition": 0.5,
+        "defect_recall": 0.5,
+        "false_approval_avoidance": 0.5,
+        "invalid_response_rate": 0.5,
+        "median_latency_ms": 3413.8808000025165,
+        "task_success_rate": 0.5,
+        "tokens_per_second": 187.95293372479154,
+        "unsafe_output_rate": 0.0
+      },
+      "role": "local-judge",
+      "run_id": "EXP-model-baseline-local-judge-baseline-f4c52d7f",
+      "status": "baseline_recorded",
+      "wall_seconds": 6.827967600002012
+    },
+    {
+      "equivalence": {
+        "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+        "baseline_model": "qwen3:30b",
+        "benchmark_config": "configs/model-benchmarks.yaml",
+        "benchmark_config_hash": "a7d6372817c77cdf753208a47a6767c8185755af33d0c7f881bd7af1cdeaba39",
+        "candidate_model": "__NO_CHALLENGER_SELECTED__",
+        "commit": "c5267ffe509934fb5e22b99d58f3306ae337bdae",
+        "role": "planner",
+        "suite": "planner",
+        "suite_hash": "50d96f0721701842226d0bdc91e338ec7a2acd806e2425182e723559917a7132"
+      },
+      "experiment_id": "EXP-model-baseline-planner",
+      "incumbent_model": "qwen3:30b",
+      "metric_values": {
+        "instruction_adherence": 0.0,
+        "invalid_response_rate": 1.0,
+        "invented_fallback_avoidance": 0.0,
+        "median_latency_ms": 3518.635999997059,
+        "ordered_task_completion": 0.0,
+        "plan_completeness": 0.0,
+        "task_success_rate": 0.0,
+        "tokens_per_second": 182.29325830204635,
+        "unsafe_output_rate": 0.0
+      },
+      "role": "planner",
+      "run_id": "EXP-model-baseline-planner-baseline-8f728fcd",
+      "status": "baseline_recorded",
+      "wall_seconds": 7.037488399997528
+    },
+    {
+      "equivalence": {
+        "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+        "baseline_model": "qwen3-coder:30b",
+        "benchmark_config": "configs/model-benchmarks.yaml",
+        "benchmark_config_hash": "a7d6372817c77cdf753208a47a6767c8185755af33d0c7f881bd7af1cdeaba39",
+        "candidate_model": "__NO_CHALLENGER_SELECTED__",
+        "commit": "c5267ffe509934fb5e22b99d58f3306ae337bdae",
+        "role": "coder",
+        "suite": "coder",
+        "suite_hash": "f3bdaed8e1902c24b947f7bb72c5785c6ba488020cb71350bc8fd2cef7d70181"
+      },
+      "experiment_id": "EXP-model-baseline-coder",
+      "incumbent_model": "qwen3-coder:30b",
+      "metric_values": {
+        "invalid_response_rate": 0.0,
+        "median_latency_ms": 3688.417400000617,
+        "no_fake_values": 0.0,
+        "no_hardcoded_fallbacks": 0.0,
+        "no_swallowed_exceptions": 1.0,
+        "patch_reasoning_quality": 1.0,
+        "relevant_test_awareness": 0.0,
+        "task_success": 1.0,
+        "task_success_rate": 0.6666666666666666,
+        "tokens_per_second": 147.62628669446931,
+        "unsafe_output_rate": 0.0
+      },
+      "role": "coder",
+      "run_id": "EXP-model-baseline-coder-baseline-d83132b5",
+      "status": "baseline_recorded",
+      "wall_seconds": 30.828823399999237
+    },
+    {
+      "equivalence": {
+        "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+        "baseline_model": "qwen3-coder:30b",
+        "benchmark_config": "configs/model-benchmarks.yaml",
+        "benchmark_config_hash": "a7d6372817c77cdf753208a47a6767c8185755af33d0c7f881bd7af1cdeaba39",
+        "candidate_model": "__NO_CHALLENGER_SELECTED__",
+        "commit": "c5267ffe509934fb5e22b99d58f3306ae337bdae",
+        "role": "architect-judge",
+        "suite": "architect-judge",
+        "suite_hash": "0b9b4ccfba0e10687be25ae12b9a475aa928312556084097f6982d960ac18a1d"
+      },
+      "experiment_id": "EXP-model-baseline-architect-judge",
+      "incumbent_model": "qwen3-coder:30b",
+      "metric_values": {
+        "architecture_defect_recall": 1.0,
+        "control_plane_boundary_awareness": 1.0,
+        "correct_disposition": 1.0,
+        "invalid_response_rate": 0.0,
+        "median_latency_ms": 3129.8056000014185,
+        "scope_expansion_avoidance": 1.0,
+        "task_success_rate": 1.0,
+        "tokens_per_second": 134.0668581130921,
+        "unsafe_output_rate": 0.0
+      },
+      "role": "architect-judge",
+      "run_id": "EXP-model-baseline-architect-judge-baseline-420b289a",
+      "status": "baseline_recorded",
+      "wall_seconds": 6.259816300000239
+    },
+    {
+      "equivalence": {
+        "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+        "baseline_model": "qwen3:30b",
+        "benchmark_config": "configs/model-benchmarks.yaml",
+        "benchmark_config_hash": "a7d6372817c77cdf753208a47a6767c8185755af33d0c7f881bd7af1cdeaba39",
+        "candidate_model": "__NO_CHALLENGER_SELECTED__",
+        "commit": "c5267ffe509934fb5e22b99d58f3306ae337bdae",
+        "role": "security-judge",
+        "suite": "security-judge",
+        "suite_hash": "419fb3f85b0ff3f0a18fc2e4f695d59237965c435e24244d27a20024c6786107"
+      },
+      "experiment_id": "EXP-model-baseline-security-judge",
+      "incumbent_model": "qwen3:30b",
+      "metric_values": {
+        "correct_disposition": 0.0,
+        "injection_resistance": 0.0,
+        "invalid_response_rate": 1.0,
+        "median_latency_ms": 14014.186899999913,
+        "missed_critical_defect_avoidance": 0.0,
+        "safety_defect_recall": 0.0,
+        "task_success_rate": 0.0,
+        "tokens_per_second": 188.44935683997875,
+        "unsafe_output_rate": 0.0
+      },
+      "role": "security-judge",
+      "run_id": "EXP-model-baseline-security-judge-baseline-c10273c5",
+      "status": "baseline_recorded",
+      "wall_seconds": 28.02867499999411
+    }
+  ]
+}

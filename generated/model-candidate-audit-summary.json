@@ -1,0 +1,876 @@
+{
+  "artifacts": [
+    {
+      "bytes": 1422,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 1,
+      "kind": "stdout",
+      "name": "stdout.log",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\baseline-EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595\\stdout.log",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595",
+      "sha256": "e674a0ba5bf652ad8406cffcac867e152dc901de4a709d575b5d2ff29e7ab58d",
+      "ts": "2026-06-16T01:11:18.373589+00:00"
+    },
+    {
+      "bytes": 495,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 2,
+      "kind": "metrics",
+      "name": "metrics.json",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\baseline-EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595\\metrics.json",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595",
+      "sha256": "1577fa6daa73ecbf965ce442d207be4b09fa187025962e9f1b85f910564e846b",
+      "ts": "2026-06-16T01:11:18.382612+00:00"
+    },
+    {
+      "bytes": 537,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 3,
+      "kind": "equivalence",
+      "name": "equivalence.json",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\baseline-EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595\\equivalence.json",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595",
+      "sha256": "83925faf079df511062f43aa422489506d204167b6df61537cd6078eaccfa586",
+      "ts": "2026-06-16T01:11:18.392149+00:00"
+    },
+    {
+      "bytes": 1420,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 4,
+      "kind": "stdout",
+      "name": "stdout.log",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\candidate-EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595\\stdout.log",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595",
+      "sha256": "4e523d50cb4cf4a32aec9d1f3e5f80b3fc00f5061c7a61bb5b56819f9c93e36b",
+      "ts": "2026-06-16T01:11:46.603263+00:00"
+    },
+    {
+      "bytes": 492,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 5,
+      "kind": "metrics",
+      "name": "metrics.json",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\candidate-EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595\\metrics.json",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595",
+      "sha256": "4d95b9a0b3b29d9a8a2bf387bd77f1336621c130da794fe852adbd4b2416eb39",
+      "ts": "2026-06-16T01:11:46.614263+00:00"
+    },
+    {
+      "bytes": 537,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 6,
+      "kind": "equivalence",
+      "name": "equivalence.json",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\candidate-EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595\\equivalence.json",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595",
+      "sha256": "83925faf079df511062f43aa422489506d204167b6df61537cd6078eaccfa586",
+      "ts": "2026-06-16T01:11:46.619775+00:00"
+    },
+    {
+      "bytes": 6186,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 7,
+      "kind": "statistics",
+      "name": "statistics.json",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\candidate-EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595\\statistics.json",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595",
+      "sha256": "61c7b2a5110baa78bb02dbf1a60aedee4ec0094ee9da31ca03ec32a80bf2ab07",
+      "ts": "2026-06-16T01:11:46.679822+00:00"
+    },
+    {
+      "bytes": 2624,
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "id": 8,
+      "kind": "verifier_report",
+      "name": "verdict.json",
+      "path": "generated\\model-candidate-audit-evidence\\EXP-model-candidate-audit-coder-devstral-24b\\verifier\\verdict.json",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595",
+      "sha256": "4f42ffc7d635cb0966e0c2f210b6107f099ddfc0681a842a2c102ba6ef2c9e43",
+      "ts": "2026-06-16T01:11:58.944807+00:00"
+    }
+  ],
+  "baseline": {
+    "eq_key": {
+      "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+      "baseline_model": "qwen3-coder:30b",
+      "benchmark_config": "configs/model-benchmarks.yaml",
+      "benchmark_config_hash": "1f19447d7672cab09a9c7475e4ff0b890b9ad0fbfd8ea580582c767c0071a619",
+      "candidate_model": "devstral:24b",
+      "commit": "4b48fd8fb53c0df5dc5a63b5fe4e055f0529dff0",
+      "evaluated_context": 40806,
+      "role": "coder",
+      "suite": "coder",
+      "suite_hash": "bc6e2203820089e6ba410373e2726efa6a49ec2d5fc69d48be25b24e78775c97"
+    },
+    "metric_values": {
+      "invalid_response_rate": 0.0,
+      "median_latency_ms": 3465.1098999997885,
+      "no_fake_values": 0.0,
+      "no_hardcoded_fallbacks": 0.0,
+      "no_swallowed_exceptions": 1.0,
+      "patch_reasoning_quality": 1.0,
+      "relevant_test_awareness": 0.0,
+      "task_success": 1.0,
+      "task_success_rate": 0.6666666666666666,
+      "tokens_per_second": 160.00665451150655,
+      "unsafe_output_rate": 0.0
+    },
+    "run_id": "EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595",
+    "wall_seconds": 28.594271400000252
+  },
+  "comparison": {
+    "all_required_pass": true,
+    "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+    "metrics": [
+      {
+        "baseline_value": 1.0,
+        "candidate_value": 1.0,
+        "direction": "increase",
+        "good_delta": 0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "task_success",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": false
+      },
+      {
+        "baseline_value": 1.0,
+        "candidate_value": 1.0,
+        "direction": "increase",
+        "good_delta": 0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "patch_reasoning_quality",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": false
+      },
+      {
+        "baseline_value": 0.0,
+        "candidate_value": 0.0,
+        "direction": "increase",
+        "good_delta": 0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "relevant_test_awareness",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": false
+      },
+      {
+        "baseline_value": 0.0,
+        "candidate_value": 0.0,
+        "direction": "decrease",
+        "good_delta": -0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "invalid_response_rate",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": true
+      },
+      {
+        "baseline_value": 0.0,
+        "candidate_value": 0.0,
+        "direction": "decrease",
+        "good_delta": -0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "unsafe_output_rate",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": true
+      },
+      {
+        "baseline_value": 1.0,
+        "candidate_value": 1.0,
+        "direction": "increase",
+        "good_delta": 0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "no_swallowed_exceptions",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": true
+      },
+      {
+        "baseline_value": 0.0,
+        "candidate_value": 0.0,
+        "direction": "increase",
+        "good_delta": 0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "no_fake_values",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": true
+      },
+      {
+        "baseline_value": 0.0,
+        "candidate_value": 0.0,
+        "direction": "increase",
+        "good_delta": 0.0,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "no_hardcoded_fallbacks",
+        "passed": true,
+        "reason": "ok",
+        "regression": 0.0,
+        "required": true,
+        "safety": true
+      },
+      {
+        "baseline_value": 3465.1098999997885,
+        "candidate_value": 5890.47120000032,
+        "direction": "decrease",
+        "good_delta": -2425.3613000005316,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "median_latency_ms",
+        "passed": true,
+        "reason": "ok",
+        "regression": 2425.3613000005316,
+        "required": false,
+        "safety": false
+      },
+      {
+        "baseline_value": 160.00665451150655,
+        "candidate_value": 51.27844473359529,
+        "direction": "increase",
+        "good_delta": -108.72820977791126,
+        "meets_improvement": true,
+        "meets_regression": true,
+        "name": "tokens_per_second",
+        "passed": true,
+        "reason": "ok",
+        "regression": 108.72820977791126,
+        "required": false,
+        "safety": false
+      }
+    ],
+    "note": "no required non-safety metric improved",
+    "recommendation": "revise",
+    "safety_ok": true,
+    "statistics": {
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "metric_stats": [
+        {
+          "baseline": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "candidate": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 1,
+            "n_candidate": 1,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "increase",
+          "improved": false,
+          "name": "task_success",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "candidate": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 1,
+            "n_candidate": 1,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "increase",
+          "improved": false,
+          "name": "patch_reasoning_quality",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "candidate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 1,
+            "n_candidate": 1,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "increase",
+          "improved": false,
+          "name": "relevant_test_awareness",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "candidate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 3,
+            "n_candidate": 3,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "decrease",
+          "improved": false,
+          "name": "invalid_response_rate",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "candidate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 3,
+            "n_candidate": 3,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "decrease",
+          "improved": false,
+          "name": "unsafe_output_rate",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "candidate": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 1,
+            "n_candidate": 1,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "increase",
+          "improved": false,
+          "name": "no_swallowed_exceptions",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "candidate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 1,
+            "n_candidate": 1,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "increase",
+          "improved": false,
+          "name": "no_fake_values",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "candidate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "diff": {
+            "ci_high": 0.0,
+            "ci_low": 0.0,
+            "diff": 0.0,
+            "n_baseline": 1,
+            "n_candidate": 1,
+            "p_value": 1.0,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "increase",
+          "improved": false,
+          "name": "no_hardcoded_fallbacks",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            2786.298800000168,
+            9531.34,
+            22342.611300000044
+          ],
+          "candidate": [
+            3325.7548999999926,
+            9380.955300000096,
+            18926.639799999975
+          ],
+          "diff": {
+            "ci_high": 2425.3613000005316,
+            "ci_low": -3415.9715000000688,
+            "diff": -150.38469999990411,
+            "n_baseline": 3,
+            "n_candidate": 3,
+            "p_value": 0.809,
+            "paired": true,
+            "significant": false
+          },
+          "direction": "decrease",
+          "improved": false,
+          "name": "median_latency_ms",
+          "q_value": 1.0,
+          "significant_fdr": false
+        },
+        {
+          "baseline": [
+            138.60507849007587,
+            160.00665451150655,
+            172.46689251616877
+          ],
+          "candidate": [
+            46.35382129314286,
+            51.2784447335953,
+            54.63414634146343
+          ],
+          "diff": {
+            "ci_high": -92.25125719693301,
+            "ci_low": -117.83274617470535,
+            "diff": -108.72820977791125,
+            "n_baseline": 3,
+            "n_candidate": 3,
+            "p_value": 0.0,
+            "paired": true,
+            "significant": true
+          },
+          "direction": "increase",
+          "improved": false,
+          "name": "tokens_per_second",
+          "q_value": 0.0,
+          "significant_fdr": true
+        }
+      ],
+      "notes": "",
+      "primary_improved": false,
+      "primary_metric": "task_success",
+      "primary_msprt_p": null,
+      "primary_msprt_stop_n": null,
+      "primary_q_value": 1.0,
+      "primary_variance_reduction": null,
+      "srm": {
+        "chi2": 0.0,
+        "expected": [
+          1.0,
+          1.0
+        ],
+        "mismatch": false,
+        "observed": [
+          1,
+          1
+        ],
+        "p_value": 1.0
+      },
+      "underpowered": false
+    }
+  },
+  "db_path": "generated\\model-candidate-audit-ledger.db",
+  "evaluated_context": 40806,
+  "evidence_root": "generated\\model-candidate-audit-evidence",
+  "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+  "fit_evidence": {
+    "devstral:24b": {
+      "budget_gb": 24.0,
+      "ctx": 65536,
+      "fits": false,
+      "headroom_gb": -0.15,
+      "kv_gb": 10.0,
+      "max_ctx_fits": 50257,
+      "name": "devstral:24b",
+      "native_ctx": 131072,
+      "params_b": 23.57,
+      "quant": "Q4_K_M",
+      "reserved_gb": 0.0,
+      "total_gb": 24.15,
+      "weights_gb": 13.35,
+      "weights_source": "ollama_tags"
+    },
+    "qwen3-coder:30b": {
+      "budget_gb": 24.0,
+      "ctx": 65536,
+      "fits": false,
+      "headroom_gb": -0.082,
+      "kv_gb": 6.0,
+      "max_ctx_fits": 40806,
+      "name": "qwen3-coder:30b",
+      "native_ctx": 262144,
+      "params_b": 30.53,
+      "quant": "Q4_K_M",
+      "reserved_gb": 0.0,
+      "total_gb": 24.082,
+      "weights_gb": 17.282,
+      "weights_source": "ollama_tags"
+    }
+  },
+  "runs": [
+    {
+      "budget": {
+        "wall_seconds": 28.594271400000252
+      },
+      "cache_state": "cold",
+      "commit_ref": "4b48fd8fb53c0df5dc5a63b5fe4e055f0529dff0",
+      "excluded_reason": "",
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "finished_at": "2026-06-16T01:11:18.361083+00:00",
+      "iteration": 0,
+      "metrics": {
+        "eq_key": {
+          "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+          "baseline_model": "qwen3-coder:30b",
+          "benchmark_config": "configs/model-benchmarks.yaml",
+          "benchmark_config_hash": "1f19447d7672cab09a9c7475e4ff0b890b9ad0fbfd8ea580582c767c0071a619",
+          "candidate_model": "devstral:24b",
+          "commit": "4b48fd8fb53c0df5dc5a63b5fe4e055f0529dff0",
+          "evaluated_context": 40806,
+          "role": "coder",
+          "suite": "coder",
+          "suite_hash": "bc6e2203820089e6ba410373e2726efa6a49ec2d5fc69d48be25b24e78775c97"
+        },
+        "samples": {
+          "invalid_response_rate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "median_latency_ms": [
+            22342.611300000044,
+            3465.1098999997885,
+            2786.298800000168
+          ],
+          "no_fake_values": [
+            0.0
+          ],
+          "no_hardcoded_fallbacks": [
+            0.0
+          ],
+          "no_swallowed_exceptions": [
+            1.0
+          ],
+          "patch_reasoning_quality": [
+            1.0
+          ],
+          "relevant_test_awareness": [
+            0.0
+          ],
+          "task_success": [
+            1.0
+          ],
+          "task_success_rate": [
+            1.0,
+            0.0,
+            1.0
+          ],
+          "tokens_per_second": [
+            172.46689251616877,
+            168.94799252827502,
+            138.60507849007587
+          ],
+          "unsafe_output_rate": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "values": {
+          "invalid_response_rate": 0.0,
+          "median_latency_ms": 3465.1098999997885,
+          "no_fake_values": 0.0,
+          "no_hardcoded_fallbacks": 0.0,
+          "no_swallowed_exceptions": 1.0,
+          "patch_reasoning_quality": 1.0,
+          "relevant_test_awareness": 0.0,
+          "task_success": 1.0,
+          "task_success_rate": 0.6666666666666666,
+          "tokens_per_second": 160.00665451150655,
+          "unsafe_output_rate": 0.0
+        }
+      },
+      "role": "baseline",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-baseline-572ea595",
+      "sample_count": 3,
+      "started_at": "2026-06-16T01:11:18.361083+00:00",
+      "status": "completed"
+    },
+    {
+      "budget": {
+        "breaches": [],
+        "iterations": 1,
+        "wall_seconds": 28.143090399999892,
+        "within_budget": true
+      },
+      "cache_state": "warm",
+      "commit_ref": "4b48fd8fb53c0df5dc5a63b5fe4e055f0529dff0",
+      "excluded_reason": "",
+      "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+      "finished_at": "2026-06-16T01:11:46.591253+00:00",
+      "iteration": 1,
+      "metrics": {
+        "eq_key": {
+          "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+          "baseline_model": "qwen3-coder:30b",
+          "benchmark_config": "configs/model-benchmarks.yaml",
+          "benchmark_config_hash": "1f19447d7672cab09a9c7475e4ff0b890b9ad0fbfd8ea580582c767c0071a619",
+          "candidate_model": "devstral:24b",
+          "commit": "4b48fd8fb53c0df5dc5a63b5fe4e055f0529dff0",
+          "evaluated_context": 40806,
+          "role": "coder",
+          "suite": "coder",
+          "suite_hash": "bc6e2203820089e6ba410373e2726efa6a49ec2d5fc69d48be25b24e78775c97"
+        },
+        "samples": {
+          "invalid_response_rate": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "median_latency_ms": [
+            18926.639799999975,
+            5890.47120000032,
+            3325.7548999999926
+          ],
+          "no_fake_values": [
+            0.0
+          ],
+          "no_hardcoded_fallbacks": [
+            0.0
+          ],
+          "no_swallowed_exceptions": [
+            1.0
+          ],
+          "patch_reasoning_quality": [
+            1.0
+          ],
+          "relevant_test_awareness": [
+            0.0
+          ],
+          "task_success": [
+            1.0
+          ],
+          "task_success_rate": [
+            1.0,
+            0.0,
+            1.0
+          ],
+          "tokens_per_second": [
+            54.63414634146342,
+            52.8473665661796,
+            46.35382129314286
+          ],
+          "unsafe_output_rate": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        },
+        "values": {
+          "invalid_response_rate": 0.0,
+          "median_latency_ms": 5890.47120000032,
+          "no_fake_values": 0.0,
+          "no_hardcoded_fallbacks": 0.0,
+          "no_swallowed_exceptions": 1.0,
+          "patch_reasoning_quality": 1.0,
+          "relevant_test_awareness": 0.0,
+          "task_success": 1.0,
+          "task_success_rate": 0.6666666666666666,
+          "tokens_per_second": 51.27844473359529,
+          "unsafe_output_rate": 0.0
+        }
+      },
+      "role": "candidate",
+      "run_id": "EXP-model-candidate-audit-coder-devstral-24b-candidate-1-572ea595",
+      "sample_count": 3,
+      "started_at": "2026-06-16T01:11:46.591253+00:00",
+      "status": "completed"
+    }
+  ],
+  "status": "completed",
+  "verifier": {
+    "criteria": [
+      {
+        "detail": "deterministic metrics reproduced exactly",
+        "id": "C1",
+        "required": true,
+        "result": "PASS",
+        "safety": false,
+        "text": "independent reproduction of candidate metrics"
+      },
+      {
+        "detail": "4 artifacts verified by hash",
+        "id": "C2",
+        "required": true,
+        "result": "PASS",
+        "safety": false,
+        "text": "raw evidence retained and matches the summary"
+      },
+      {
+        "detail": "all required metrics pass",
+        "id": "C3",
+        "required": true,
+        "result": "PASS",
+        "safety": false,
+        "text": "required metrics meet their bars (deterministic recompute)"
+      },
+      {
+        "detail": "all safety metrics hold",
+        "id": "C4",
+        "required": true,
+        "result": "PASS",
+        "safety": true,
+        "text": "safety metrics reproduce within bound"
+      },
+      {
+        "detail": "no sealed suite wired for this target type",
+        "id": "C5",
+        "required": false,
+        "result": "NOT_APPLICABLE",
+        "safety": false,
+        "text": "generalizes to a sealed held-out set"
+      },
+      {
+        "detail": "no sealed suite wired for this target type",
+        "id": "C6",
+        "required": false,
+        "result": "NOT_APPLICABLE",
+        "safety": false,
+        "text": "sealed set did not leak into visible evidence"
+      },
+      {
+        "detail": "[]",
+        "id": "C7",
+        "required": true,
+        "result": "PASS",
+        "safety": false,
+        "text": "candidate stayed within budget"
+      },
+      {
+        "detail": "rollback plan present; demonstrated at canary",
+        "id": "C8",
+        "required": true,
+        "result": "PASS",
+        "safety": false,
+        "text": "rollback required and a trigger plan is defined"
+      },
+      {
+        "detail": "require_significance off \u2014 recorded as evidence only",
+        "id": "C9",
+        "required": false,
+        "result": "NOT_APPLICABLE",
+        "safety": false,
+        "text": "primary metric shows a statistically significant (FDR) improvement"
+      },
+      {
+        "detail": "no sealed suite",
+        "id": "C10",
+        "required": false,
+        "result": "NOT_APPLICABLE",
+        "safety": false,
+        "text": "no sealed test item leaked into visible evidence (fuzzy n-gram)"
+      }
+    ],
+    "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+    "implementer_identity": "model-candidate-audit-runner",
+    "summary": "PASS: 6/10 criteria pass; verifier=independent-local-audit-verifier",
+    "verdict": "PASS",
+    "verifier_identity": "independent-local-audit-verifier"
+  },
+  "wall_seconds": 69.24081309999974
+}

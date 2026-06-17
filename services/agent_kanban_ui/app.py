@@ -41,7 +41,9 @@ CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
 # Governed write verbs the console may call directly (the action layer enforces the
 # wall; Approved is structurally refused inside them). No Ledger approve/kill here.
 ACTION_VERBS = frozenset({"stage_card", "block_card", "reject_card",
-                          "start_todo", "finish_todo", "block_todo", "move_item"})
+                          "start_todo", "finish_todo", "block_todo", "move_item",
+                          "annotate_item", "set_item_field",
+                          "remove_item_field_value"})
 
 LEDGER_BASE_URL = os.environ.get("LEDGER_BASE_URL", "http://ledger:8090").rstrip("/")
 STATIC_DIR = Path(os.environ.get("KANBAN_UI_STATIC", "/app/static"))

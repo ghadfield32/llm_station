@@ -7,7 +7,12 @@ actually exist in targets.yaml (different files). This does. Exit 1 on a danglin
 reference so the inventory and the watchers can't drift apart.
 """
 import sys
+from pathlib import Path
+
 import yaml
+
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def check_judge_routing(judges: dict, roles: set) -> list:
@@ -65,6 +70,34 @@ def check_tool_safe_roles(models: dict, channels: dict) -> list:
                 f"role '{role}' is used for tool-calling but is backed by {bad}, "
                 f"whose Ollama parser drops prose-prefixed tool calls; route it to "
                 f"a tool-robust model (qwen3/devstral — configs/models.yaml `chat:`)")
+    return problems
+
+
+def check_autonomy_manifest_paths(autonomy: dict, root: Path = ROOT) -> list:
+    """Every repo manifest path that gates autonomy must exist inside the repo.
+
+    The Pydantic contract proves shape; this proves local repository facts. It
+    does not read secrets or contact GitHub.
+    """
+    problems = []
+    for repo in autonomy.get("repo_manifests", []):
+        repo_id = repo.get("repo_id", "<unknown>")
+        for field in ("devcontainer_path", "codeowners_path"):
+            ref = repo.get(field)
+            if not ref:
+                continue
+            candidate = (root / ref).resolve()
+            try:
+                candidate.relative_to(root.resolve())
+            except ValueError:
+                problems.append(
+                    f"repo manifest '{repo_id}' {field} '{ref}' escapes the repository"
+                )
+                continue
+            if not candidate.is_file():
+                problems.append(
+                    f"repo manifest '{repo_id}' {field} '{ref}' does not exist"
+                )
     return problems
 
 
@@ -144,6 +177,11 @@ def main() -> int:
     # every risk tier's default classify route must also resolve to a real role.
     gates = yaml.safe_load(open("configs/gates.yaml"))
     for msg in check_gate_routes(gates, roles):
+        print(f"  DANGLING: {msg}")
+        ok = False
+
+    autonomy = yaml.safe_load(open("configs/autonomy.yaml"))
+    for msg in check_autonomy_manifest_paths(autonomy):
         print(f"  DANGLING: {msg}")
         ok = False
 

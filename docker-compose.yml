@@ -105,8 +105,12 @@ services:
       - SKEPTIC_MODEL=security-judge
       - LEDGER_BASE_URL=http://ledger:8090
       - STANDARDS_CONFIG=/app/standards.yaml
+      - GATES_CONFIG=/app/gates.yaml
+      - MODELS_CONFIG=/app/models.yaml
     volumes:
       - ./configs/standards.yaml:/app/standards.yaml:ro
+      - ./configs/gates.yaml:/app/gates.yaml:ro
+      - ./configs/models.yaml:/app/models.yaml:ro
     ports: ["127.0.0.1:8088:8088"]
     depends_on:
       litellm: { condition: service_healthy }

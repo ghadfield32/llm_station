@@ -197,6 +197,15 @@ the *read* path (snapshot stays); router/lanes are **data-derived** from real co
 routing); model list comes from `models.yaml` (no hardcoded model names); fail-loud everywhere; no leakage
 (the console shows only what the Ledger/log/snapshot already hold).
 
+### Phase 6 — usability round 4 (inline field editing)
+- **Edit any field from the card drawer.** Each field has an inline `edit` (→ `set_item_field`) and there's an
+  "+ Note" box (→ `annotate_item`, clobber-safe) — built on the governed verbs a concurrent session added
+  (`set_item_field`/`annotate_item`/`remove_item_field_value`, now in the UI's `ACTION_VERBS`). So you can adjust
+  Priority/Area/Risk/Due/Tags/etc. on any board at any time. Verified live: `Priority=P3` set, **Status edit
+  refused** ("use move_item"), **invalid `P9` rejected** with the data-derived allowed set
+  (`['P0','P1','P2','P3']`), note added, reverted. Status/keys are not offered as editable (the move control owns
+  Status; protected fields are server-refused regardless).
+
 ### Phase 6 — usability round 3 (drag-and-drop)
 - **Drag-and-drop on the Boards kanban.** Cards are draggable; columns are drop targets (all legal columns
   render, so you can drop into an empty one); dropping calls the governed `move_item` and the live board
@@ -232,6 +241,14 @@ Found during the live visual pass and fixed (all live-verified):
   in-app calls now show as `app` (verified `03:34 app stage_card`), so the agent chain is observable per surface.
 - **Adjust ANY board at any time** — `board_view` carries each board's full legal `statuses`; the card drawer
   has a "Move to…" dropdown (→ `move_item`) for every board, plus quick verb buttons for cards/todos.
+- **Row-level Kanban powers are explicit and schema-derived** — the shared action layer now exposes
+  `annotate_item` (append dated Notes without clobbering), `set_item_field` (change real schema fields such as
+  Section/Area/Priority/Risk/Due/Tags/Pillar/Format/Module/Action/Acceptance/Owners), and
+  `remove_item_field_value` (remove one exact value from grouped text fields such as Tags/Topics/Owners/Media).
+  Field names/types/select options come from `config/schema.yaml` including project/content templates. The tools
+  refuse generated/writeback/key fields and Status stays on `move_item`/lifecycle verbs. AppFlowy view
+  layout/group-by/visual formatting is **not claimed** through the row-write REST client; blank field clearing is
+  also not claimed until REST clear semantics are verified.
 - **See writes immediately** — `/api/boards/live` (console-only; reads AppFlowy live, full statuses) + the card
   drawer refreshes the boards after each action. Read-only deployments still use the worker snapshot.
 - **`/api/action` routed through the logged dispatch** (was calling the raw action, bypassing the log).

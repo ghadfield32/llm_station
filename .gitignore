@@ -7,6 +7,9 @@
 !.env.example
 !**/.env.example
 **/CREDENTIALS.md
+*.pem
+*.private-key.pem
+*.key
 
 # ── Python ────────────────────────────────────────────────────────────────
 __pycache__/
@@ -65,6 +68,7 @@ generated/linkedin-publish.lock
 
 # ── Local staging / scratch ───────────────────────────────────────────────
 _staging/
+.codex_tmp/
 
 # ── Runtime logs (the gateway manager writes gateway.log; regenerated on run) ─
 *.log

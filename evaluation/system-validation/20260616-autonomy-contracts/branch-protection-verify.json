@@ -1,0 +1,33 @@
+{
+  "blockers": [
+    "missing_env_GITHUB_OWNER_ADMIN_TOKEN"
+  ],
+  "codeowners_path": ".github/CODEOWNERS",
+  "env": [
+    {
+      "length": 0,
+      "name": "GITHUB_OWNER_ADMIN_TOKEN",
+      "present": false
+    }
+  ],
+  "evidence": [
+    "read configs/autonomy.yaml branch_protection_verification",
+    "read owner/admin token env presence without printing value"
+  ],
+  "next_actions": [
+    "set GITHUB_OWNER_ADMIN_TOKEN to an owner/admin read-only observer token for one verification run; do not commit or print it"
+  ],
+  "repositories": [],
+  "required_status_check_contexts": [
+    "validate",
+    "lint-test"
+  ],
+  "secrets_printed": false,
+  "status": "blocked",
+  "workflow_jobs": [
+    "lint-test",
+    "validate"
+  ],
+  "workflow_source": ".github/workflows/contracts.yml",
+  "writes_performed": false
+}

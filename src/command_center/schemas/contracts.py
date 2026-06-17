@@ -853,6 +853,599 @@ class AgentSurfaceConfig(Strict):
     tuning: TuningKnobs = Field(default_factory=TuningKnobs)
 
 
+# ---- autonomy.yaml ----------------------------------------------------------
+# Contracts for the whole-system autonomy hardening layer. This is deliberately a
+# contract/config layer first: event schemas, repo manifests, desktop rights,
+# completion verification, canaries, telemetry posture, auth review, and external
+# runtime evaluation policy. It does not enable desktop automation or repo writes
+# by itself.
+_EVENT_KIND_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
+_REPO_ID_RE = re.compile(r"^[a-zA-Z0-9_.-]+$")
+
+_MINIMUM_EVENT_FIELDS = {
+    "event_id",
+    "mission_id",
+    "timestamp",
+    "actor",
+    "source_authority",
+    "risk_tier",
+    "privacy_classification",
+    "result",
+    "input_artifact_hashes",
+    "output_artifact_hashes",
+    "trace_id",
+}
+_REQUIRED_EVENT_FAMILIES = {
+    "mission.forecast",
+    "mission.action",
+    "mission.verification",
+    "mission.rollback",
+    "route.decision",
+    "repo.action",
+    "kanban.mutation",
+    "desktop.observation",
+    "desktop.action",
+    "model.call",
+    "notification.sent",
+}
+_DEFAULT_DESKTOP_DENIES = {
+    "clipboard_read",
+    "password_field_read",
+    "system_settings_change",
+    "file_delete",
+}
+_AUTOMATION_ORDER = ["direct_api", "browser", "os_accessibility", "screenshot"]
+
+
+class EventFamilySpec(Strict):
+    kind: str
+    required_fields: list[str]
+    raw_payload_allowed: bool = False
+    retained_artifact_policy: Literal["hashes_and_refs_only", "redacted_summary_only"]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _EVENT_KIND_RE.match(self.kind):
+            raise ValueError(f"event family {self.kind!r} must use dotted lowercase form")
+        if not self.required_fields:
+            raise ValueError(f"event family {self.kind!r} must declare required_fields")
+        if len(self.required_fields) != len(set(self.required_fields)):
+            raise ValueError(f"event family {self.kind!r} has duplicate required_fields")
+        if self.raw_payload_allowed:
+            raise ValueError(
+                f"event family {self.kind!r} may not retain raw payloads; "
+                "store hashes, refs, or redacted summaries"
+            )
+        return self
+
+
+class EventContractConfig(Strict):
+    schema_version: str
+    privacy_classes: list[Literal["public", "internal", "confidential", "secret_reference"]]
+    result_values: list[str]
+    common_required_fields: list[str]
+    families: list[EventFamilySpec]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.events.v1":
+            raise ValueError("event_contract.schema_version must be command-center.events.v1")
+        if len(self.privacy_classes) != len(set(self.privacy_classes)):
+            raise ValueError("event_contract.privacy_classes contains duplicates")
+        if "confidential" not in self.privacy_classes:
+            raise ValueError("event_contract must include confidential privacy class")
+        if "secret_reference" not in self.privacy_classes:
+            raise ValueError("event_contract must include secret_reference privacy class")
+        if len(self.result_values) != len(set(self.result_values)):
+            raise ValueError("event_contract.result_values contains duplicates")
+        if len(self.common_required_fields) != len(set(self.common_required_fields)):
+            raise ValueError("event_contract.common_required_fields contains duplicates")
+        missing_fields = _MINIMUM_EVENT_FIELDS - set(self.common_required_fields)
+        if missing_fields:
+            raise ValueError(
+                "event_contract.common_required_fields missing minimum field(s): "
+                f"{sorted(missing_fields)}"
+            )
+        kinds = [family.kind for family in self.families]
+        if len(kinds) != len(set(kinds)):
+            raise ValueError("event_contract contains duplicate event families")
+        missing_families = _REQUIRED_EVENT_FAMILIES - set(kinds)
+        if missing_families:
+            raise ValueError(
+                "event_contract missing required event family/families: "
+                f"{sorted(missing_families)}"
+            )
+        return self
+
+
+class RepoManifest(Strict):
+    repo_id: str
+    remote_url: str
+    default_branch: str
+    protected_branches: list[str]
+    allowed_base_branches: list[str]
+    branch_write_policy: Literal["feature_branch_only"]
+    auth_mode: Literal["github_app", "github_app_pending", "fine_grained_pat_pilot_only"]
+    execution_mode: Literal["devcontainer", "contract_only"]
+    devcontainer_path: str | None = None
+    ci_commands: list[str]
+    secret_policy: Literal["no_runtime_secrets_inside_container"]
+    codeowners_required: bool
+    codeowners_path: str | None = None
+    risk_ceiling: RiskTier
+    autonomous_edits_enabled: bool = False
+    blockers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.repo_id):
+            raise ValueError(f"repo_id {self.repo_id!r} must be a stable id")
+        if not self.remote_url:
+            raise ValueError(f"repo {self.repo_id!r} remote_url is required")
+        if not self.default_branch:
+            raise ValueError(f"repo {self.repo_id!r} default_branch is required")
+        if self.default_branch not in self.allowed_base_branches:
+            raise ValueError(
+                f"repo {self.repo_id!r} default_branch must appear in allowed_base_branches"
+            )
+        if len(self.allowed_base_branches) != len(set(self.allowed_base_branches)):
+            raise ValueError(f"repo {self.repo_id!r} allowed_base_branches has duplicates")
+        if not self.ci_commands:
+            raise ValueError(f"repo {self.repo_id!r} must declare ci_commands")
+        if any(not cmd for cmd in self.ci_commands):
+            raise ValueError(f"repo {self.repo_id!r} ci_commands cannot contain blank commands")
+        if self.codeowners_required and not self.codeowners_path:
+            raise ValueError(f"repo {self.repo_id!r} requires codeowners_path")
+        if self.risk_ceiling in (RiskTier.L3, RiskTier.L4):
+            raise ValueError(f"repo {self.repo_id!r} autonomous risk ceiling cannot exceed L2")
+        if self.execution_mode == "devcontainer" and not self.devcontainer_path:
+            raise ValueError(f"repo {self.repo_id!r} devcontainer execution needs devcontainer_path")
+        if self.autonomous_edits_enabled:
+            if self.blockers:
+                raise ValueError(f"repo {self.repo_id!r} enabled manifests cannot list blockers")
+            if self.auth_mode != "github_app":
+                raise ValueError(
+                    f"repo {self.repo_id!r} autonomous edits require auth_mode=github_app"
+                )
+            if self.execution_mode != "devcontainer" or not self.devcontainer_path:
+                raise ValueError(
+                    f"repo {self.repo_id!r} autonomous edits require a devcontainer manifest"
+                )
+            if not self.codeowners_required:
+                raise ValueError(
+                    f"repo {self.repo_id!r} autonomous edits require CODEOWNERS review"
+                )
+        elif not self.blockers:
+            raise ValueError(f"repo {self.repo_id!r} disabled manifests must list blockers")
+        return self
+
+
+class DesktopVerifierSpec(Strict):
+    type: Literal["ui_assertion", "api_assertion", "event_assertion"]
+    must_show: list[str] = Field(default_factory=list)
+    evidence_event_family: str
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.type == "ui_assertion" and not self.must_show:
+            raise ValueError("ui_assertion desktop verifier must declare must_show evidence")
+        return self
+
+
+class DesktopTarget(Strict):
+    target_id: str
+    enabled: bool = False
+    os_family: Literal["windows", "macos", "browser"]
+    surface: Literal["direct_api", "browser", "os_accessibility", "screenshot"]
+    board: str | None = None
+    card_ref: str | None = None
+    snapshot_evidence_ref: str | None = None
+    allowed_windows: list[str]
+    allowed_actions: list[str]
+    forbidden_actions: list[str]
+    verifier: DesktopVerifierSpec
+    automation_order: list[Literal["direct_api", "browser", "os_accessibility", "screenshot"]]
+    ttl_minutes: int | None = Field(default=None, ge=1)
+    ttl_source: str | None = None
+    action_timeout_seconds: int | None = Field(default=None, ge=1)
+    action_timeout_source: str | None = None
+    human_takeover_hotkey: str | None = None
+    screenshot_artifact_policy: Literal[
+        "none",
+        "redacted_hashes_and_refs_only",
+    ] | None = None
+    blockers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.target_id):
+            raise ValueError(f"desktop target {self.target_id!r} must be a stable id")
+        if not self.allowed_windows:
+            raise ValueError(f"desktop target {self.target_id!r} must declare allowed_windows")
+        if not self.allowed_actions:
+            raise ValueError(f"desktop target {self.target_id!r} must declare allowed_actions")
+        if (self.board is None) != (self.card_ref is None):
+            raise ValueError(
+                f"desktop target {self.target_id!r} board and card_ref must be declared together"
+            )
+        if self.card_ref and not self.snapshot_evidence_ref:
+            raise ValueError(
+                f"desktop target {self.target_id!r} selected card_ref needs snapshot evidence"
+            )
+        if len(self.allowed_windows) != len(set(self.allowed_windows)):
+            raise ValueError(f"desktop target {self.target_id!r} has duplicate allowed_windows")
+        if len(self.allowed_actions) != len(set(self.allowed_actions)):
+            raise ValueError(f"desktop target {self.target_id!r} has duplicate allowed_actions")
+        if len(self.forbidden_actions) != len(set(self.forbidden_actions)):
+            raise ValueError(f"desktop target {self.target_id!r} has duplicate forbidden_actions")
+        overlap = set(self.allowed_actions) & set(self.forbidden_actions)
+        if overlap:
+            raise ValueError(
+                f"desktop target {self.target_id!r} action(s) both allowed and forbidden: "
+                f"{sorted(overlap)}"
+            )
+        missing_denies = _DEFAULT_DESKTOP_DENIES - set(self.forbidden_actions)
+        if missing_denies:
+            raise ValueError(
+                f"desktop target {self.target_id!r} missing default deny action(s): "
+                f"{sorted(missing_denies)}"
+            )
+        if self.automation_order != _AUTOMATION_ORDER:
+            raise ValueError(
+                f"desktop target {self.target_id!r} automation_order must be "
+                f"{_AUTOMATION_ORDER}"
+            )
+        if (self.ttl_minutes is None) != (self.ttl_source is None):
+            raise ValueError(
+                f"desktop target {self.target_id!r} ttl_minutes and ttl_source must be "
+                "declared together"
+            )
+        if (self.action_timeout_seconds is None) != (self.action_timeout_source is None):
+            raise ValueError(
+                f"desktop target {self.target_id!r} action_timeout_seconds and "
+                "action_timeout_source must be declared together"
+            )
+        if self.enabled:
+            if self.blockers:
+                raise ValueError(f"desktop target {self.target_id!r} enabled target has blockers")
+            if self.ttl_minutes is None:
+                raise ValueError(
+                    f"desktop target {self.target_id!r} enabled target needs ttl_minutes"
+                )
+            if self.action_timeout_seconds is None:
+                raise ValueError(
+                    f"desktop target {self.target_id!r} enabled target needs action_timeout_seconds"
+                )
+            if not self.human_takeover_hotkey:
+                raise ValueError(
+                    f"desktop target {self.target_id!r} enabled target needs takeover hotkey"
+                )
+            if not self.screenshot_artifact_policy:
+                raise ValueError(
+                    f"desktop target {self.target_id!r} enabled target needs screenshot policy"
+                )
+            if not self.board or not self.card_ref:
+                raise ValueError(
+                    f"desktop target {self.target_id!r} enabled target needs board and card_ref"
+                )
+        elif not self.blockers:
+            raise ValueError(f"desktop target {self.target_id!r} disabled target needs blockers")
+        return self
+
+
+class CompletionVerifierConfig(Strict):
+    enabled: bool = True
+    done_requires_evidence_refs: bool = True
+    required_event_families: list[str]
+    repeated_action_policy: Literal[
+        "block_or_strategy_change",
+        "experiment_derived_threshold_required_before_autonomous_gui",
+    ]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        required = {"mission.forecast", "mission.verification"}
+        missing = required - set(self.required_event_families)
+        if missing:
+            raise ValueError(
+                "completion_verifier.required_event_families missing "
+                f"{sorted(missing)}"
+            )
+        if not self.done_requires_evidence_refs:
+            raise ValueError("completion_verifier must require evidence refs before DONE")
+        return self
+
+
+class AgentValidationConfig(Strict):
+    model_alias: str
+    max_tokens: int = Field(ge=1)
+    max_tokens_source: str
+    required_scenarios: list[Literal[
+        "chat_tool_call_parse",
+        "memory_block_recall",
+        "long_multi_turn_recall",
+        "fresh_conversation_without_memory_abstains",
+    ]]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.model_alias:
+            raise ValueError("agent_validation.model_alias must be declared")
+        if not self.max_tokens_source:
+            raise ValueError("agent_validation.max_tokens_source must be declared")
+        if len(self.required_scenarios) != len(set(self.required_scenarios)):
+            raise ValueError("agent_validation.required_scenarios contains duplicates")
+        return self
+
+
+class AutonomyCanarySpec(Strict):
+    name: str
+    kind: Literal[
+        "read_only_repo_scan",
+        "noop_kanban_roundtrip",
+        "browser_staging_task",
+        "prompt_judge_suite",
+        "model_routing_benchmark",
+        "notification_dry_run",
+        "privacy_artifact_scan",
+    ]
+    enabled: bool = False
+    risk_tier: RiskTier
+    schedule: str | None = None
+    evidence_required: list[str]
+    blocked_until: list[str] = Field(default_factory=list)
+    writes_external: bool = False
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.evidence_required:
+            raise ValueError(f"canary {self.name!r} must declare evidence_required")
+        if self.risk_tier in (RiskTier.L3, RiskTier.L4):
+            raise ValueError(f"canary {self.name!r} cannot be L3/L4 autonomous work")
+        if self.enabled:
+            if not self.schedule:
+                raise ValueError(f"enabled canary {self.name!r} must declare schedule")
+            if self.blocked_until:
+                raise ValueError(f"enabled canary {self.name!r} cannot list blocked_until")
+        else:
+            if self.schedule:
+                raise ValueError(f"disabled canary {self.name!r} must not declare schedule")
+            if not self.blocked_until:
+                raise ValueError(f"disabled canary {self.name!r} must declare blocked_until")
+        if self.writes_external:
+            raise ValueError(f"canary {self.name!r} must not write external systems")
+        return self
+
+
+class TelemetryDecision(Strict):
+    mode: Literal["structured_events_only", "defer_until_event_contracts", "opentelemetry"]
+    decision_basis: list[str]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.decision_basis:
+            raise ValueError("telemetry.decision_basis must explain the current mode")
+        return self
+
+
+class GitHubAppReview(Strict):
+    status: Literal["pending", "approved", "not_required"]
+    production_auth_policy: Literal["github_app_required", "not_applicable"]
+    pilot_auth_policy: Literal["fine_grained_pat_pilot_only", "not_applicable"]
+    requirements: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.status == "pending" and not self.requirements:
+            raise ValueError("github_app_review pending status must list requirements")
+        if self.production_auth_policy != "github_app_required":
+            raise ValueError("production repo autonomy must require GitHub App auth")
+        return self
+
+
+_GITHUB_PERMISSION_VALUE = Literal["none", "read", "read_write"]
+
+
+class GitHubAppAuth(Strict):
+    status: Literal["created_pending_verification", "verified", "blocked"]
+    app_name: str
+    owner: str
+    homepage_url: str
+    webhook_active: bool = False
+    app_id_env: str
+    client_id_env: str
+    installation_id_env: str
+    private_key_path_env: str
+    webhook_secret_env: str | None = None
+    selected_repositories: list[str]
+    allowed_repository_permissions: dict[str, _GITHUB_PERMISSION_VALUE]
+    forbidden_repository_permissions: dict[str, Literal["any"]]
+    token_storage_policy: Literal[
+        "env_refs_only_private_key_outside_repo_short_lived_installation_tokens"
+    ]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.app_name:
+            raise ValueError("github_app_auth.app_name is required")
+        if not self.owner:
+            raise ValueError("github_app_auth.owner is required")
+        if not self.homepage_url.startswith("https://github.com/"):
+            raise ValueError("github_app_auth.homepage_url must point at the GitHub owner or repo")
+        env_fields = [
+            self.app_id_env,
+            self.client_id_env,
+            self.installation_id_env,
+            self.private_key_path_env,
+        ]
+        if self.webhook_secret_env:
+            env_fields.append(self.webhook_secret_env)
+        for env_name in env_fields:
+            if not re.match(r"^[A-Z][A-Z0-9_]*$", env_name):
+                raise ValueError(f"github_app_auth env ref {env_name!r} is not a valid env name")
+        if self.webhook_active and not self.webhook_secret_env:
+            raise ValueError("active GitHub webhook requires webhook_secret_env")
+        if not self.selected_repositories:
+            raise ValueError("github_app_auth must list selected_repositories")
+        for repo in self.selected_repositories:
+            if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+                raise ValueError(
+                    f"github_app_auth selected repository {repo!r} must be owner/repo"
+                )
+        required = {
+            "metadata": "read",
+            "contents": "read_write",
+            "pull_requests": "read_write",
+            "checks": "read",
+            "statuses": "read",
+        }
+        for permission, expected in required.items():
+            if self.allowed_repository_permissions.get(permission) != expected:
+                raise ValueError(
+                    "github_app_auth allowed_repository_permissions must include "
+                    f"{permission}: {expected}"
+                )
+        disallowed = {
+            "administration",
+            "secrets",
+            "variables",
+            "deployments",
+            "environments",
+            "workflows",
+            "actions",
+        }
+        missing_forbidden = disallowed - set(self.forbidden_repository_permissions)
+        if missing_forbidden:
+            raise ValueError(
+                "github_app_auth forbidden_repository_permissions missing "
+                f"{sorted(missing_forbidden)}"
+            )
+        if any(value != "any" for value in self.forbidden_repository_permissions.values()):
+            raise ValueError("github_app_auth forbidden permissions must use value 'any'")
+        return self
+
+
+class BranchProtectionVerification(Strict):
+    status: Literal["blocked", "verified"]
+    owner_admin_token_env: str
+    selected_repositories: list[str]
+    required_status_check_contexts: list[str]
+    required_status_check_source_path: str
+    required_status_check_source: str
+    codeowners_path: str
+    required_approving_review_count: int = Field(ge=1)
+    required_review_count_source: str
+    require_code_owner_reviews: bool = True
+    require_force_pushes_disabled: bool = True
+    require_deletions_disabled: bool = True
+    require_linear_history: bool = True
+    token_policy: Literal["env_ref_only_owner_admin_observer_no_settings_writes"]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not re.match(r"^[A-Z][A-Z0-9_]*$", self.owner_admin_token_env):
+            raise ValueError(
+                "branch_protection_verification.owner_admin_token_env must be an env ref"
+            )
+        if not self.selected_repositories:
+            raise ValueError("branch_protection_verification must list selected_repositories")
+        for repo in self.selected_repositories:
+            if not re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", repo):
+                raise ValueError(
+                    "branch_protection_verification selected repositories must be owner/repo"
+                )
+        if not self.required_status_check_contexts:
+            raise ValueError(
+                "branch_protection_verification.required_status_check_contexts must not be empty"
+            )
+        if len(self.required_status_check_contexts) != len(
+            set(self.required_status_check_contexts)
+        ):
+            raise ValueError(
+                "branch_protection_verification.required_status_check_contexts contains duplicates"
+            )
+        if not self.required_status_check_source:
+            raise ValueError("branch protection required check source must be documented")
+        if not self.required_status_check_source_path:
+            raise ValueError("branch protection required check source path must be documented")
+        if not self.required_review_count_source:
+            raise ValueError("branch protection review count source must be documented")
+        if not self.codeowners_path:
+            raise ValueError("branch protection codeowners_path must be documented")
+        return self
+
+
+class ExternalRuntimeEvaluation(Strict):
+    status: Literal["blocked_until_measured_gap", "proposed", "approved_for_spike"]
+    candidates: list[str]
+    required_gates: list[str]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.required_gates:
+            raise ValueError("external_runtime_evaluation must list required_gates")
+        if self.status == "approved_for_spike" and not self.candidates:
+            raise ValueError("approved runtime spikes must name candidate(s)")
+        return self
+
+
+class AutonomyConfig(Strict):
+    schema_version: str
+    completed_work: list[str] = Field(default_factory=list)
+    ordered_work: list[str]
+    event_contract: EventContractConfig
+    repo_manifests: list[RepoManifest] = Field(default_factory=list)
+    desktop_targets: list[DesktopTarget] = Field(default_factory=list)
+    completion_verifier: CompletionVerifierConfig
+    agent_validation: AgentValidationConfig
+    canaries: list[AutonomyCanarySpec] = Field(default_factory=list)
+    telemetry: TelemetryDecision
+    github_app_review: GitHubAppReview
+    github_app_auth: GitHubAppAuth
+    branch_protection_verification: BranchProtectionVerification
+    external_runtime_evaluation: ExternalRuntimeEvaluation
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.autonomy.v1":
+            raise ValueError("schema_version must be command-center.autonomy.v1")
+        if not self.ordered_work:
+            raise ValueError("autonomy config must declare ordered_work")
+        if len(self.completed_work) != len(set(self.completed_work)):
+            raise ValueError("autonomy config completed_work contains duplicates")
+        if len(self.ordered_work) != len(set(self.ordered_work)):
+            raise ValueError("autonomy config ordered_work contains duplicates")
+        overlap = set(self.completed_work) & set(self.ordered_work)
+        if overlap:
+            raise ValueError(
+                "autonomy config work item(s) cannot be both completed and ordered: "
+                f"{sorted(overlap)}"
+            )
+        repo_ids = [repo.repo_id for repo in self.repo_manifests]
+        if len(repo_ids) != len(set(repo_ids)):
+            raise ValueError("duplicate repo manifest ids")
+        desktop_ids = [target.target_id for target in self.desktop_targets]
+        if len(desktop_ids) != len(set(desktop_ids)):
+            raise ValueError("duplicate desktop target ids")
+        canary_names = [canary.name for canary in self.canaries]
+        if len(canary_names) != len(set(canary_names)):
+            raise ValueError("duplicate canary names")
+        event_kinds = {family.kind for family in self.event_contract.families}
+        missing_verifier_events = set(self.completion_verifier.required_event_families) - event_kinds
+        if missing_verifier_events:
+            raise ValueError(
+                "completion_verifier references unknown event family/families: "
+                f"{sorted(missing_verifier_events)}"
+            )
+        for target in self.desktop_targets:
+            if target.verifier.evidence_event_family not in event_kinds:
+                raise ValueError(
+                    f"desktop target {target.target_id!r} verifier references unknown "
+                    f"event family {target.verifier.evidence_event_family!r}"
+                )
+        return self
+
+
 # ---- standards.yaml ---------------------------------------------------------
 # The standing engineering values, written ONCE, injected EVERYWHERE: rendered
 # into CLAUDE.md (Claude Code) and AGENTS.md (Codex) on repo-install, and read

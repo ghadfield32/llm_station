@@ -99,6 +99,21 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 .obs-foot { color: var(--muted); font-size: 11px; margin-top: 10px;
   font-family: ui-monospace, monospace; }
 .fields .fk { color: var(--muted); width: 130px; vertical-align: top; }
+.fieldval { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.editbtn { background: none; border: 1px solid var(--border); color: var(--muted);
+  border-radius: 5px; padding: 0 7px; font-size: 11px; cursor: pointer; }
+.editbtn:hover { color: var(--fg); border-color: var(--accent); }
+.fieldedit { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.fieldedit input { background: var(--bg); border: 1px solid var(--accent); color: var(--fg);
+  border-radius: 6px; padding: 4px 8px; font-size: 13px; }
+.fieldedit button { background: var(--col); border: 1px solid var(--border); color: var(--fg);
+  border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.noteadd { display: flex; gap: 8px; margin-top: 12px; }
+.noteadd input { flex: 1; background: var(--col); border: 1px solid var(--border);
+  color: var(--fg); border-radius: 7px; padding: 7px 10px; font-size: 13px; }
+.noteadd button { background: var(--col); border: 1px solid var(--border); color: var(--fg);
+  border-radius: 7px; padding: 0 14px; cursor: pointer; }
+.noteadd button:disabled { opacity: 0.5; cursor: default; }
 
 /* router / model lanes */
 .router .lane { display: flex; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }

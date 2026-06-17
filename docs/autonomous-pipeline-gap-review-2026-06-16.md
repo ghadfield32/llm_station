@@ -11,6 +11,17 @@ preserve one control plane, one action layer, one approval wall, one mission
 Ledger, one Kanban bridge, one model gateway, and one repo execution boundary;
 then fill the remaining contract/test gaps in order.
 
+## Implementation status
+
+This review started as the gap list. The current executable status is now
+`configs/autonomy.yaml` plus `AutonomyConfig`: canonical event schemas, repo
+registration manifest schema, desktop target rights manifest schema,
+forecast/evidence completion verifier contract, observer-only system-validation
+runner, disabled canary declarations, telemetry/auth/runtime gate decisions, and
+the completed-vs-remaining work order are contract-backed. Production activation
+is still blocked until the remaining ordered items in `configs/autonomy.yaml`
+clear with evidence.
+
 ## Decisions
 
 1. **Keep the current control plane.** Do not adopt LangGraph, OpenAI Agents

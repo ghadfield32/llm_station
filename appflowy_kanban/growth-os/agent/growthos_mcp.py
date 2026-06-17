@@ -32,6 +32,9 @@ def _reg(fn):
 _reg(actions.list_inbox)
 _reg(actions.search)
 _reg(actions.move_item)        # title-addressed status move for the long-tail boards
+_reg(actions.annotate_item)    # append notes without clobbering
+_reg(actions.set_item_field)   # schema-validated grouping/metadata update
+_reg(actions.remove_item_field_value)  # remove one grouped text value
 # todos / kanban
 _reg(actions.add_todo)
 _reg(actions.list_todos)

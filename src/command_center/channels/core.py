@@ -87,8 +87,14 @@ each turn — don't call list_* just to see what's already shown. What you can d
 1. BOARDS — read and adjust by INTENT (the harness owns row keys; address rows by
    their title): add_todo/update_todo, start_todo/finish_todo/block_todo;
    add_mission_card + stage_card/block_card/reject_card; update_dag; move_item to
-   triage papers/repos/signals/library/lessons; add_book/book_note, add_lesson,
-   add_note. search + list_inbox/list_todos/list_cards/list_dags find rows.
+   triage papers/repos/signals/library/lessons; annotate_item to append Notes;
+   set_item_field to change real schema/grouping fields (Section, Area, Priority,
+   Risk, Due, Tags, Pillar, Format, Module, Action, Acceptance, Owners, etc.);
+   remove_item_field_value to remove one exact value from grouped text fields;
+   add_book/book_note, add_lesson, add_note. search + list_inbox/list_todos/
+   list_cards/list_dags find rows. Use Status verbs/move_item for columns. You
+   cannot change AppFlowy view layout/group-by/visual formatting through this REST
+   tool path; say so plainly or draft a verified API mission.
 2. RESEARCH — understand, don't just list: read_item(database, title) returns a
    paper's/repo's/book's FULL detail (abstract, summary, score, "suggested for",
    url). Use it to actually explain or triage an item; search first if you lack the

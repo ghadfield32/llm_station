@@ -109,6 +109,93 @@ def test_move_item_refuses_approved_and_unknown_board(fake):
     assert fake.calls == []
 
 
+def test_move_item_uses_template_statuses_for_project_boards(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Train model", "CardKey": "card-train-model",
+                         "Status": "Backlog"}])
+    out = actions.move_item("betts_basketball_board", "Train model", "Ready")
+    assert "-> Ready" in out
+    db, rows = fake.calls[-1]
+    assert db == "betts_basketball_board"
+    assert rows[0]["pre_hash"] == "card-train-model"
+    assert rows[0]["cells"]["Status"] == "Ready"
+
+
+def test_annotate_item_appends_notes_without_clobbering(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Plan release", "CardKey": "card-plan-release",
+                         "Status": "Backlog", "Notes": "human note"}])
+    out = actions.annotate_item("mission_intake", "Plan release", "confirm owner")
+    assert "noted on" in out
+    cells = fake.calls[-1][1][0]["cells"]
+    assert "human note" in cells["Notes"]
+    assert "confirm owner" in cells["Notes"]
+
+
+def test_annotate_item_requires_real_notes_field(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Attention paper", "ArxivID": "2401.1",
+                         "Status": "Inbox"}])
+    out = actions.annotate_item("papers", "Attention paper", "read later")
+    assert "has no Notes field" in out
+    assert fake.calls == []
+
+
+def test_set_item_field_updates_schema_grouping_field(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Plan release", "CardKey": "card-plan-release",
+                         "Status": "Backlog", "Section": "Command Center"}])
+    out = actions.set_item_field("mission_intake", "Plan release", "Section", "Learning")
+    assert "Section='Learning'" in out
+    db, rows = fake.calls[-1]
+    assert db == "mission_intake"
+    assert rows[0]["pre_hash"] == "card-plan-release"
+    assert rows[0]["cells"]["Section"] == "Learning"
+
+
+def test_set_item_field_rejects_invalid_select_and_status_route(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Plan release", "CardKey": "card-plan-release",
+                         "Status": "Backlog"}])
+    out = actions.set_item_field("mission_intake", "Plan release", "Section", "Nope")
+    assert "must be one of" in out
+    assert fake.calls == []
+    out = actions.set_item_field("mission_intake", "Plan release", "Status", "Ready")
+    assert "use move_item" in out
+    assert fake.calls == []
+
+
+def test_set_item_field_rewrites_free_text_grouping(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Standup ideas", "Tags": "work,ideas",
+                         "Updated": "2026-06-13"}])
+    out = actions.set_item_field("notes", "Standup ideas", "Tags", "ideas")
+    assert "Tags='ideas'" in out
+    assert fake.calls[-1][1][0]["cells"]["Tags"] == "ideas"
+
+
+def test_remove_item_field_value_updates_grouped_text(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Standup ideas", "Tags": "work, ideas, parking",
+                         "Updated": "2026-06-13"}])
+    out = actions.remove_item_field_value("notes", "Standup ideas", "Tags", "work")
+    assert "removed 'work'" in out
+    assert fake.calls[-1][1][0]["cells"]["Tags"] == "ideas, parking"
+
+
+def test_remove_item_field_value_refuses_unknown_or_full_clear(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Standup ideas", "Tags": "work",
+                         "Updated": "2026-06-13"}])
+    out = actions.remove_item_field_value("notes", "Standup ideas", "Tags", "missing")
+    assert "has no value" in out
+    assert fake.calls == []
+    out = actions.remove_item_field_value("notes", "Standup ideas", "Tags", "work")
+    assert "would clear" in out
+    assert fake.calls == []
+
+
+def test_remove_item_field_value_rejects_select_fields(fake, monkeypatch):
+    _rows(monkeypatch, [{"Name": "Plan release", "CardKey": "card-plan-release",
+                         "Status": "Backlog", "Section": "Command Center"}])
+    out = actions.remove_item_field_value(
+        "mission_intake", "Plan release", "Section", "Command Center")
+    assert "not a grouped text field" in out
+    assert fake.calls == []
+
+
 def test_board_view_groups_every_row_by_status(monkeypatch):
     _rows(monkeypatch, [
         {"Name": "p1", "Status": "Inbox", "Score": "9"},
@@ -138,7 +225,9 @@ def test_set_status_dropped_from_agent_tools_but_verbs_present():
     names = {f.__name__ for f in TOOL_FNS}
     assert "set_status" not in names
     assert {"stage_card", "block_card", "reject_card",
-            "start_todo", "finish_todo", "block_todo"} <= names
+            "start_todo", "finish_todo", "block_todo",
+            "annotate_item", "set_item_field",
+            "remove_item_field_value"} <= names
 
 
 def test_read_item_returns_full_nonempty_fields(monkeypatch):

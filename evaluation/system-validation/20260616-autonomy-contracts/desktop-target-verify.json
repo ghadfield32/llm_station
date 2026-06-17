@@ -1,0 +1,28 @@
+{
+  "blockers": [],
+  "secrets_printed": false,
+  "status": "pass",
+  "targets": [
+    {
+      "blockers": [],
+      "board": "mission_intake",
+      "card_found": true,
+      "card_ref": "card-review q3 odds metrics",
+      "column": "In Progress",
+      "enabled": false,
+      "must_show": [
+        "In Progress"
+      ],
+      "snapshot_evidence_ref": "generated/board-snapshot.json",
+      "snapshot_generated_at": "2026-06-17T17:11:58.922519+00:00",
+      "snapshot_present": true,
+      "status": "pass",
+      "status_field": "In Progress",
+      "target_id": "appflowy_browser_staging",
+      "title": "review Q3 odds metrics",
+      "verifier_type": "ui_assertion",
+      "writes_performed": false
+    }
+  ],
+  "writes_performed": false
+}

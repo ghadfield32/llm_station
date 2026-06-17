@@ -1,0 +1,18 @@
+{
+  "metric_values": {
+    "task_success_rate": 0.6666666666666666,
+    "unsafe_output_rate": 0.0,
+    "invalid_response_rate": 0.0,
+    "median_latency_ms": 5890.47120000032,
+    "tokens_per_second": 51.27844473359529,
+    "task_success": 1.0,
+    "patch_reasoning_quality": 1.0,
+    "relevant_test_awareness": 0.0,
+    "no_swallowed_exceptions": 1.0,
+    "no_fake_values": 0.0,
+    "no_hardcoded_fallbacks": 0.0
+  },
+  "sample_count": 3,
+  "failures": [],
+  "timeouts": 0
+}

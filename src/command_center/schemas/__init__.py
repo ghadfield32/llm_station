@@ -15,6 +15,10 @@ from .contracts import (
     StandardsProfile, SkillUpdatePolicy, StandardsConfig, ScoutSpec,
     WebUIConfig, UIConfig,
     BoardStateKnobs, AddressingKnobs, TuningKnobs, AgentSurfaceConfig,
+    EventFamilySpec, EventContractConfig, RepoManifest, DesktopVerifierSpec,
+    DesktopTarget, CompletionVerifierConfig, AgentValidationConfig, AutonomyCanarySpec,
+    TelemetryDecision, GitHubAppReview, GitHubAppAuth, BranchProtectionVerification,
+    ExternalRuntimeEvaluation, AutonomyConfig,
     ChannelSpec, ChannelsConfig,
     MissionOpen, JudgeVerdict,
 )
@@ -36,6 +40,7 @@ CONFIG_CONTRACTS = {
     "configs/ui.yaml": UIConfig,
     "configs/channels.yaml": ChannelsConfig,
     "configs/agent_surface.yaml": AgentSurfaceConfig,
+    "configs/autonomy.yaml": AutonomyConfig,
 }
 
 # The improvement loop's contracts. Registered here so the same `make validate` /

@@ -154,6 +154,7 @@ The config files and their contracts:
 | `configs/improvement.yaml` | self-improvement experiment definitions (+ `improvement-targets.yaml` per-target refs) |
 | `configs/discovery.yaml` | daily-scan knobs: ranking / triage / code-health / acceptance (no inline literals) |
 | `configs/agent_surface.yaml` | agent-kanban knobs: board-state re-injection cadence/size, fuzzy addressing, tuning bounds (`AgentSurfaceConfig`) |
+| `configs/autonomy.yaml` | whole-system autonomy hardening: event contracts, repo manifests, desktop rights, canary blockers, telemetry/auth/runtime gates |
 
 ---
 
@@ -688,6 +689,15 @@ The attachment-driven reconciliation is recorded in
 It keeps the current single-control-plane architecture and treats the proposal
 as a hardening checklist, not a replacement stack.
 
+The executable source of truth for the hardening checklist is now
+`configs/autonomy.yaml`, validated by `AutonomyConfig`. It declares the
+canonical event families, repo registration manifest, desktop target rights
+manifest, forecast/evidence completion verifier policy, disabled no-op canaries,
+the current telemetry decision, the GitHub App production-auth review, and the
+external-runtime evaluation gate. The config separates completed contract work
+from remaining ordered activation work, so blocked items cannot be treated as
+ready.
+
 The prompt ties together the current implementation, the external idea
 evaluation prompt, the coded improvement loop, the AppFlowy/Growth OS surface,
 repo-task isolation, channel notification, and the model-upgrade lane. It is
@@ -710,27 +720,46 @@ Required output from that prompt:
 5. A `docs/MASTER.md` update recording what was proven, what remains, and the
    next ordered work.
 
+The bounded observer-only runner is `uv run cc system-validation --run-id
+<run-id>`. It reads validated config and git metadata, writes markdown evidence,
+and intentionally does not call models, mutate repos, write AppFlowy cards,
+capture screenshots, send notifications, or read `.env`.
+
 Rules that prompt must preserve: no provider fallback, no fake metrics, no
 hardcoded thresholds, no guessed prices/statuses/model fit, no raw secret or
 private transcript retention, no agent self-approval, and no promotion without
 validate, evals, canary telemetry, independent verification, and human approval.
 
-Current ordered hardening gaps from the attachment:
+Current verified state from the hardening pass:
 
-1. Add canonical event schemas for forecast, action, verification, rollback,
-   route decision, repo action, Kanban mutation, desktop observation/action,
-   model call, and notification events.
-2. Add a repo registration manifest before broader autonomous repo mutation:
-   remote, branch policy, auth mode, devcontainer, CI commands, secret policy,
-   CODEOWNERS requirement, and risk ceiling.
-3. Add a desktop target manifest before any GUI automation: allowed windows,
-   allowed actions, forbidden actions, verifier, TTL, human takeover, and
-   rollback/block policy.
-4. Add a generic completion verifier and loop breaker that compares forecasts to
-   observed state and refuses `DONE` without evidence.
-5. Add proposed continuous canaries only after the event contracts exist. Any
-   numeric guard must come from local baseline data or a pre-registered plan,
-   not architecture-note example targets.
+1. Canonical event schemas, repo registration manifest, desktop target rights
+   manifest, forecast/evidence completion verifier contract, disabled no-op
+   canaries, telemetry decision, and external-runtime gate are in
+   `configs/autonomy.yaml` and validate through `AutonomyConfig`.
+2. `llm_station` now has a declared devcontainer execution manifest and remains
+   `autonomous_edits_enabled: false` until GitHub auth and branch-protection
+   gates pass.
+3. The GitHub App is installed on the selected `ghadfield32/llm_station`
+   repository. `uv run cc github-app-verify` can authenticate the app, mint a
+   short-lived installation token in memory, read the selected repo, and read
+   check/status endpoints without printing or storing secrets.
+4. The GitHub App `issues: read` permission is explicitly operator-approved in
+   policy and repository-permission verification now passes. The remaining
+   GitHub blocker is data-derived: `uv run cc branch-protection-verify` is
+   blocked until `GITHUB_OWNER_ADMIN_TOKEN` is provided for a read-only observer
+   run. The app must not be granted Administration solely to inspect branch
+   protection.
+5. The local agent route has live evidence for parsed tool calls, memory-block
+   recall, 14-turn recall, and fresh-conversation abstention through `chat`.
+   The AppFlowy staging card now verifies as `In Progress`, and the desktop
+   adapter readiness gate exists. Live desktop actions remain blocked because
+   the target is disabled and timeout, takeover, and screenshot/evidence
+   policies are not declared.
+6. The next ordered work is in `configs/autonomy.yaml`: provide the
+   owner/admin observer token, rerun branch-protection verification, finalize
+   token storage/rotation after that passes, declare desktop timeout/takeover
+   policy before live actions, then continue loop-breaker derivation, canaries,
+   telemetry, and external-runtime gates.
 
 ---
 
@@ -1051,9 +1080,14 @@ The enforcement stack (full commands in [github-safety.md](github-safety.md)):
    required CODEOWNERS review, linear history, no force-push/deletes.
    `enforce_admins:false` so *you* can fix emergencies; the agent never holds
    an admin token.
-2. **Scoped agent token** — fine-grained PAT for MVP: Contents R/W, Pull
-   requests R/W, Issues R, Metadata R, everything else No access. Migrate to a
-   **GitHub App** (starts with zero permissions) once long-lived.
+2. **Scoped repo identity** — production autonomy uses the
+   `llm-station-command-center` GitHub App, not a broad PAT. The app is
+   installed on `ghadfield32/llm_station` and can mint an in-memory installation
+   token. The operator-approved `issues: read` permission is now recorded in
+   policy and repository permission verification passes, but repo autonomy
+   remains blocked until branch protection is verified through an owner/admin
+   path and token storage/rotation boundaries are documented.
+   Fine-grained PATs remain pilot-only.
 3. **Deploy = separate human-gated environment** — `production` environment
    with a required reviewer and prevent-self-review; the agent never gets its
    secrets.
@@ -1459,6 +1493,8 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
 | [whole-system-validation-prompt.md](whole-system-validation-prompt.md) | reusable end-to-end validation prompt for self-improvement, AppFlowy kanban control, registered repo autonomy, notifications, local model routing, forecast-before-action checks, and privacy |
 | [autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md) | attachment reconciliation for the autonomous pipeline proposal: what this repo already covers, what remains, and the ordered hardening path for events, repo manifests, desktop rights, completion verification, and canaries |
+| [github-app-production-auth-review-2026-06-16.md](github-app-production-auth-review-2026-06-16.md) | GitHub App production-auth review: local evidence, current GitHub-doc basis, blockers, and remaining steps before repo autonomy can use GitHub App auth |
+| [github-token-storage-rotation.md](github-token-storage-rotation.md) | GitHub App private-key, installation-token, and owner/admin observer-token storage and rotation policy |
 | [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
 | [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
 | [knowledge-format.md](knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
@@ -1543,6 +1579,46 @@ Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
 
+### 2026-06-17 — GitHub permissions verified; agent validation added
+
+- **Verifier state corrected.** The local GitHub App verifier now proves the
+  app is installed on the selected `ghadfield32/llm_station` repo, can mint an
+  installation token in memory, can read the selected repository, and can read
+  commit check/status endpoints. The old "install the app" blocker is closed.
+- **Repository permissions verified.** `issues: read` is now explicitly
+  operator-approved in `configs/autonomy.yaml`; the verifier passes repository
+  permission checks without printing or storing secrets. Administration, secrets,
+  variables, deployments, environments, workflows, and actions remain forbidden.
+- **Branch-protection proof.** Branch-protection inspection returns 403 with
+  the GitHub App token. Do not grant the app Administration solely to inspect
+  settings. Added `uv run cc branch-protection-verify`, which proves expected
+  check contexts from `.github/workflows/contracts.yml`, checks CODEOWNERS path
+  presence, and blocks until `GITHUB_OWNER_ADMIN_TOKEN` is supplied for a
+  read-only owner/admin observer run.
+- **Token policy drafted.** Added
+  [github-token-storage-rotation.md](github-token-storage-rotation.md), which
+  records env-ref-only storage, out-of-repo PEM handling, in-memory installation
+  tokens, one-run owner/admin observer token use, and rotation steps. It is not
+  a repo-autonomy approval until branch protection verifies.
+- **Agent route proof.** Added `uv run cc agent-validation`, a read-only live
+  validator for the `chat` route. It passes parsed tool-call parsing,
+  memory-block recall, 14-turn recall, and fresh-conversation abstention, with
+  only synthetic scenario status stored in `agent-validation.json`.
+- **Desktop target proof.** Added `uv run cc desktop-target-verify`, a read-only
+  snapshot verifier. The configured AppFlowy test card was moved to
+  `In Progress` through the existing `move_item` intent and now verifies from a
+  regenerated live snapshot.
+- **Desktop adapter readiness.** Added `uv run cc desktop-adapter`, a manifest
+  readiness gate. It performs no clicks, screenshots, clipboard reads, or
+  desktop writes; it currently blocks because live actions are disabled and no
+  timeout, takeover hotkey, or screenshot policy is declared.
+- **Evidence package refreshed.** `evaluation/system-validation/20260616-autonomy-contracts/`
+  now includes regenerated `NEXT.md`, `GAPS.md`, `SCENARIOS.md`, the redacted
+  `github-app-verify.json`, `branch-protection-verify.json`,
+  `agent-validation.json`, `desktop-target-verify.json`,
+  `desktop-adapter-readiness.json`, an implementation note, and validation
+  results.
+
 ### 2026-06-16 — Autonomous pipeline attachment reconciled
 
 - **What changed.** Added
@@ -1555,16 +1631,76 @@ should preserve.
   one approval wall, one mission Ledger, one Kanban bridge, local-only model
   routing, open-weight model discovery, proposal-only self-improvement, and
   branch-protected repo execution boundaries.
-- **What remains.** The review names the missing contracts in order: canonical
-  event schemas, repo registration manifests, desktop target rights manifests,
-  generic completion verification and loop breaking, system-validation evidence
-  runner, no-op canaries, telemetry decision, GitHub App production auth review,
-  and only-then external runtime evaluation.
-- **Prompt update.** The whole-system validation prompt now checks these gaps
-  explicitly and preserves the API-first desktop automation order: direct API,
-  browser automation, OS accessibility, then screenshot-only as last resort.
-  Example KPI numbers from architecture notes are planning context only; they
-  are not gates unless derived from local evidence or a pre-registered plan.
+- **Contract pass.** Added `configs/autonomy.yaml` plus `AutonomyConfig`,
+  canonical event records, and a forecast/evidence completion verifier. The
+  contract now declares the required event families, registered repo manifest,
+  desktop rights manifest, disabled no-op canaries, structured-events-only
+  telemetry decision, GitHub App production-auth review, and external-runtime
+  gate. Raw payload retention, missing event families, overlapping desktop
+  actions, enabled desktop targets without TTL/takeover policy, enabled canaries
+  with blockers, and production repo autonomy without GitHub App + devcontainer
+  are rejected by tests.
+- **Evidence runner.** Added `uv run cc system-validation --run-id <run-id>`,
+  an observer-only evidence package writer under
+  `evaluation/system-validation/<run-id>/`. It records config state, git
+  metadata, blockers, privacy boundaries, forecasts, completed contract work,
+  and remaining ordered work without calling models, mutating repos, writing
+  AppFlowy, sending notifications, capturing screenshots, or reading `.env`.
+- **Live local-model check.** `uv run cc live-smoke` initially failed because
+  LiteLLM `planner` spent the whole 160-token smoke budget in
+  `reasoning_content` and returned empty visible `content`. Live prompt/budget
+  checks showed `Output only <sentinel>`, deterministic `temperature: 0`, and a
+  smoke-only 512-token completion budget return visible content for `planner`
+  and `local-judge`. No provider fallback or alias substitution was added; the
+  smoke scripts now prove Ollama direct, LiteLLM `triage`, `planner`,
+  `local-judge`, denied cloud-model names, and the forbidden-provider scan.
+- **Repo manifest pass.** Added `.devcontainer/devcontainer.json` for
+  `llm_station` using a digest-pinned Python 3.12 devcontainer image and the
+  locally observed `uv==0.8.11`; `configs/autonomy.yaml` now records
+  `execution_mode: devcontainer` and `devcontainer_path:
+  .devcontainer/devcontainer.json`. Cross-reference validation now proves the
+  declared devcontainer and CODEOWNERS files exist inside the repository.
+- **GitHub App auth review.** Added
+  [github-app-production-auth-review-2026-06-16.md](github-app-production-auth-review-2026-06-16.md).
+  Local evidence verified the GitHub remote, default branch, branch heads,
+  CODEOWNERS, and CI workflow. The app identity is now recorded in
+  `configs/autonomy.yaml` as env-var references only:
+  `llm-station-command-center`, owner `ghadfield32`, homepage
+  `https://github.com/ghadfield32/llm_station`, webhook disabled, selected repo
+  `ghadfield32/llm_station`, and least-privilege permission policy. Added
+  `uv run cc github-app-verify`, an observer-only verifier that mints no stored
+  credential, prints no secrets, performs no writes, and records redacted
+  evidence. The PEM that was placed in the repo was moved to
+  `C:\Users\ghadf\.secrets\github-apps\llm-station-command-center.2026-06-16.private-key.pem`,
+  `.env` now points at that path, and `.gitignore` blocks future PEM/key files.
+  Current verifier result authenticates the app (`/app` and `/app/installations`
+  return 200), discovers the selected-repo installation, mints an installation
+  token in memory, reads `ghadfield32/llm_station`, and reads check/status
+  endpoints. The operator-approved `issues: read` permission is now recorded in
+  `configs/autonomy.yaml`, and repository permission verification passes. GitHub
+  App auth remains blocked because branch protection inspection returns 403
+  with the app token. Do not add Administration permission to the app only to
+  inspect settings; use an owner/admin verification path.
+- **Staging AppFlowy target.** `configs/autonomy.yaml` now selects
+  `mission_intake` / `card-review q3 odds metrics` from
+  `generated/board-snapshot.json` as the staging candidate for future no-op
+  desktop/kanban tests. The live snapshot now proves the card exists and is
+  `In Progress`; live desktop actions are still disabled until timeout,
+  takeover, and evidence policies are declared.
+- **Runtime completion gate.** The Ledger now exposes
+  `POST /mission/{id}/verify-completion`, which reads mission forecast/action/
+  verification events, requires evidence refs, compares observed vs expected
+  state, blocks exact repeated action signatures, writes
+  `mission.completion_verdict`, and marks the mission `done` only on PASS.
+  The generic `/mission/{id}/status` endpoint rejects direct `done` updates.
+- **What remains.** The next ordered work is now in `configs/autonomy.yaml`:
+  provide an owner/admin observer token, rerun branch-protection verification,
+  finalize token storage/rotation after that passes, declare desktop timeout
+  and human-takeover policy before live actions, derive loop-breaker policy from
+  event history before GUI autonomy, enable canaries only after blockers clear,
+  decide whether OpenTelemetry is needed after structured-event gaps are
+  measured, and evaluate external runtimes only after a measured control-plane
+  gap.
 
 ### 2026-06-16 — Whole-system validation prompt added
 

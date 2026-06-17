@@ -61,7 +61,8 @@ function Invoke-LiteLLMChat {
   $Body = @{
     model = $Model
     messages = @(@{ role = "user"; content = $Prompt })
-    max_tokens = 160
+    max_tokens = 512
+    temperature = 0
   } | ConvertTo-Json -Depth 5
 
   $Response = Invoke-RestMethod -Method Post -Uri "$LiteLLMUrl/v1/chat/completions" -Headers $Headers -Body $Body -TimeoutSec 120
@@ -140,22 +141,22 @@ Write-Host "== 1. Ollama direct ($OllamaBase) =="
 if ($OllamaDirectBase -ne $OllamaBase) {
   Write-Host "host direct URL: $OllamaDirectBase"
 }
-$Reply = Invoke-OllamaChat -BaseUrl $OllamaDirectBase -Model "qwen3-coder:30b" -Prompt "Reply with exactly: LOCAL-TIER-OK"
+$Reply = Invoke-OllamaChat -BaseUrl $OllamaDirectBase -Model "qwen3-coder:30b" -Prompt "Output only LOCAL-TIER-OK"
 Write-Host "reply: $Reply"
 
 Write-Host ""
 Write-Host "== 2. LiteLLM -> local triage alias '$TriageAlias' =="
-$Reply = Invoke-LiteLLMChat -BearerToken $HermesKey -Model $TriageAlias -Prompt "Reply with exactly: GATEWAY-TRIAGE-OK"
+$Reply = Invoke-LiteLLMChat -BearerToken $HermesKey -Model $TriageAlias -Prompt "Output only GATEWAY-TRIAGE-OK"
 Write-Host "reply: $Reply"
 
 Write-Host ""
 Write-Host "== 3. LiteLLM -> local planner alias '$PlannerAlias' =="
-$Reply = Invoke-LiteLLMChat -BearerToken $HermesKey -Model $PlannerAlias -Prompt "Reply with exactly: GATEWAY-PLANNER-OK"
+$Reply = Invoke-LiteLLMChat -BearerToken $HermesKey -Model $PlannerAlias -Prompt "Output only GATEWAY-PLANNER-OK"
 Write-Host "reply: $Reply"
 
 Write-Host ""
 Write-Host "== 4. LiteLLM -> local judge alias '$JudgeAlias' =="
-$Reply = Invoke-LiteLLMChat -BearerToken $HermesKey -Model $JudgeAlias -Prompt "Reply with exactly: GATEWAY-JUDGE-OK"
+$Reply = Invoke-LiteLLMChat -BearerToken $HermesKey -Model $JudgeAlias -Prompt "Output only GATEWAY-JUDGE-OK"
 Write-Host "reply: $Reply"
 
 Write-Host ""

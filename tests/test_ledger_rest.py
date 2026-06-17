@@ -131,3 +131,118 @@ def test_migration_recorded_and_tables_exist(ledger):
         "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
     assert {"experiments", "experiment_events", "missions", "leases"} <= tables  # extends, not replaces
     conn.close()
+
+
+# ---- mission completion verifier ------------------------------------------
+
+def _open_mission(client, action="verify completion"):
+    r = client.post("/mission", json={
+        "action": action,
+        "repo": "llm_station",
+        "branch": "test/completion",
+        "risk": "L1",
+        "requires_approval": False,
+    })
+    assert r.status_code == 200
+    return r.json()["id"]
+
+
+def _add_event(client, mid, kind, detail):
+    r = client.post(f"/mission/{mid}/event", json={"kind": kind, "payload": {"detail": detail}})
+    assert r.status_code == 200
+
+
+def _forecast(expected):
+    return {
+        "expected_state_before": {"card": "Backlog"},
+        "expected_state_after": expected,
+        "expected_events": ["mission.verification"],
+        "expected_no_change": ["provider_keys", "raw_transcripts"],
+        "privacy_boundary": "hashes_and_refs_only",
+        "rollback_or_revert_plan": "delete local evidence package",
+    }
+
+
+def _verification(observed, evidence_refs):
+    return {
+        "observed_state_after": observed,
+        "evidence_refs": evidence_refs,
+        "verifier_result": "matched_forecast",
+    }
+
+
+def _action(command="noop-scan"):
+    return {
+        "command_or_tool": command,
+        "target_ref": "repo:llm_station",
+        "observed_state_before": {"repo": "unchanged"},
+        "action": "read_only_scan",
+    }
+
+
+def test_generic_status_cannot_set_done_without_completion_verifier(ledger):
+    client, _ = ledger
+    mid = _open_mission(client, "generic done rejection")
+
+    r = client.post(f"/mission/{mid}/status", params={"status": "done"})
+
+    assert r.status_code == 409
+    assert "verify-completion" in r.text
+
+
+def test_completion_verifier_marks_done_only_with_matching_evidence(ledger):
+    client, _ = ledger
+    mid = _open_mission(client, "completion pass")
+    expected = {"card": "Done", "repo": "unchanged"}
+    _add_event(client, mid, "mission.forecast", _forecast(expected))
+    _add_event(client, mid, "mission.action", _action())
+    _add_event(
+        client,
+        mid,
+        "mission.verification",
+        _verification(expected, ["evaluation/system-validation/test-run/BASELINE.md"]),
+    )
+
+    r = client.post(f"/mission/{mid}/verify-completion")
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "done"
+    assert r.json()["verdict"]["status"] == "PASS"
+    detail = client.get(f"/mission/{mid}").json()
+    assert detail["mission"]["status"] == "done"
+    assert any(event["kind"] == "mission.completion_verdict" for event in detail["events"])
+
+
+def test_completion_verifier_blocks_missing_evidence_refs(ledger):
+    client, _ = ledger
+    mid = _open_mission(client, "completion missing evidence")
+    expected = {"card": "Done"}
+    _add_event(client, mid, "mission.forecast", _forecast(expected))
+    _add_event(client, mid, "mission.verification", _verification(expected, []))
+
+    r = client.post(f"/mission/{mid}/verify-completion")
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "blocked"
+    assert any("evidence_refs" in reason for reason in r.json()["verdict"]["reasons"])
+
+
+def test_completion_verifier_blocks_repeated_action_signature(ledger):
+    client, _ = ledger
+    mid = _open_mission(client, "completion repeated action")
+    expected = {"repo": "unchanged"}
+    _add_event(client, mid, "mission.forecast", _forecast(expected))
+    _add_event(client, mid, "mission.action", _action())
+    _add_event(client, mid, "mission.action", _action())
+    _add_event(
+        client,
+        mid,
+        "mission.verification",
+        _verification(expected, ["evaluation/system-validation/test-run/COMMANDS.md"]),
+    )
+
+    r = client.post(f"/mission/{mid}/verify-completion")
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "blocked"
+    assert any("repeated action signature" in reason for reason in r.json()["verdict"]["reasons"])

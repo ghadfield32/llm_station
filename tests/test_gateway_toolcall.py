@@ -11,11 +11,14 @@ Hermetic — no AppFlowy/Ledger/Ollama/LiteLLM: the tool layer, surface config,
 and the model completion are all injected.
 """
 import asyncio
+import sys
 
 import pytest
 
 from command_center.channels import core
 from command_center.schemas import AgentSurfaceConfig, BoardStateKnobs
+
+sys.path.insert(0, str(core.GROWTHOS_ROOT))
 
 
 # ---- pure helpers ----------------------------------------------------------
@@ -97,6 +100,97 @@ def test_normal_tool_loop_executes_and_answers(monkeypatch):
     out = asyncio.run(gw.run_turn("c1", "ping please"))
     assert calls == [{}]            # the tool actually ran
     assert out == "all done"
+
+
+def test_history_is_multi_turn_and_scoped_by_conversation(monkeypatch):
+    gw = _gateway(monkeypatch)
+    seen_messages = []
+
+    async def fake(messages, with_tools):
+        seen_messages.append([m.get("content", "") for m in messages])
+        return {"content": "ok", "tool_calls": []}
+
+    monkeypatch.setattr(gw, "_completion", fake)
+
+    assert asyncio.run(gw.run_turn("same", "remember marker ALPHA")) == "ok"
+    assert asyncio.run(gw.run_turn("same", "what marker did I give you?")) == "ok"
+    assert any("remember marker ALPHA" in c for c in seen_messages[-1])
+
+    assert asyncio.run(gw.run_turn("fresh", "what marker did I give you?")) == "ok"
+    assert not any("remember marker ALPHA" in c for c in seen_messages[-1])
+
+
+def test_memory_block_is_injected_across_fresh_conversations(monkeypatch):
+    from growthos import memory
+
+    class _MemoryCfg:
+        enabled = True
+        refresh_every_rounds = 99
+
+    monkeypatch.setattr(memory, "load_memory_config", lambda: _MemoryCfg())
+    monkeypatch.setattr(
+        memory,
+        "collect_memory_state",
+        lambda query, cfg: "=== REMEMBERED ===\n- durable marker BETA\n=== END REMEMBERED ===",
+    )
+    gw = _gateway(monkeypatch)
+    seen_messages = []
+
+    async def fake(messages, with_tools):
+        seen_messages.append([m.get("content", "") for m in messages])
+        return {"content": "BETA", "tool_calls": []}
+
+    monkeypatch.setattr(gw, "_completion", fake)
+
+    assert asyncio.run(gw.run_turn("fresh-memory-conversation", "what is durable marker?")) == "BETA"
+    assert any("durable marker BETA" in c for c in seen_messages[-1])
+
+
+def test_repeated_identical_tool_call_is_suppressed(monkeypatch):
+    calls = []
+
+    def ping(**kw):
+        calls.append(kw)
+        return "pong"
+
+    gw = _gateway(monkeypatch, dispatch={"ping": ping})
+    same_call = {"id": "1", "function": {"name": "ping", "arguments": "{\"x\": 1}"}}
+    monkeypatch.setattr(gw, "_completion", _scripted(
+        {"content": "", "tool_calls": [same_call]},
+        {"content": "", "tool_calls": [same_call]},
+        {"content": "done", "tool_calls": []},
+    ))
+
+    out = asyncio.run(gw.run_turn("c1", "repeat tool"))
+
+    assert out == "done"
+    assert calls == [{"x": 1}]
+
+
+def test_conversation_busy_rule_rejects_overlapping_turn(monkeypatch):
+    gw = _gateway(monkeypatch)
+
+    async def scenario():
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake(messages, with_tools):
+            started.set()
+            await release.wait()
+            return {"content": "first done", "tool_calls": []}
+
+        monkeypatch.setattr(gw, "_completion", fake)
+        first = asyncio.create_task(gw.run_turn("same", "start long turn"))
+        await started.wait()
+        second = await gw.run_turn("same", "overlap")
+        release.set()
+        first_out = await first
+        return first_out, second
+
+    first_out, second = asyncio.run(scenario())
+
+    assert first_out == "first done"
+    assert "still working" in second
 
 
 if __name__ == "__main__":

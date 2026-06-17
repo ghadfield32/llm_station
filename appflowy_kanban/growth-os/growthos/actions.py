@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import difflib
 from datetime import date, timedelta
+from functools import lru_cache
 from pathlib import Path
+
+import yaml
 
 from .config import load_settings
 from .appflowy import AppFlowyClient
@@ -29,6 +32,16 @@ STATUSES = {
 }
 TODO_AREAS = ["Betts Basketball", "DAGs", "Growth OS", "Learning", "Life"]
 PRIORITIES = ["P0", "P1", "P2", "P3"]
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "config" / "schema.yaml"
+# Fields owned by the workflow/bridge or by the row identity itself. The agent may
+# edit descriptive/grouping fields, but these stay under their purpose-built verbs
+# or the human/bridge path.
+PROTECTED_UPDATE_FIELDS = frozenset({
+    "Name", "Title", "Task", "Headline", "Lesson", "Package",
+    "Status", "CardKey", "Key", "MissionID", "Branch", "LastSync",
+    "Created", "LastSeen", "PublishedAt", "PostURN", "Done", "Type",
+    "ArxivID", "DagID", "URL",
+})
 
 _client: AppFlowyClient | None = None
 
@@ -59,6 +72,70 @@ def _rows(db: str) -> list[dict]:
 
 def _date_str(v) -> str:
     return v.get("pretty_start_date", "") if isinstance(v, dict) else (v or "")
+
+
+@lru_cache(maxsize=1)
+def _workspace_schema() -> dict:
+    """Committed AppFlowy schema. Missing/invalid schema is a hard error: field
+    powers must come from the real workspace contract, never from guesses."""
+    return yaml.safe_load(SCHEMA_PATH.read_text(encoding="utf-8")) or {}
+
+
+def _schema_spec(database: str) -> dict:
+    schema = _workspace_schema()
+    dbs = schema.get("databases") or {}
+    if database in dbs:
+        return dbs[database]
+    if database.endswith("_content") and "content_template" in schema:
+        return schema["content_template"]
+    if database.endswith("_board") and "project_template" in schema:
+        return schema["project_template"]
+    raise KeyError(database)
+
+
+def _field_spec(database: str, field: str):
+    spec = (_schema_spec(database).get("fields") or {}).get(field)
+    if spec is None:
+        allowed = sorted((_schema_spec(database).get("fields") or {}).keys())
+        raise KeyError(f"{field!r}; allowed fields for {database}: {allowed}")
+    return spec
+
+
+def _field_type_options(spec) -> tuple[str, list[str]]:
+    if isinstance(spec, str):
+        return spec, []
+    return str(spec.get("type", "")), list(spec.get("options") or [])
+
+
+def _select_options(database: str, field: str) -> list[str]:
+    kind, options = _field_type_options(_field_spec(database, field))
+    return options if kind == "select" else []
+
+
+def _coerce_field_value(database: str, field: str, value: str):
+    if value == "":
+        raise ValueError(
+            "empty writes are not supported by the current AppFlowy client; set a "
+            "new value, or clear the field in AppFlowy until REST clear semantics "
+            "are verified")
+    kind, options = _field_type_options(_field_spec(database, field))
+    if kind == "select":
+        if value not in options:
+            raise ValueError(f"{field} must be one of {options}")
+        return value
+    if kind == "number":
+        return float(value)
+    if kind == "checkbox":
+        lowered = value.lower()
+        if lowered not in ("true", "false"):
+            raise ValueError(f"{field} checkbox value must be true or false")
+        return lowered == "true"
+    if kind == "date":
+        date.fromisoformat(value)
+        return value
+    if kind in ("text", "longtext", "url"):
+        return value
+    raise ValueError(f"{field} has unsupported schema type {kind!r}")
 
 
 # ----------------------------------------------------------------- triage --
@@ -122,6 +199,10 @@ def set_status(database: str, key: str, status: str) -> str:
 
 def _row_key(database: str, cells: dict) -> str:
     """The pre_hash a row was created with, per board — the only valid upsert key."""
+    if cells.get("CardKey"):
+        return cells["CardKey"]
+    if cells.get("Key"):
+        return cells["Key"]
     if database == "mission_intake":
         return cells.get("CardKey") or _slug("card", cells.get("Name", ""))
     prefix = {"todos": "todo", "library": "book",
@@ -206,7 +287,10 @@ def move_item(database: str, title: str, status: str) -> str:
     harness resolves the row and validates the status against that board LOUDLY,
     so the model never has to know row keys. For mission cards use stage/block/
     reject_card; for todos use start/finish/block_todo; for DAGs use update_dag."""
-    allowed = STATUSES.get(database)
+    try:
+        allowed = STATUSES.get(database) or _select_options(database, "Status")
+    except KeyError:
+        allowed = None
     if not allowed:
         return (f"unknown board {database!r}; boards with statuses: "
                 f"{sorted(STATUSES)}")
@@ -216,6 +300,99 @@ def move_item(database: str, title: str, status: str) -> str:
     if status not in allowed:
         return f"invalid status {status!r} for {database}; allowed: {allowed}"
     return _move(database, title, status)
+
+
+def annotate_item(database: str, title: str, note: str) -> str:
+    """Append a dated note to any board row that actually has a Notes field
+    (mission cards, todos, DAGs, library, packages, project/content boards, etc.).
+    Address the row by title; the harness resolves the stable row key and appends
+    without clobbering existing notes. Boards without Notes fail loudly."""
+    if not note.strip():
+        return "nothing to annotate"
+    try:
+        _field_spec(database, "Notes")
+    except KeyError:
+        return f"{database!r} has no Notes field in config/schema.yaml"
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, cells = resolved
+    if not key:
+        return (f"cannot safely annotate {name!r} in {database}: no stable row "
+                "key field was present")
+    existing = cells.get("Notes", "") or ""
+    stamped = f"[{date.today().isoformat()}] {note.strip()}"
+    client().upsert(database, [{"pre_hash": key,
+                                "cells": {"Notes": f"{existing}\n{stamped}".strip()}}])
+    return f"noted on {database}/{name!r}"
+
+
+def set_item_field(database: str, title: str, field: str, value: str) -> str:
+    """Set one real schema field on a board row: grouping/metadata such as
+    Section, Area, Priority, Risk, Due, Tags, Pillar, Format, Module, Tier, Action,
+    Acceptance, Owners, etc. Field names and select options are validated from
+    config/schema.yaml. For Status/columns use move_item or the dedicated verbs;
+    approval/writeback/key fields are not editable by this generic tool. To remove
+    a free-text grouping, rewrite the field without that value; blank clears are
+    not supported by the current AppFlowy write client."""
+    if field in PROTECTED_UPDATE_FIELDS:
+        if field == "Status":
+            return "use move_item or the dedicated lifecycle verbs for Status"
+        return f"{field!r} is not editable through set_item_field"
+    try:
+        coerced = _coerce_field_value(database, field, value)
+    except KeyError as exc:
+        return f"unknown field {exc}"
+    except ValueError as exc:
+        return f"invalid {field!r} for {database}: {exc}"
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, _cells = resolved
+    if not key:
+        return (f"cannot safely update {name!r} in {database}: no stable row "
+                "key field was present")
+    client().upsert(database, [{"pre_hash": key, "cells": {field: coerced}}])
+    return f"updated {database}/{name!r}: {field}={value!r}"
+
+
+def remove_item_field_value(database: str, title: str, field: str, value: str) -> str:
+    """Remove one exact value from a grouped text field such as Tags, Topics,
+    Owners, Media, or similar comma/newline-separated schema text fields. This
+    is the safe "take away this grouping" path for free-text groupings: it
+    rewrites the remaining values and refuses if removal would require clearing
+    the field entirely. For select fields (Section/Area/Priority/Risk/Format)
+    use set_item_field to move to a different valid option."""
+    if field in PROTECTED_UPDATE_FIELDS:
+        return f"{field!r} is not editable through remove_item_field_value"
+    try:
+        kind, _options = _field_type_options(_field_spec(database, field))
+    except KeyError as exc:
+        return f"unknown field {exc}"
+    if kind not in ("text", "longtext"):
+        return (f"{field!r} is a {kind} field, not a grouped text field; "
+                "use set_item_field for select/date/number fields")
+    needle = value.strip()
+    if not needle:
+        return "nothing to remove"
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, cells = resolved
+    if not key:
+        return (f"cannot safely update {name!r} in {database}: no stable row "
+                "key field was present")
+    existing = str(cells.get(field, "") or "")
+    parts = [p.strip() for p in existing.replace("\n", ",").split(",") if p.strip()]
+    kept = [p for p in parts if p.lower() != needle.lower()]
+    if len(kept) == len(parts):
+        return f"{field!r} on {database}/{name!r} has no value {needle!r}"
+    if not kept:
+        return (f"removing {needle!r} would clear {field!r}; blank clears are "
+                "not supported until AppFlowy REST clear semantics are verified")
+    new_value = ", ".join(kept)
+    client().upsert(database, [{"pre_hash": key, "cells": {field: new_value}}])
+    return f"updated {database}/{name!r}: removed {needle!r} from {field}"
 
 
 # Compact per-board meta shown on a UI card (besides the title + status column).
@@ -232,7 +409,10 @@ def board_view(database: str) -> dict:
     """Read-only structured view of an ENTIRE board: every row grouped by its
     Status into the board's canonical columns (an unfamiliar status is still
     shown, never dropped). For a UI/snapshot — agents use list_*/the verbs."""
-    cols = STATUSES.get(database)
+    try:
+        cols = STATUSES.get(database) or _select_options(database, "Status")
+    except KeyError:
+        cols = None
     if not cols:
         return {"board": database,
                 "error": f"unknown board; have {sorted(STATUSES)}"}

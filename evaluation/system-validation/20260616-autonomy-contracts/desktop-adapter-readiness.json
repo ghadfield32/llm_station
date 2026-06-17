@@ -1,0 +1,50 @@
+{
+  "blockers": [
+    "desktop_target_appflowy_browser_staging_not_enabled",
+    "desktop_target_appflowy_browser_staging_ttl_policy_missing",
+    "desktop_target_appflowy_browser_staging_action_timeout_policy_missing",
+    "desktop_target_appflowy_browser_staging_human_takeover_missing",
+    "desktop_target_appflowy_browser_staging_screenshot_policy_missing"
+  ],
+  "capabilities": [
+    "verify_target_state",
+    "enforce_manifest_before_actions",
+    "write_redacted_readiness_evidence"
+  ],
+  "clipboard_read": false,
+  "desktop_actions_performed": false,
+  "screenshots_captured": false,
+  "secrets_printed": false,
+  "status": "blocked",
+  "targets": [
+    {
+      "adapter_supported": true,
+      "allowed_actions": [
+        "click",
+        "type",
+        "select",
+        "drag",
+        "keyboard_shortcut"
+      ],
+      "blockers": [
+        "desktop_target_appflowy_browser_staging_not_enabled",
+        "desktop_target_appflowy_browser_staging_ttl_policy_missing",
+        "desktop_target_appflowy_browser_staging_action_timeout_policy_missing",
+        "desktop_target_appflowy_browser_staging_human_takeover_missing",
+        "desktop_target_appflowy_browser_staging_screenshot_policy_missing"
+      ],
+      "forbidden_actions": [
+        "clipboard_read",
+        "password_field_read",
+        "system_settings_change",
+        "file_delete"
+      ],
+      "live_actions_enabled": false,
+      "status": "blocked",
+      "surface": "browser",
+      "target_id": "appflowy_browser_staging",
+      "target_state_status": "pass"
+    }
+  ],
+  "writes_performed": false
+}

@@ -44,6 +44,7 @@ READ_CASES = [
 # the queue -> in-progress -> complete flow is given by these intent verbs (not a flattened schema)
 LIFECYCLE_VERBS = {"stage_card", "block_card", "reject_card", "start_todo", "finish_todo",
                    "block_todo"}
+KANBAN_FIELD_VERBS = {"annotate_item", "set_item_field", "remove_item_field_value"}
 
 
 def main() -> int:
@@ -70,6 +71,7 @@ def main() -> int:
         ("no 'approve' verb exists", not any("approve" in n for n in names)),
         ("set_status not exposed as a tool", "set_status" not in DISPATCH),
         ("lifecycle verbs present (queue->in-progress->complete)", LIFECYCLE_VERBS <= names),
+        ("field-edit verbs present (notes + schema grouping)", KANBAN_FIELD_VERBS <= names),
     ]
     for label, ok in checks:
         print(f"  [{'PASS' if ok else 'FAIL'}] {label}")

@@ -63,7 +63,8 @@ model, prompt = sys.argv[1], sys.argv[2]
 print(json.dumps({
     "model": model,
     "messages": [{"role": "user", "content": prompt}],
-    "max_tokens": 160,
+    "max_tokens": 512,
+    "temperature": 0,
 }))
 PY
 }
@@ -100,6 +101,40 @@ ask_litellm() {
     -d "$payload" | extract_openai_reply
 }
 
+resolve_ollama_direct() {
+  local -a candidates=()
+  local candidate ns
+  if [ -n "${OLLAMA_DIRECT_BASE:-}" ]; then
+    candidates+=("$OLLAMA_DIRECT_BASE")
+  else
+    candidates+=("$OLLAMA")
+    case "$OLLAMA" in
+      http://host.docker.internal|http://host.docker.internal:*)
+        candidates+=("${OLLAMA/host.docker.internal/127.0.0.1}")
+        if [ -r /etc/resolv.conf ]; then
+          ns="$(awk '/^nameserver[[:space:]]+/ {print $2; exit}' /etc/resolv.conf)"
+          if [ -n "$ns" ]; then
+            candidates+=("${OLLAMA/host.docker.internal/$ns}")
+          fi
+        fi
+        ;;
+    esac
+  fi
+  for candidate in "${candidates[@]}"; do
+    if curl -fsS --max-time 5 "$candidate/api/tags" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  {
+    echo "No reachable Ollama direct URL. Tested:"
+    for candidate in "${candidates[@]}"; do
+      echo "  - $candidate"
+    done
+  } >&2
+  return 1
+}
+
 expect_litellm_denied() {
   local model="$1"
   local payload status tmp
@@ -132,12 +167,7 @@ if [ -z "$VKEY" ]; then
   exit 1
 fi
 
-$OLLAMA_DIRECT="${OLLAMA_DIRECT_BASE:-$OLLAMA}"
-case "$OLLAMA_DIRECT" in
-  http://host.docker.internal|http://host.docker.internal:*)
-    OLLAMA_DIRECT="http://127.0.0.1:11434"
-    ;;
-esac
+OLLAMA_DIRECT="$(resolve_ollama_direct)"
 
 echo "== 1. Ollama direct ($OLLAMA) =="
 if [ "$OLLAMA_DIRECT" != "$OLLAMA" ]; then
@@ -145,23 +175,23 @@ if [ "$OLLAMA_DIRECT" != "$OLLAMA" ]; then
 fi
 curl -sS --max-time 180 "$OLLAMA_DIRECT/api/chat" \
   -H "Content-Type: application/json" \
-  -d '{"model":"qwen3-coder:30b","stream":false,"messages":[{"role":"user","content":"Reply with exactly: LOCAL-TIER-OK"}]}' \
+  -d '{"model":"qwen3-coder:30b","stream":false,"messages":[{"role":"user","content":"Output only LOCAL-TIER-OK"}]}' \
   | { printf "reply: "; extract_ollama_reply; }
 
 echo ""
 echo "== 2. LiteLLM -> local triage alias '$TRIAGE_ALIAS' =="
 printf "reply: "
-ask_litellm "$TRIAGE_ALIAS" "Reply with exactly: GATEWAY-TRIAGE-OK"
+ask_litellm "$TRIAGE_ALIAS" "Output only GATEWAY-TRIAGE-OK"
 
 echo ""
 echo "== 3. LiteLLM -> local planner alias '$PLANNER_ALIAS' =="
 printf "reply: "
-ask_litellm "$PLANNER_ALIAS" "Reply with exactly: GATEWAY-PLANNER-OK"
+ask_litellm "$PLANNER_ALIAS" "Output only GATEWAY-PLANNER-OK"
 
 echo ""
 echo "== 4. LiteLLM -> local judge alias '$JUDGE_ALIAS' =="
 printf "reply: "
-ask_litellm "$JUDGE_ALIAS" "Reply with exactly: GATEWAY-JUDGE-OK"
+ask_litellm "$JUDGE_ALIAS" "Output only GATEWAY-JUDGE-OK"
 
 echo ""
 echo "== 5. Denied-model checks =="

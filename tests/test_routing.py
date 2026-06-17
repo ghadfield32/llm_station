@@ -14,7 +14,11 @@ from pathlib import Path
 import yaml
 
 from command_center.schemas import ModelRegistry
-from command_center.cli.check_cross_refs import check_gate_routes, check_judge_routing
+from command_center.cli.check_cross_refs import (
+    check_autonomy_manifest_paths,
+    check_gate_routes,
+    check_judge_routing,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -113,3 +117,38 @@ def test_check_judge_routing_flags_a_dangling_escalation():
     assert len(problems) == 1
     assert "ghost-role" in problems[0]
     assert "escalation_role" in problems[0]
+
+
+def test_autonomy_manifest_paths_exist_inside_repo():
+    autonomy = yaml.safe_load((REPO_ROOT / "configs/autonomy.yaml").read_text(encoding="utf-8"))
+
+    assert check_autonomy_manifest_paths(autonomy, REPO_ROOT) == []
+
+
+def test_autonomy_manifest_path_check_flags_missing_files(tmp_path):
+    autonomy = {
+        "repo_manifests": [{
+            "repo_id": "example",
+            "devcontainer_path": ".devcontainer/devcontainer.json",
+            "codeowners_path": ".github/CODEOWNERS",
+        }]
+    }
+
+    problems = check_autonomy_manifest_paths(autonomy, tmp_path)
+
+    assert len(problems) == 2
+    assert all("does not exist" in problem for problem in problems)
+
+
+def test_autonomy_manifest_path_check_flags_repo_escape(tmp_path):
+    autonomy = {
+        "repo_manifests": [{
+            "repo_id": "example",
+            "devcontainer_path": "../outside/devcontainer.json",
+        }]
+    }
+
+    problems = check_autonomy_manifest_paths(autonomy, tmp_path)
+
+    assert len(problems) == 1
+    assert "escapes the repository" in problems[0]

@@ -117,6 +117,8 @@ def test_action_never_allows_approve(client, monkeypatch):
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
     # there is simply no 'approve' verb in the governed set — the wall holds here too
     assert "approve" not in mod.ACTION_VERBS
+    assert {"annotate_item", "set_item_field",
+            "remove_item_field_value"} <= mod.ACTION_VERBS
     assert tc.post("/api/action", json={"action": "approve_card",
                                         "params": {}}).status_code == 400
 

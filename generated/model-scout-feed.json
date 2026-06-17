@@ -1,0 +1,39 @@
+{
+  "litellm_registry": [
+    {
+      "record_type": "model_scout_candidate",
+      "model": "devstral:24b",
+      "provider": "ollama",
+      "metric": "coding_score",
+      "candidate": 46.8,
+      "direction": "increase",
+      "source": "model-scout",
+      "source_name": "curated-openweight",
+      "source_url": "https://mistral.ai/news/devstral/",
+      "candidate_roles": [
+        "coder"
+      ],
+      "open_weight": true,
+      "open_weight_evidence": "Mistral AI and the Hugging Face model card state Devstral Small 2505 is released under Apache-2.0; the local Ollama tag digest is observed from /api/tags.",
+      "license": "Apache-2.0",
+      "ollama_tag": "devstral:24b",
+      "digest": "9bd74193e93935e9d8564d88607b220a9d341c4a36b748cffcbd9ad4f47a9ca9",
+      "quant": "Q4_K_M",
+      "native_context": 131072,
+      "parameter_size": "23.6B",
+      "params_b": 23.57,
+      "vram_fit": "NO @ 64k (max 49k, -0.1G free)",
+      "model_family": "devstral",
+      "release_id": "devstral-small-2505",
+      "source_model_id": "mistralai/Devstral-Small-2505",
+      "source_model_url": "https://huggingface.co/mistralai/Devstral-Small-2505",
+      "source_model_payload_sha256": "c84d253789fe8a9d9e4e2fdfaba9302e7723a49130c35ba55be5a5523556cdc1",
+      "benchmark_name": "SWE-bench Verified",
+      "benchmark_version": "2025-05-21 Mistral Devstral announcement / OpenHands scaffold",
+      "score_definition": "Percent resolved on SWE-bench Verified under the OpenHands scaffold as reported by Mistral AI for Devstral.",
+      "evaluation_date": "2025-05-21",
+      "retrieval_timestamp": "2026-06-15T14:01:34.4601835-04:00",
+      "source_payload_sha256": "ef183a2ddb914a564c5131de082569b477c648a2a5c7c77eade732ccf1a6bdf9"
+    }
+  ]
+}

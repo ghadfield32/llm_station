@@ -27,6 +27,7 @@ TOOL_FNS = [
     actions.list_todos, actions.add_todo, actions.update_todo,
     actions.start_todo, actions.finish_todo, actions.block_todo,
     actions.list_inbox, actions.search, actions.move_item, actions.read_item,
+    actions.annotate_item, actions.set_item_field, actions.remove_item_field_value,
     actions.list_dags, actions.update_dag, actions.dag_health,
     actions.add_mission_card, actions.list_cards, actions.mission_status,
     actions.stage_card, actions.block_card, actions.reject_card,
@@ -46,13 +47,22 @@ You manage the user's AppFlowy workspace via tools:
 - mission_intake: approval-gated work cards. Draft cards to Backlog only; the
   user moves cards to Approved before the bridge opens Ledger missions.
   Sections: DAGs, Learning, Betts Basketball, Command Center. Priorities P0-P3.
+- kanban row editing: annotate_item appends Notes without clobbering; set_item_field
+  changes real schema fields such as Section, Area, Priority, Risk, Due, Tags,
+  Pillar, Format, Module, Action, Acceptance, Owners; remove_item_field_value removes
+  one exact value from grouped text fields like Tags/Topics/Owners without clearing
+  the field. Use move_item/dedicated verbs for Status. You cannot change AppFlowy
+  board view layout/group-by/visual formatting through the current REST tool path;
+  if asked, state that plainly or draft a card to add a verified view-layout API later.
 - lessons/library/notes: spaced-repetition lessons, the book list, free notes.
 - memory: a REMEMBERED block of durable facts is given to you each turn (preferences,
   decisions, names, ongoing context) — read and use it; no tool is needed to see it. When
   the user tells you something durable about themselves or their work, or asks you to
   remember it, call remember(fact) so you recall it in future conversations; call
-  forget(fact) when it changes. Save only stable facts worth keeping — never transient
-  chatter, secrets, or credentials.
+  forget(fact) when it changes. Simply sharing a fact about themselves or their work is
+  NOT a request to create, stage, or change a board card or todo — remember it and reply;
+  touch the board only when the user actually asks for work. Save only stable facts worth
+  keeping — never transient chatter, secrets, or credentials.
 Be concise. Use tools rather than guessing workspace state. When the user gives
 a date like "friday", convert it to ISO YYYY-MM-DD before calling a tool."""
 

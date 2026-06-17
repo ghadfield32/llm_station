@@ -364,6 +364,52 @@ const ACTIONS: Record<string, { verb: string; label: string }[]> = {
   ],
 };
 
+// Fields the console can't edit via set_item_field (Status has the move control;
+// keys/writeback are server-refused anyway — we just don't offer an editor).
+const UNEDITABLE = new Set(["Status", "CardKey", "MissionID", "LastSync"]);
+
+function FieldRow({ board, title, name, value, canAct, onResult }: {
+  board: string; title: string; name: string; value: string;
+  canAct: boolean; onResult: (r: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(value);
+  const [shown, setShown] = useState(value);   // optimistic display after a save
+  const [busy, setBusy] = useState(false);
+  const editable = canAct && !UNEDITABLE.has(name);
+  async function save() {
+    setBusy(true);
+    try {
+      const r = await postAction("set_item_field",
+        { database: board, title, field: name, value: val });
+      onResult(r.result);
+      setShown(val); setEditing(false);   // source of truth re-fetches behind us
+    } catch (e) { onResult("⚠ " + (e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <tr>
+      <td className="fk">{name}</td>
+      <td>
+        {!editing ? (
+          <span className="fieldval">
+            {shown}
+            {editable && <button className="editbtn" onClick={() => { setVal(shown); setEditing(true); }}>edit</button>}
+          </span>
+        ) : (
+          <span className="fieldedit">
+            <input value={val} onChange={(e) => setVal(e.target.value)} disabled={busy}
+              onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+              autoFocus />
+            <button onClick={save} disabled={busy}>save</button>
+            <button onClick={() => setEditing(false)}>cancel</button>
+          </span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 function CardDrawer({ board, card, statuses, canAct, onChanged, onClose }: {
   board: string; card: BoardCard; statuses: string[]; canAct: boolean;
   onChanged: () => void; onClose: () => void;
@@ -371,11 +417,13 @@ function CardDrawer({ board, card, statuses, canAct, onChanged, onClose }: {
   const fields = card.fields ?? {};
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
   const verbs = ACTIONS[board] ?? [];
   const current = String(fields.Status ?? "");
+  function result(r: string) { setMsg(r); onChanged(); }
   async function call(action: string, params: Record<string, unknown>) {
     setBusy(true); setMsg(null);
-    try { setMsg((await postAction(action, params)).result); onChanged(); }
+    try { result((await postAction(action, params)).result); }
     catch (e) { setMsg("⚠ " + (e as Error).message); }
     finally { setBusy(false); }
   }
@@ -383,6 +431,11 @@ function CardDrawer({ board, card, statuses, canAct, onChanged, onClose }: {
     call(verb, board === "todos" ? { task: card.title } : { title: card.title });
   const moveTo = (status: string) =>
     call("move_item", { database: board, title: card.title, status });
+  const addNote = () => {
+    if (!note.trim()) return;
+    call("annotate_item", { database: board, title: card.title, note });
+    setNote("");
+  };
   return (
     <DrawerShell title={card.title || "(untitled)"} onClose={onClose}>
       <div className="kv">board <b>{board}</b>{current && <> · status <b>{current}</b></>}</div>
@@ -402,17 +455,26 @@ function CardDrawer({ board, card, statuses, canAct, onChanged, onClose }: {
           {msg && <div className="actmsg">{msg}</div>}
         </div>
       )}
-      <h3>Fields</h3>
+      <h3>Fields {canAct && <span className="muted small">— click edit to change a field</span>}</h3>
       <table className="fields">
         <tbody>
           {Object.entries(fields).map(([k, v]) => (
-            <tr key={k}><td className="fk">{k}</td><td>{String(v)}</td></tr>
+            <FieldRow key={k} board={board} title={card.title} name={k}
+              value={String(v)} canAct={canAct} onResult={result} />
           ))}
           {Object.keys(fields).length === 0 && (
             <tr><td className="muted">no extra fields</td></tr>
           )}
         </tbody>
       </table>
+      {canAct && (
+        <div className="noteadd">
+          <input value={note} placeholder="add a dated note…"
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") addNote(); }} />
+          <button onClick={addNote} disabled={busy || !note.trim()}>+ Note</button>
+        </div>
+      )}
     </DrawerShell>
   );
 }
