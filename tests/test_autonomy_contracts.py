@@ -60,6 +60,7 @@ def test_enabled_repo_autonomy_requires_github_app_and_devcontainer():
     repo = raw["repo_manifests"][0]
     repo["autonomous_edits_enabled"] = True
     repo["blockers"] = []
+    repo["auth_mode"] = "github_app_pending"
 
     with pytest.raises(ValueError, match="auth_mode=github_app"):
         AutonomyConfig.model_validate(raw)

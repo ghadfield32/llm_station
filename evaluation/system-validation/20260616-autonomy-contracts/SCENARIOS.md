@@ -12,8 +12,9 @@
 | desktop adapter readiness | BLOCKED | desktop-adapter-readiness.json |
 | no-op canaries scheduled | BLOCKED | GAPS.md#canaries |
 | telemetry production backend | BLOCKED | GAPS.md#telemetry |
-| GitHub App production auth | BLOCKED | GAPS.md#auth-and-external-runtimes |
+| GitHub App production auth | PASS | configs/autonomy.yaml |
+| GitHub App verifier | PASS | github-app-verify.json |
 | GitHub App installation observed | PASS | github-app-verify.json |
 | GitHub App repository permission verification | PASS | GAPS.md#auth-and-external-runtimes |
-| GitHub branch protection verification | BLOCKED | branch-protection-verify.json |
+| GitHub branch protection verification | PASS | branch-protection-verify.json |
 | external runtime spike | BLOCKED | GAPS.md#auth-and-external-runtimes |

@@ -744,22 +744,25 @@ Current verified state from the hardening pass:
    short-lived installation token in memory, read the selected repo, and read
    check/status endpoints without printing or storing secrets.
 4. The GitHub App `issues: read` permission is explicitly operator-approved in
-   policy and repository-permission verification now passes. The remaining
-   GitHub blocker is data-derived: `uv run cc branch-protection-verify` is
-   blocked until `GITHUB_OWNER_ADMIN_TOKEN` is provided for a read-only observer
-   run. The app must not be granted Administration solely to inspect branch
-   protection.
+   policy and repository-permission verification now passes. The owner/admin
+   observer token is present and can read `ghadfield32/llm_station`.
+   `uv run cc branch-protection-verify` now passes against the active
+   `protect-main-command-center` ruleset. It verifies branch protection,
+   deletion restriction, force-push blocking, linear history, required PR review,
+   CODEOWNERS review, conversation resolution, empty bypass actors, and required
+   checks `validate` plus `lint-test`. The app must not be granted
+   Administration solely to inspect branch protection.
 5. The local agent route has live evidence for parsed tool calls, memory-block
    recall, 14-turn recall, and fresh-conversation abstention through `chat`.
    The AppFlowy staging card now verifies as `In Progress`, and the desktop
    adapter readiness gate exists. Live desktop actions remain blocked because
    the target is disabled and timeout, takeover, and screenshot/evidence
    policies are not declared.
-6. The next ordered work is in `configs/autonomy.yaml`: provide the
-   owner/admin observer token, rerun branch-protection verification, finalize
-   token storage/rotation after that passes, declare desktop timeout/takeover
-   policy before live actions, then continue loop-breaker derivation, canaries,
-   telemetry, and external-runtime gates.
+6. The next ordered work is in `configs/autonomy.yaml`: run one tiny
+   branch-only repo mission, verify the PR/check/evidence loop before enabling
+   autonomous edits, declare desktop timeout/takeover policy before live actions,
+   then continue loop-breaker derivation, canaries, telemetry, and
+   external-runtime gates.
 
 ---
 
@@ -1075,19 +1078,22 @@ settings/protections, administer secrets, deploy, publish, bypass checks.
 
 The enforcement stack (full commands in [github-safety.md](github-safety.md)):
 
-1. **Branch protection on main** — required status checks (`validate / tests,
-   lint, typecheck, secret-scan` from `repo-template/.github/workflows/validate.yml`),
-   required CODEOWNERS review, linear history, no force-push/deletes.
-   `enforce_admins:false` so *you* can fix emergencies; the agent never holds
-   an admin token.
+1. **Branch protection on main** — required status checks are the actual
+   workflow jobs in this repo (`validate` and `lint-test` from
+   `.github/workflows/contracts.yml`), not invented names. The wall also
+   requires pull-request review, CODEOWNERS review, conversation resolution,
+   linear history, and no force-push/deletes. Keep the owner/admin emergency
+   path available unless a later policy deliberately changes that; the agent
+   never holds an admin token.
 2. **Scoped repo identity** — production autonomy uses the
-   `llm-station-command-center` GitHub App, not a broad PAT. The app is
-   installed on `ghadfield32/llm_station` and can mint an in-memory installation
-   token. The operator-approved `issues: read` permission is now recorded in
-   policy and repository permission verification passes, but repo autonomy
-   remains blocked until branch protection is verified through an owner/admin
-   path and token storage/rotation boundaries are documented.
-   Fine-grained PATs remain pilot-only.
+    `llm-station-command-center` GitHub App, not a broad PAT. The app is
+    installed on `ghadfield32/llm_station` and can mint an in-memory installation
+    token. The operator-approved `issues: read` permission is now recorded in
+    policy, repository permission verification passes, branch protection is
+    verified through the owner/admin observer path, and token storage/rotation
+    policy is finalized. Repo autonomy remains disabled until a tiny branch-only
+    mission proves the branch/worktree/devcontainer and PR/check evidence loop.
+    Fine-grained PATs remain pilot-only.
 3. **Deploy = separate human-gated environment** — `production` environment
    with a required reviewer and prevent-self-review; the agent never gets its
    secrets.
@@ -1095,6 +1101,24 @@ The enforcement stack (full commands in [github-safety.md](github-safety.md)):
    pytest/mypy/ruff, branch + edits, logged dep installs; push only after
    `scripts/pre_push_gate.sh` exits 0; deny reading `.env`/keys, sudo,
    `rm -rf`, `curl|bash`, force push, merge.
+
+Current GitHub wall state: `uv run cc branch-protection-verify` passes using
+the active `protect-main-command-center` ruleset. The verified wall has:
+
+- Require a pull request before merging.
+- Require 1 approval.
+- Require status checks to pass before merging, selecting the real `validate`
+  and `lint-test` checks after GitHub has observed them.
+- Require conversation resolution before merging.
+- Require linear history.
+- Do not allow force pushes.
+- Do not allow deletions.
+
+The owner/admin observer token exists only to prove this wall from GitHub's
+read APIs. It is not the runtime agent credential, and adding it to `.env` does
+not make repo autonomy ready unless `uv run cc branch-protection-verify` passes.
+Now that the verifier passes, remove or let the temporary observer token expire
+after any final audit rerun that needs it.
 
 ---
 
@@ -1579,6 +1603,23 @@ Newest first. Dates are from the docs themselves; the repo has no git history
 yet (first commit pending), so this reconstructs the record the next commit
 should preserve.
 
+### 2026-06-18 — Branch wall verified
+
+- **Observer token is not the blocker.** Re-ran
+  `uv run cc branch-protection-verify` with `GITHUB_OWNER_ADMIN_TOKEN` present.
+  GitHub accepts the token for repo, branch, protected-branch list, active-rule,
+  and ruleset reads. The active `protect-main-command-center` ruleset now
+  verifies `main` protection, required checks, PR review count, CODEOWNERS
+  review, conversation resolution, linear history, deletion restriction,
+  force-push blocking, and an empty bypass list. GitHub wall verification is
+  complete.
+- **Setup language simplified.** §8 now names the two identities directly:
+  the GitHub App is the normal long-lived agent identity and must not receive
+  Administration permission; the owner/admin observer token is a temporary
+  read-only proof tool only. The next ordered work is no longer GitHub setup;
+  it is a tiny branch-only repo mission to prove the branch/worktree/validation
+  evidence loop without merging.
+
 ### 2026-06-17 — GitHub permissions verified; agent validation added
 
 - **Verifier state corrected.** The local GitHub App verifier now proves the
@@ -1589,12 +1630,16 @@ should preserve.
   operator-approved in `configs/autonomy.yaml`; the verifier passes repository
   permission checks without printing or storing secrets. Administration, secrets,
   variables, deployments, environments, workflows, and actions remain forbidden.
-- **Branch-protection proof.** Branch-protection inspection returns 403 with
-  the GitHub App token. Do not grant the app Administration solely to inspect
-  settings. Added `uv run cc branch-protection-verify`, which proves expected
-  check contexts from `.github/workflows/contracts.yml`, checks CODEOWNERS path
-  presence, and blocks until `GITHUB_OWNER_ADMIN_TOKEN` is supplied for a
-  read-only owner/admin observer run.
+- **Branch-protection proof.** Branch-protection inspection still returns 403
+  with the GitHub App token, and the app must not receive Administration solely
+  to inspect settings. Added `uv run cc branch-protection-verify`, which proves
+  expected check contexts from `.github/workflows/contracts.yml`, checks
+  CODEOWNERS path presence, reads the owner/admin observer token without
+  printing it, and now probes both classic branch protection and GitHub active
+  branch rules/rulesets. The 2026-06-17 observer run proves the token can read
+  `ghadfield32/llm_station`, but `main` has no classic protection and no active
+  ruleset evidence, so the blocker is now configuration of the branch wall, not
+  credential visibility.
 - **Token policy drafted.** Added
   [github-token-storage-rotation.md](github-token-storage-rotation.md), which
   records env-ref-only storage, out-of-repo PEM handling, in-memory installation
@@ -1677,10 +1722,11 @@ should preserve.
   return 200), discovers the selected-repo installation, mints an installation
   token in memory, reads `ghadfield32/llm_station`, and reads check/status
   endpoints. The operator-approved `issues: read` permission is now recorded in
-  `configs/autonomy.yaml`, and repository permission verification passes. GitHub
-  App auth remains blocked because branch protection inspection returns 403
-  with the app token. Do not add Administration permission to the app only to
-  inspect settings; use an owner/admin verification path.
+  `configs/autonomy.yaml`, and repository permission verification passes.
+  Branch-wall approval remains blocked separately: app-token branch-protection
+  inspection returns 403 by design, while the owner/admin observer run now shows
+  `main` has no classic protection and no active branch ruleset. Do not add
+  Administration permission to the app only to inspect settings.
 - **Staging AppFlowy target.** `configs/autonomy.yaml` now selects
   `mission_intake` / `card-review q3 odds metrics` from
   `generated/board-snapshot.json` as the staging candidate for future no-op
@@ -1694,12 +1740,12 @@ should preserve.
   `mission.completion_verdict`, and marks the mission `done` only on PASS.
   The generic `/mission/{id}/status` endpoint rejects direct `done` updates.
 - **What remains.** The next ordered work is now in `configs/autonomy.yaml`:
-  provide an owner/admin observer token, rerun branch-protection verification,
-  finalize token storage/rotation after that passes, declare desktop timeout
-  and human-takeover policy before live actions, derive loop-breaker policy from
-  event history before GUI autonomy, enable canaries only after blockers clear,
-  decide whether OpenTelemetry is needed after structured-event gaps are
-  measured, and evaluate external runtimes only after a measured control-plane
+  run a tiny branch-only repo mission, verify the PR/check/evidence loop before
+  autonomous edits, declare desktop timeout and human-takeover policy before
+  live actions, derive loop-breaker policy from event history before GUI
+  autonomy, enable canaries only after blockers clear, decide whether
+  OpenTelemetry is needed after structured-event gaps are measured, and evaluate
+  external runtimes only after a measured control-plane
   gap.
 
 ### 2026-06-16 — Whole-system validation prompt added

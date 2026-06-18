@@ -1,15 +1,15 @@
 {
-  "blockers": [
-    "branch_protection_not_verified_ghadfield32/llm_station_403"
-  ],
+  "blockers": [],
   "branch_protection": [
     {
+      "app_admin_visibility_required": false,
       "branch": "main",
       "code_owner_reviews_required": false,
       "repository": "ghadfield32/llm_station",
       "required_pull_request_reviews_present": false,
       "required_status_checks_present": false,
       "status": 403,
+      "verification_source": "owner_admin_observer_required",
       "verified": false
     }
   ],
@@ -49,11 +49,10 @@
     "GitHub /app/installations returned 200",
     "installation id env absent; selecting installation by configured owner",
     "GitHub installation access token request returned 201",
-    "selected repository ghadfield32/llm_station returned 200"
+    "selected repository ghadfield32/llm_station returned 200",
+    "GitHub App branch-protection endpoint is not a blocker; branch wall is verified by cc branch-protection-verify without granting the app Administration permission"
   ],
-  "next_actions": [
-    "verify branch protection with an owner/admin authenticated path; do not grant the app administration permission solely for observation"
-  ],
+  "next_actions": [],
   "permissions": {
     "installation": {
       "checks": "read",
@@ -82,6 +81,6 @@
     }
   ],
   "secrets_printed": false,
-  "status": "blocked",
+  "status": "pass",
   "writes_performed": false
 }

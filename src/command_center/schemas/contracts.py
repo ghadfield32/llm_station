@@ -1339,6 +1339,8 @@ class BranchProtectionVerification(Strict):
     require_force_pushes_disabled: bool = True
     require_deletions_disabled: bool = True
     require_linear_history: bool = True
+    require_ruleset_bypass_actors_absent: bool = True
+    ruleset_bypass_policy_source: str
     token_policy: Literal["env_ref_only_owner_admin_observer_no_settings_writes"]
 
     @model_validator(mode="after")
@@ -1372,6 +1374,8 @@ class BranchProtectionVerification(Strict):
             raise ValueError("branch protection review count source must be documented")
         if not self.codeowners_path:
             raise ValueError("branch protection codeowners_path must be documented")
+        if self.require_ruleset_bypass_actors_absent and not self.ruleset_bypass_policy_source:
+            raise ValueError("branch protection ruleset bypass policy source must be documented")
         return self
 
 

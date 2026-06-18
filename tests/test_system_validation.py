@@ -36,9 +36,12 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "private_key_path_env=GITHUB_APP_PRIVATE_KEY_PATH" in baseline
     assert "owner_admin_token_env=GITHUB_OWNER_ADMIN_TOKEN" in baseline
     assert "required_status_check_contexts=validate, lint-test" in baseline
+    assert "require_ruleset_bypass_actors_absent=True" in baseline
+    assert "ruleset_bypass_policy_source=GitHub wall requires no unverified" in baseline
     assert "repo `llm_station` autonomous edits blocked" in gaps
     assert "desktop target `appflowy_browser_staging` blocked" in gaps
-    assert "GitHub App auth is `blocked`" in gaps
+    assert "GitHub App auth is `blocked` pending auth requirements" not in gaps
+    assert "GitHub App production auth review pending" not in gaps
     assert ".env` was not read" in privacy
     assert "| local agent tool/memory/multi-turn validation | MISSING | agent-validation.json |" in scenarios
     assert "| desktop target snapshot verification | MISSING | desktop-target-verify.json |" in scenarios
@@ -60,9 +63,20 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "github_token_storage_rotation_policy_drafted" in next_steps
     assert "staging_appflowy_card_state_in_progress_verified" in next_steps
     assert "desktop_adapter_readiness_gate_added" in next_steps
-    assert "provide_owner_admin_branch_protection_observer_token" in next_steps
-    assert "rerun_branch_protection_verify_and_required_checks" in next_steps
+    assert "branch_protection_observer_token_supplied_and_repo_read_verified" in next_steps
+    assert "branch_protection_ruleset_diagnostics_added" in next_steps
+    assert "branch_protection_rerun_confirmed_main_unprotected" in next_steps
+    assert "branch_protection_active_ruleset_detected" in next_steps
+    assert "branch_protection_required_checks_and_core_rules_verified" in next_steps
+    assert "code_owner_reviews_verified_on_active_branch_ruleset" in next_steps
+    assert "branch_protection_verified_with_active_ruleset" in next_steps
+    assert "github_token_storage_rotation_policy_finalized" in next_steps
+    assert "github_app_auth_verified_after_branch_wall" in next_steps
+    assert "run_tiny_branch_only_repo_mission" in next_steps
+    assert "verify_pr_check_evidence_loop_before_autonomous_edits" in next_steps
     assert "declare_desktop_timeout_and_human_takeover_policy_before_live_actions" in next_steps
+    assert "enable_code_owner_reviews_on_active_branch_ruleset" not in next_steps
+    assert "rerun_branch_protection_verify_until_verified" not in next_steps
     assert "remove_unneeded_github_app_issues_permission" not in next_steps
     assert "implement_desktop_adapter_after_target_state_verifies" not in next_steps
 

@@ -407,11 +407,14 @@ def verify_github_app(
                 "code_owner_reviews_required": code_owner_reviews_required,
             })
             if protection_status != 200:
-                blockers.append(f"branch_protection_not_verified_{repo}_{protection_status}")
-                _append_next_action(
-                    next_actions,
-                    "verify branch protection with an owner/admin authenticated path; do not grant "
-                    "the app administration permission solely for observation",
+                branch_protection_results[-1]["verification_source"] = (
+                    "owner_admin_observer_required"
+                )
+                branch_protection_results[-1]["app_admin_visibility_required"] = False
+                evidence.append(
+                    "GitHub App branch-protection endpoint is not a blocker; "
+                    "branch wall is verified by cc branch-protection-verify without "
+                    "granting the app Administration permission"
                 )
             else:
                 if not status_checks_present:

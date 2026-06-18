@@ -30,10 +30,18 @@ completed_work:
   - github_token_storage_rotation_policy_drafted
   - staging_appflowy_card_state_in_progress_verified
   - desktop_adapter_readiness_gate_added
+  - branch_protection_observer_token_supplied_and_repo_read_verified
+  - branch_protection_ruleset_diagnostics_added
+  - branch_protection_rerun_confirmed_main_unprotected
+  - branch_protection_active_ruleset_detected
+  - branch_protection_required_checks_and_core_rules_verified
+  - code_owner_reviews_verified_on_active_branch_ruleset
+  - branch_protection_verified_with_active_ruleset
+  - github_token_storage_rotation_policy_finalized
+  - github_app_auth_verified_after_branch_wall
 ordered_work:
-  - provide_owner_admin_branch_protection_observer_token
-  - rerun_branch_protection_verify_and_required_checks
-  - finalize_github_app_token_storage_rotation_after_branch_protection_passes
+  - run_tiny_branch_only_repo_mission
+  - verify_pr_check_evidence_loop_before_autonomous_edits
   - declare_desktop_timeout_and_human_takeover_policy_before_live_actions
   - enable_desktop_target_only_after_timeout_takeover_and_canary_plan
   - derive_loop_breaker_threshold_from_event_history_before_autonomous_gui
@@ -110,7 +118,7 @@ repo_manifests:
     protected_branches: [main]
     allowed_base_branches: [main]
     branch_write_policy: feature_branch_only
-    auth_mode: github_app_pending
+    auth_mode: github_app
     execution_mode: devcontainer
     devcontainer_path: .devcontainer/devcontainer.json
     ci_commands:
@@ -122,9 +130,8 @@ repo_manifests:
     risk_ceiling: L2_local_edits
     autonomous_edits_enabled: false
     blockers:
-      - owner_admin_branch_protection_observer_token_missing
-      - branch_protection_not_verified_with_owner_admin_path
-      - token_storage_and_rotation_not_finalized_after_branch_protection
+      - branch_only_repo_mission_loop_not_proven
+      - pr_check_evidence_loop_not_verified
 
 desktop_targets:
   - target_id: appflowy_browser_staging
@@ -223,16 +230,13 @@ telemetry:
     - opentelemetry_deferred_until_cross_service_trace_gap_is_measured
 
 github_app_review:
-  status: pending
+  status: approved
   production_auth_policy: github_app_required
   pilot_auth_policy: fine_grained_pat_pilot_only
-  requirements:
-    - provide_owner_admin_branch_protection_observer_token
-    - rerun_branch_protection_verify_and_required_checks
-    - finalize_github_app_token_storage_rotation_after_branch_protection_passes
+  requirements: []
 
 github_app_auth:
-  status: blocked
+  status: verified
   app_name: llm-station-command-center
   owner: ghadfield32
   homepage_url: https://github.com/ghadfield32/llm_station
@@ -262,7 +266,7 @@ github_app_auth:
   token_storage_policy: env_refs_only_private_key_outside_repo_short_lived_installation_tokens
 
 branch_protection_verification:
-  status: blocked
+  status: verified
   owner_admin_token_env: GITHUB_OWNER_ADMIN_TOKEN
   selected_repositories:
     - ghadfield32/llm_station
@@ -278,6 +282,8 @@ branch_protection_verification:
   require_force_pushes_disabled: true
   require_deletions_disabled: true
   require_linear_history: true
+  require_ruleset_bypass_actors_absent: true
+  ruleset_bypass_policy_source: GitHub wall requires no unverified bot/admin bypass around required checks and review gates
   token_policy: env_ref_only_owner_admin_observer_no_settings_writes
 
 external_runtime_evaluation:

@@ -1,65 +1,29 @@
 # Baseline
 
 - Run id: `20260616-autonomy-contracts`
-- Commit: `6b22965`
-- Dirty entries: 55
+- Commit: `7f70ca2`
+- Dirty entries: 19
 
 ## Dirty Worktree
-- M .env.example
--  M .gitignore
--  M Makefile
--  M appflowy_kanban/growth-os/agent/growthos_mcp.py
--  M appflowy_kanban/growth-os/growthos/actions.py
--  M appflowy_kanban/growth-os/growthos/assistant.py
--  M appflowy_kanban/growth-os/scripts/test_abilities.py
--  M docker-compose.yml
+- M configs/autonomy.yaml
 -  M docs/MASTER.md
--  M docs/autonomous-pipeline-gap-review-2026-06-16.md
--  M docs/backend/projects/AGENT_KANBAN_SURFACE.md
--  M generated/board-snapshot.json
--  M scripts/live_smoke.ps1
--  M scripts/live_smoke.sh
--  M services/agent_kanban_ui/app.py
--  M services/agent_kanban_ui/web/src/App.tsx
--  M services/agent_kanban_ui/web/src/styles.css
--  M services/ledger/app.py
--  M src/command_center/channels/core.py
--  M src/command_center/cli/check_cross_refs.py
--  M src/command_center/cli/main.py
--  M src/command_center/schemas/__init__.py
+-  M docs/github-token-storage-rotation.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/BASELINE.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/GAPS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/IMPLEMENTATION_NOTE.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/NEXT.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/SCENARIOS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/VALIDATION_RESULTS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/branch-protection-verify.json
+-  M evaluation/system-validation/20260616-autonomy-contracts/github-app-verify.json
+-  M src/command_center/cli/branch_protection_verify.py
+-  M src/command_center/cli/github_app_verify.py
+-  M src/command_center/cli/system_validation.py
 -  M src/command_center/schemas/contracts.py
--  M tests/test_actions_intent.py
--  M tests/test_agent_kanban_ui.py
--  M tests/test_gateway_toolcall.py
--  M tests/test_ledger_rest.py
--  M tests/test_routing.py
-- ?? .devcontainer/
-- ?? configs/autonomy.yaml
-- ?? docs/github-app-production-auth-review-2026-06-16.md
-- ?? docs/github-token-storage-rotation.md
-- ?? evaluation/system-validation/
-- ?? generated/model-baseline-summary.json
-- ?? generated/model-candidate-audit-evidence/
-- ?? generated/model-candidate-audit-summary.json
-- ?? generated/model-metric-audit-evidence/
-- ?? generated/model-metric-audit-summary.json
-- ?? generated/model-scout-feed.json
-- ?? generated/model-scout-report.json
-- ?? src/command_center/autonomy/
-- ?? src/command_center/cli/agent_validation.py
-- ?? src/command_center/cli/branch_protection_verify.py
-- ?? src/command_center/cli/desktop_adapter.py
-- ?? src/command_center/cli/desktop_target_verify.py
-- ?? src/command_center/cli/github_app_verify.py
-- ?? src/command_center/cli/system_validation.py
-- ?? tests/test_agent_validation.py
-- ?? tests/test_autonomy_contracts.py
-- ?? tests/test_autonomy_events.py
-- ?? tests/test_branch_protection_verify.py
-- ?? tests/test_desktop_adapter.py
-- ?? tests/test_desktop_target_verify.py
-- ?? tests/test_github_app_verify.py
-- ?? tests/test_system_validation.py
+-  M tests/test_autonomy_contracts.py
+-  M tests/test_branch_protection_verify.py
+-  M tests/test_github_app_verify.py
+-  M tests/test_system_validation.py
 
 ## Validated Config Contracts
 - configs/agent_surface.yaml
@@ -98,7 +62,7 @@
 - notification.sent
 
 ## Repo Manifests
-- `llm_station`: blocked; auth=github_app_pending; execution=devcontainer; risk_ceiling=L2_local_edits; devcontainer=.devcontainer/devcontainer.json; blockers=owner_admin_branch_protection_observer_token_missing, branch_protection_not_verified_with_owner_admin_path, token_storage_and_rotation_not_finalized_after_branch_protection
+- `llm_station`: blocked; auth=github_app; execution=devcontainer; risk_ceiling=L2_local_edits; devcontainer=.devcontainer/devcontainer.json; blockers=branch_only_repo_mission_loop_not_proven, pr_check_evidence_loop_not_verified
 
 ## Desktop Targets
 - `appflowy_browser_staging`: blocked; surface=browser; os=windows; card=mission_intake/card-review q3 odds metrics; snapshot=generated/board-snapshot.json; blockers=desktop_live_actions_not_enabled, desktop_timeout_and_takeover_policy_not_declared
@@ -110,7 +74,7 @@
 - required_scenarios=chat_tool_call_parse, memory_block_recall, long_multi_turn_recall, fresh_conversation_without_memory_abstains
 
 ## GitHub App Auth
-- status=blocked
+- status=verified
 - app=llm-station-command-center
 - owner=ghadfield32
 - homepage=https://github.com/ghadfield32/llm_station
@@ -123,7 +87,7 @@
 - token_storage_policy=env_refs_only_private_key_outside_repo_short_lived_installation_tokens
 
 ## Branch Protection Verification
-- status=blocked
+- status=verified
 - owner_admin_token_env=GITHUB_OWNER_ADMIN_TOKEN
 - selected_repositories=ghadfield32/llm_station
 - required_status_check_contexts=validate, lint-test
@@ -131,4 +95,6 @@
 - codeowners_path=.github/CODEOWNERS
 - required_approving_review_count=1
 - required_review_count_source=.github/CODEOWNERS default_owner_policy
+- require_ruleset_bypass_actors_absent=True
+- ruleset_bypass_policy_source=GitHub wall requires no unverified bot/admin bypass around required checks and review gates
 - token_policy=env_ref_only_owner_admin_observer_no_settings_writes

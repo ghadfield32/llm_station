@@ -9,7 +9,10 @@
 - `uv run cc github-app-verify` authenticates the GitHub App, discovers the selected-repo installation, mints a short-lived installation token in memory, reads `ghadfield32/llm_station`, and reads check/status endpoints.
 - The operator-approved `issues: read` permission is recorded in `configs/autonomy.yaml`, and GitHub App repository permission verification passes.
 - `uv run cc branch-protection-verify` exists and verifies local expected check contexts from `.github/workflows/contracts.yml` plus CODEOWNERS path before attempting owner/admin GitHub reads.
-- `docs/github-token-storage-rotation.md` documents env-ref-only storage, out-of-repo PEM handling, in-memory installation tokens, one-run owner/admin observer token use, and rotation steps.
+- `uv run cc branch-protection-verify` now diagnoses both classic branch protection and GitHub active branch rules/rulesets after a classic endpoint miss.
+- `GITHUB_OWNER_ADMIN_TOKEN` is present for the observer run and can read `ghadfield32/llm_station`; no token value is printed or written.
+- `uv run cc branch-protection-verify` passes against the active `protect-main-command-center` ruleset.
+- `docs/github-token-storage-rotation.md` documents env-ref-only storage, out-of-repo PEM handling, in-memory installation tokens, one-run owner/admin observer token use, rotation steps, and the recommendation to remove or expire the temporary observer token after final audit reruns.
 - `uv run cc agent-validation` passes live local-model checks for parsed tool calls, memory-block recall, 14-turn recall, and fresh-conversation abstention through the `chat` route.
 - The configured AppFlowy staging card was moved to `In Progress` through the existing `move_item` intent, and `uv run cc desktop-target-verify` now passes from the regenerated live snapshot.
 - `uv run cc desktop-adapter` exists as a readiness gate; it performs no desktop actions and blocks until live-action policy is declared.
@@ -18,15 +21,15 @@
 ## Blocked
 
 - Repository autonomy remains disabled.
-- Branch protection verification is blocked because `GITHUB_OWNER_ADMIN_TOKEN` is absent; the GitHub App token still must not receive Administration permission solely for observation.
-- Token storage and rotation policy is drafted but final auth approval is blocked until branch-protection verification passes.
+- Branch protection verification now passes; repo autonomy remains blocked until a tiny branch-only repo mission proves the branch/worktree/devcontainer, validation, and PR/check evidence loop.
+- Token storage and rotation policy is finalized after branch-protection verification passed.
 - Desktop/browser live actions remain blocked because the target is disabled and no TTL, action timeout, human takeover hotkey, or screenshot/evidence policy is declared.
 - Canaries remain disabled until their declared blockers clear.
 
 ## Can Be Completed Locally
 
 - Re-run `uv run cc github-app-verify --output evaluation/system-validation/20260616-autonomy-contracts/github-app-verify.json` after GitHub App auth/policy changes.
-- Set `GITHUB_OWNER_ADMIN_TOKEN` for one read-only observer run, then run `uv run cc branch-protection-verify --output evaluation/system-validation/20260616-autonomy-contracts/branch-protection-verify.json`.
+- Run one tiny branch-only repo mission, then verify the PR/check/evidence loop before enabling autonomous edits.
 - Re-run `uv run cc agent-validation --output evaluation/system-validation/20260616-autonomy-contracts/agent-validation.json` after model-route changes.
 - Re-run `uv run python -m command_center.cli.kanban_surface board-snapshot --output generated/board-snapshot.json`, then `uv run cc desktop-target-verify --output evaluation/system-validation/20260616-autonomy-contracts/desktop-target-verify.json` after AppFlowy target changes.
 - Declare desktop TTL, action timeout, human takeover, and screenshot/evidence policy before enabling live desktop actions.
@@ -36,7 +39,7 @@
 
 ## Requires External User Action
 
-- Provide `GITHUB_OWNER_ADMIN_TOKEN` only if you approve an owner/admin read-only observer credential for branch-protection verification.
+- None for branch protection. Optional cleanup: remove `GITHUB_OWNER_ADMIN_TOKEN` or let it expire after final audit reruns.
 
 ## Must Not Be Attempted Yet
 

@@ -255,7 +255,11 @@ def test_github_app_verify_records_branch_next_action(monkeypatch, tmp_path):
         client_factory=_FakeGitHubClientWithBlockedProtection,
     )
 
-    assert result["status"] == "blocked"
-    assert "branch_protection_not_verified_ghadfield32/llm_station_403" in result["blockers"]
+    assert result["status"] == "pass"
+    assert result["blockers"] == []
     assert result["permissions"]["installation"]["issues"] == "read"
-    assert any("owner/admin authenticated path" in action for action in result["next_actions"])
+    assert result["branch_protection"][0]["verification_source"] == (
+        "owner_admin_observer_required"
+    )
+    assert result["branch_protection"][0]["app_admin_visibility_required"] is False
+    assert result["next_actions"] == []

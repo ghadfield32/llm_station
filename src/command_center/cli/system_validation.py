@@ -140,6 +140,8 @@ def _branch_protection_lines(cfg: AutonomyConfig) -> list[str]:
         f"codeowners_path={protection.codeowners_path}",
         f"required_approving_review_count={protection.required_approving_review_count}",
         f"required_review_count_source={protection.required_review_count_source}",
+        f"require_ruleset_bypass_actors_absent={protection.require_ruleset_bypass_actors_absent}",
+        f"ruleset_bypass_policy_source={protection.ruleset_bypass_policy_source}",
         f"token_policy={protection.token_policy}",
     ]
 
@@ -163,9 +165,10 @@ def _gap_lines(cfg: AutonomyConfig) -> list[str]:
             + ", ".join(cfg.github_app_review.requirements)
         )
     if cfg.github_app_auth.status != "verified":
+        requirements = ", ".join(cfg.github_app_review.requirements)
         gaps.append(
-            f"GitHub App auth is `{cfg.github_app_auth.status}`; run "
-            "`cc github-app-verify` to identify the current installation or permission blocker"
+            f"GitHub App auth is `{cfg.github_app_auth.status}` pending auth "
+            f"requirements: {requirements}"
         )
     if cfg.external_runtime_evaluation.status != "approved_for_spike":
         gaps.append(
@@ -187,6 +190,7 @@ def build_package(output_root: Path, run_id: str) -> Path:
     desktop_target_status = _artifact_status(out / "desktop-target-verify.json")
     desktop_adapter_status = _artifact_status(out / "desktop-adapter-readiness.json")
     branch_protection_status = _artifact_status(out / "branch-protection-verify.json")
+    github_app_status = _artifact_status(out / "github-app-verify.json")
     commit = _git("rev-parse", "--short", "HEAD")
     status = _git("status", "--short")
     dirty = status.splitlines() if status else []
@@ -201,6 +205,11 @@ def build_package(output_root: Path, run_id: str) -> Path:
     github_app_repository_permissions_status = (
         "PASS"
         if "github_app_repository_permissions_verified" in cfg.completed_work
+        else "BLOCKED"
+    )
+    github_app_production_auth_status = (
+        "PASS"
+        if cfg.github_app_review.status == "approved" and cfg.github_app_auth.status == "verified"
         else "BLOCKED"
     )
 
@@ -259,7 +268,9 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "desktop-adapter-readiness.json |",
             "| no-op canaries scheduled | BLOCKED | GAPS.md#canaries |",
             "| telemetry production backend | BLOCKED | GAPS.md#telemetry |",
-            "| GitHub App production auth | BLOCKED | GAPS.md#auth-and-external-runtimes |",
+            f"| GitHub App production auth | {github_app_production_auth_status} | "
+            "configs/autonomy.yaml |",
+            f"| GitHub App verifier | {github_app_status} | github-app-verify.json |",
             f"| GitHub App installation observed | {github_app_installation_status} | "
             "github-app-verify.json |",
             f"| GitHub App repository permission verification | {github_app_repository_permissions_status} | "

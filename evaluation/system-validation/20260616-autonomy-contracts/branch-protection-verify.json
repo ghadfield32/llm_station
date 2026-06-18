@@ -1,29 +1,104 @@
 {
-  "blockers": [
-    "missing_env_GITHUB_OWNER_ADMIN_TOKEN"
-  ],
+  "blockers": [],
   "codeowners_path": ".github/CODEOWNERS",
   "env": [
     {
-      "length": 0,
+      "length": 93,
       "name": "GITHUB_OWNER_ADMIN_TOKEN",
-      "present": false
+      "present": true
     }
   ],
   "evidence": [
     "read configs/autonomy.yaml branch_protection_verification",
     "read owner/admin token env presence without printing value"
   ],
-  "next_actions": [
-    "set GITHUB_OWNER_ADMIN_TOKEN to an owner/admin read-only observer token for one verification run; do not commit or print it"
+  "next_actions": [],
+  "repositories": [
+    {
+      "active_branch_rules": [
+        {
+          "ruleset_id": 17841767,
+          "type": "deletion"
+        },
+        {
+          "ruleset_id": 17841767,
+          "type": "non_fast_forward"
+        },
+        {
+          "ruleset_id": 17841767,
+          "type": "required_linear_history"
+        },
+        {
+          "require_code_owner_review": true,
+          "required_approving_review_count": 1,
+          "required_review_thread_resolution": true,
+          "ruleset_id": 17841767,
+          "type": "pull_request"
+        },
+        {
+          "required_status_checks": [
+            "lint-test",
+            "validate"
+          ],
+          "ruleset_id": 17841767,
+          "type": "required_status_checks"
+        }
+      ],
+      "active_branch_rules_status": 200,
+      "branch": "main",
+      "branch_protected": true,
+      "branch_status": 200,
+      "classic_branch_protection_verified": false,
+      "protected_branch_list_status": 200,
+      "protected_branch_names": [
+        "main"
+      ],
+      "protection_mode": "active_branch_ruleset",
+      "protection_status": 404,
+      "repo_status": 200,
+      "repository": "ghadfield32/llm_station",
+      "ruleset_evaluation": {
+        "active_rule_count": 5,
+        "active_ruleset_bypass_actors_count": 0,
+        "code_owner_reviews_required": true,
+        "deletion_restricted": true,
+        "linear_history_required": true,
+        "non_fast_forward_required": true,
+        "required_approving_review_count": 1,
+        "required_pull_request_rule_present": true,
+        "required_status_checks": [
+          "lint-test",
+          "validate"
+        ],
+        "rule_types": [
+          "deletion",
+          "non_fast_forward",
+          "pull_request",
+          "required_linear_history",
+          "required_status_checks"
+        ]
+      },
+      "rulesets": [
+        {
+          "bypass_actors_count": 0,
+          "enforcement": "active",
+          "id": 17841767,
+          "name": "protect-main-command-center",
+          "rule_types": [],
+          "source_type": "Repository",
+          "target": "branch"
+        }
+      ],
+      "rulesets_status": 200,
+      "verified": true
+    }
   ],
-  "repositories": [],
   "required_status_check_contexts": [
     "validate",
     "lint-test"
   ],
   "secrets_printed": false,
-  "status": "blocked",
+  "status": "pass",
   "workflow_jobs": [
     "lint-test",
     "validate"
