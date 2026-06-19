@@ -1631,12 +1631,15 @@ first commit and reconstruct the record git now preserves.
   installation token, does not put tokens into git remotes, and does not merge,
   deploy, alter settings, alter secrets, or delete branches. The PR remains a
   draft with human review/CODEOWNERS as the merge wall.
-- **No workflow-write dependency.** The protected `lint-test` job installs
-  `.[dev]` before full pytest, so FastAPI is now a dev test dependency in
-  `pyproject.toml` and `uv.lock`. Future PR-check canaries read
-  `pyproject.toml` from the protected base branch through the GitHub contents
-  API, then apply only the bounded canary changes instead of copying unrelated
-  local working-tree content.
+- **Required-check contract fixed.** The protected `lint-test` job installs
+  `.[dev,gateways]` before full pytest, matching the repo manifest's declared
+  validation command because collected tests import channel adapters. The
+  `contracts` workflow now runs for every PR targeting `main` instead of using a
+  path filter, so docs/evidence-only PR commits cannot leave required checks
+  permanently unreported. Future PR-check canaries read `pyproject.toml` from
+  the protected base branch through the GitHub contents API, then apply only the
+  bounded canary changes instead of copying unrelated local working-tree
+  content.
 - **Gate moved forward.** `configs/autonomy.yaml` now records
   `pr_check_evidence_loop_verified`, removes
   `verify_pr_check_evidence_loop_before_autonomous_edits` from ordered work,

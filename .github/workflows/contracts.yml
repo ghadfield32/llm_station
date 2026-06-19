@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    paths: [configs/**, src/**, tests/**, pyproject.toml, .github/workflows/contracts.yml]
+    branches: [main]
 permissions:
   contents: read
 jobs:
