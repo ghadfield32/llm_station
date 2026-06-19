@@ -1,0 +1,86 @@
+{
+  "blockers": [],
+  "branch_protection": [
+    {
+      "app_admin_visibility_required": false,
+      "branch": "main",
+      "code_owner_reviews_required": false,
+      "repository": "ghadfield32/llm_station",
+      "required_pull_request_reviews_present": false,
+      "required_status_checks_present": false,
+      "status": 403,
+      "verification_source": "owner_admin_observer_required",
+      "verified": false
+    }
+  ],
+  "env": [
+    {
+      "length": 7,
+      "name": "GITHUB_APP_ID",
+      "present": true
+    },
+    {
+      "length": 20,
+      "name": "GITHUB_CLIENT_ID",
+      "present": true
+    },
+    {
+      "length": 0,
+      "name": "GITHUB_APP_INSTALLATION_ID",
+      "present": false
+    },
+    {
+      "inside_repo": false,
+      "length": 89,
+      "name": "GITHUB_APP_PRIVATE_KEY_PATH",
+      "path_exists": true,
+      "present": true
+    },
+    {
+      "length": 0,
+      "name": "GITHUB_WEBHOOK_SECRET",
+      "present": false
+    }
+  ],
+  "evidence": [
+    "read configs/autonomy.yaml github_app_auth",
+    "read .env key presence without printing values",
+    "GitHub /app metadata returned 200",
+    "GitHub /app/installations returned 200",
+    "installation id env absent; selecting installation by configured owner",
+    "GitHub installation access token request returned 201",
+    "selected repository ghadfield32/llm_station returned 200",
+    "GitHub App branch-protection endpoint is not a blocker; branch wall is verified by cc branch-protection-verify without granting the app Administration permission"
+  ],
+  "next_actions": [],
+  "permissions": {
+    "installation": {
+      "checks": "read",
+      "contents": "write",
+      "issues": "read",
+      "metadata": "read",
+      "pull_requests": "write",
+      "statuses": "read"
+    },
+    "installation_token": {
+      "checks": "read",
+      "contents": "write",
+      "issues": "read",
+      "metadata": "read",
+      "pull_requests": "write",
+      "statuses": "read"
+    }
+  },
+  "repositories": [
+    {
+      "checks_status": 200,
+      "commit_status_status": 200,
+      "default_branch_status": 200,
+      "repo_status": 200,
+      "repository": "ghadfield32/llm_station"
+    }
+  ],
+  "secrets_printed": false,
+  "status": "pass",
+  "writes_performed": false
+}

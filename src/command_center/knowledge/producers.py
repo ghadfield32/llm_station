@@ -165,10 +165,14 @@ def produce_models(root: Path, now_iso: str) -> list[ConceptDraft]:
     lines = ["Local-only model roles (every role must be `provider: ollama, local: true`).", ""]
     if isinstance(roles, dict):
         for role, spec in roles.items():
-            cand = ""
-            if isinstance(spec, dict):
-                c = spec.get("candidates") or spec.get("model")
-                cand = (c[0] if isinstance(c, list) and c else c) or ""
+            # A role maps to a LIST of ranked candidate dicts (ModelRegistry
+            # schema). Render each candidate's model in priority order, matching
+            # render.py — never an empty string, which would misreport the route.
+            cands = spec if isinstance(spec, list) else []
+            ordered = sorted(
+                (c for c in cands if isinstance(c, dict)),
+                key=lambda c: c.get("priority", 99))
+            cand = ", ".join(c["model"] for c in ordered if c.get("model"))
             lines.append(f"- **{role}** → `{cand}`")
     fm = _concept(type_="System", title="Model roles",
                   description="Role → ranked local Ollama model candidates (no provider keys).",
@@ -304,6 +308,56 @@ def produce_apis(root: Path, now_iso: str) -> list[ConceptDraft]:
     return out
 
 
+# --------------------------------------------------------------------- agents (chat + kanban)
+
+def produce_channels(root: Path, now_iso: str) -> list[ConceptDraft]:
+    """The chat-gateway agents (Discord/Slack/Telegram/WhatsApp) from configs/channels.yaml."""
+    p = root / "configs" / "channels.yaml"
+    data = _load_yaml(p)
+    if not data:
+        return []
+    channels = data.get("channels") or []
+    lines = ["Chat-gateway agents — every channel is one more SURFACE, not a new authority: messages",
+             "route through LiteLLM (local-first) to the same Growth OS action layer, and none can",
+             "approve a mission card.", "",
+             "| Channel | Transport | Enabled | Model |", "|---|---|---|---|"]
+    for c in channels:
+        if isinstance(c, dict):
+            lines.append(f"| {c.get('name')} | {c.get('transport')} | {c.get('enabled')} "
+                         f"| {c.get('model')} |")
+    fm = _concept(type_="API", title="Chat-gateway agents (Discord/Slack/Telegram/WhatsApp)",
+                  description="The chat agents, their transports, enabled state, and model roles.",
+                  resource="config://configs/channels.yaml",
+                  tags=["agents", "discord", "chat", "gateway"], now_iso=now_iso,
+                  source_system=SourceSystem.CONFIG, source_path="configs/channels.yaml",
+                  source_hash=_sha256_file(p), confidence=Confidence.VERIFIED)
+    return [ConceptDraft("APIs", "chat-gateway-agents", fm, "\n".join(lines))]
+
+
+def produce_kanban(root: Path, now_iso: str) -> list[ConceptDraft]:
+    """The Kanban bridge agent from configs/kanban.yaml — Approved cards → Ledger missions."""
+    p = root / "configs" / "kanban.yaml"
+    data = _load_yaml(p)
+    if not data:
+        return []
+    sections = data.get("sections") or []
+    lines = ["The Kanban bridge — Approved cards become Ledger missions. Agents may DRAFT cards;",
+             "only a human drag to Approved dispatches one. Dispatch sections + risk ceilings:", "",
+             "| Section | Target kind | Max auto risk | Ready statuses |", "|---|---|---|---|"]
+    for s in sections:
+        if isinstance(s, dict):
+            ready = ", ".join(s.get("ready_statuses", []) or [])
+            lines.append(f"| {s.get('name')} | {s.get('target_kind', '')} "
+                         f"| {s.get('max_auto_risk', '')} | {ready} |")
+    fm = _concept(type_="Data Pipeline", title="Kanban bridge (cards → missions)",
+                  description="The dispatch contract: sections, risk ceilings, ready statuses.",
+                  resource="config://configs/kanban.yaml",
+                  tags=["kanban", "agents", "dispatch", "appflowy"], now_iso=now_iso,
+                  source_system=SourceSystem.CONFIG, source_path="configs/kanban.yaml",
+                  source_hash=_sha256_file(p), confidence=Confidence.VERIFIED)
+    return [ConceptDraft("pipelines", "kanban-bridge", fm, "\n".join(lines))]
+
+
 # --------------------------------------------------------------------- experiments (the Ledger)
 
 def produce_experiments(root: Path, now_iso: str) -> list[ConceptDraft]:
@@ -344,7 +398,8 @@ def produce_experiments(root: Path, now_iso: str) -> list[ConceptDraft]:
 ALL_PRODUCERS = [
     produce_risk_tiers, produce_operator_interface, produce_configuration_model,
     produce_standards, produce_models, produce_repositories, produce_dags,
-    produce_pipelines, produce_metrics, produce_apis, produce_experiments,
+    produce_pipelines, produce_metrics, produce_apis, produce_channels,
+    produce_kanban, produce_experiments,
 ]
 
 # sections that always exist in a full bundle even when a producer emits nothing yet

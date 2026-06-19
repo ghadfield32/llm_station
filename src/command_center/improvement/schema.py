@@ -23,7 +23,7 @@ Rejected at validation time (each has a contract test):
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -194,6 +194,7 @@ class ExperimentDefinition(Strict):
     hypothesis: str
     baseline: str                                  # description / ref of the current behavior
     candidate: str                                 # description / ref of the proposed change
+    parameters: dict[str, Any] = Field(default_factory=dict)
     risk_tier: RiskTier = RiskTier.L2
     status: ExperimentStatus = ExperimentStatus.PROPOSED
     automated: bool = True                         # proactive-proposed + runner-driven by default
@@ -283,6 +284,123 @@ class ImprovementConfig(Strict):
         ids = [e.experiment_id for e in self.experiments]
         if len(ids) != len(set(ids)):
             raise ValueError("duplicate experiment_id values in improvement.yaml")
+        return self
+
+
+class ModelBenchmarkDefaults(Strict):
+    timeout_seconds: int = Field(ge=1)
+    temperature: float = Field(ge=0)
+    num_predict: int = Field(ge=1)
+
+
+class ModelBenchmarkCase(Strict):
+    id: str
+    prompt: str
+    response_format: Literal["json"] | None = None
+    metric_tags: list[str] = Field(default_factory=list)
+    expected_contains: list[str] = Field(default_factory=list)
+    forbidden_contains: list[str] = Field(default_factory=list)
+    required_json_keys: list[str] = Field(default_factory=list)
+    expected_json_values: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    safety: bool = False
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.id:
+            raise ValueError("benchmark case id is required")
+        if not self.prompt:
+            raise ValueError(f"benchmark case {self.id!r} prompt is required")
+        if not self.metric_tags:
+            raise ValueError(f"benchmark case {self.id!r} must declare metric_tags")
+        if len(self.metric_tags) != len(set(self.metric_tags)):
+            raise ValueError(f"benchmark case {self.id!r} has duplicate metric_tags")
+        if (not self.expected_contains and not self.forbidden_contains
+                and not self.required_json_keys and not self.expected_json_values):
+            raise ValueError(
+                f"benchmark case {self.id!r} must define expected_contains, "
+                "forbidden_contains, required_json_keys, or expected_json_values")
+        has_json_checks = bool(self.required_json_keys or self.expected_json_values)
+        if has_json_checks and self.response_format != "json":
+            raise ValueError(
+                f"benchmark case {self.id!r} uses JSON checks and must declare "
+                "response_format: json")
+        if self.response_format == "json" and not has_json_checks:
+            raise ValueError(
+                f"benchmark case {self.id!r} declares response_format: json but has no "
+                "JSON checks")
+        if self.expected_json_values:
+            missing = [
+                key for key in self.expected_json_values
+                if key not in self.required_json_keys
+            ]
+            if missing:
+                raise ValueError(
+                    f"benchmark case {self.id!r} expected_json_values keys must also "
+                    f"appear in required_json_keys: {missing}")
+        return self
+
+
+class ModelMetricPolicy(Strict):
+    primary: list[str]
+    hard_non_regression: list[str]
+    supporting: list[str] = Field(default_factory=list)
+    directions: dict[str, MetricDirection]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.primary:
+            raise ValueError("model metric policy needs at least one primary metric")
+        if not self.hard_non_regression:
+            raise ValueError("model metric policy needs at least one hard non-regression metric")
+        names = self.primary + self.hard_non_regression + self.supporting
+        if len(names) != len(set(names)):
+            raise ValueError("model metric policy contains duplicate metric names")
+        missing = [name for name in names if name not in self.directions]
+        if missing:
+            raise ValueError(f"model metric policy missing directions for {missing}")
+        extra = [name for name in self.directions if name not in names]
+        if extra:
+            raise ValueError(f"model metric policy directions contains unknown metrics {extra}")
+        return self
+
+
+class ModelBenchmarkSuite(Strict):
+    role: str
+    description: str
+    metric_policy: ModelMetricPolicy
+    cases: list[ModelBenchmarkCase]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.role:
+            raise ValueError("model benchmark suite role is required")
+        if not self.cases:
+            raise ValueError(f"model benchmark suite {self.role!r} has no cases")
+        known_metrics = (
+            self.metric_policy.primary
+            + self.metric_policy.hard_non_regression
+            + self.metric_policy.supporting
+        )
+        unknown_tags = sorted({
+            tag for case in self.cases for tag in case.metric_tags
+            if tag not in known_metrics
+        })
+        if unknown_tags:
+            raise ValueError(
+                f"model benchmark suite {self.role!r} cases reference unknown metric_tags "
+                f"{unknown_tags}")
+        return self
+
+
+class ModelBenchmarksConfig(Strict):
+    schema_version: str
+    defaults: ModelBenchmarkDefaults
+    suites: dict[str, ModelBenchmarkSuite]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.suites:
+            raise ValueError("model benchmark config must define at least one suite")
         return self
 
 

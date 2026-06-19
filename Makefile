@@ -18,7 +18,8 @@ LITELLM_DIGEST ?= ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0
         improvement-run improvement-verify improvement-report improvement-request-promotion \
         improvement-canary improvement-promote improvement-rollback improvement-post-watch \
         improvement-board improvement-propose improvement-scan improvement-scan-validate \
-        knowledge-generate knowledge-validate judge-calibration attention-digest
+        knowledge-generate knowledge-validate judge-calibration attention-digest \
+        kanban-digest kanban-surface-validate kanban-board-snapshot
 
 help:  ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -184,8 +185,8 @@ models-rollback:  ## Revert canary for ROLE=
 	@$(COMPOSE) restart litellm && echo "rolled back $(ROLE)"
 
 model-scout:  ## Propose model candidates from configured sources. Never edits configs.
-	@$(PY) -m command_center.registry.model_scout --output generated/model-scout-report.md || true
-	@echo "review generated/model-scout-report.md, then edit configs/models.yaml manually if warranted"
+	@$(PY) -m command_center.registry.model_scout --output generated/model-scout-report.md --feed-output generated/model-scout-feed.json || true
+	@echo "review generated/model-scout-report.md; daily scan feed is generated/model-scout-feed.json"
 
 model-fit:  ## Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
 	@$(PY) -m command_center.cli.model_fit $(if $(CTX),--ctx $(CTX),) $(if $(MODEL),--model $(MODEL),) $(if $(ENV),--env $(ENV),) $(if $(VRAM),--vram-gb $(VRAM),)
@@ -195,8 +196,17 @@ usage-digest:  ## Write generated/usage-digest.md from LiteLLM + Ledger usage AP
 
 usage-report: usage-digest  ## Alias for usage-digest
 
+kanban-digest:  ## Write generated/kanban-digest.md — agent-surface metrics + tuning verdict (real data)
+	@$(PY) -m command_center.cli.kanban_surface digest --output generated/kanban-digest.md
+
+kanban-surface-validate:  ## Blocking N/N gate for the agent kanban surface (config/leakage/verbs/tuning)
+	@$(PY) -m command_center.cli.kanban_surface validate
+
+kanban-board-snapshot:  ## Write generated/board-snapshot.json for the UI (run on the worker; needs growthos + AppFlowy creds)
+	@$(PY) -m command_center.cli.kanban_surface board-snapshot --output generated/board-snapshot.json
+
 live-smoke:  ## Print real local model replies through Ollama/LiteLLM. TRIAGE=triage PLANNER=planner JUDGE=local-judge
-	@bash scripts/live_smoke.sh $(or $(TRIAGE),triage) $(or $(PLANNER),planner) $(or $(JUDGE),local-judge)
+	@uv run cc live-smoke $(or $(TRIAGE),triage) $(or $(PLANNER),planner) $(or $(JUDGE),local-judge)
 
 repo-install:  ## Install hooks + devcontainer + standards into a repo. REPO=/path [PROFILE=python_ml_pipeline]
 	@test -n "$(REPO)" || { echo "usage: make repo-install REPO=/path/to/repo [PROFILE=python_ml_pipeline]"; exit 1; }
@@ -221,6 +231,9 @@ channels-validate:  ## Validate configs/channels.yaml (chat transport registry)
 gateway:  ## Run enabled chat channels from configs/channels.yaml. Installs the gateways extra first.
 	@if [ -n "$(UV)" ]; then uv pip install -e ".[gateways]" --python $(PY) --quiet; else $(PY) -m pip install -e ".[gateways]" --quiet; fi
 	@$(PY) -m command_center.channels $(if $(CHANNELS),--channels $(CHANNELS),)
+
+notify:  ## Push a proactive digest (brief + active missions) to Discord. ARGS=--dry-run to preview.
+	@$(PY) -m command_center.cli.notify $(ARGS)
 
 lint:  ## ruff + mypy over src/ (install the dev extra first: uv pip install -e ".[dev]")
 	@$(PY) -m ruff check src
@@ -266,6 +279,8 @@ knowledge-generate:  ## Generate the observer-only OKF knowledge/ bundle from au
 	@$(PY) -m command_center.cli.knowledge generate
 knowledge-validate:  ## Blocking validation gate for the knowledge/ bundle (N/N PASS)
 	@$(PY) -m command_center.cli.knowledge validate
+system-validation:  ## Write whole-system validation evidence from real config state. RUN_ID= optional
+	@$(PY) -m command_center.cli.system_validation $(if $(RUN_ID),--run-id $(RUN_ID),)
 judge-calibration:  ## Score the judge against the calibration set (TP/FP/FN/precision/recall)
 	@$(PY) -m command_center.cli.improvement calibration
 attention-digest:  ## Print the human-attention morning brief + queue metrics

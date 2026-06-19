@@ -8,8 +8,12 @@ a slug derived from the title (recomputed here, callers just pass titles).
 """
 from __future__ import annotations
 
+import difflib
 from datetime import date, timedelta
+from functools import lru_cache
 from pathlib import Path
+
+import yaml
 
 from .config import load_settings
 from .appflowy import AppFlowyClient
@@ -28,6 +32,16 @@ STATUSES = {
 }
 TODO_AREAS = ["Betts Basketball", "DAGs", "Growth OS", "Learning", "Life"]
 PRIORITIES = ["P0", "P1", "P2", "P3"]
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "config" / "schema.yaml"
+# Fields owned by the workflow/bridge or by the row identity itself. The agent may
+# edit descriptive/grouping fields, but these stay under their purpose-built verbs
+# or the human/bridge path.
+PROTECTED_UPDATE_FIELDS = frozenset({
+    "Name", "Title", "Task", "Headline", "Lesson", "Package",
+    "Status", "CardKey", "Key", "MissionID", "Branch", "LastSync",
+    "Created", "LastSeen", "PublishedAt", "PostURN", "Done", "Type",
+    "ArxivID", "DagID", "URL",
+})
 
 _client: AppFlowyClient | None = None
 
@@ -58,6 +72,70 @@ def _rows(db: str) -> list[dict]:
 
 def _date_str(v) -> str:
     return v.get("pretty_start_date", "") if isinstance(v, dict) else (v or "")
+
+
+@lru_cache(maxsize=1)
+def _workspace_schema() -> dict:
+    """Committed AppFlowy schema. Missing/invalid schema is a hard error: field
+    powers must come from the real workspace contract, never from guesses."""
+    return yaml.safe_load(SCHEMA_PATH.read_text(encoding="utf-8")) or {}
+
+
+def _schema_spec(database: str) -> dict:
+    schema = _workspace_schema()
+    dbs = schema.get("databases") or {}
+    if database in dbs:
+        return dbs[database]
+    if database.endswith("_content") and "content_template" in schema:
+        return schema["content_template"]
+    if database.endswith("_board") and "project_template" in schema:
+        return schema["project_template"]
+    raise KeyError(database)
+
+
+def _field_spec(database: str, field: str):
+    spec = (_schema_spec(database).get("fields") or {}).get(field)
+    if spec is None:
+        allowed = sorted((_schema_spec(database).get("fields") or {}).keys())
+        raise KeyError(f"{field!r}; allowed fields for {database}: {allowed}")
+    return spec
+
+
+def _field_type_options(spec) -> tuple[str, list[str]]:
+    if isinstance(spec, str):
+        return spec, []
+    return str(spec.get("type", "")), list(spec.get("options") or [])
+
+
+def _select_options(database: str, field: str) -> list[str]:
+    kind, options = _field_type_options(_field_spec(database, field))
+    return options if kind == "select" else []
+
+
+def _coerce_field_value(database: str, field: str, value: str):
+    if value == "":
+        raise ValueError(
+            "empty writes are not supported by the current AppFlowy client; set a "
+            "new value, or clear the field in AppFlowy until REST clear semantics "
+            "are verified")
+    kind, options = _field_type_options(_field_spec(database, field))
+    if kind == "select":
+        if value not in options:
+            raise ValueError(f"{field} must be one of {options}")
+        return value
+    if kind == "number":
+        return float(value)
+    if kind == "checkbox":
+        lowered = value.lower()
+        if lowered not in ("true", "false"):
+            raise ValueError(f"{field} checkbox value must be true or false")
+        return lowered == "true"
+    if kind == "date":
+        date.fromisoformat(value)
+        return value
+    if kind in ("text", "longtext", "url"):
+        return value
+    raise ValueError(f"{field} has unsupported schema type {kind!r}")
 
 
 # ----------------------------------------------------------------- triage --
@@ -110,6 +188,281 @@ def set_status(database: str, key: str, status: str) -> str:
             key = _slug(prefix, key)
     n = client().upsert(database, [{"pre_hash": key, "cells": {"Status": status}}])
     return f"updated {len(n)} row(s) in {database}"
+
+
+# --------------------------------------------------------- intent verbs --
+# Agents move work by INTENT, not by typing a database name + an exact column
+# string. Each verb addresses a row by its human title; the harness owns the
+# (board, column, key) bookkeeping. This is the agent-facing surface (set_status
+# stays for the bridge/scripts but is not exposed as an agent tool). Approved is
+# never a verb — staging to Approved is a human drag, structurally.
+
+def _row_key(database: str, cells: dict) -> str:
+    """The pre_hash a row was created with, per board — the only valid upsert key."""
+    if cells.get("CardKey"):
+        return cells["CardKey"]
+    if cells.get("Key"):
+        return cells["Key"]
+    if database == "mission_intake":
+        return cells.get("CardKey") or _slug("card", cells.get("Name", ""))
+    prefix = {"todos": "todo", "library": "book",
+              "lessons": "lesson", "notes": "note"}.get(database)
+    if prefix:
+        return _slug(prefix, cells.get("Name", ""))
+    return cells.get(KEY_FIELD.get(database, "URL"), "")
+
+
+def _resolve(database: str, title: str):
+    """Resolve a human title to (key, name, cells). An exact (case-insensitive)
+    name wins; otherwise the single best fuzzy match at/above the configured ratio
+    wins. If nothing is confident or two rows tie above the ratio, return a string
+    listing candidates so the agent retries with an exact title — never a silent
+    best-guess. The ratio is data-derived (configs/agent_surface.yaml), not a literal."""
+    rows = [c for c in _rows(database) if c.get("Name")]
+    for c in rows:
+        if c.get("Name", "").lower() == title.lower():
+            return _row_key(database, c), c["Name"], c
+    from command_center.channels.board_state import load_agent_surface_config
+    ratio = load_agent_surface_config().addressing.fuzzy_min_ratio
+    scored = sorted(
+        ((difflib.SequenceMatcher(None, title.lower(), c["Name"].lower()).ratio(), c)
+         for c in rows), key=lambda t: t[0], reverse=True)
+    if scored and scored[0][0] >= ratio and (
+            len(scored) == 1 or scored[1][0] < ratio):
+        best = scored[0][1]
+        return _row_key(database, best), best["Name"], best
+    near = [c["Name"] for _, c in scored[:5]]
+    return (f"no confident match for {title!r} in {database}; candidates: "
+            f"{near or '(board empty)'} - retry with an exact title")
+
+
+def _move(database: str, title: str, status: str, note: str = "") -> str:
+    """Resolve `title` and set its Status (+ append a dated note, clobber-safe)."""
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, cells = resolved
+    new_cells: dict = {"Status": status}
+    if note:
+        existing = cells.get("Notes", "") or ""
+        new_cells["Notes"] = f"{existing}\n[{date.today().isoformat()}] {note}".strip()
+    client().upsert(database, [{"pre_hash": key, "cells": new_cells}])
+    return f"{name!r} -> {status}" + (f" (noted: {note})" if note else "")
+
+
+def stage_card(title: str) -> str:
+    """Stage a mission card to Ready (the human then drags Ready->Approved to
+    dispatch a gated Ledger mission). Address it by its title."""
+    return _move("mission_intake", title, "Ready")
+
+
+def block_card(title: str, reason: str = "") -> str:
+    """Mark a mission card Blocked, recording why. Address it by its title."""
+    return _move("mission_intake", title, "Blocked", note=reason)
+
+
+def reject_card(title: str, reason: str = "") -> str:
+    """Reject a mission card (won't be done), recording why. By title."""
+    return _move("mission_intake", title, "Rejected", note=reason)
+
+
+def start_todo(task: str) -> str:
+    """Move a todo to In Progress. Address it by its task title."""
+    return _move("todos", task, "In Progress")
+
+
+def finish_todo(task: str) -> str:
+    """Mark a todo Done. Address it by its task title."""
+    return _move("todos", task, "Done")
+
+
+def block_todo(task: str, reason: str = "") -> str:
+    """Mark a todo Blocked, recording why. Address it by its task title."""
+    return _move("todos", task, "Blocked", note=reason)
+
+
+def move_item(database: str, title: str, status: str) -> str:
+    """Move ANY board row to a new status by its title — the long-tail boards
+    without a dedicated verb: papers/repos/signals triage, library, lessons. The
+    harness resolves the row and validates the status against that board LOUDLY,
+    so the model never has to know row keys. For mission cards use stage/block/
+    reject_card; for todos use start/finish/block_todo; for DAGs use update_dag."""
+    try:
+        allowed = STATUSES.get(database) or _select_options(database, "Status")
+    except KeyError:
+        allowed = None
+    if not allowed:
+        return (f"unknown board {database!r}; boards with statuses: "
+                f"{sorted(STATUSES)}")
+    if database == "mission_intake" and status == "Approved":
+        return ("refused: approving mission cards is human-only - drag the card "
+                "to Approved on the board. Use stage_card to move it to Ready.")
+    if status not in allowed:
+        return f"invalid status {status!r} for {database}; allowed: {allowed}"
+    return _move(database, title, status)
+
+
+def annotate_item(database: str, title: str, note: str) -> str:
+    """Append a dated note to any board row that actually has a Notes field
+    (mission cards, todos, DAGs, library, packages, project/content boards, etc.).
+    Address the row by title; the harness resolves the stable row key and appends
+    without clobbering existing notes. Boards without Notes fail loudly."""
+    if not note.strip():
+        return "nothing to annotate"
+    try:
+        _field_spec(database, "Notes")
+    except KeyError:
+        return f"{database!r} has no Notes field in config/schema.yaml"
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, cells = resolved
+    if not key:
+        return (f"cannot safely annotate {name!r} in {database}: no stable row "
+                "key field was present")
+    existing = cells.get("Notes", "") or ""
+    stamped = f"[{date.today().isoformat()}] {note.strip()}"
+    client().upsert(database, [{"pre_hash": key,
+                                "cells": {"Notes": f"{existing}\n{stamped}".strip()}}])
+    return f"noted on {database}/{name!r}"
+
+
+def set_item_field(database: str, title: str, field: str, value: str) -> str:
+    """Set one real schema field on a board row: grouping/metadata such as
+    Section, Area, Priority, Risk, Due, Tags, Pillar, Format, Module, Tier, Action,
+    Acceptance, Owners, etc. Field names and select options are validated from
+    config/schema.yaml. For Status/columns use move_item or the dedicated verbs;
+    approval/writeback/key fields are not editable by this generic tool. To remove
+    a free-text grouping, rewrite the field without that value; blank clears are
+    not supported by the current AppFlowy write client."""
+    if field in PROTECTED_UPDATE_FIELDS:
+        if field == "Status":
+            return "use move_item or the dedicated lifecycle verbs for Status"
+        return f"{field!r} is not editable through set_item_field"
+    try:
+        coerced = _coerce_field_value(database, field, value)
+    except KeyError as exc:
+        return f"unknown field {exc}"
+    except ValueError as exc:
+        return f"invalid {field!r} for {database}: {exc}"
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, _cells = resolved
+    if not key:
+        return (f"cannot safely update {name!r} in {database}: no stable row "
+                "key field was present")
+    client().upsert(database, [{"pre_hash": key, "cells": {field: coerced}}])
+    return f"updated {database}/{name!r}: {field}={value!r}"
+
+
+def remove_item_field_value(database: str, title: str, field: str, value: str) -> str:
+    """Remove one exact value from a grouped text field such as Tags, Topics,
+    Owners, Media, or similar comma/newline-separated schema text fields. This
+    is the safe "take away this grouping" path for free-text groupings: it
+    rewrites the remaining values and refuses if removal would require clearing
+    the field entirely. For select fields (Section/Area/Priority/Risk/Format)
+    use set_item_field to move to a different valid option."""
+    if field in PROTECTED_UPDATE_FIELDS:
+        return f"{field!r} is not editable through remove_item_field_value"
+    try:
+        kind, _options = _field_type_options(_field_spec(database, field))
+    except KeyError as exc:
+        return f"unknown field {exc}"
+    if kind not in ("text", "longtext"):
+        return (f"{field!r} is a {kind} field, not a grouped text field; "
+                "use set_item_field for select/date/number fields")
+    needle = value.strip()
+    if not needle:
+        return "nothing to remove"
+    resolved = _resolve(database, title)
+    if isinstance(resolved, str):
+        return resolved
+    key, name, cells = resolved
+    if not key:
+        return (f"cannot safely update {name!r} in {database}: no stable row "
+                "key field was present")
+    existing = str(cells.get(field, "") or "")
+    parts = [p.strip() for p in existing.replace("\n", ",").split(",") if p.strip()]
+    kept = [p for p in parts if p.lower() != needle.lower()]
+    if len(kept) == len(parts):
+        return f"{field!r} on {database}/{name!r} has no value {needle!r}"
+    if not kept:
+        return (f"removing {needle!r} would clear {field!r}; blank clears are "
+                "not supported until AppFlowy REST clear semantics are verified")
+    new_value = ", ".join(kept)
+    client().upsert(database, [{"pre_hash": key, "cells": {field: new_value}}])
+    return f"updated {database}/{name!r}: removed {needle!r} from {field}"
+
+
+# Compact per-board meta shown on a UI card (besides the title + status column).
+_BOARD_META = {
+    "mission_intake": ["Risk", "Section", "Priority"],
+    "todos": ["Area", "Priority"],
+    "dags": ["Schedule"],
+    "papers": ["Score"], "repos": ["Score"], "signals": ["Score"],
+    "library": ["Tier"], "lessons": ["Domain"],
+}
+
+
+def board_view(database: str) -> dict:
+    """Read-only structured view of an ENTIRE board: every row grouped by its
+    Status into the board's canonical columns (an unfamiliar status is still
+    shown, never dropped). For a UI/snapshot — agents use list_*/the verbs."""
+    try:
+        cols = STATUSES.get(database) or _select_options(database, "Status")
+    except KeyError:
+        cols = None
+    if not cols:
+        return {"board": database,
+                "error": f"unknown board; have {sorted(STATUSES)}"}
+    groups: dict[str, list] = {c: [] for c in cols}
+    metas = _BOARD_META.get(database, [])
+    for c in _rows(database):
+        st = c.get("Status", "") or "(none)"
+        meta = " · ".join(str(c[m]) for m in metas if c.get(m))
+        # full scalar fields travel with the card so the UI can show ALL of them
+        # in the detail drawer (where it is, what it is) — not just title + meta.
+        fields = {k: v for k, v in c.items()
+                  if isinstance(v, (str, int, float)) and v != "" and k != "Name"}
+        groups.setdefault(st, []).append(
+            {"title": c.get("Name", ""), "meta": meta, "fields": fields})
+    return {"board": database,
+            "statuses": cols,   # full legal columns — the UI's "Move to…" targets
+            "columns": [{"name": col, "cards": rows}
+                        for col, rows in groups.items() if rows]}
+
+
+# Boards read_item can fetch a row from: every status board plus `notes` (a real
+# content board that has rows but no Status workflow, so it's absent from STATUSES).
+# Derived from the canonical status set, not a hand-listed literal.
+READABLE_DBS = set(STATUSES) | {"notes"}
+
+
+def read_item(database: str, title: str) -> dict | str:
+    """Full detail of ONE row so you can actually explain or triage it — a paper's
+    abstract, a repo's summary, its score and 'suggested for' note, status, url.
+    Returns EVERY non-empty field of the matching row (read-only; nothing is
+    truncated, so you see the real content). Match is by title, case-insensitive;
+    on a miss the closest titles come back so you retry with an exact one — never a
+    silent best-guess. database: papers, repos, signals, library, lessons, todos,
+    dags, mission_intake, or notes. Find the title first with search/list_inbox if
+    you don't have it."""
+    if database not in READABLE_DBS:
+        return f"unknown board {database!r}; have {sorted(READABLE_DBS)}"
+    rows = [c for c in _rows(database) if c.get("Name")]
+    match = next((c for c in rows
+                  if c.get("Name", "").lower() == title.lower()), None)
+    if match is None:
+        scored = sorted(
+            ((difflib.SequenceMatcher(None, title.lower(),
+                                      c["Name"].lower()).ratio(), c) for c in rows),
+            key=lambda t: t[0], reverse=True)
+        near = [c["Name"] for _, c in scored[:5]]
+        return (f"no item titled {title!r} in {database}; closest: "
+                f"{near or '(board empty)'} - retry with an exact title")
+    return {k: v for k, v in match.items()
+            if isinstance(v, (str, int, float)) and str(v).strip()}
 
 
 # ------------------------------------------------------------------ todos --

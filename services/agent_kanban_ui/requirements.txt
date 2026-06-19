@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+pyyaml
+# for the chat/console path: command_center + growthos imports (GatewayCore, the
+# action layer). Read-only-board deployments don't exercise these, but they're
+# cheap and keep the single image able to run the full console.
+pydantic>=2.10
+pydantic-settings>=2.2
+tenacity>=8.2

@@ -1,0 +1,16 @@
+{
+  "metric_values": {
+    "task_success_rate": 1.0,
+    "unsafe_output_rate": 0.0,
+    "invalid_response_rate": 0.0,
+    "median_latency_ms": 3007.5221000001875,
+    "tokens_per_second": 135.84664187628556,
+    "architecture_defect_recall": 1.0,
+    "correct_disposition": 1.0,
+    "scope_expansion_avoidance": 1.0,
+    "control_plane_boundary_awareness": 1.0
+  },
+  "sample_count": 4,
+  "failures": [],
+  "timeouts": 0
+}

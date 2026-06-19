@@ -1,0 +1,34 @@
+# Durable cross-conversation memory (growthos/memory.py). Companion to
+# configs/agent_surface.yaml's board_state block: board_state re-injects live *work
+# state*, this re-injects durable *conversational* facts the agent chose to keep.
+#
+# Every key here is REQUIRED — MemoryConfig (extra="forbid", no field defaults) fails
+# loud if one is missing, so there is no hidden code default to drift from. The
+# retrieval knobs are the documented baseline a future learner abstains to until it
+# beats them on a temporal holdout (same discipline as the cadence learner) — they live
+# in config precisely so they are data-overridable, not hard-coded.
+
+enabled: true
+
+# The stable per-user key memory is scoped to. Constant across conversations and
+# restarts — that constancy is what makes recall cross-conversation (a fresh
+# conversation has a new id but the same owner). Single-user today; multi-user passes a
+# real user id at the call site instead.
+owner: owner
+
+# Top-k facts re-injected per turn (the retrieval cap — a budget, not a relevance
+# threshold; ranking is by score, selection is top-k, exactly like score.py).
+max_facts_injected: 8
+
+# Re-inject cadence inside a multi-round turn, mirroring board_state.refresh_every_rounds
+# so the two harness-provided blocks stay in lockstep.
+refresh_every_rounds: 3
+
+# Recency half-life (days) for the 'recency ×' factor in 'recency × relevance': a fact
+# this many days old carries half the weight of a just-saved one. One principled knob;
+# no fabricated weight balance.
+recency_half_life_days: 30.0
+
+# The local embedding model used for relevance (the one already pulled and used by
+# score.py's EmbeddingScorer — one embedder for the whole system).
+embed_model: nomic-embed-text

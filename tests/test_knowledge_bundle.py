@@ -55,6 +55,17 @@ def test_dags_producer_flags_observer_only(tmp_path):
     assert "observer-only: yes" in drafts[0].generated
 
 
+def test_discord_and_kanban_agents_become_concepts():
+    # the Kanban + Discord agents are first-class concepts (read from the real configs)
+    from command_center.knowledge.producers import produce_channels, produce_kanban
+    ch = produce_channels(Path("."), NOW)
+    assert ch and ch[0].section == "APIs" and ch[0].name == "chat-gateway-agents"
+    assert "discord" in ch[0].generated.lower()
+    kb = produce_kanban(Path("."), NOW)
+    assert kb and kb[0].section == "pipelines" and kb[0].name == "kanban-bridge"
+    assert "missions" in kb[0].generated.lower()
+
+
 def test_producers_are_deterministic(tmp_path):
     repo = _mini_repo(tmp_path)
     a = produce_risk_tiers(repo, NOW)[0]

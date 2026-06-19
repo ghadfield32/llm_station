@@ -19,13 +19,34 @@ roles:
     #      the survivor if one is down — that is the "route to more GPU" path.
     # - {alias: triage-5080, provider: ollama, model: "devstral:24b", priority: 2, local: true, monthly_budget_usd: 0, vram_gb: 14, license: Apache-2.0, api_base_env: OLLAMA_API_BASE_5080}
 
+  # Conversational chat surfaces (Discord/Slack/Telegram/WhatsApp gateway). This
+  # role exists DISTINCT from `triage` for one verified reason: tool-call format.
+  # qwen3-coder ships an Ollama RENDERER/PARSER (native, compiled-in) for its
+  # `<tool_call><function=..><parameter=..>` XML; that parser DROPS the call when
+  # the model narrates before calling a tool ("I'll search..." then the call) —
+  # reproduced 7/8 (Ollama) and 6/6 (full LiteLLM path). The call then leaks to
+  # the user as raw XML. qwen3 (instruct) uses Ollama's Go-template tool path,
+  # which parses `<tool_call>{json}</tool_call>` regardless of surrounding prose
+  # (0/8). Chat is tool-heavy and the model narrates, so it MUST use a
+  # template-parsed model. Keep this role off qwen3-coder. See
+  # docs/channels.md + WORKLOG.md (Channels / gateways).
+  chat:
+    - {alias: chat-qwen, provider: ollama, model: "qwen3:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+
   local-judge:
     - {alias: judge-qwen, provider: ollama, model: "qwen3:30b", priority: 1, local: true, vram_gb: 19, license: Apache-2.0}
     - {alias: judge-devstral, provider: ollama, model: "devstral:24b", priority: 2, local: true, vram_gb: 14, license: Apache-2.0}
 
+  # Hermes (HERMES_DEFAULT_MODEL=planner, docker-compose.yml) does its OWN
+  # tool-calling against LiteLLM, so planner is a TOOL-USING role — same
+  # constraint as `chat`: NO qwen3-coder. Its Ollama native parser drops a tool
+  # call the model prefixes with prose (verified 7/8), leaking raw `<function=..>`
+  # XML; qwen3 (instruct) parses tool calls via the Go-template path regardless of
+  # prose. qwen3:30b plans + tool-calls reliably; devstral:24b is the cross-family
+  # tool-robust failover. See `chat:` above + MASTER.md §14 (2026-06-13).
   planner:
-    - {alias: planner-local, provider: ollama, model: "qwen3-coder:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
-    - {alias: planner-judge, provider: ollama, model: "qwen3:30b", priority: 2, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+    - {alias: planner-qwen, provider: ollama, model: "qwen3:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
+    - {alias: planner-devstral, provider: ollama, model: "devstral:24b", priority: 2, local: true, monthly_budget_usd: 0, vram_gb: 14, license: Apache-2.0}
 
   coder:
     - {alias: coder-local, provider: ollama, model: "qwen3-coder:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
@@ -54,9 +75,10 @@ local_whitelist:
 
 # The model scout proposes candidates and annotates each with VRAM fit on the
 # 4090 (WS1 gate). Discovery is keyless-first; provider routes stay forbidden in
-# roles. artificial-analysis runs only if AA_API_KEY is set (optional tiebreaker).
+# roles. curated-openweight is the versioned provenance-clean source; artificial-analysis
+# runs only if AA_API_KEY is set (optional tiebreaker).
 scout:
   cadence: monthly
-  sources: [aider-polyglot, local-ollama-tags, artificial-analysis]
+  sources: [aider-polyglot, local-ollama-tags, curated-openweight, artificial-analysis]
   propose_only: true
   max_candidates_per_run: 10

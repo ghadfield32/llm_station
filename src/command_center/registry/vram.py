@@ -30,6 +30,7 @@ a missing number is reported as an error, not papered over.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 
 import httpx
@@ -85,6 +86,9 @@ class Estimate:
     headroom_gb: float              # budget - total (positive == spare)
     max_ctx_fits: int               # largest context that still fits the budget
     weights_source: str             # "ollama_tags" | "bpw_estimate"
+    reserved_gb: float = 0.0        # VRAM held for always-resident companions (e.g. the
+                                    # memory embedder) — subtracted from the budget before
+                                    # this model's fit is decided
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -128,9 +132,13 @@ def max_ctx_fits(
     kv_bytes: float = KV_BYTES_FP16,
     baseline_gb: float = CUDA_BASELINE_GB,
     headroom_frac: float = SAFETY_HEADROOM_FRAC,
+    reserved_gb: float = 0.0,
 ) -> int:
-    """Largest context (tokens) whose total footprint still fits the budget."""
-    usable = budget_gb / (1.0 + headroom_frac) - baseline_gb - weights_gb
+    """Largest context (tokens) whose total footprint still fits the budget.
+
+    reserved_gb is VRAM already committed to always-resident companions (e.g. the
+    memory embedder); it shrinks the usable budget before this model's KV cache."""
+    usable = budget_gb / (1.0 + headroom_frac) - baseline_gb - weights_gb - reserved_gb
     if usable <= 0:
         return 0
     per_token_gb = n_layers * n_kv_heads * (key_length + value_length) * kv_bytes / GIB
@@ -154,8 +162,13 @@ def estimate_from_metadata(
     kv_bytes: float = KV_BYTES_FP16,
     baseline_gb: float = CUDA_BASELINE_GB,
     headroom_frac: float = SAFETY_HEADROOM_FRAC,
+    reserved_gb: float = 0.0,
 ) -> Estimate:
-    """Build a full Estimate from already-resolved metadata (no network)."""
+    """Build a full Estimate from already-resolved metadata (no network).
+
+    `reserved_gb` is VRAM held by always-resident companions (e.g. the memory
+    embedder); it is charged against the budget alongside this model's own footprint,
+    so a model is only `fits` when model + companions + headroom all fit at once."""
     kv = kv_cache_gb(
         n_layers=n_layers, n_kv_heads=n_kv_heads,
         key_length=key_length, value_length=value_length,
@@ -173,14 +186,16 @@ def estimate_from_metadata(
         kv_gb=round(kv, 3),
         total_gb=round(total, 3),
         budget_gb=round(budget, 3),
-        fits=total * (1.0 + headroom_frac) <= budget,
-        headroom_gb=round(budget - total, 3),
+        fits=(total + reserved_gb) * (1.0 + headroom_frac) <= budget,
+        headroom_gb=round(budget - total - reserved_gb, 3),
         max_ctx_fits=max_ctx_fits(
             weights_gb=weights_gb, n_layers=n_layers, n_kv_heads=n_kv_heads,
             key_length=key_length, value_length=value_length, budget_gb=budget,
             kv_bytes=kv_bytes, baseline_gb=baseline_gb, headroom_frac=headroom_frac,
+            reserved_gb=reserved_gb,
         ),
         weights_source=weights_source,
+        reserved_gb=round(reserved_gb, 3),
     )
 
 
@@ -201,8 +216,12 @@ def _client(base_url: str) -> httpx.Client:
     return httpx.Client(base_url=base_url, timeout=30)
 
 
-def ollama_tags(base_url: str = DEFAULT_OLLAMA_BASE) -> dict[str, int]:
-    """name -> on-disk size in bytes for every installed model."""
+def ollama_tag_records(base_url: str = DEFAULT_OLLAMA_BASE) -> list[dict]:
+    """Raw model records from Ollama /api/tags.
+
+    This is the provenance source for local model discovery: name, digest, size,
+    and details are whatever Ollama reports. Shape errors fail loudly.
+    """
     try:
         with _client(base_url) as c:
             r = c.get("/api/tags")
@@ -213,7 +232,13 @@ def ollama_tags(base_url: str = DEFAULT_OLLAMA_BASE) -> dict[str, int]:
     models = data.get("models")
     if not isinstance(models, list):
         raise VramError("Ollama /api/tags returned an unexpected shape (no 'models' list)")
-    return {m["name"]: int(m["size"]) for m in models if "name" in m and "size" in m}
+    return [m for m in models if isinstance(m, dict)]
+
+
+def ollama_tags(base_url: str = DEFAULT_OLLAMA_BASE) -> dict[str, int]:
+    """name -> on-disk size in bytes for every installed model."""
+    return {m["name"]: int(m["size"]) for m in ollama_tag_records(base_url)
+            if "name" in m and "size" in m}
 
 
 def ollama_show(name: str, base_url: str = DEFAULT_OLLAMA_BASE) -> dict:
@@ -240,6 +265,39 @@ def ollama_ps(base_url: str = DEFAULT_OLLAMA_BASE) -> dict[str, dict]:
         if "name" in m:
             out[m["name"]] = m
     return out
+
+
+def _resolve_installed(name: str, registry: Mapping[str, object]) -> str | None:
+    """Match an Ollama model name against a /api/tags or /api/ps registry, resolving
+    Ollama's implicit ':latest' tag (the registry lists 'nomic-embed-text:latest' but a
+    caller — and the embed endpoint — accept the untagged 'nomic-embed-text'). Returns
+    the registry key or None. Not a fuzzy fallback: only the exact name or its :latest."""
+    if name in registry:
+        return name
+    tagged = f"{name}:latest"
+    return tagged if tagged in registry else None
+
+
+def resident_weight_gb(name: str, base_url: str = DEFAULT_OLLAMA_BASE) -> float:
+    """Resident VRAM footprint of an always-on companion model (e.g. the memory
+    embedder), so the chat-model fit gate can charge for it.
+
+    Data-derived, never a hand-picked number: prefer the model's ACTUAL resident size
+    from /api/ps when it is loaded (ground truth); otherwise its real on-disk weight
+    bytes (/api/tags) plus the CUDA baseline every loaded model carries. An embedding
+    model has no autoregressive KV cache, so weights + baseline is its footprint. Fails
+    loud if the model isn't installed — a missing companion is not silently free."""
+    ps = ollama_ps(base_url)
+    pk = _resolve_installed(name, ps)
+    if pk is not None and "size_vram" in ps[pk]:
+        return int(ps[pk]["size_vram"]) / GIB
+    sizes = ollama_tags(base_url)
+    sk = _resolve_installed(name, sizes)
+    if sk is None:
+        raise VramError(
+            f"{name!r} is not installed; cannot reserve its VRAM. Pull it or correct "
+            "the reserved-companion name.")
+    return sizes[sk] / GIB + CUDA_BASELINE_GB
 
 
 def _info_int(info: dict, key: str) -> int:
@@ -311,14 +369,17 @@ def estimate_installed(
     budget_gb: float,
     base_url: str = DEFAULT_OLLAMA_BASE,
     kv_bytes: float = KV_BYTES_FP16,
+    reserved_gb: float = 0.0,
 ) -> Estimate:
-    """Estimate one installed model end to end (tags + show)."""
+    """Estimate one installed model end to end (tags + show). reserved_gb charges for
+    always-resident companions (e.g. the memory embedder) against the same budget."""
     sizes = ollama_tags(base_url)
     if name not in sizes:
         raise VramError(f"{name!r} is not an installed Ollama model")
     meta = metadata_for(name, show=ollama_show(name, base_url), size_bytes=sizes[name])
     eff_ctx = min(ctx, meta["native_ctx"])
-    return estimate_from_metadata(ctx=eff_ctx, budget_gb=budget_gb, kv_bytes=kv_bytes, **meta)
+    return estimate_from_metadata(ctx=eff_ctx, budget_gb=budget_gb, kv_bytes=kv_bytes,
+                                  reserved_gb=reserved_gb, **meta)
 
 
 def list_installed_estimates(
@@ -327,11 +388,14 @@ def list_installed_estimates(
     budget_gb: float,
     base_url: str = DEFAULT_OLLAMA_BASE,
     kv_bytes: float = KV_BYTES_FP16,
+    reserved_gb: float = 0.0,
 ) -> tuple[list[Estimate], list[str]]:
     """Estimate every installed model. Returns (estimates, errors).
 
-    Errors (e.g. embedding models with no attention metadata) are collected and
-    returned, not swallowed -- the caller surfaces them.
+    reserved_gb charges always-resident companions (e.g. the memory embedder) against
+    the budget so the fit verdict reflects what the GPU holds at once. Errors (e.g.
+    embedding models with no attention metadata) are collected and returned, not
+    swallowed -- the caller surfaces them.
     """
     sizes = ollama_tags(base_url)
     estimates: list[Estimate] = []
@@ -341,7 +405,8 @@ def list_installed_estimates(
             meta = metadata_for(name, show=ollama_show(name, base_url), size_bytes=size)
             eff_ctx = min(ctx, meta["native_ctx"])
             estimates.append(
-                estimate_from_metadata(ctx=eff_ctx, budget_gb=budget_gb, kv_bytes=kv_bytes, **meta)
+                estimate_from_metadata(ctx=eff_ctx, budget_gb=budget_gb, kv_bytes=kv_bytes,
+                                       reserved_gb=reserved_gb, **meta)
             )
         except VramError as exc:
             errors.append(f"{name}: {exc}")

@@ -136,3 +136,55 @@ def test_metadata_for_falls_back_to_bpw_when_no_ondisk_size():
     assert meta["weights_source"] == "bpw_estimate"
     # 7B at Q4_K_M (4.83 bpw)
     assert meta["weights_gb"] == pytest.approx(7e9 * 4.83 / 8 / GIB, rel=1e-6)
+
+
+# ---- reserved_gb: charging the budget for an always-resident companion -----
+# (e.g. the memory embedder that must stay loaded for memory_state retrieval).
+
+_RESERVE_COMMON = dict(
+    weights_source="ollama_tags", n_layers=1, n_kv_heads=1,
+    key_length=1, value_length=1, native_ctx=131072, ctx=8192,
+)
+
+
+def test_reserved_gb_defaults_to_zero_and_is_recorded():
+    est = vram.estimate_from_metadata(name="m", weights_gb=18.0, budget_gb=24.0,
+                                      **_RESERVE_COMMON)
+    assert est.reserved_gb == 0.0          # default leaves the prior behaviour intact
+    assert est.fits is True
+
+
+def test_reserved_gb_shrinks_headroom_and_can_flip_fit():
+    base = vram.estimate_from_metadata(name="m", weights_gb=18.0, budget_gb=24.0,
+                                       **_RESERVE_COMMON)
+    with_embed = vram.estimate_from_metadata(name="m", weights_gb=18.0, budget_gb=24.0,
+                                             reserved_gb=4.0, **_RESERVE_COMMON)
+    # the model's own total is unchanged; only the verdict tightens.
+    assert with_embed.total_gb == base.total_gb
+    assert with_embed.reserved_gb == 4.0
+    assert with_embed.headroom_gb == pytest.approx(base.headroom_gb - 4.0, abs=1e-6)
+    assert base.fits is True and with_embed.fits is False   # the companion flips it
+
+
+def test_reserved_gb_shrinks_max_ctx_fits():
+    common = dict(weights_gb=8.0, n_layers=32, n_kv_heads=8,
+                  key_length=128, value_length=128, budget_gb=24.0)
+    assert vram.max_ctx_fits(reserved_gb=4.0, **common) < vram.max_ctx_fits(**common)
+
+
+def test_resident_weight_gb_prefers_live_ps_then_tags(monkeypatch):
+    # loaded -> the ACTUAL resident size from /api/ps wins (ground truth)
+    monkeypatch.setattr(vram, "ollama_ps",
+                        lambda base_url=None: {"nomic": {"size_vram": int(0.5 * GIB)}})
+    monkeypatch.setattr(vram, "ollama_tags", lambda base_url=None: {"nomic": int(9 * GIB)})
+    assert vram.resident_weight_gb("nomic") == pytest.approx(0.5)
+    # not loaded -> on-disk weights (/api/tags) + the CUDA baseline
+    monkeypatch.setattr(vram, "ollama_ps", lambda base_url=None: {})
+    assert vram.resident_weight_gb("nomic") == pytest.approx(9.0 + vram.CUDA_BASELINE_GB)
+
+
+def test_resident_weight_gb_raises_when_not_installed(monkeypatch):
+    monkeypatch.setattr(vram, "ollama_ps", lambda base_url=None: {})
+    monkeypatch.setattr(vram, "ollama_tags", lambda base_url=None: {})
+    with pytest.raises(vram.VramError):
+        vram.resident_weight_gb("absent-model")

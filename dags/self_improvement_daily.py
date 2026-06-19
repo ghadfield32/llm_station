@@ -55,6 +55,10 @@ REPORT_ASSET = Dataset("command-center://improvement/daily-report")
 LEDGER_DB_PATH = os.environ.get("LEDGER_DB_PATH", "data/ledger.db")
 # Apply (draft real cards) by default; set to "false" for a read-only preview run.
 APPLY = os.environ.get("SELF_IMPROVEMENT_APPLY", "true").lower() == "true"
+# Draft the top findings as human-gated mission_intake cards each morning (off by default —
+# opt in once the workspace board is reachable from the scheduler). Approval stays a human drag.
+KANBAN = os.environ.get("SELF_IMPROVEMENT_KANBAN", "false").lower() == "true"
+KANBAN_TOP = int(os.environ.get("SELF_IMPROVEMENT_KANBAN_TOP", "3"))
 
 
 def _registry():
@@ -106,7 +110,7 @@ def self_improvement_daily():
         date = context["ds"]            # YYYY-MM-DD (logical date)
         now_iso = context["ts"]         # ISO-8601 logical timestamp
         report = dag_support.finish(outcomes, _registry(), date=date, now_iso=now_iso,
-                                    apply=APPLY)
+                                    apply=APPLY, draft_kanban=KANBAN, kanban_top=KANBAN_TOP)
         n_failed = report["n_failed"]
         if n_failed:
             # surfaced, not hidden: failed sources are in the report; flag them at the DAG level

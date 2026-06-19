@@ -1,0 +1,33 @@
+schema_version: command-center.agent-surface.v1
+
+# Knobs for the agent kanban surface (AgentSurfaceConfig). The harness owns board
+# state and re-injects it into the agent loop as a single source of truth each
+# turn — the model emits intent, deterministic code owns the bookkeeping. Edit
+# this file, then `make validate`. Tracker:
+# docs/backend/projects/AGENT_KANBAN_SURFACE.md.
+
+board_state:
+  enabled: true
+  # Within one user turn, re-inject the board block after this many tool rounds
+  # (0 = only at the start of the turn). Always injected at turn start.
+  refresh_every_rounds: 3
+  # Rows shown per column/status group; overflow disclosed as "(+N more)".
+  max_items_per_group: 12
+  boards: [mission_intake, todos, missions]
+
+addressing:
+  # Minimum similarity to accept a unique title match; below this the agent gets
+  # candidates back and must retry — the harness never silently best-guesses.
+  fuzzy_min_ratio: 0.6
+
+# Bounds for the Phase-3 cadence learner (command_center.kanban.tuning). It abstains
+# to the board_state defaults above until it has at least min_decisions logged turns
+# AND beats the configured cadence by min_auc_uplift on a temporal holdout. No cadence
+# value is hardcoded in code — these are the only source, and they are data-overridable.
+tuning:
+  min_decisions: 40
+  holdout_fraction: 0.3
+  min_auc_uplift: 0.02
+  learning_rate: 0.1
+  max_iterations: 500
+  l2: 1.0

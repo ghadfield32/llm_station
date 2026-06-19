@@ -264,6 +264,89 @@ def add_event(mid: str, body: EventIn):
     return {"ok": True}
 
 
+def _event_detail(payload: dict) -> dict:
+    detail = payload.get("detail", payload)
+    return detail if isinstance(detail, dict) else {}
+
+
+def _action_signature(payload: dict) -> tuple[str, str, str]:
+    detail = _event_detail(payload)
+    return (
+        str(detail.get("command_or_tool", "")),
+        str(detail.get("target_ref", "")),
+        str(detail.get("action", detail.get("command", ""))),
+    )
+
+
+def _completion_verdict(rows: list[sqlite3.Row]) -> dict:
+    forecast = None
+    verification = None
+    action_signatures = []
+    reasons: list[str] = []
+
+    for row in rows:
+        payload = json.loads(row["payload"])
+        if row["kind"] == "mission.forecast":
+            forecast = payload
+        elif row["kind"] == "mission.verification":
+            verification = payload
+        elif row["kind"] == "mission.action":
+            signature = _action_signature(payload)
+            if any(signature):
+                action_signatures.append(signature)
+
+    if forecast is None:
+        reasons.append("missing mission.forecast event")
+    if verification is None:
+        reasons.append("missing mission.verification event")
+
+    evidence_refs = []
+    if forecast is not None and verification is not None:
+        forecast_detail = _event_detail(forecast)
+        verification_detail = _event_detail(verification)
+        expected = forecast_detail.get("expected_state_after")
+        observed = verification_detail.get("observed_state_after")
+        if expected is not None and observed != expected:
+            reasons.append(
+                f"observed_state_after does not match expected_state_after: {observed!r} != {expected!r}"
+            )
+        evidence_refs = verification_detail.get("evidence_refs", [])
+        if not isinstance(evidence_refs, list) or not evidence_refs:
+            reasons.append("verification must include non-empty evidence_refs")
+
+    if len(action_signatures) != len(set(action_signatures)):
+        reasons.append("repeated action signature detected; strategy change required")
+
+    return {
+        "status": "BLOCKED" if reasons else "PASS",
+        "reasons": reasons,
+        "evidence_refs": evidence_refs if isinstance(evidence_refs, list) else [],
+    }
+
+
+@app.post("/mission/{mid}/verify-completion")
+def verify_completion(mid: str):
+    with closing(_db()) as c:
+        if not c.execute("SELECT 1 FROM missions WHERE id=?", (mid,)).fetchone():
+            raise HTTPException(404, "mission not found")
+        rows = c.execute(
+            "SELECT ts, kind, payload FROM events WHERE mission_id=? ORDER BY id",
+            (mid,),
+        ).fetchall()
+        verdict = _completion_verdict(rows)
+        status = "done" if verdict["status"] == "PASS" else "blocked"
+        c.execute(
+            "UPDATE missions SET status=?, outcome=?, updated_at=? WHERE id=?",
+            (status, json.dumps(verdict), _now(), mid),
+        )
+        c.execute(
+            "INSERT INTO events (mission_id, ts, kind, payload) VALUES (?,?,?,?)",
+            (mid, _now(), "mission.completion_verdict", json.dumps(verdict)),
+        )
+        c.commit()
+    return {"id": mid, "status": status, "verdict": verdict}
+
+
 @app.post("/events")
 def add_global_event(body: GlobalEventIn):
     """Record a non-mission operational event.
@@ -311,6 +394,8 @@ def approve(mid: str, body: ApprovalIn):
 
 @app.post("/mission/{mid}/status")
 def set_status(mid: str, status: Status, outcome: str = ""):
+    if status == "done":
+        raise HTTPException(409, "mission completion requires /mission/{id}/verify-completion")
     with closing(_db()) as c:
         c.execute("UPDATE missions SET status=?, outcome=?, updated_at=? WHERE id=?",
                   (status, outcome, _now(), mid))

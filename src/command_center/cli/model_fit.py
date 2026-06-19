@@ -82,22 +82,28 @@ def main() -> int:
                         help="bytes per KV element (fp16=2, q8_0 cache=1, q4_0=0.5)")
     parser.add_argument("--base-url", default=vram.DEFAULT_OLLAMA_BASE,
                         help="Ollama base URL")
+    parser.add_argument("--reserve-model", action="append", metavar="NAME",
+                        help="an always-resident companion (repeatable) whose actual "
+                             "VRAM is charged against the budget before the chat model "
+                             "is sized — e.g. the memory embedder nomic-embed-text")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     args = parser.parse_args()
 
     budget = args.vram_gb if args.vram_gb is not None else budget_from_env(args.env)
 
     try:
+        reserved_gb = sum(vram.resident_weight_gb(m, args.base_url)
+                          for m in (args.reserve_model or []))
         if args.model:
             estimates = [vram.estimate_installed(
                 args.model, ctx=args.ctx, budget_gb=budget,
-                base_url=args.base_url, kv_bytes=args.kv_bytes,
+                base_url=args.base_url, kv_bytes=args.kv_bytes, reserved_gb=reserved_gb,
             )]
             errors: list[str] = []
         else:
             estimates, errors = vram.list_installed_estimates(
                 ctx=args.ctx, budget_gb=budget,
-                base_url=args.base_url, kv_bytes=args.kv_bytes,
+                base_url=args.base_url, kv_bytes=args.kv_bytes, reserved_gb=reserved_gb,
             )
         loaded = vram.ollama_ps(args.base_url)
     except vram.VramError as exc:
@@ -106,13 +112,18 @@ def main() -> int:
     if args.json:
         print(json.dumps({
             "budget_gb": budget,
+            "reserved_gb": round(reserved_gb, 3),
+            "reserved_models": args.reserve_model or [],
             "ctx": args.ctx,
             "estimates": [e.to_dict() for e in estimates],
             "skipped": errors,
         }, indent=2))
         return 0
 
-    print(f"GPU budget: {budget:g} GB  |  sizing at ctx={args.ctx:,}  "
+    reserved_note = (
+        f"  |  reserved {reserved_gb:.1f} GB for {', '.join(args.reserve_model)}"
+        if args.reserve_model else "")
+    print(f"GPU budget: {budget:g} GB{reserved_note}  |  sizing at ctx={args.ctx:,}  "
           f"(kv={args.kv_bytes:g}B/elem)\n")
     print(render_table(estimates, loaded))
     if errors:

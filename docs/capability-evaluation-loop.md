@@ -8,6 +8,12 @@
 > [improvement-loop.md](improvement-loop.md) (registry, runner, independent verifier, sealed
 > evals, human-gated promotion). Use this doc for "should we adopt tool X"; use the
 > improvement loop for "should we change our own component Y".
+>
+> For broad "would this AI-agent/UI/memory/framework idea help us?" sweeps, start with
+> [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md), compare against
+> [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md)
+> when the question is routing/performance, then use this doc's staged loop for
+> selected candidate experiments.
 
 A reusable mission prompt for deciding whether an external tool, repository,
 agent pattern, skill, or library should be adopted. The job is not to advocate
@@ -700,7 +706,7 @@ betts_basketball · **WS** = the workstation/fleet level (not a repo).
 | --- | --- | --- | --- | --- | --- |
 | **dbt-agent-skills** | github.com/dbt-labs/dbt-agent-skills | first-party skills for analytics engineering, semantic layer, migrations, with evals | skill layer | **BB only** | dbt actually exists at `api/de/basketball`, so a justified use case exists. Test trigger precision, generated-SQL validity vs `dbt parse/compile/test`, blast radius, and adherence to the §0.x data-engineering standards. Import only relevant skills. |
 | **Independent-verifier loop** (/goal, Outcomes, "loops > prompts") | pattern, no repo; "~6x over Opus 4.7" unverified | goal + rubric + independent grader; never self-grade | verification | CC | BORROW_PATTERN_ONLY → implement natively: we already have cross-provider judges + Ledger; the gap is explicit per-mission acceptance rubrics and a verifier stage that reproduces evidence. Extend `configs/judges.yaml`/mission flow, don't add a framework. |
-| **Puppetmaster** | github.com/professorpalmer/Puppetmaster (PyPI: puppetmaster; URL to confirm at Stage 1) | queen-worker routing to cheapest capable model; independent worker processes; typed SQLite artifacts; zero-token follow-ups | worker execution | CC | BORROW_PATTERN_ONLY expected: its router duplicates Ledger/LiteLLM authority, and cheap-first *cloud* routing conflicts with the no-provider-keys rule (knockout for that mode). The testable ideas: typed artifact store for worker outputs, artifact reuse, failure classification. At most an adapter invoked by one Ledger mission. |
+| **Puppetmaster** | github.com/professorpalmer/Puppetmaster (PyPI: `puppetmaster-ai`; latest observed 2026-06-14: 0.9.47) | queen-worker routing to cheapest capable model; independent worker processes; typed SQLite artifacts; zero-token follow-ups | worker execution | CC | BORROW_PATTERN_ONLY expected: its router duplicates Ledger/LiteLLM authority, and cheap-first *cloud* routing conflicts with the no-provider-keys rule (knockout for that mode). The testable ideas: typed artifact store for worker outputs, artifact reuse, failure classification. At most an adapter invoked by one Ledger mission. |
 | **MAPPA / multiagent-coaching** | github.com/ltjed/multiagent-coaching | per-action 0–10 coaching scores; cross-agent blame attribution; distributed RL training | post-run attribution | CC | BORROW_PATTERN_ONLY: the RL stack is impractical on a 4090/5080 and adds provider dependencies. The portable idea — per-event scoring/attribution — maps onto the existing executor event stream (`POST /mission/{id}/event`). Compare deterministic attribution first. |
 | **Agno GitWiki** | github.com/agno-agi/agno (cookbook/01_demo) | git-backed generated wiki; ingest → markdown → auto-commit-push; query via the same agent | knowledge generation / documentation | CC + BB | BORROW_PATTERN_ONLY: auto-commit-push violates the GitHub wall. Pattern worth testing: generated wiki pages on a mission branch + PR review. Decide explicitly whether AppFlowy or the repo stays the authoritative knowledge surface — no second source of truth by accident. |
 

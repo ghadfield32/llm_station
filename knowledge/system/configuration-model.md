@@ -10,8 +10,8 @@ tags:
 - contracts
 - configs
 - pydantic
-timestamp: '2026-06-13T19:43:05.390123+00:00'
-last_verified_at: '2026-06-13T19:43:05.390123+00:00'
+timestamp: '2026-06-14T03:01:33.913942+00:00'
+last_verified_at: '2026-06-14T03:01:33.913942+00:00'
 source_system: config
 source_path: configs/
 source_revision: null
@@ -26,7 +26,7 @@ generator_version: 0.1.0
 mission_id: null
 experiment_id: null
 supersedes: null
-review_after: '2026-07-13T19:43:05.390123+00:00'
+review_after: '2026-07-14T03:01:33.913942+00:00'
 ---
 
 <!-- generated:start -->
@@ -35,8 +35,10 @@ The contract model: edit `configs/*.yaml` â†’ Pydantic contracts validate them â
 
 Config files under contract:
 
+- `configs/agent_surface.yaml`
 - `configs/breakage.yaml`
 - `configs/channels.yaml`
+- `configs/content.yaml`
 - `configs/discovery.yaml`
 - `configs/environments.yaml`
 - `configs/evals.yaml`

@@ -42,6 +42,8 @@ JUDGE_GATE_KEY   = os.environ.get("JUDGE_GATE_KEY", "")
 TRIAGE_MODEL     = os.environ.get("TRIAGE_MODEL", "triage")
 SKEPTIC_MODEL    = os.environ.get("SKEPTIC_MODEL", "security-judge")
 STANDARDS_CONFIG = os.environ.get("STANDARDS_CONFIG", "configs/standards.yaml")
+GATES_CONFIG     = os.environ.get("GATES_CONFIG", "configs/gates.yaml")
+MODELS_CONFIG    = os.environ.get("MODELS_CONFIG", "configs/models.yaml")
 
 app = FastAPI(title="Judge Gate", version="1.0.0")
 
@@ -54,14 +56,53 @@ class Risk(IntEnum):
     L4_DANGEROUS     = 4   # merge / deploy / delete data / rotate secrets / publish
 
 
-# Which model alias each risk level is allowed to use by default.
-ROUTE = {
-    Risk.L0_READONLY:       "triage",
-    Risk.L1_PLAN:           "planner",
-    Risk.L2_LOCAL_CHANGE:   "coder",
-    Risk.L3_EXTERNAL_WRITE: "coder",
-    Risk.L4_DANGEROUS:      "architect-judge",
-}
+def _load_yaml_config(path: str, label: str) -> dict:
+    if not path or not os.path.exists(path):
+        raise RuntimeError(f"{label} config not found: {path!r}")
+    data = yaml.safe_load(open(path, encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{label} config must be a mapping: {path}")
+    return data
+
+
+def _tier_key_for_risk(risk: Risk, tiers: dict) -> str:
+    prefix = f"L{int(risk)}_"
+    matches = [key for key in tiers if isinstance(key, str) and key.startswith(prefix)]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"{GATES_CONFIG} must define exactly one risk tier starting with {prefix!r}; "
+            f"found {matches}")
+    return matches[0]
+
+
+def _load_route_map() -> dict[Risk, str]:
+    gates = _load_yaml_config(GATES_CONFIG, "gates")
+    models = _load_yaml_config(MODELS_CONFIG, "models")
+    tiers = gates.get("tiers")
+    if not isinstance(tiers, dict):
+        raise RuntimeError(f"{GATES_CONFIG} must contain a 'tiers' mapping")
+    roles = set((models.get("roles") or {}).keys())
+    if not roles:
+        raise RuntimeError(f"{MODELS_CONFIG} must contain model roles")
+
+    routes: dict[Risk, str] = {}
+    for risk in Risk:
+        tier_key = _tier_key_for_risk(risk, tiers)
+        tier = tiers[tier_key]
+        if not isinstance(tier, dict):
+            raise RuntimeError(f"{GATES_CONFIG} tier {tier_key!r} must be a mapping")
+        alias = tier.get("default_route_alias")
+        if not alias:
+            raise RuntimeError(f"{GATES_CONFIG} tier {tier_key!r} missing default_route_alias")
+        if alias not in roles:
+            raise RuntimeError(
+                f"{GATES_CONFIG} tier {tier_key!r} default_route_alias {alias!r} "
+                f"is not a role in {MODELS_CONFIG}")
+        routes[risk] = alias
+    return routes
+
+
+ROUTES_BY_RISK = _load_route_map()
 
 # Levels that may NEVER run without an explicit human approval.
 REQUIRES_HUMAN = {Risk.L3_EXTERNAL_WRITE, Risk.L4_DANGEROUS}
@@ -231,7 +272,7 @@ async def classify(body: ClassifyIn):
     repo = (body.repo or result.get("repo") or "unknown")
     sensitive = repo in SENSITIVE_REPOS
 
-    model_alias = ROUTE[risk]
+    model_alias = ROUTES_BY_RISK[risk]
     needs_human = risk in REQUIRES_HUMAN
 
     # Hard rule: any change at all to a sensitive repo gets a human in the loop.

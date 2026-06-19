@@ -1,0 +1,56 @@
+# LinkedIn content pipeline (validated by command_center.schemas.ContentConfig).
+#
+# Flow: Claude Code drafts -> AppFlowy board "In Queue" -> you approve by dragging
+# to "In Progress" (+ set ScheduledFor) -> command_center.cli.linkedin_publish ships
+# the due, approved rows to LinkedIn's official Posts API and stamps "Completed".
+#
+# Secrets are NOT here. This file only NAMES the .env keys that hold them
+# (same discipline as configs/kanban.yaml and the Airflow observer).
+schema_version: "1"
+
+source:
+  # AppFlowy connection - reuses the same env keys as the kanban bridge.
+  growthos_root: appflowy_kanban/growth-os
+  database_map_path: config/databases.json
+  base_url_env: APPFLOWY_BASE_URL
+  workspace_id_env: APPFLOWY_WORKSPACE_ID
+  email_env: APPFLOWY_EMAIL
+  password_env: APPFLOWY_PASSWORD
+
+statuses:
+  queue: In Queue          # Claude Code drafted, awaiting your review
+  approved: In Progress    # you dragged it here = approved + scheduled to ship
+  done: Completed          # published; PostURN + PublishedAt stamped back
+
+linkedin:
+  # Official LinkedIn API. `version` is the required LinkedIn-Version header in
+  # LinkedIn's monthly YYYYMM scheme. NOTE the format is YEAR+MONTH: 202605 =
+  # May 2026 (NOT June). Each version is sunset ~12 months after release, so this
+  # MUST be verified against LinkedIn's current "Latest" before going live and
+  # bumped ~monthly. As of 2026-06-13 the latest supported is 202605; 202506
+  # (Jun 2025) sunsets 2026-06-15. Verify:
+  # https://learn.microsoft.com/linkedin/marketing/integrations/recent-changes
+  version: "202605"
+  api_base: https://api.linkedin.com
+  posts_path: /rest/posts
+  userinfo_url: https://api.linkedin.com/v2/userinfo
+  auth_base: https://www.linkedin.com/oauth/v2
+  token_store: generated/linkedin-token.json
+  # Start warning this many days before the ~60-day token expires. LinkedIn gives
+  # standard apps no refresh token, so renewal = re-run `cc linkedin-publish --login`.
+  token_warn_days: 14
+  client_id_env: LINKEDIN_CLIENT_ID
+  client_secret_env: LINKEDIN_CLIENT_SECRET
+  redirect_uri_env: LINKEDIN_REDIRECT_URI
+  # Least-privilege posting scopes (no email, no read scopes).
+  member_scopes: [openid, profile, w_member_social]
+  organization_scopes: [w_organization_social]
+
+accounts:
+  - board: geoffhadfield32_content
+    author: member            # personal profile; URN resolved from the token owner
+    cadence: daily
+  - board: world_model_sports_content
+    author: organization      # World Model Sports company Page (needs Page admin)
+    org_urn_env: LINKEDIN_WMS_ORG_URN
+    cadence: daily

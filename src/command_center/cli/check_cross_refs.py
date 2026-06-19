@@ -7,7 +7,12 @@ actually exist in targets.yaml (different files). This does. Exit 1 on a danglin
 reference so the inventory and the watchers can't drift apart.
 """
 import sys
+from pathlib import Path
+
 import yaml
+
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def check_judge_routing(judges: dict, roles: set) -> list:
@@ -24,6 +29,75 @@ def check_judge_routing(judges: dict, roles: set) -> list:
                     problems.append(
                         f"judge '{j.get('name')}' {field} '{ref}' "
                         f"is not a role in models.yaml")
+    return problems
+
+
+def check_gate_routes(gates: dict, roles: set) -> list:
+    """Every risk tier's default Judge Gate classify route must resolve to a
+    real models.yaml role. This keeps request routing in validated config rather
+    than in a service-local fallback table."""
+    problems = []
+    for tier, policy in (gates.get("tiers") or {}).items():
+        ref = policy.get("default_route_alias")
+        if not ref:
+            problems.append(f"gate tier '{tier}' missing default_route_alias")
+        elif ref not in roles:
+            problems.append(
+                f"gate tier '{tier}' default_route_alias '{ref}' "
+                f"is not a role in models.yaml")
+    return problems
+
+
+def check_tool_safe_roles(models: dict, channels: dict) -> list:
+    """A TOOL-USING role must not be backed by a model whose Ollama tool parser
+    drops a call the model prefixes with prose. Only the qwen3-coder family is
+    known-broken: it ships a native RENDERER/PARSER (its Go template has no tool
+    handling) and leaks such calls to the user as raw `<function=..>` XML
+    (reproduced 7/8; MASTER.md §14, 2026-06-13). Tool users in this system: every
+    chat channel's role, plus `planner` (Hermes tool-calls through it,
+    HERMES_DEFAULT_MODEL). qwen3 / devstral parse tool calls robustly. Returns a
+    list of tool-unsafe-routing messages (empty = all tool roles are safe)."""
+    role_models = {role: [c.get("model", "") for c in cands]
+                   for role, cands in (models.get("roles") or {}).items()}
+    tool_using = {ch.get("model") for ch in channels.get("channels", [])}
+    tool_using.add("planner")                 # Hermes' default tool-calling model
+    problems = []
+    for role in sorted(r for r in tool_using if r):
+        bad = sorted({m for m in role_models.get(role, [])
+                      if m.startswith("qwen3-coder")})
+        if bad:
+            problems.append(
+                f"role '{role}' is used for tool-calling but is backed by {bad}, "
+                f"whose Ollama parser drops prose-prefixed tool calls; route it to "
+                f"a tool-robust model (qwen3/devstral — configs/models.yaml `chat:`)")
+    return problems
+
+
+def check_autonomy_manifest_paths(autonomy: dict, root: Path = ROOT) -> list:
+    """Every repo manifest path that gates autonomy must exist inside the repo.
+
+    The Pydantic contract proves shape; this proves local repository facts. It
+    does not read secrets or contact GitHub.
+    """
+    problems = []
+    for repo in autonomy.get("repo_manifests", []):
+        repo_id = repo.get("repo_id", "<unknown>")
+        for field in ("devcontainer_path", "codeowners_path"):
+            ref = repo.get(field)
+            if not ref:
+                continue
+            candidate = (root / ref).resolve()
+            try:
+                candidate.relative_to(root.resolve())
+            except ValueError:
+                problems.append(
+                    f"repo manifest '{repo_id}' {field} '{ref}' escapes the repository"
+                )
+                continue
+            if not candidate.is_file():
+                problems.append(
+                    f"repo manifest '{repo_id}' {field} '{ref}' does not exist"
+                )
     return problems
 
 
@@ -87,10 +161,27 @@ def main() -> int:
                   f"which is not a role in models.yaml")
             ok = False
 
+    # a tool-using role must not be backed by a model whose Ollama tool parser
+    # drops prose-prefixed calls (see check_tool_safe_roles)
+    for msg in check_tool_safe_roles(models, channels):
+        print(f"  TOOL-UNSAFE: {msg}")
+        ok = False
+
     # every judge's role_alias + escalation_role must route to a real role, so the
     # cheap->strong / stuck-escalation chain can never point at a nonexistent model
     judges = yaml.safe_load(open("configs/judges.yaml"))
     for msg in check_judge_routing(judges, roles):
+        print(f"  DANGLING: {msg}")
+        ok = False
+
+    # every risk tier's default classify route must also resolve to a real role.
+    gates = yaml.safe_load(open("configs/gates.yaml"))
+    for msg in check_gate_routes(gates, roles):
+        print(f"  DANGLING: {msg}")
+        ok = False
+
+    autonomy = yaml.safe_load(open("configs/autonomy.yaml"))
+    for msg in check_autonomy_manifest_paths(autonomy):
         print(f"  DANGLING: {msg}")
         ok = False
 

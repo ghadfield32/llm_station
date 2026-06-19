@@ -267,5 +267,53 @@
       "Acceptance": "cs_-8j",
       "Task": "iCGwBt"
     }
+  },
+  "geoffhadfield32_content": {
+    "view_id": "a9137612-8a01-4f74-bbdd-782832e980f9",
+    "database_id": "1efa7f07-cb1a-47bd-9435-cec77a41c036",
+    "primary_field_id": "iiJN9V",
+    "title_column": "Hook",
+    "fields": {
+      "Type": "7O8GGF",
+      "Done": "lTHjx0",
+      "Media": "94Ijp-",
+      "Body": "uPFHsM",
+      "ScheduledFor": "b25HfA",
+      "Key": "qPgiTY",
+      "Status": "Gy6_kN",
+      "Name": "iiJN9V",
+      "PublishedAt": "avynb9",
+      "Format": "VgQ7-O",
+      "Pillar": "obrFWW",
+      "Notes": "5ez9oA",
+      "Source": "8ha285",
+      "PostURN": "awS2Iw",
+      "Created": "Sv9OqW",
+      "Hook": "iiJN9V"
+    }
+  },
+  "world_model_sports_content": {
+    "view_id": "c14ac554-550b-495e-bd2e-53c4635f672f",
+    "database_id": "f0c353d6-a597-4051-bd62-2ef983f47736",
+    "primary_field_id": "L4eMO3",
+    "title_column": "Hook",
+    "fields": {
+      "Notes": "8So-1D",
+      "Key": "qDtAcj",
+      "Status": "R8rU66",
+      "Done": "MWjCGA",
+      "PostURN": "AIxzPF",
+      "Format": "CssaQ2",
+      "Pillar": "iNeovn",
+      "Source": "pKnQqJ",
+      "Body": "rOlvWt",
+      "Created": "vhLOiR",
+      "PublishedAt": "gD98iE",
+      "Type": "4gsm42",
+      "Media": "BNmeIB",
+      "Name": "L4eMO3",
+      "ScheduledFor": "dyq1Fx",
+      "Hook": "L4eMO3"
+    }
   }
 }

@@ -112,6 +112,7 @@ This is also why the delivery's **acceptance feedback loop** matters — it's th
 | Surface | Module | Role | State |
 |---------|--------|------|:----:|
 | AppFlowy Kanban | `board.py` (+ `Pillar` for swimlanes) | where you ACT (the human wall) | ✅ |
+| **Mission-card bridge** | `kanban.py` (`improvement scan --kanban`) | "report daily + **apply if approved**": top findings → human-gated `mission_intake` Backlog cards (Section=Command Center, risk mapped to L0–L4); a human drags to Approved → bridge → mission. Observer-only (no approve verb). | ✅ |
 | Email digest (SMTP) | `delivery/digest.py` + `email_smtp.py` | where you LEARN/triage (3-min skim) | ✅ |
 | Chat ping (Discord/…) | `delivery/ping.py` | the nudge | ✅ |
 | Weekly metrics rollup | `selfmetrics.py` → digest `weekly=` | see the loop improving | 🟡 renderer ready; Monday auto-send TBD |

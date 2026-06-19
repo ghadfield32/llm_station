@@ -1,0 +1,41 @@
+{
+  "base_url": "http://localhost:4000/v1",
+  "blockers": [],
+  "key_source": "LITELLM_MASTER_KEY",
+  "max_tokens": 512,
+  "max_tokens_source": "existing_live_smoke_generation_budget_required_for_qwen_visible_content",
+  "model": "chat",
+  "required_scenarios": [
+    "chat_tool_call_parse",
+    "memory_block_recall",
+    "long_multi_turn_recall",
+    "fresh_conversation_without_memory_abstains"
+  ],
+  "scenarios": [
+    {
+      "raw_markup_leaked": false,
+      "scenario": "chat_tool_call_parse",
+      "status": "pass",
+      "tool_calls": 1
+    },
+    {
+      "marker_seen": true,
+      "scenario": "memory_block_recall",
+      "status": "pass"
+    },
+    {
+      "marker_seen": true,
+      "scenario": "long_multi_turn_recall",
+      "status": "pass",
+      "turn_pairs_between_fact_and_query": 14
+    },
+    {
+      "abstained_without_memory": true,
+      "scenario": "fresh_conversation_without_memory_abstains",
+      "status": "pass"
+    }
+  ],
+  "secrets_printed": false,
+  "status": "pass",
+  "writes_performed": false
+}

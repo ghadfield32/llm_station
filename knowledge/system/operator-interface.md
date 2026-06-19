@@ -3,18 +3,18 @@ okf_version: '0.1'
 profile: growth-os-0.1
 type: Runbook
 title: Operator interface
-description: 69 make targets — the operator entry points.
+description: 73 make targets — the operator entry points.
 resource: repo://llm_station/Makefile
 tags:
 - operator
 - make
 - cli
-timestamp: '2026-06-13T19:46:56.913375+00:00'
-last_verified_at: '2026-06-13T19:46:56.913375+00:00'
+timestamp: '2026-06-14T03:44:07.529660+00:00'
+last_verified_at: '2026-06-14T03:44:07.529660+00:00'
 source_system: repository
 source_path: Makefile
 source_revision: null
-source_hash: sha256:e4fb04710815a1057c3bd4a8b156524b38c2e185e500e7ff018f5af241cb83dd
+source_hash: sha256:e47d1f9d15852425f0f824031c7566b482c9bab0800f383bdbae156646ad2a4d
 authority: derived
 owner: command-center
 status: current
@@ -25,7 +25,7 @@ generator_version: 0.1.0
 mission_id: null
 experiment_id: null
 supersedes: null
-review_after: '2026-07-13T19:46:56.913375+00:00'
+review_after: '2026-07-14T03:44:07.529660+00:00'
 ---
 
 <!-- generated:start -->
@@ -71,6 +71,9 @@ Operator commands (`make <target>`; Windows: `.\scripts\cc.ps1 <target>`).
 - `make model-fit` — Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
 - `make usage-digest` — Write generated/usage-digest.md from LiteLLM + Ledger usage APIs
 - `make usage-report` — Alias for usage-digest
+- `make kanban-digest` — Write generated/kanban-digest.md — agent-surface metrics + tuning verdict (real data)
+- `make kanban-surface-validate` — Blocking N/N gate for the agent kanban surface (config/leakage/verbs/tuning)
+- `make kanban-board-snapshot` — Write generated/board-snapshot.json for the UI (run on the worker; needs growthos + AppFlowy creds)
 - `make live-smoke` — Print real local model replies through Ollama/LiteLLM. TRIAGE=triage PLANNER=planner JUDGE=local-judge
 - `make repo-install` — Install hooks + devcontainer + standards into a repo. REPO=/path [PROFILE=python_ml_pipeline]
 - `make backup` — restic snapshot (see docs/SETUP-FROM-SCRATCH.md, Backups)
@@ -78,6 +81,7 @@ Operator commands (`make <target>`; Windows: `.\scripts\cc.ps1 <target>`).
 - `make logs` — Tail all logs
 - `make channels-validate` — Validate configs/channels.yaml (chat transport registry)
 - `make gateway` — Run enabled chat channels from configs/channels.yaml. Installs the gateways extra first.
+- `make notify` — Push a proactive digest (brief + active missions) to Discord. ARGS=--dry-run to preview.
 - `make lint` — ruff + mypy over src/ (install the dev extra first: uv pip install -e ".[dev]")
 - `make test` — Run the test suite (install the dev extra first: uv pip install -e ".[dev]")
 - `make improvement-validate` — Validate configs/improvement.yaml experiment definitions

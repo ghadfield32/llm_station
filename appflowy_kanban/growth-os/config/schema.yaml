@@ -175,3 +175,28 @@ project_template:
     MissionID: text
     CardKey: text
     Created: date
+
+# Content calendar board shape used by scripts/new_content_board.py (one board
+# per LinkedIn account: geoffhadfield32_content, world_model_sports_content).
+# NOT created by setup_workspace.py. The 3 Status options are the only kanban
+# columns the user asked for: In Queue (Claude Code drafted, awaiting review) ->
+# In Progress (human-approved + scheduled; the publisher will ship it) ->
+# Completed (published; PostURN/PublishedAt stamped back). Hook is the primary
+# column. Source records the real artifact each post is derived from (no fake
+# claims). PostURN/PublishedAt are written by command_center.cli.linkedin_publish.
+content_template:
+  icon: "kanban"
+  fields:
+    Hook: text
+    Body: longtext
+    Status: {type: select, options: [In Queue, In Progress, Completed]}
+    ScheduledFor: date
+    Pillar: {type: select, options: [Betts & Sports Analytics, ML & Data Engineering, World Model Sports, Learning in Public]}
+    Format: {type: select, options: [Text, Image, Carousel, Video]}
+    Media: text
+    Source: longtext
+    PostURN: text
+    PublishedAt: date
+    Notes: longtext
+    Key: text
+    Created: date

@@ -1,0 +1,316 @@
+{
+  "blockers": [],
+  "branch": "mission/llm_station/docs-only/20260619T121716461025Z",
+  "changed_paths": [
+    "docs/branch-mission-smoke.md"
+  ],
+  "ci_results": [
+    {
+      "command": "uv run cc validate",
+      "exit_code": 0,
+      "status": "pass",
+      "stderr_line_count": 5,
+      "stderr_sha256": "25d21b8ac5956174f00efb642f2541d4a1dd6ec2ccf42de3dbc043a32f3bfc68",
+      "stdout_line_count": 24,
+      "stdout_sha256": "1304ef7d91ee02ab5df13fbc82b94c076ee7449974349433adfd03c97a639bad"
+    },
+    {
+      "command": "uv run --extra dev --extra gateways pytest",
+      "exit_code": 0,
+      "status": "pass",
+      "stderr_line_count": 1,
+      "stderr_sha256": "6f443d0355a5b89116cc4ac4ac86f937c9b9d843077ab04eaba1fb310885cf43",
+      "stdout_line_count": 16,
+      "stdout_sha256": "ea471a26d7b5dcb90f62cee3501cad1c7857049fbcea5f154864ebff6d6d28d7"
+    }
+  ],
+  "commands": [
+    {
+      "args": [
+        "git",
+        "worktree",
+        "add",
+        "-b",
+        "mission/llm_station/docs-only/20260619T121716461025Z",
+        "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z",
+        "HEAD"
+      ],
+      "cwd": "C:\\Users\\ghadf\\vscode_projects\\docker_projects\\llm_station",
+      "exit_code": 0,
+      "purpose": "create_worktree_branch",
+      "stderr_line_count": 1,
+      "stderr_sha256": "055f71b7ea56fb0e55365b232fe0eb1b9b9c49b7767c94ed795f0dc93145dabc",
+      "stdout_line_count": 1,
+      "stdout_sha256": "68cc9b7650036bfcf9dda33d5d78c47daca3cf5e1ff3daf5520bcccaabf2a433"
+    },
+    {
+      "args": [
+        "git",
+        "status",
+        "--porcelain",
+        "--untracked-files=all"
+      ],
+      "cwd": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z",
+      "exit_code": 0,
+      "purpose": "inspect_changed_paths",
+      "stderr_line_count": 0,
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdout_line_count": 1,
+      "stdout_sha256": "f0887f369a8eed6d55360eba0f4a1f194c0531cf198f2e85eed80ca0c7bde131"
+    },
+    {
+      "args": [
+        "uv",
+        "run",
+        "cc",
+        "validate"
+      ],
+      "cwd": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z",
+      "exit_code": 0,
+      "purpose": "declared_validation_command",
+      "stderr_line_count": 5,
+      "stderr_sha256": "25d21b8ac5956174f00efb642f2541d4a1dd6ec2ccf42de3dbc043a32f3bfc68",
+      "stdout_line_count": 24,
+      "stdout_sha256": "1304ef7d91ee02ab5df13fbc82b94c076ee7449974349433adfd03c97a639bad"
+    },
+    {
+      "args": [
+        "uv",
+        "run",
+        "--extra",
+        "dev",
+        "--extra",
+        "gateways",
+        "pytest"
+      ],
+      "cwd": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z",
+      "exit_code": 0,
+      "purpose": "declared_validation_command",
+      "stderr_line_count": 1,
+      "stderr_sha256": "6f443d0355a5b89116cc4ac4ac86f937c9b9d843077ab04eaba1fb310885cf43",
+      "stdout_line_count": 16,
+      "stdout_sha256": "ea471a26d7b5dcb90f62cee3501cad1c7857049fbcea5f154864ebff6d6d28d7"
+    }
+  ],
+  "completion_verdict": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "created_at": "2026-06-19T12:17:16.461025+00:00",
+  "declared_ci_commands": [
+    "uv run cc validate",
+    "uv run --extra dev --extra gateways pytest"
+  ],
+  "devcontainer": {
+    "execution_mode": "devcontainer",
+    "manifest_path": ".devcontainer/devcontainer.json",
+    "manifest_verified": true,
+    "runtime_invocation_policy": "not_invoked_by_branch_only_smoke",
+    "runtime_invoked": false
+  },
+  "doc_path": "docs/branch-mission-smoke.md",
+  "doc_sha256": "e07b341717bc8faab235b610c7158d54e5f29c400aff15c0a7196090f5c3196e",
+  "docs_only": true,
+  "events": [
+    {
+      "actor": "cc.branch-mission",
+      "approval_id": null,
+      "detail": {
+        "expected_events": [
+          "local_branch_created",
+          "local_worktree_created",
+          "docs_only_change_written",
+          "declared_validation_commands_run",
+          "redacted_evidence_written"
+        ],
+        "expected_no_change": [
+          "no_main_push",
+          "no_remote_push",
+          "no_pr",
+          "no_merge",
+          "no_deploy",
+          "no_settings_change",
+          "no_secret_write"
+        ],
+        "expected_state_after": {
+          "branch": "mission/llm_station/docs-only/20260619T121716461025Z",
+          "changed_paths": [
+            "docs/branch-mission-smoke.md"
+          ],
+          "ci": "all_declared_commands_passed",
+          "merge_performed": false,
+          "pr_created": false,
+          "push_performed": false,
+          "worktree": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z"
+        },
+        "expected_state_before": {
+          "autonomous_edits_enabled": false,
+          "worktree_exists": false
+        },
+        "privacy_boundary": "no_env_file_read_no_secret_values_retained_command_output_hashed",
+        "rollback_or_revert_plan": "remove the local worktree; retain the local mission branch unless human cleanup is approved"
+      },
+      "event_id": "llm_station-docs-only-20260619T121716461025Z:forecast",
+      "input_artifact_hashes": [],
+      "kind": "mission.forecast",
+      "mission_id": "llm_station-docs-only-20260619T121716461025Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "planned",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:17:16.461025+00:00",
+      "trace_id": "llm_station-docs-only-20260619T121716461025Z"
+    },
+    {
+      "actor": "cc.branch-mission",
+      "approval_id": null,
+      "detail": {
+        "branch": "mission/llm_station/docs-only/20260619T121716461025Z",
+        "command": [
+          "git",
+          "worktree",
+          "add",
+          "-b",
+          "mission/llm_station/docs-only/20260619T121716461025Z",
+          "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z",
+          "HEAD"
+        ],
+        "exit_code": 0,
+        "repo_id": "llm_station",
+        "worktree_ref": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z"
+      },
+      "event_id": "llm_station-docs-only-20260619T121716461025Z:repo-action:worktree-add",
+      "input_artifact_hashes": [],
+      "kind": "repo.action",
+      "mission_id": "llm_station-docs-only-20260619T121716461025Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "verified",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:17:16.461025+00:00",
+      "trace_id": "llm_station-docs-only-20260619T121716461025Z"
+    },
+    {
+      "actor": "cc.branch-mission",
+      "approval_id": null,
+      "detail": {
+        "branch": "mission/llm_station/docs-only/20260619T121716461025Z",
+        "command": [
+          "uv",
+          "run",
+          "cc",
+          "validate"
+        ],
+        "exit_code": 0,
+        "repo_id": "llm_station",
+        "worktree_ref": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z"
+      },
+      "event_id": "llm_station-docs-only-20260619T121716461025Z:repo-action:ci:1",
+      "input_artifact_hashes": [],
+      "kind": "repo.action",
+      "mission_id": "llm_station-docs-only-20260619T121716461025Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "verified",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:17:16.461025+00:00",
+      "trace_id": "llm_station-docs-only-20260619T121716461025Z"
+    },
+    {
+      "actor": "cc.branch-mission",
+      "approval_id": null,
+      "detail": {
+        "branch": "mission/llm_station/docs-only/20260619T121716461025Z",
+        "command": [
+          "uv",
+          "run",
+          "--extra",
+          "dev",
+          "--extra",
+          "gateways",
+          "pytest"
+        ],
+        "exit_code": 0,
+        "repo_id": "llm_station",
+        "worktree_ref": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z"
+      },
+      "event_id": "llm_station-docs-only-20260619T121716461025Z:repo-action:ci:2",
+      "input_artifact_hashes": [],
+      "kind": "repo.action",
+      "mission_id": "llm_station-docs-only-20260619T121716461025Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "verified",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:17:16.461025+00:00",
+      "trace_id": "llm_station-docs-only-20260619T121716461025Z"
+    },
+    {
+      "actor": "cc.branch-mission",
+      "approval_id": null,
+      "detail": {
+        "evidence_refs": [
+          "C:\\Users\\ghadf\\vscode_projects\\docker_projects\\llm_station\\evaluation\\system-validation\\20260616-autonomy-contracts\\branch-mission.json"
+        ],
+        "observed_state_after": {
+          "branch": "mission/llm_station/docs-only/20260619T121716461025Z",
+          "changed_paths": [
+            "docs/branch-mission-smoke.md"
+          ],
+          "ci": "all_declared_commands_passed",
+          "merge_performed": false,
+          "pr_created": false,
+          "push_performed": false,
+          "worktree": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z"
+        },
+        "verifier_result": "pass"
+      },
+      "event_id": "llm_station-docs-only-20260619T121716461025Z:verification",
+      "input_artifact_hashes": [],
+      "kind": "mission.verification",
+      "mission_id": "llm_station-docs-only-20260619T121716461025Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "verified",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:17:16.461025+00:00",
+      "trace_id": "llm_station-docs-only-20260619T121716461025Z"
+    }
+  ],
+  "github_policy": {
+    "auth_mode": "github_app",
+    "autonomous_edits_enabled": false,
+    "branch_write_policy": "feature_branch_only",
+    "merge_performed": false,
+    "pr_created": false,
+    "push_performed": false,
+    "secrets_changed": false,
+    "settings_changed": false
+  },
+  "mission_id": "llm_station-docs-only-20260619T121716461025Z",
+  "privacy": {
+    "command_output_retention": "sha256_and_line_counts_only",
+    "env_file_read": false,
+    "secret_env_var_names_removed": [],
+    "secret_values_retained": false
+  },
+  "repo_id": "llm_station",
+  "risk_tier": "L2_local_edits",
+  "status": "pass",
+  "worktree": "C:\\tmp\\command-center-repo-missions\\llm_station-docs-only-20260619T121716461025Z"
+}

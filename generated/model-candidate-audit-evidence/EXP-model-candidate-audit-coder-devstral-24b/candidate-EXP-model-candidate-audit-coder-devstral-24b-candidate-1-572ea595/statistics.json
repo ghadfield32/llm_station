@@ -1,0 +1,296 @@
+{
+  "experiment_id": "EXP-model-candidate-audit-coder-devstral-24b",
+  "primary_metric": "task_success",
+  "primary_improved": false,
+  "primary_q_value": 1.0,
+  "underpowered": false,
+  "srm": {
+    "chi2": 0.0,
+    "p_value": 1.0,
+    "mismatch": false,
+    "observed": [
+      1,
+      1
+    ],
+    "expected": [
+      1.0,
+      1.0
+    ]
+  },
+  "metric_stats": [
+    {
+      "name": "task_success",
+      "direction": "increase",
+      "baseline": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "candidate": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 1,
+        "n_candidate": 1,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "patch_reasoning_quality",
+      "direction": "increase",
+      "baseline": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "candidate": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 1,
+        "n_candidate": 1,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "relevant_test_awareness",
+      "direction": "increase",
+      "baseline": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "candidate": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 1,
+        "n_candidate": 1,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "invalid_response_rate",
+      "direction": "decrease",
+      "baseline": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "candidate": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 3,
+        "n_candidate": 3,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "unsafe_output_rate",
+      "direction": "decrease",
+      "baseline": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "candidate": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 3,
+        "n_candidate": 3,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "no_swallowed_exceptions",
+      "direction": "increase",
+      "baseline": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "candidate": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 1,
+        "n_candidate": 1,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "no_fake_values",
+      "direction": "increase",
+      "baseline": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "candidate": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 1,
+        "n_candidate": 1,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "no_hardcoded_fallbacks",
+      "direction": "increase",
+      "baseline": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "candidate": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "diff": {
+        "diff": 0.0,
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "p_value": 1.0,
+        "significant": false,
+        "n_baseline": 1,
+        "n_candidate": 1,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "median_latency_ms",
+      "direction": "decrease",
+      "baseline": [
+        2786.298800000168,
+        9531.34,
+        22342.611300000044
+      ],
+      "candidate": [
+        3325.7548999999926,
+        9380.955300000096,
+        18926.639799999975
+      ],
+      "diff": {
+        "diff": -150.38469999990411,
+        "ci_low": -3415.9715000000688,
+        "ci_high": 2425.3613000005316,
+        "p_value": 0.809,
+        "significant": false,
+        "n_baseline": 3,
+        "n_candidate": 3,
+        "paired": true
+      },
+      "q_value": 1.0,
+      "significant_fdr": false,
+      "improved": false
+    },
+    {
+      "name": "tokens_per_second",
+      "direction": "increase",
+      "baseline": [
+        138.60507849007587,
+        160.00665451150655,
+        172.46689251616877
+      ],
+      "candidate": [
+        46.35382129314286,
+        51.2784447335953,
+        54.63414634146343
+      ],
+      "diff": {
+        "diff": -108.72820977791125,
+        "ci_low": -117.83274617470535,
+        "ci_high": -92.25125719693301,
+        "p_value": 0.0,
+        "significant": true,
+        "n_baseline": 3,
+        "n_candidate": 3,
+        "paired": true
+      },
+      "q_value": 0.0,
+      "significant_fdr": true,
+      "improved": false
+    }
+  ],
+  "notes": "",
+  "primary_msprt_p": null,
+  "primary_msprt_stop_n": null,
+  "primary_variance_reduction": null
+}

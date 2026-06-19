@@ -9,7 +9,7 @@ For the high-level, whole-system map (control plane + knowledge base + managed
 projects + fleet, with the module tree and the strategic order) see
 [system-roadmap.md](system-roadmap.md). This file stays the tactical tracker.
 
-_Last updated: 2026-06-13._
+_Last updated: 2026-06-19._
 
 ## Done
 
@@ -34,11 +34,29 @@ _Last updated: 2026-06-13._
   local models installed, virtual keys minted, health + live smoke passing, Growth OS
   selftest 22/22, kanban bridge live with writeback.
 
+## Autonomy hardening (2026-06-19)
+
+The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (validated by
+`AutonomyConfig`) and evidenced under `evaluation/system-validation/`. State:
+
+- **GitHub wall verified.** `uv run cc branch-protection-verify` **PASS** against the active
+  `protect-main-command-center` ruleset: required PR review (1) + CODEOWNERS, conversation
+  resolution, linear history, deletion + force-push blocked, empty bypass list, required checks
+  `validate` + `lint-test`. `uv run cc github-app-verify` **PASS** (App installed on the selected
+  repo, mints an in-memory installation token, reads repo + check/status; no Administration).
+- **Repo autonomy.** `uv run cc branch-mission` proves the bounded local
+  branch->worktree->docs-only change->declared checks->redacted evidence loop.
+  It does not push, open a PR, merge, deploy, change settings, or touch secrets.
+  `uv run cc pr-check-verify --apply --poll-interval 15 --poll-timeout 1800`
+  proves the remote feature-branch->draft-PR->required-check loop through PR #6:
+  `validate` and `lint-test` both completed successfully. `llm_station`
+  repo autonomy is now enabled only for registered L2 feature-branch-only work;
+  merge, deploy, settings, secrets, and branch deletion remain human-gated.
+- **Desktop automation** (`appflowy_browser_staging`) stays disabled until timeout/human-takeover
+  and screenshot/evidence policy are declared.
+
 ## In progress / awaiting a human
 
-- **First commit.** The tree is staged-ready but uncommitted. Stage explicit paths (never
-  `git add -A`), commit on a branch off `main`, push, open a PR. The submodule + `.gitmodules`
-  go in that first commit.
 - **Channels are wired but off.** Discord is `enabled: true` in `channels.yaml` but needs
   `DISCORD_*` tokens in `.env` to actually connect; Slack/Telegram/WhatsApp are `enabled:
   false` pending tokens. Live-test each once tokens exist (`make gateway CHANNELS=<one>`).
@@ -49,21 +67,31 @@ _Last updated: 2026-06-13._
   approval. Then schedule the bridge (schtasks one-liner in `kanban-integration.md`).
 - **Deployment remainder** (machine-by-machine, against the SETUP-FROM-SCRATCH §12
   definition of done): VPS rent + Docker/Tailscale + same bootstrap flow; Tailscale on the
-  4090 + point VPS `OLLAMA_API_BASE` at it + `make live-smoke` from the VPS; GitHub
-  branch protection + scoped token. Local items (digest pin, keys, health, live smoke,
-  `cc.ps1 check`) are all done.
+  4090 + point VPS `OLLAMA_API_BASE` at it + `make live-smoke` from the VPS. GitHub branch
+  protection + GitHub App identity are now **verified** (see Autonomy hardening above). Local
+  items (digest pin, keys, health, live smoke, `cc.ps1 check`) are all done.
 
 ## Next (suggested order)
 
-1. **Commit + push + open PR** for this GitHub-readiness work; let CI (`contracts.yml`)
-   prove validate + ruff + pytest on a clean runner.
-2. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
+1. **Declare desktop timeout and human-takeover policy** before any live
+   desktop action. Keep `appflowy_browser_staging` disabled until timeout,
+   takeover hotkey, screenshot/evidence retention, and no-op canary rules are
+   contract-backed.
+2. **Enable the desktop target only after timeout/takeover and canary policy**
+   are declared and verified by evidence.
+3. **Derive the GUI loop-breaker policy from event history** before allowing
+   autonomous GUI retries.
+4. **Enable no-op canaries only after blockers clear**, then decide telemetry
+   from structured event gaps.
+5. **Evaluate external runtimes only after measured gaps** show the current
+   control plane cannot cover the needed capability.
+6. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
    webhook, no app review) to exercise `GatewayCore` on a second transport in production.
-3. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
+7. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
    webhook (`docs/channels.md`), confirm the `GET` verify + `POST` inbound round-trip.
-4. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
+8. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
    via `make lint` but not yet wired into CI — tighten types and add it to CI when green.
-5. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
+9. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
    the CWD (run from repo root via `make` / `python -m`). If you want the console scripts to
    work from any directory, anchor their file reads to the repo root and expose the rest as
    entry points.

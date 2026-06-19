@@ -309,6 +309,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "fastapi" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
@@ -323,6 +324,7 @@ gateways = [
 [package.metadata]
 requires-dist = [
     { name = "discord-py", marker = "extra == 'gateways'", specifier = ">=2.4" },
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'gateways'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },

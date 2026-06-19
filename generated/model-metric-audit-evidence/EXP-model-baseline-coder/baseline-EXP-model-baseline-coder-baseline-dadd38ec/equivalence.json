@@ -1,0 +1,12 @@
+{
+  "base_url_sha256": "7866d63830422cd421667c95360eaf1d8819f6f603bd2d479450e06cf01cb023",
+  "baseline_model": "qwen3-coder:30b",
+  "benchmark_config": "configs/model-benchmarks.yaml",
+  "benchmark_config_hash": "1f19447d7672cab09a9c7475e4ff0b890b9ad0fbfd8ea580582c767c0071a619",
+  "candidate_model": "__NO_CHALLENGER_SELECTED__",
+  "commit": "4b48fd8fb53c0df5dc5a63b5fe4e055f0529dff0",
+  "evaluated_context": null,
+  "role": "coder",
+  "suite": "coder",
+  "suite_hash": "bc6e2203820089e6ba410373e2726efa6a49ec2d5fc69d48be25b24e78775c97"
+}

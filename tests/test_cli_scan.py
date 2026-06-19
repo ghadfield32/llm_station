@@ -24,7 +24,8 @@ def temp_registry(tmp_path, monkeypatch):
 def _args(tmp_path, **kw) -> argparse.Namespace:
     base = dict(apply=False, method="wsjf", feeds="", source=[], max_cards=20,
                 report_out=str(tmp_path / "report.md"), show_report=False,
-                email=False, email_to="", board=False, ping=False, feature_log="")
+                email=False, email_to="", board=False, ping=False, feature_log="",
+                kanban=False, kanban_top=3)
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -102,3 +103,12 @@ def test_scan_ping_prints_one_line(tmp_path, temp_registry, capsys):
     rc = cli.cmd_scan(_args(tmp_path, source=["ledger"], ping=True))
     out = capsys.readouterr().out
     assert rc == 0 and "ping: " in out and "Daily self-improvement" in out
+
+
+def test_scan_kanban_dry_run_drafts_human_gated_card(tmp_path, temp_registry, capsys):
+    # dry-run: a self-improvement card is described but NOT written live (no AppFlowy touched)
+    rc = cli.cmd_scan(_args(tmp_path, source=["litellm_registry"],
+                            feeds=_model_feed(tmp_path), kanban=True, kanban_top=1))
+    out = capsys.readouterr().out
+    assert rc == 0 and "kanban [DRY-RUN]" in out and "would draft to Backlog" in out
+    assert "[self-improve]" in out
