@@ -1640,6 +1640,11 @@ first commit and reconstruct the record git now preserves.
   the protected base branch through the GitHub contents API, then apply only the
   bounded canary changes instead of copying unrelated local working-tree
   content.
+- **Ruleset approval actor clarified.** The active GitHub ruleset requires approval
+  of the most recent reviewable push. Integration PR maintenance commits should
+  be pushed by the GitHub App or another non-approving actor so `ghadfield32`
+  approval remains the human merge wall instead of self-approval by the last
+  pusher.
 - **Gate moved forward.** `configs/autonomy.yaml` now records
   `pr_check_evidence_loop_verified`, removes
   `verify_pr_check_evidence_loop_before_autonomous_edits` from ordered work,
