@@ -39,9 +39,9 @@ completed_work:
   - branch_protection_verified_with_active_ruleset
   - github_token_storage_rotation_policy_finalized
   - github_app_auth_verified_after_branch_wall
+  - tiny_branch_only_repo_mission_passed
+  - pr_check_evidence_loop_verified
 ordered_work:
-  - run_tiny_branch_only_repo_mission
-  - verify_pr_check_evidence_loop_before_autonomous_edits
   - declare_desktop_timeout_and_human_takeover_policy_before_live_actions
   - enable_desktop_target_only_after_timeout_takeover_and_canary_plan
   - derive_loop_breaker_threshold_from_event_history_before_autonomous_gui
@@ -123,15 +123,13 @@ repo_manifests:
     devcontainer_path: .devcontainer/devcontainer.json
     ci_commands:
       - uv run cc validate
-      - uv run pytest
+      - uv run --extra dev --extra gateways pytest
     secret_policy: no_runtime_secrets_inside_container
     codeowners_required: true
     codeowners_path: .github/CODEOWNERS
     risk_ceiling: L2_local_edits
-    autonomous_edits_enabled: false
-    blockers:
-      - branch_only_repo_mission_loop_not_proven
-      - pr_check_evidence_loop_not_verified
+    autonomous_edits_enabled: true
+    blockers: []
 
 desktop_targets:
   - target_id: appflowy_browser_staging

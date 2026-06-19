@@ -16,12 +16,14 @@
 - `uv run cc agent-validation` passes live local-model checks for parsed tool calls, memory-block recall, 14-turn recall, and fresh-conversation abstention through the `chat` route.
 - The configured AppFlowy staging card was moved to `In Progress` through the existing `move_item` intent, and `uv run cc desktop-target-verify` now passes from the regenerated live snapshot.
 - `uv run cc desktop-adapter` exists as a readiness gate; it performs no desktop actions and blocks until live-action policy is declared.
-- The verifier prints no token, private key, `.env` value, or raw credential material and performs no writes.
+- `uv run cc branch-mission` passes the bounded local branch/worktree/docs-only validation loop.
+- `uv run cc pr-check-verify --apply --poll-interval 15 --poll-timeout 1800` passes the remote branch/draft-PR/required-check evidence loop through draft PR #6.
+- `llm_station` repo autonomy is enabled for registered L2 feature-branch-only work after local and remote evidence gates passed.
+- Observer verifiers print no token, private key, `.env` value, or raw credential material and perform no writes. The PR/check verifier performs only the explicitly approved feature-branch and draft-PR writes and stores redacted evidence.
 
 ## Blocked
 
-- Repository autonomy remains disabled.
-- Branch protection verification now passes; repo autonomy remains blocked until a tiny branch-only repo mission proves the branch/worktree/devcontainer, validation, and PR/check evidence loop.
+- Repository autonomy is no longer blocked for `llm_station` L2 feature-branch-only work; merge/deploy/settings/secrets/branch deletion remain human-gated.
 - Token storage and rotation policy is finalized after branch-protection verification passed.
 - Desktop/browser live actions remain blocked because the target is disabled and no TTL, action timeout, human takeover hotkey, or screenshot/evidence policy is declared.
 - Canaries remain disabled until their declared blockers clear.
@@ -29,7 +31,8 @@
 ## Can Be Completed Locally
 
 - Re-run `uv run cc github-app-verify --output evaluation/system-validation/20260616-autonomy-contracts/github-app-verify.json` after GitHub App auth/policy changes.
-- Run one tiny branch-only repo mission, then verify the PR/check/evidence loop before enabling autonomous edits.
+- Re-run `uv run cc branch-mission --output evaluation/system-validation/20260616-autonomy-contracts/branch-mission.json` after repo-manifest or validation-command changes.
+- Re-run `uv run cc pr-check-verify --apply --poll-interval <operator-derived> --poll-timeout <operator-derived> --output evaluation/system-validation/20260616-autonomy-contracts/pr-check-loop.json` only when a fresh PR/check evidence loop is intentionally required.
 - Re-run `uv run cc agent-validation --output evaluation/system-validation/20260616-autonomy-contracts/agent-validation.json` after model-route changes.
 - Re-run `uv run python -m command_center.cli.kanban_surface board-snapshot --output generated/board-snapshot.json`, then `uv run cc desktop-target-verify --output evaluation/system-validation/20260616-autonomy-contracts/desktop-target-verify.json` after AppFlowy target changes.
 - Declare desktop TTL, action timeout, human takeover, and screenshot/evidence policy before enabling live desktop actions.
@@ -43,10 +46,8 @@
 
 ## Must Not Be Attempted Yet
 
-- Do not enable `autonomous_edits_enabled`.
-- Do not set repo `auth_mode: github_app`.
 - Do not grant the GitHub App Administration permission solely to inspect branch protection.
 - Do not use a PAT to bypass the GitHub App production-auth blocker.
 - Do not store installation tokens.
 - Do not print secrets or `.env` values.
-- Do not perform branch pushes, PR writes, merges, deploys, settings changes, secret changes, or desktop automation in this pass.
+- Do not merge, deploy, change settings, change secrets, delete branches, or perform desktop automation in this pass.

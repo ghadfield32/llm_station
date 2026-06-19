@@ -1,0 +1,179 @@
+{
+  "base_branch": "main",
+  "blockers": [],
+  "branch": "mission/llm_station/pr-check/20260619T122507591431Z",
+  "changed_paths": [
+    "pyproject.toml",
+    "tests/test_pr_check_canary.py"
+  ],
+  "check_run_polls": 4,
+  "check_runs": {
+    "lint-test": {
+      "conclusion": "success",
+      "html_url": "https://github.com/ghadfield32/llm_station/actions/runs/27825557744/job/82348939856",
+      "status": "completed"
+    },
+    "validate": {
+      "conclusion": "success",
+      "html_url": "https://github.com/ghadfield32/llm_station/actions/runs/27825557744/job/82348939897",
+      "status": "completed"
+    }
+  },
+  "check_runs_complete": true,
+  "check_runs_status_code": 200,
+  "check_runs_success": true,
+  "commit": "8109cf49298c89d18251fd72edcefbc4311156f0",
+  "completion_verdict": {
+    "reasons": [],
+    "status": "PASS"
+  },
+  "created_at": "2026-06-19T12:25:07.591431+00:00",
+  "events": [
+    {
+      "actor": "cc.pr-check-verify",
+      "approval_id": null,
+      "detail": {
+        "expected_events": [
+          "repo.action",
+          "mission.verification"
+        ],
+        "expected_no_change": "no merge, no deploy, no settings, no secret write",
+        "expected_state_after": "feature_branch_pr_open_required_checks_succeeded",
+        "expected_state_before": "protected_base_branch_without_canary_pr",
+        "privacy_boundary": "installation token in memory only; no token in git remote or evidence",
+        "rollback_or_revert_plan": "close the PR; retain the feature branch unless human cleanup is approved"
+      },
+      "event_id": "llm_station-pr-check-20260619T122507591431Z:forecast",
+      "input_artifact_hashes": [],
+      "kind": "mission.forecast",
+      "mission_id": "llm_station-pr-check-20260619T122507591431Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "planned",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:25:07.591431+00:00",
+      "trace_id": "llm_station-pr-check-20260619T122507591431Z"
+    },
+    {
+      "actor": "cc.pr-check-verify",
+      "approval_id": null,
+      "detail": {
+        "branch": "mission/llm_station/pr-check/20260619T122507591431Z",
+        "command": "github-git-api:create-ref",
+        "exit_code": 0,
+        "repo_id": "llm_station",
+        "worktree_ref": "github-api:ghadfield32/llm_station:mission/llm_station/pr-check/20260619T122507591431Z"
+      },
+      "event_id": "llm_station-pr-check-20260619T122507591431Z:repo-action:branch-commit",
+      "input_artifact_hashes": [],
+      "kind": "repo.action",
+      "mission_id": "llm_station-pr-check-20260619T122507591431Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "verified",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:25:07.591431+00:00",
+      "trace_id": "llm_station-pr-check-20260619T122507591431Z"
+    },
+    {
+      "actor": "cc.pr-check-verify",
+      "approval_id": null,
+      "detail": {
+        "branch": "mission/llm_station/pr-check/20260619T122507591431Z",
+        "command": "github-actions-required-checks",
+        "exit_code": 0,
+        "repo_id": "llm_station",
+        "worktree_ref": "github-api:ghadfield32/llm_station:mission/llm_station/pr-check/20260619T122507591431Z"
+      },
+      "event_id": "llm_station-pr-check-20260619T122507591431Z:repo-action:checks",
+      "input_artifact_hashes": [],
+      "kind": "repo.action",
+      "mission_id": "llm_station-pr-check-20260619T122507591431Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "verified",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:25:07.591431+00:00",
+      "trace_id": "llm_station-pr-check-20260619T122507591431Z"
+    },
+    {
+      "actor": "cc.pr-check-verify",
+      "approval_id": null,
+      "detail": {
+        "evidence_refs": [
+          "commit:8109cf49298c89d18251fd72edcefbc4311156f0",
+          "pr:https://github.com/ghadfield32/llm_station/pull/6",
+          "check:validate:success",
+          "check:lint-test:success"
+        ],
+        "observed_state_after": "feature_branch_pr_open_required_checks_succeeded",
+        "verifier_result": "PASS"
+      },
+      "event_id": "llm_station-pr-check-20260619T122507591431Z:verification",
+      "input_artifact_hashes": [],
+      "kind": "mission.verification",
+      "mission_id": "llm_station-pr-check-20260619T122507591431Z",
+      "output_artifact_hashes": [],
+      "privacy_classification": "internal",
+      "result": "verified",
+      "risk_tier": "L2_local_edits",
+      "rollback_id": null,
+      "schema_version": "command-center.event.v1",
+      "source_authority": "configs/autonomy.yaml",
+      "timestamp": "2026-06-19T12:25:07.591431+00:00",
+      "trace_id": "llm_station-pr-check-20260619T122507591431Z"
+    }
+  ],
+  "evidence": [
+    "feature branch created through GitHub Git API: mission/llm_station/pr-check/20260619T122507591431Z",
+    "pull request opened: #6",
+    "PR/check-evidence loop verified: all configured required checks succeeded"
+  ],
+  "github_policy": {
+    "feature_branch_created": true,
+    "merge_performed": false,
+    "pr_created": true,
+    "secrets_changed": false,
+    "settings_changed": false
+  },
+  "mission_id": "llm_station-pr-check-20260619T122507591431Z",
+  "next_actions": [
+    "human review + CODEOWNERS approval is still required to merge"
+  ],
+  "poll_budget_source": "operator_cli_args",
+  "poll_interval_seconds": 15.0,
+  "poll_timeout_seconds": 1800.0,
+  "pull_request": {
+    "html_url": "https://github.com/ghadfield32/llm_station/pull/6",
+    "merged": false,
+    "number": 6,
+    "state": "open"
+  },
+  "repo_id": "llm_station",
+  "repository": "ghadfield32/llm_station",
+  "required_checks": [
+    "validate",
+    "lint-test"
+  ],
+  "required_checks_source": "configs/autonomy.yaml:branch_protection_verification.required_status_check_contexts",
+  "secrets_printed": false,
+  "status": "pass",
+  "token_expires_at": "2026-06-19T13:25:08Z",
+  "token_permissions": {
+    "checks": "read",
+    "contents": "write",
+    "metadata": "read",
+    "pull_requests": "write",
+    "statuses": "read"
+  },
+  "writes_performed": true
+}

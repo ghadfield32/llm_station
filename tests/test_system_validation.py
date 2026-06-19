@@ -38,7 +38,7 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "required_status_check_contexts=validate, lint-test" in baseline
     assert "require_ruleset_bypass_actors_absent=True" in baseline
     assert "ruleset_bypass_policy_source=GitHub wall requires no unverified" in baseline
-    assert "repo `llm_station` autonomous edits blocked" in gaps
+    assert "repo `llm_station` autonomous edits blocked" not in gaps
     assert "desktop target `appflowy_browser_staging` blocked" in gaps
     assert "GitHub App auth is `blocked` pending auth requirements" not in gaps
     assert "GitHub App production auth review pending" not in gaps
@@ -49,6 +49,9 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "| GitHub App installation observed | PASS | github-app-verify.json |" in scenarios
     assert "| GitHub App repository permission verification | PASS |" in scenarios
     assert "| GitHub branch protection verification | MISSING | branch-protection-verify.json |" in scenarios
+    assert "| tiny branch-only repo mission | MISSING | branch-mission.json |" in scenarios
+    assert "| live PR/check evidence loop | MISSING | pr-check-loop.json |" in scenarios
+    assert "| repo autonomy enabled | BLOCKED | configs/autonomy.yaml + pr-check-loop.json |" in scenarios
     assert "Completed Contract Work" in next_steps
     assert "canonical_event_schemas" in next_steps
     assert "repo_devcontainer_manifest_added_for_llm_station" in next_steps
@@ -72,8 +75,10 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "branch_protection_verified_with_active_ruleset" in next_steps
     assert "github_token_storage_rotation_policy_finalized" in next_steps
     assert "github_app_auth_verified_after_branch_wall" in next_steps
-    assert "run_tiny_branch_only_repo_mission" in next_steps
-    assert "verify_pr_check_evidence_loop_before_autonomous_edits" in next_steps
+    assert "tiny_branch_only_repo_mission_passed" in next_steps
+    assert "pr_check_evidence_loop_verified" in next_steps
+    assert "run_tiny_branch_only_repo_mission" not in next_steps
+    assert "verify_pr_check_evidence_loop_before_autonomous_edits" not in next_steps
     assert "declare_desktop_timeout_and_human_takeover_policy_before_live_actions" in next_steps
     assert "enable_code_owner_reviews_on_active_branch_ruleset" not in next_steps
     assert "rerun_branch_protection_verify_until_verified" not in next_steps

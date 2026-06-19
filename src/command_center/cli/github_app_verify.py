@@ -165,6 +165,74 @@ def _append_permission_next_actions(next_actions: list[str], blockers: list[str]
             )
 
 
+def mint_installation_token(
+    *,
+    env: dict[str, str],
+    auth: Any,
+    client_factory=httpx.Client,
+    permissions: dict[str, str] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Mint a short-lived GitHub App installation token for the selected repos.
+
+    Reuses the App JWT and installation selection used by `verify_github_app`.
+    Returns ``(token, info)`` where ``info`` carries only non-secret metadata
+    (granted permissions, expiry, installation id). Never prints or returns
+    secrets in error messages; raises ``RuntimeError`` with a token-free code on
+    any failure so callers can record it as a blocker.
+    """
+    app_id = env.get(auth.app_id_env, "")
+    installation_id = env.get(auth.installation_id_env, "")
+    key_path_value = env.get(auth.private_key_path_env, "")
+    if not app_id or not key_path_value:
+        raise RuntimeError("github_app_token_env_missing")
+    key_path = Path(key_path_value).expanduser()
+    if not key_path.is_file():
+        raise RuntimeError("github_app_private_key_not_found")
+
+    app_jwt = build_app_jwt(app_id, key_path)
+    jwt_headers = _headers(app_jwt)
+    repo_names = [repo.split("/", 1)[1] for repo in auth.selected_repositories]
+    requested = permissions or {
+        name: _github_permission_value(value)
+        for name, value in auth.allowed_repository_permissions.items()
+        if _github_permission_value(value) is not None
+    }
+
+    with client_factory(timeout=30) as client:
+        status, installations = _request_json(
+            client, "GET", "/app/installations", headers=jwt_headers
+        )
+        if status != 200 or not isinstance(installations, list):
+            raise RuntimeError(f"github_app_installations_request_failed_{status}")
+        selected = None
+        for installation in installations:
+            account = installation.get("account") or {}
+            if str(installation.get("id")) == installation_id:
+                selected = installation
+                break
+            if account.get("login") == auth.owner:
+                selected = installation
+        if selected is None:
+            raise RuntimeError("github_app_installation_not_found")
+        status, token_data = _request_json(
+            client,
+            "POST",
+            f"/app/installations/{selected['id']}/access_tokens",
+            headers=jwt_headers,
+            body={"repositories": repo_names, "permissions": requested},
+        )
+        if status != 201:
+            raise RuntimeError(f"github_app_installation_token_request_failed_{status}")
+        token = token_data.get("token")
+        if not token:
+            raise RuntimeError("github_app_installation_token_missing")
+        return token, {
+            "permissions": dict(sorted((token_data.get("permissions") or {}).items())),
+            "expires_at": token_data.get("expires_at"),
+            "installation_id": selected.get("id"),
+        }
+
+
 def verify_github_app(
     *,
     config_path: Path = ROOT / "configs" / "autonomy.yaml",

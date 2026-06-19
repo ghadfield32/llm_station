@@ -1,7 +1,6 @@
 # Gaps
 
 ## Repo And Desktop Blockers
-- repo `llm_station` autonomous edits blocked: branch_only_repo_mission_loop_not_proven, pr_check_evidence_loop_not_verified
 - desktop target `appflowy_browser_staging` blocked: desktop_live_actions_not_enabled, desktop_timeout_and_takeover_policy_not_declared
 
 ## Canaries

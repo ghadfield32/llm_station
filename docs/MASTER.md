@@ -736,9 +736,11 @@ Current verified state from the hardening pass:
    manifest, forecast/evidence completion verifier contract, disabled no-op
    canaries, telemetry decision, and external-runtime gate are in
    `configs/autonomy.yaml` and validate through `AutonomyConfig`.
-2. `llm_station` now has a declared devcontainer execution manifest and remains
-   `autonomous_edits_enabled: false` until GitHub auth and branch-protection
-   gates pass.
+2. `llm_station` now has a declared devcontainer execution manifest and
+   `autonomous_edits_enabled: true` for registered L2 feature-branch-only repo
+   work after GitHub auth, branch-protection, local branch mission, and live
+   PR/check evidence gates passed. Merge, deploy, settings, secrets, branch
+   deletion, and other L4 actions remain outside autonomous scope.
 3. The GitHub App is installed on the selected `ghadfield32/llm_station`
    repository. `uv run cc github-app-verify` can authenticate the app, mint a
    short-lived installation token in memory, read the selected repo, and read
@@ -758,10 +760,18 @@ Current verified state from the hardening pass:
    adapter readiness gate exists. Live desktop actions remain blocked because
    the target is disabled and timeout, takeover, and screenshot/evidence
    policies are not declared.
-6. The next ordered work is in `configs/autonomy.yaml`: run one tiny
-   branch-only repo mission, verify the PR/check/evidence loop before enabling
-   autonomous edits, declare desktop timeout/takeover policy before live actions,
-   then continue loop-breaker derivation, canaries, telemetry, and
+6. `uv run cc branch-mission` now proves the tiny branch-only repo loop:
+   one local mission id, one local feature branch, one temporary worktree, one
+   docs-only change, declared validation commands, and redacted evidence. It
+   does not push, open a PR, merge, deploy, change settings, or touch secrets.
+7. `uv run cc pr-check-verify --apply --poll-interval 15 --poll-timeout 1800`
+   proved the remote PR/check/evidence loop with draft PR #6. The GitHub App
+   created one feature branch through the GitHub Git API, opened one draft PR,
+   and observed the configured required checks `validate` and `lint-test`
+   complete successfully. It did not merge, deploy, change settings, change
+   secrets, delete branches, or store the installation token in evidence. The
+   next ordered work is now desktop timeout/takeover policy before live desktop
+   actions, then loop-breaker derivation, canaries, telemetry, and
    external-runtime gates.
 
 ---
@@ -1091,9 +1101,14 @@ The enforcement stack (full commands in [github-safety.md](github-safety.md)):
     token. The operator-approved `issues: read` permission is now recorded in
     policy, repository permission verification passes, branch protection is
     verified through the owner/admin observer path, and token storage/rotation
-    policy is finalized. Repo autonomy remains disabled until a tiny branch-only
-    mission proves the branch/worktree/devcontainer and PR/check evidence loop.
-    Fine-grained PATs remain pilot-only.
+    policy is finalized. The tiny branch-only mission now proves local
+    branch/worktree/docs-only validation evidence. The live PR/check verifier
+    now proves the remote branch -> draft PR -> required-check evidence loop
+    through PR #6. Repo autonomy is enabled only for registered
+    feature-branch-only L2 work; human review/CODEOWNERS and branch protection
+    remain the merge wall. Devcontainer runtime execution remains
+    manifest-verified, not invoked by the branch-only smoke. Fine-grained PATs
+    remain pilot-only.
 3. **Deploy = separate human-gated environment** — `production` environment
    with a required reviewer and prevent-self-review; the agent never gets its
    secrets.
@@ -1599,9 +1614,66 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 ## 14. Change log
 
-Newest first. Dates are from the docs themselves; the repo has no git history
-yet (first commit pending), so this reconstructs the record the next commit
-should preserve.
+Newest first. Dates are from the docs themselves; early entries predate the
+first commit and reconstruct the record git now preserves.
+
+### 2026-06-19 — Live PR/check evidence loop verified
+
+- **Remote repo loop passed.** `uv run cc pr-check-verify --apply
+  --poll-interval 15 --poll-timeout 1800` created feature branch
+  `mission/llm_station/pr-check/20260619T122507591431Z`, opened draft PR #6,
+  and observed both configured required checks succeed: `validate` and
+  `lint-test`. Evidence is recorded in
+  `evaluation/system-validation/20260616-autonomy-contracts/pr-check-loop.json`.
+- **Credential and privacy boundary held.** The verifier uses the
+  `llm-station-command-center` GitHub App installation token in memory only. It
+  does not use the owner/admin observer token, does not print or store the
+  installation token, does not put tokens into git remotes, and does not merge,
+  deploy, alter settings, alter secrets, or delete branches. The PR remains a
+  draft with human review/CODEOWNERS as the merge wall.
+- **No workflow-write dependency.** The protected `lint-test` job installs
+  `.[dev]` before full pytest, so FastAPI is now a dev test dependency in
+  `pyproject.toml` and `uv.lock`. Future PR-check canaries read
+  `pyproject.toml` from the protected base branch through the GitHub contents
+  API, then apply only the bounded canary changes instead of copying unrelated
+  local working-tree content.
+- **Gate moved forward.** `configs/autonomy.yaml` now records
+  `pr_check_evidence_loop_verified`, removes
+  `verify_pr_check_evidence_loop_before_autonomous_edits` from ordered work,
+  and enables `llm_station` repo autonomy with an L2 feature-branch-only risk
+  ceiling and no repo blockers. `cc system-validation` now reports repo
+  autonomy PASS only when the config is enabled and `pr-check-loop.json` is
+  PASS, preventing config intent from being reported as verified evidence.
+- **Next ordered work.** Start with
+  `declare_desktop_timeout_and_human_takeover_policy_before_live_actions`, then
+  `enable_desktop_target_only_after_timeout_takeover_and_canary_plan`, then
+  loop-breaker derivation, no-op canary enablement, telemetry decision, and
+  external-runtime evaluation only after measured gaps.
+
+### 2026-06-18 — Branch-only repo mission passed
+
+- **Bounded mission command added.** `uv run cc branch-mission` creates one
+  local mission id, one local feature branch, and one temporary worktree under
+  `C:\tmp\command-center-repo-missions`, writes only
+  `docs/branch-mission-smoke.md`, runs the repo manifest's declared validation
+  commands, and emits `evaluation/system-validation/20260616-autonomy-contracts/branch-mission.json`.
+  It records canonical forecast, repo-action, and verification events plus a
+  completion-verifier verdict, while retaining command output only as hashes and
+  line counts.
+- **Clean-worktree dependency gap fixed.** The first branch mission correctly
+  blocked because a clean worktree could not run `pytest` without optional test
+  dependencies. `configs/autonomy.yaml` keeps the local branch-mission command
+  explicit as `uv run --extra dev --extra gateways pytest` while this work is
+  still unmerged. The PR/check verifier adds the `pyproject.toml` dev dependency
+  fix on its canary branch because the existing protected `lint-test` job
+  installs `.[dev]` before running full pytest. The bot does not need workflow
+  write permission.
+- **Result and remaining gate.** The final branch mission passed: docs-only
+  change, `cc validate` PASS, full pytest PASS, completion verifier PASS, no
+  push, no PR, no merge, no deploy, no settings change, and no secret value
+  retention. `configs/autonomy.yaml` now marks
+  `tiny_branch_only_repo_mission_passed`; this gate was superseded by the
+  2026-06-19 live PR/check/evidence pass.
 
 ### 2026-06-18 — Branch wall verified
 
@@ -1740,13 +1812,12 @@ should preserve.
   `mission.completion_verdict`, and marks the mission `done` only on PASS.
   The generic `/mission/{id}/status` endpoint rejects direct `done` updates.
 - **What remains.** The next ordered work is now in `configs/autonomy.yaml`:
-  run a tiny branch-only repo mission, verify the PR/check/evidence loop before
-  autonomous edits, declare desktop timeout and human-takeover policy before
-  live actions, derive loop-breaker policy from event history before GUI
-  autonomy, enable canaries only after blockers clear, decide whether
-  OpenTelemetry is needed after structured-event gaps are measured, and evaluate
-  external runtimes only after a measured control-plane
-  gap.
+  declare desktop timeout and human-takeover policy before live actions, enable
+  the desktop target only after timeout/takeover and canary policy are declared,
+  derive loop-breaker policy from event history before GUI autonomy, enable
+  canaries only after blockers clear, decide whether OpenTelemetry is needed
+  after structured-event gaps are measured, and evaluate external runtimes only
+  after a measured control-plane gap.
 
 ### 2026-06-16 — Whole-system validation prompt added
 

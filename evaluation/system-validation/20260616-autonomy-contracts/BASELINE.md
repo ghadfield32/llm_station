@@ -1,29 +1,11 @@
 # Baseline
 
 - Run id: `20260616-autonomy-contracts`
-- Commit: `7f70ca2`
-- Dirty entries: 19
+- Commit: `5762fea`
+- Dirty entries: 0
 
 ## Dirty Worktree
-- M configs/autonomy.yaml
--  M docs/MASTER.md
--  M docs/github-token-storage-rotation.md
--  M evaluation/system-validation/20260616-autonomy-contracts/BASELINE.md
--  M evaluation/system-validation/20260616-autonomy-contracts/GAPS.md
--  M evaluation/system-validation/20260616-autonomy-contracts/IMPLEMENTATION_NOTE.md
--  M evaluation/system-validation/20260616-autonomy-contracts/NEXT.md
--  M evaluation/system-validation/20260616-autonomy-contracts/SCENARIOS.md
--  M evaluation/system-validation/20260616-autonomy-contracts/VALIDATION_RESULTS.md
--  M evaluation/system-validation/20260616-autonomy-contracts/branch-protection-verify.json
--  M evaluation/system-validation/20260616-autonomy-contracts/github-app-verify.json
--  M src/command_center/cli/branch_protection_verify.py
--  M src/command_center/cli/github_app_verify.py
--  M src/command_center/cli/system_validation.py
--  M src/command_center/schemas/contracts.py
--  M tests/test_autonomy_contracts.py
--  M tests/test_branch_protection_verify.py
--  M tests/test_github_app_verify.py
--  M tests/test_system_validation.py
+- none
 
 ## Validated Config Contracts
 - configs/agent_surface.yaml
@@ -62,7 +44,7 @@
 - notification.sent
 
 ## Repo Manifests
-- `llm_station`: blocked; auth=github_app; execution=devcontainer; risk_ceiling=L2_local_edits; devcontainer=.devcontainer/devcontainer.json; blockers=branch_only_repo_mission_loop_not_proven, pr_check_evidence_loop_not_verified
+- `llm_station`: enabled; auth=github_app; execution=devcontainer; risk_ceiling=L2_local_edits; devcontainer=.devcontainer/devcontainer.json; blockers=none
 
 ## Desktop Targets
 - `appflowy_browser_staging`: blocked; surface=browser; os=windows; card=mission_intake/card-review q3 odds metrics; snapshot=generated/board-snapshot.json; blockers=desktop_live_actions_not_enabled, desktop_timeout_and_takeover_policy_not_declared

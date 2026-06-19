@@ -88,9 +88,20 @@ def test_devcontainer_execution_requires_path_even_before_autonomy_is_enabled():
 
 def test_disabled_repo_manifest_must_name_blockers():
     raw = _raw()
+    # llm_station is now enabled; exercise the invariant on a disabled manifest.
+    raw["repo_manifests"][0]["autonomous_edits_enabled"] = False
     raw["repo_manifests"][0]["blockers"] = []
 
     with pytest.raises(ValueError, match="disabled manifests must list blockers"):
+        AutonomyConfig.model_validate(raw)
+
+
+def test_enabled_repo_manifest_must_not_list_blockers():
+    raw = _raw()
+    raw["repo_manifests"][0]["autonomous_edits_enabled"] = True
+    raw["repo_manifests"][0]["blockers"] = ["some_blocker"]
+
+    with pytest.raises(ValueError, match="enabled manifests cannot list blockers"):
         AutonomyConfig.model_validate(raw)
 
 

@@ -191,6 +191,8 @@ def build_package(output_root: Path, run_id: str) -> Path:
     desktop_adapter_status = _artifact_status(out / "desktop-adapter-readiness.json")
     branch_protection_status = _artifact_status(out / "branch-protection-verify.json")
     github_app_status = _artifact_status(out / "github-app-verify.json")
+    branch_mission_status = _artifact_status(out / "branch-mission.json")
+    pr_check_status = _artifact_status(out / "pr-check-loop.json")
     commit = _git("rev-parse", "--short", "HEAD")
     status = _git("status", "--short")
     dirty = status.splitlines() if status else []
@@ -205,6 +207,17 @@ def build_package(output_root: Path, run_id: str) -> Path:
     github_app_repository_permissions_status = (
         "PASS"
         if "github_app_repository_permissions_verified" in cfg.completed_work
+        else "BLOCKED"
+    )
+    repo_autonomy_config_enabled = (
+        cfg.repo_manifests and all(repo.autonomous_edits_enabled for repo in cfg.repo_manifests)
+    )
+    repo_autonomy_status = (
+        "PASS" if repo_autonomy_config_enabled and pr_check_status == "PASS" else "BLOCKED"
+    )
+    desktop_automation_status = (
+        "PASS"
+        if cfg.desktop_targets and all(target.enabled for target in cfg.desktop_targets)
         else "BLOCKED"
     )
     github_app_production_auth_status = (
@@ -257,8 +270,10 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "| --- | --- | --- |",
             "| autonomy config validates | PASS | configs/autonomy.yaml |",
             "| canonical event families declared | PASS | BASELINE.md#event-families |",
-            "| repo autonomy enabled | BLOCKED | GAPS.md#repo-and-desktop-blockers |",
-            "| desktop automation enabled | BLOCKED | GAPS.md#repo-and-desktop-blockers |",
+            f"| repo autonomy enabled | {repo_autonomy_status} | "
+            "configs/autonomy.yaml + pr-check-loop.json |",
+            f"| desktop automation enabled | {desktop_automation_status} | "
+            "GAPS.md#repo-and-desktop-blockers |",
             "| completion verifier requires evidence | PASS | configs/autonomy.yaml |",
             f"| local agent tool/memory/multi-turn validation | {agent_validation_status} | "
             "agent-validation.json |",
@@ -277,6 +292,10 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "GAPS.md#auth-and-external-runtimes |",
             f"| GitHub branch protection verification | {branch_protection_status} | "
             "branch-protection-verify.json |",
+            f"| tiny branch-only repo mission | {branch_mission_status} | "
+            "branch-mission.json |",
+            f"| live PR/check evidence loop | {pr_check_status} | "
+            "pr-check-loop.json |",
             "| external runtime spike | BLOCKED | GAPS.md#auth-and-external-runtimes |",
         ]),
     )
@@ -291,6 +310,8 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "- `AutonomyConfig.model_validate(configs/autonomy.yaml)`",
             "- Optional: `cc github-app-verify --output <package>/github-app-verify.json`",
             "- Optional: `cc branch-protection-verify --output <package>/branch-protection-verify.json`",
+            "- Optional: `cc branch-mission --output <package>/branch-mission.json`",
+            "- Optional: `cc pr-check-verify --apply --output <package>/pr-check-loop.json`",
             "- Optional: `cc agent-validation --output <package>/agent-validation.json`",
             "- Optional: `cc desktop-target-verify --output <package>/desktop-target-verify.json`",
             "- Optional: `cc desktop-adapter --output <package>/desktop-adapter-readiness.json`",
@@ -311,6 +332,13 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "presence and write a redacted artifact into this package.",
             "- `cc branch-protection-verify`, when run separately, may read owner/admin "
             "observer token presence and write redacted branch-protection evidence.",
+            "- `cc branch-mission`, when run separately, creates a temporary local "
+            "worktree, writes one docs-only smoke file, runs configured validation "
+            "commands with secret env names removed, and retains command output hashes "
+            "and line counts only.",
+            "- `cc pr-check-verify`, when run separately with `--apply`, uses a "
+            "short-lived GitHub App installation token in memory to create one "
+            "feature branch and one draft PR, then stores only PR/check metadata.",
             "- Raw chat transcripts were not read.",
             "- Screenshots were not captured.",
             "- Model prompts and outputs were not retained.",
