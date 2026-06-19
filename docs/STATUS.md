@@ -52,8 +52,11 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
   `validate` and `lint-test` both completed successfully. `llm_station`
   repo autonomy is now enabled only for registered L2 feature-branch-only work;
   merge, deploy, settings, secrets, and branch deletion remain human-gated.
-- **Desktop automation** (`appflowy_browser_staging`) stays disabled until timeout/human-takeover
-  and screenshot/evidence policy are declared.
+- **Desktop automation** (`appflowy_browser_staging`) has declared
+  timeout/takeover, human-takeover, and screenshot/evidence policy, but numeric
+  TTL and action-timeout controls are intentionally unset until no-op canary
+  telemetry derives them. It stays disabled until canary policy and loop-breaker
+  evidence are ready.
 
 ## In progress / awaiting a human
 
@@ -73,25 +76,22 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
 
 ## Next (suggested order)
 
-1. **Declare desktop timeout and human-takeover policy** before any live
-   desktop action. Keep `appflowy_browser_staging` disabled until timeout,
-   takeover hotkey, screenshot/evidence retention, and no-op canary rules are
-   contract-backed.
-2. **Enable the desktop target only after timeout/takeover and canary policy**
-   are declared and verified by evidence.
-3. **Derive the GUI loop-breaker policy from event history** before allowing
+1. **Enable the desktop target only after timeout/takeover and canary policy**
+   are verified by evidence, including telemetry-derived TTL and action-timeout
+   controls.
+2. **Derive the GUI loop-breaker policy from event history** before allowing
    autonomous GUI retries.
-4. **Enable no-op canaries only after blockers clear**, then decide telemetry
+3. **Enable no-op canaries only after blockers clear**, then decide telemetry
    from structured event gaps.
-5. **Evaluate external runtimes only after measured gaps** show the current
+4. **Evaluate external runtimes only after measured gaps** show the current
    control plane cannot cover the needed capability.
-6. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
+5. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
    webhook, no app review) to exercise `GatewayCore` on a second transport in production.
-7. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
+6. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
    webhook (`docs/channels.md`), confirm the `GET` verify + `POST` inbound round-trip.
-8. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
+7. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
    via `make lint` but not yet wired into CI — tighten types and add it to CI when green.
-9. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
+8. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
    the CWD (run from repo root via `make` / `python -m`). If you want the console scripts to
    work from any directory, anchor their file reads to the repo root and expose the rest as
    entry points.

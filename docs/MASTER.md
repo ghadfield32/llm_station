@@ -757,9 +757,10 @@ Current verified state from the hardening pass:
 5. The local agent route has live evidence for parsed tool calls, memory-block
    recall, 14-turn recall, and fresh-conversation abstention through `chat`.
    The AppFlowy staging card now verifies as `In Progress`, and the desktop
-   adapter readiness gate exists. Live desktop actions remain blocked because
-   the target is disabled and timeout, takeover, and screenshot/evidence
-   policies are not declared.
+   adapter readiness gate exists. Timeout/takeover policy is declared for the
+   staging target, but numeric TTL and per-action timeout controls are still
+   pending no-op canary telemetry. Live desktop actions remain blocked because
+   the target is still disabled pending canary policy and loop-breaker evidence.
 6. `uv run cc branch-mission` now proves the tiny branch-only repo loop:
    one local mission id, one local feature branch, one temporary worktree, one
    docs-only change, declared validation commands, and redacted evidence. It
@@ -770,9 +771,16 @@ Current verified state from the hardening pass:
    and observed the configured required checks `validate` and `lint-test`
    complete successfully. It did not merge, deploy, change settings, change
    secrets, delete branches, or store the installation token in evidence. The
-   next ordered work is now desktop timeout/takeover policy before live desktop
-   actions, then loop-breaker derivation, canaries, telemetry, and
-   external-runtime gates.
+   integration PR #7 merged through squash auto-merge after CODEOWNERS approval;
+   the obsolete draft proof PR #6 was closed without deleting its branch.
+8. `configs/autonomy.yaml` now records
+   `desktop_timeout_and_human_takeover_policy_declared`, declares the
+   human-takeover and screenshot artifact policies for
+   `appflowy_browser_staging`, and deliberately leaves numeric TTL and
+   per-action timeout controls unset until telemetry derives them. The target
+   remains disabled. The next ordered work is now enabling the desktop target
+   only after timeout/takeover and canary policy are verified by evidence, then
+   loop-breaker derivation, canaries, telemetry, and external-runtime gates.
 
 ---
 
@@ -1617,6 +1625,31 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-19 — Desktop timeout and takeover policy declared
+
+- **Post-merge cleanup done.** PR #7 merged via squash auto-merge after
+  CODEOWNERS approval. Local `main` was fast-forwarded to the merge commit, and
+  obsolete draft proof PR #6 was closed without deleting its feature branch.
+- **Policy declared, actions still disabled.** `configs/autonomy.yaml` now
+  records `desktop_timeout_and_human_takeover_policy_declared`, declares the
+  human-takeover hotkey and `redacted_hashes_and_refs_only` screenshot artifact
+  policy for `appflowy_browser_staging`, and deliberately leaves numeric TTL
+  and per-action timeout controls unset until no-op canary telemetry derives
+  them. The target remains `enabled: false`; this is a safety policy
+  declaration, not live GUI approval.
+- **Evidence boundary explicit.** [desktop-timeout-takeover-policy.md](desktop-timeout-takeover-policy.md)
+  records that the current policy is declaration evidence only. No live-GUI
+  timing percentile is claimed, no raw screenshots are retained, and the target
+  must still pass no-op canary evidence before live actions can be enabled.
+- **Adapter evidence improved.** `cc desktop-adapter` now reports whether the
+  timeout/takeover policy is declared, whether TTL and action-timeout controls
+  are measured, and whether human-takeover and screenshot policies exist while
+  retaining only the presence of the takeover hotkey, not the key sequence.
+- **Next ordered work.** Start with
+  `enable_desktop_target_only_after_timeout_takeover_and_canary_plan`, then
+  derive the GUI loop-breaker threshold from event history before autonomous GUI
+  retries, then enable no-op canaries, telemetry, and external-runtime gates.
+
 ### 2026-06-19 — Live PR/check evidence loop verified
 
 - **Remote repo loop passed.** `uv run cc pr-check-verify --apply
@@ -1653,10 +1686,8 @@ first commit and reconstruct the record git now preserves.
   autonomy PASS only when the config is enabled and `pr-check-loop.json` is
   PASS, preventing config intent from being reported as verified evidence.
 - **Next ordered work.** Start with
-  `declare_desktop_timeout_and_human_takeover_policy_before_live_actions`, then
-  `enable_desktop_target_only_after_timeout_takeover_and_canary_plan`, then
-  loop-breaker derivation, no-op canary enablement, telemetry decision, and
-  external-runtime evaluation only after measured gaps.
+  desktop timeout/takeover policy declaration before live actions; this was
+  completed later on 2026-06-19.
 
 ### 2026-06-18 — Branch-only repo mission passed
 
