@@ -355,6 +355,8 @@ COMMANDS: dict[str, tuple] = {
                     "verify a repo's autonomy gates (devcontainer/CI/app/branch-protection/board/evidence)"),
     "repo-enable-autonomy": (lambda a: pym("command_center.cli.repo_registry", "enable-autonomy", *a),
                              "flip autonomous_edits_enabled only if every gate passes (--apply)"),
+    "repo-merge-guard": (lambda a: pym("command_center.cli.merge_guard", *a),
+                         "install/verify the local pre-push merge guard (local_pre_push_and_human_merge posture)"),
     "memory-add": (lambda a: pym("command_center.cli.memory_ops", "add", *a),
                    "add a durable memory (pending until --approved-by; secrets rejected)"),
     "memory-review": (lambda a: pym("command_center.cli.memory_ops", "review", *a),

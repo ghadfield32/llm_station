@@ -148,7 +148,7 @@ repo_manifests:
     allowed_base_branches:
     - main
     branch_write_policy: feature_branch_only
-    auth_mode: github_app_pending
+    auth_mode: github_app
     execution_mode: devcontainer
     devcontainer_path: .devcontainer/devcontainer.json
     ci_commands:
@@ -162,6 +162,7 @@ repo_manifests:
     local_path_ref: env:BETTS_BASKETBALL_LOCAL_PATH
     required_status_check_contexts:
     - Unit Tests
+    merge_wall: local_pre_push_and_human_merge
     autonomous_edits_enabled: false
     blockers:
     - repo_autonomy_not_yet_verified

@@ -1321,6 +1321,15 @@ class RepoManifest(Strict):
     # branch protection use these). Empty -> fall back to the global
     # branch_protection_verification.required_status_check_contexts (the self repo).
     required_status_check_contexts: list[str] = Field(default_factory=list)
+    # How the merge wall is enforced for this repo:
+    #  - github_branch_protection: server-side (ruleset/branch protection); the
+    #    strongest posture, but unavailable for PRIVATE repos on a free GitHub plan.
+    #  - local_pre_push_and_human_merge: a local pre-push guard blocks direct pushes
+    #    to protected branches on this machine, the agent stays PR-only (structural,
+    #    via the action layer), and a human merges. LOWER ASSURANCE — there is no
+    #    server-side backstop — chosen deliberately for a private+free repo.
+    merge_wall: Literal["github_branch_protection",
+                        "local_pre_push_and_human_merge"] = "github_branch_protection"
     autonomous_edits_enabled: bool = False
     blockers: list[str] = Field(default_factory=list)
 
