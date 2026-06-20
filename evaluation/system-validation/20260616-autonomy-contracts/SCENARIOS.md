@@ -10,6 +10,8 @@
 | local agent tool/memory/multi-turn validation | PASS | agent-validation.json |
 | desktop target snapshot verification | PASS | desktop-target-verify.json |
 | desktop adapter readiness | BLOCKED | desktop-adapter-readiness.json |
+| desktop no-op canary telemetry | PASS | desktop-noop-canary.json |
+| desktop timing candidate derivation | BLOCKED | desktop-timing-candidates.json |
 | no-op canaries scheduled | BLOCKED | GAPS.md#canaries |
 | telemetry production backend | BLOCKED | GAPS.md#telemetry |
 | GitHub App production auth | PASS | configs/autonomy.yaml |

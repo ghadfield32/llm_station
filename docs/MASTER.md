@@ -772,15 +772,20 @@ Current verified state from the hardening pass:
    complete successfully. It did not merge, deploy, change settings, change
    secrets, delete branches, or store the installation token in evidence. The
    integration PR #7 merged through squash auto-merge after CODEOWNERS approval;
-   the obsolete draft proof PR #6 was closed without deleting its branch.
+   the obsolete draft proof PR #6 was closed without deleting its branch. PR #8
+   proved that a user-authored PR cannot satisfy the owner approval gate for the
+   same user. Replacement PR #9 was authored by the GitHub App, approved by
+   `ghadfield32`, passed required checks, and merged through the protected branch
+   wall without weakening branch protection.
 8. `configs/autonomy.yaml` now records
    `desktop_timeout_and_human_takeover_policy_declared`, declares the
    human-takeover and screenshot artifact policies for
    `appflowy_browser_staging`, and deliberately leaves numeric TTL and
    per-action timeout controls unset until telemetry derives them. The target
-   remains disabled. The next ordered work is now enabling the desktop target
-   only after timeout/takeover and canary policy are verified by evidence, then
-   loop-breaker derivation, canaries, telemetry, and external-runtime gates.
+   remains disabled. The first read-only no-op canary telemetry sample is now
+   recorded, and timing derivation correctly blocks without a reviewed sample
+   plan. The next ordered work is declaring that sample plan, running additional
+   canary samples from it, and only then deriving provisional timing candidates.
 
 ---
 
@@ -1624,6 +1629,39 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-06-20 — Desktop no-op canary telemetry added
+
+- **Read-only canary path added.** `cc desktop-noop-canary` records redacted
+  timing evidence for `appflowy_browser_staging` from the existing target
+  snapshot and verifier. It performs no clicks, typing, screenshots, clipboard
+  reads, password reads, AppFlowy writes, or desktop live actions.
+- **Derivation stays blocked.** `cc desktop-timing-derive` can derive
+  provisional candidates only from measured canary evidence and an explicit
+  sample plan. The current merged-main sample proves instrumentation only; it
+  does not set `ttl_minutes` or `action_timeout_seconds`.
+- **Evidence recorded.** The current artifacts are
+  `desktop-noop-canary.json` and `desktop-timing-candidates.json` under the
+  `20260616-autonomy-contracts` system-validation package.
+- **Next ordered work.** Declare the desktop timing sample plan, run additional
+  no-op samples from that plan, then derive provisional timing candidates while
+  keeping desktop live actions disabled.
+
+### 2026-06-20 — PR #9 merged through the protected GitHub App path
+
+- **PR #8 retired.** PR #8 is historical only. It was user-authored, so
+  `ghadfield32` reviews landed as comments and could not satisfy the required
+  non-author approval gate.
+- **Correct path proved.** Replacement PR #9 was created through the configured
+  GitHub App identity, approved by `ghadfield32`, passed `validate` and
+  `lint-test`, and merged as squash commit `0eb46bc`. Branch protection stayed
+  intact: no direct main push, no branch-protection weakening, no check bypass,
+  and no self-approval.
+- **Desktop gate merged.** The timeout/takeover policy gate is now on `main`.
+  Live desktop actions remain disabled. Numeric TTL and per-action timeout
+  controls remain unset until measured no-op canary telemetry derives them.
+- **Next ordered work.** Build measured no-op desktop/browser canary telemetry
+  and readiness evidence before proposing any desktop target enablement.
 
 ### 2026-06-19 — Desktop timeout and takeover policy declared
 

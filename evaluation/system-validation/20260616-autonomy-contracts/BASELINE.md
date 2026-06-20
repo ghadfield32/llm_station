@@ -1,8 +1,8 @@
 # Baseline
 
 - Run id: `20260616-autonomy-contracts`
-- Commit: `85da0ca`
-- Dirty entries: 19
+- Commit: `0eb46bc`
+- Dirty entries: 28
 
 ## Dirty Worktree
 - M configs/autonomy.yaml
@@ -16,14 +16,23 @@
 -  M evaluation/system-validation/20260616-autonomy-contracts/NEXT.md
 -  M evaluation/system-validation/20260616-autonomy-contracts/PRIVACY.md
 -  M evaluation/system-validation/20260616-autonomy-contracts/SCENARIOS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/agent-validation.json
+-  M evaluation/system-validation/20260616-autonomy-contracts/branch-protection-verify.json
 -  M evaluation/system-validation/20260616-autonomy-contracts/desktop-adapter-readiness.json
 -  M evaluation/system-validation/20260616-autonomy-contracts/desktop-target-verify.json
--  M src/command_center/cli/desktop_adapter.py
+-  M evaluation/system-validation/20260616-autonomy-contracts/github-app-verify.json
+-  M src/command_center/cli/main.py
 -  M src/command_center/cli/system_validation.py
+-  M src/command_center/schemas/__init__.py
+-  M src/command_center/schemas/contracts.py
 -  M tests/test_autonomy_contracts.py
--  M tests/test_desktop_adapter.py
 -  M tests/test_system_validation.py
-- ?? docs/desktop-timeout-takeover-policy.md
+- ?? docs/desktop-noop-canary-telemetry.md
+- ?? evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary.json
+- ?? evaluation/system-validation/20260616-autonomy-contracts/desktop-timing-candidates.json
+- ?? src/command_center/cli/desktop_noop_canary.py
+- ?? src/command_center/cli/desktop_timing_derive.py
+- ?? tests/test_desktop_noop_canary.py
 
 ## Validated Config Contracts
 - configs/agent_surface.yaml

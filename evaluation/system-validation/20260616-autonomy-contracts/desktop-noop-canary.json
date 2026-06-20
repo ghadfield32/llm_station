@@ -1,0 +1,70 @@
+{
+  "action_count_performed": 0,
+  "allowed_apps_windows_domains": [
+    "AppFlowy"
+  ],
+  "allowed_mode": "read_only",
+  "blockers": [],
+  "clipboard_read": false,
+  "desktop_actions_performed": false,
+  "desktop_live_actions_enabled": false,
+  "duration_ms": 29.5004,
+  "end_time": "2026-06-20T01:37:14.201683+00:00",
+  "evidence_policy": "redacted_json_only",
+  "final_status": "pass",
+  "forbidden_actions": [
+    "clipboard_read",
+    "password_field_read",
+    "system_settings_change",
+    "file_delete",
+    "click",
+    "type",
+    "select",
+    "drag",
+    "keyboard_shortcut",
+    "submit_form",
+    "move_card"
+  ],
+  "human_takeover_policy_ref": "docs/desktop-timeout-takeover-policy.md",
+  "human_takeover_value_retained": false,
+  "max_action_count": null,
+  "max_action_count_source": null,
+  "measurement_fields": [
+    "snapshot_load_ms",
+    "target_verify_ms",
+    "total_duration_ms"
+  ],
+  "measurements": {
+    "snapshot_load_ms": 2.9483,
+    "target_verify_ms": 14.2128,
+    "total_duration_ms": 29.5004
+  },
+  "mission_id": null,
+  "password_fields_read": false,
+  "production_values_written": false,
+  "raw_content_retained": false,
+  "redaction_policy": "no_raw_content_no_secrets_no_clipboard",
+  "run_id": "20260620T013714172641Z",
+  "schema_version": "command-center.desktop-noop-canary.v1",
+  "screenshot_policy": "none",
+  "screenshots_captured": false,
+  "secrets_printed": false,
+  "start_time": "2026-06-20T01:37:14.172641+00:00",
+  "status": "pass",
+  "synthetic_canary_id": "desktop-noop-appflowy_browser_staging",
+  "target_id": "appflowy_browser_staging",
+  "target_type": "appflowy_browser",
+  "verifier_result": {
+    "blockers": [],
+    "status": "pass"
+  },
+  "visible_target_assertions": {
+    "card_ref_matched": true,
+    "must_show_values_matched": [
+      "In Progress"
+    ],
+    "snapshot_present": true,
+    "target_identity_verified": true
+  },
+  "writes_performed": false
+}

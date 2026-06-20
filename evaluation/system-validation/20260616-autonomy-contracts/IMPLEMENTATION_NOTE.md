@@ -20,8 +20,10 @@
 - `uv run cc pr-check-verify --apply --poll-interval 15 --poll-timeout 1800` passes the remote branch/draft-PR/required-check evidence loop through draft PR #6.
 - `llm_station` repo autonomy is enabled for registered L2 feature-branch-only work after local and remote evidence gates passed.
 - PR #7 merged via squash auto-merge after CODEOWNERS approval; obsolete draft proof PR #6 was closed without deleting its branch.
-- PR #8 uses the GitHub App bot-final-push approval pattern: after connector attribution was checked, the final reviewable evidence-only push is performed through the configured GitHub App installation token so the human owner can approve without weakening branch protection or bypassing required checks.
+- PR #8 is obsolete historical evidence: it was user-authored, so `ghadfield32` could not provide the required non-author approval. Replacement PR #9 was created through the GitHub App identity, approved by `ghadfield32`, passed required checks, and merged as squash commit `0eb46bc` without weakening branch protection.
 - Desktop timeout/takeover policy plus human-takeover and screenshot artifact policy are declared for `appflowy_browser_staging`; numeric TTL and action-timeout controls remain unset until no-op canary telemetry derives them.
+- `uv run cc desktop-noop-canary` records the first read-only, redacted telemetry sample for `appflowy_browser_staging` without desktop actions, screenshots, clipboard reads, password reads, or AppFlowy mutation.
+- `uv run cc desktop-timing-derive` blocks with `sample_plan_missing` and `insufficient_noop_canary_telemetry`; no production TTL/action-timeout controls are written.
 - Observer verifiers print no token, private key, `.env` value, or raw credential material and perform no writes. The PR/check verifier performs only the explicitly approved feature-branch and draft-PR writes and stores redacted evidence.
 
 ## Blocked
@@ -29,6 +31,7 @@
 - Repository autonomy is no longer blocked for `llm_station` L2 feature-branch-only work; merge/deploy/settings/secrets/branch deletion remain human-gated.
 - Token storage and rotation policy is finalized after branch-protection verification passed.
 - Desktop/browser live actions remain blocked because the target is disabled, no no-op canary policy has approved live actions, and the adapter records missing telemetry-derived TTL/action-timeout controls.
+- Timing candidate derivation remains blocked until a reviewed sample plan declares the required sample count and source evidence.
 - Canaries remain disabled until their declared blockers clear.
 
 ## Can Be Completed Locally
@@ -38,7 +41,9 @@
 - Re-run `uv run cc pr-check-verify --apply --poll-interval <operator-derived> --poll-timeout <operator-derived> --output evaluation/system-validation/20260616-autonomy-contracts/pr-check-loop.json` only when a fresh PR/check evidence loop is intentionally required.
 - Re-run `uv run cc agent-validation --output evaluation/system-validation/20260616-autonomy-contracts/agent-validation.json` after model-route changes.
 - Re-run `uv run python -m command_center.cli.kanban_surface board-snapshot --output generated/board-snapshot.json`, then `uv run cc desktop-target-verify --output evaluation/system-validation/20260616-autonomy-contracts/desktop-target-verify.json` after AppFlowy target changes.
-- Enable the desktop target only after timeout/takeover policy and no-op canary plan are verified by evidence, including telemetry-derived TTL/action-timeout controls.
+- Build read-only/no-op desktop/browser canary telemetry before proposing any desktop target enablement.
+- Declare the desktop timing sample plan, then run additional no-op canary samples from that plan.
+- Enable the desktop target only after timeout/takeover policy and no-op canary plan are verified by evidence, including accepted telemetry-derived TTL/action-timeout controls.
 - Re-run `uv run cc system-validation --run-id 20260616-autonomy-contracts` after verifier changes.
 - Keep `docs/MASTER.md`, `configs/autonomy.yaml`, and this evidence package synchronized after each verifier result.
 - Add an owner/admin branch-protection observer only if an approved credential path exists and it does not broaden the GitHub App.

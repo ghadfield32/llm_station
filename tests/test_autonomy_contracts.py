@@ -238,3 +238,38 @@ def test_enabled_canary_requires_schedule_and_cleared_blockers():
 
     with pytest.raises(ValueError, match="cannot list blocked_until"):
         AutonomyConfig.model_validate(raw)
+
+
+def test_desktop_noop_canary_requires_target_id():
+    raw = _raw()
+    raw["desktop_noop_canaries"][0].pop("target_id")
+
+    with pytest.raises(ValueError, match="target_id"):
+        AutonomyConfig.model_validate(raw)
+
+
+def test_desktop_noop_canary_rejects_allowed_forbidden_overlap():
+    raw = _raw()
+    canary = raw["desktop_noop_canaries"][0]
+    canary["forbidden_actions"].append(canary["allowed_actions"][0])
+
+    with pytest.raises(ValueError, match="both allowed and forbidden"):
+        AutonomyConfig.model_validate(raw)
+
+
+def test_desktop_noop_canary_rejects_screenshot_without_redaction_policy():
+    raw = _raw()
+    canary = raw["desktop_noop_canaries"][0]
+    canary["screenshot_policy"] = "redacted_hashes_and_refs_only"
+    canary.pop("redaction_policy")
+
+    with pytest.raises(ValueError, match="redaction_policy"):
+        AutonomyConfig.model_validate(raw)
+
+
+def test_desktop_noop_canary_rejects_unknown_target():
+    raw = _raw()
+    raw["desktop_noop_canaries"][0]["target_id"] = "unknown_target"
+
+    with pytest.raises(ValueError, match="unknown target"):
+        AutonomyConfig.model_validate(raw)

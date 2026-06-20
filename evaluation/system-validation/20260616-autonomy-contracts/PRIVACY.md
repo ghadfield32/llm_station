@@ -11,4 +11,6 @@
 - `cc agent-validation`, when run separately, stores synthetic scenario statuses only; it does not retain prompts or model text.
 - `cc desktop-target-verify`, when run separately, reads the board snapshot and stores target identity/status evidence only.
 - `cc desktop-adapter`, when run separately, stores manifest readiness evidence only and performs no desktop actions.
+- `cc desktop-noop-canary`, when run separately, stores redacted timing and target-assertion evidence only; it performs no desktop actions.
+- `cc desktop-timing-derive`, when run separately, stores provisional candidate timing values only from measured canary evidence and never writes production controls.
 - The package stores config-derived summaries, git metadata, blockers, and paths only.
