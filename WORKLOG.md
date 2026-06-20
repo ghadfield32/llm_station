@@ -168,3 +168,19 @@ fast "has this been done?" index. Dates are when the line was written.
 - NEXT: wire `APPFLOWY_SANDBOX_*` env to a real sandbox board → run `cc desktop-action-
   canary` N times for real evidence; then design a session-duration evidence source
   for `ttl_minutes` before any enablement.
+
+## Kanban registry (boards) — Phase 2
+
+- ADD 06-20: `configs/kanban_boards.yaml` (`KanbanBoardsConfig`) — provider-agnostic
+  board registry (provider appflowy|command_center_ui) mapping board_id → repos,
+  canonical status workflow, required fields, agent verb contract. Both providers
+  share one action contract by construction.
+- CONTRACT 06-20: wall verbs (approve_card/merge/deploy/delete_card/delete_board) must
+  be forbidden on every board; allowed only grants add/stage/start/finish/block/reject;
+  appflowy workspace_ref must be `env:` (no inline secret).
+- CMDS 06-20: `cc kanban-verify` (contract + snapshot dup-MissionID/secret check, NOT_RUN
+  w/o snapshot), `cc kanban-register` (dry-run default, --apply writes), `cc kanban-sync
+  --dry-run` (read-only plan; mutation stays with kanban-bridge). No writes/approves/merges.
+- TESTS 06-20: tests/test_kanban_registry.py (15) — schema contract + verify/register/sync.
+- NEXT (Phase 3): `cc repo-register/repo-verify/repo-enable-autonomy`, each bound to a
+  registered kanban_board_id.
