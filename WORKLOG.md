@@ -182,5 +182,18 @@ fast "has this been done?" index. Dates are when the line was written.
   w/o snapshot), `cc kanban-register` (dry-run default, --apply writes), `cc kanban-sync
   --dry-run` (read-only plan; mutation stays with kanban-bridge). No writes/approves/merges.
 - TESTS 06-20: tests/test_kanban_registry.py (15) — schema contract + verify/register/sync.
-- NEXT (Phase 3): `cc repo-register/repo-verify/repo-enable-autonomy`, each bound to a
-  registered kanban_board_id.
+- DONE (Phase 3): see Repo registry topic below.
+
+## Repo registry (onboarding local repos) — Phase 3
+
+- ADD 06-20: RepoManifest += `kanban_board_id` (binds to a kanban_boards.yaml board) +
+  `local_path_ref` (`self`/`env:NAME` only — never a committed absolute path). Enabling
+  autonomy now also requires both. llm_station manifest updated accordingly.
+- CMDS 06-20: `cc repo-register` (disabled manifest + blockers, dry-run default, local
+  path stored as env: ref, --apply inserts+revalidates), `cc repo-verify` (gates:
+  devcontainer/CI/CODEOWNERS/board-mapping/local_path_ref/github-app-installed/branch-
+  protection/secret-policy + branch-mission & pr-check evidence PASS, NOT_RUN if absent),
+  `cc repo-enable-autonomy` (refuses unless all gates pass; --apply flips the flag).
+- TESTS 06-20: tests/test_repo_registry.py (12) — gate failures + schema invariants +
+  register dry-run/duplicate. repo-verify llm_station PASS.
+- NEXT (Phase 5): cross-conversation persistent memory (provenance/redaction/approval).

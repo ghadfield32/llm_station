@@ -135,6 +135,8 @@ repo_manifests:
     codeowners_required: true
     codeowners_path: .github/CODEOWNERS
     risk_ceiling: L2_local_edits
+    kanban_board_id: llm_station_command_center
+    local_path_ref: self
     autonomous_edits_enabled: true
     blockers: []
 

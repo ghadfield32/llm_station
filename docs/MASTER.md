@@ -1674,6 +1674,29 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Phase 3: generalized repo registration + autonomy gates
+
+- **RepoManifest extended.** Added `kanban_board_id` (binds a repo to a board in
+  `kanban_boards.yaml`, cross-checked by repo-verify) and `local_path_ref`
+  (`self` or `env:NAME` only — a committed absolute path would leak machine
+  layout). Enabling autonomy now also requires both fields. `llm_station`'s
+  manifest gained `kanban_board_id: llm_station_command_center`, `local_path_ref:
+  self`.
+- **Commands.** `cc repo-register` (adds a DISABLED manifest with blockers;
+  dry-run by default, stores the local path as an `env:` ref and tells you to set
+  it in `.env`; `--apply` inserts the block + re-validates), `cc repo-verify`
+  (gates: devcontainer present, CI commands declared, CODEOWNERS present, kanban
+  board mapping, local_path_ref resolves, GitHub App installed for the repo,
+  branch protection verified, no-runtime-secrets policy, and branch-mission +
+  PR-check evidence both PASS — never faked, NOT_RUN when absent), `cc
+  repo-enable-autonomy` (re-runs verify and refuses unless every gate passes;
+  `--apply` flips `autonomous_edits_enabled` + clears blockers).
+- **Safety.** No new repo can be autonomy-enabled until all gates pass; the
+  enabled-manifest schema invariants are re-validated before any write. No direct
+  main push, no merge, no branch-protection change.
+- **Next (Phase 5).** Cross-conversation persistent memory with provenance,
+  redaction, and human approval.
+
 ### 2026-06-20 — Phase 2: provider-agnostic kanban board registry
 
 - **New registry contract.** `configs/kanban_boards.yaml` (`KanbanBoardsConfig`)
