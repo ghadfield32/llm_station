@@ -46,10 +46,10 @@ completed_work:
   - desktop_noop_canary_contract_and_runner_added
   - desktop_noop_canary_read_only_sample_recorded
   - desktop_timing_derivation_blocks_without_sample_plan
+  - desktop_timing_sample_plan_declared
+  - additional_noop_canary_samples_recorded
+  - desktop_ttl_action_timeout_candidates_proposed_from_noop_telemetry
 ordered_work:
-  - declare_desktop_timing_sample_plan_before_candidates
-  - run_additional_noop_canary_samples_from_declared_plan
-  - derive_desktop_ttl_action_timeout_candidates_from_noop_telemetry
   - enable_desktop_target_only_after_timeout_takeover_and_canary_plan
   - derive_loop_breaker_threshold_from_event_history_before_autonomous_gui
   - enable_no_op_canaries_after_blockers_clear
@@ -202,7 +202,6 @@ canaries:
     blocked_until:
       - desktop_live_actions_not_enabled
       - canary_schedule_plan_not_approved
-      - desktop_timing_sample_plan_not_declared
   - name: prompt judge suite
     kind: prompt_judge_suite
     enabled: false
@@ -260,8 +259,27 @@ desktop_noop_canaries:
       - snapshot_load_ms
       - target_verify_ms
       - total_duration_ms
-    blockers:
-      - insufficient_noop_canary_telemetry
+    blockers: []
+
+desktop_timing_sample_plans:
+  - target_id: appflowy_browser_staging
+    status: declared
+    source_work_item: declare_desktop_timing_sample_plan_before_candidates
+    sample_plan_basis: explicit_read_only_noop_samples_for_current_staging_snapshot
+    required_evidence_refs:
+      - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary.json
+      - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-001.json
+      - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-002.json
+    required_sample_count_source: configs/autonomy.yaml:desktop_timing_sample_plans[appflowy_browser_staging].required_evidence_refs
+    required_measurement_fields:
+      - snapshot_load_ms
+      - target_verify_ms
+      - total_duration_ms
+    candidate_derivation: max_observed_read_only_noop_timing_without_multiplier
+    evidence_policy: redacted_json_only
+    live_actions_allowed: false
+    production_enabling: false
+    blockers: []
 
 telemetry:
   mode: structured_events_only

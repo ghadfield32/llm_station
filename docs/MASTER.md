@@ -783,10 +783,12 @@ Current verified state from the hardening pass:
    human-takeover and screenshot artifact policies for
    `appflowy_browser_staging`, and deliberately leaves numeric TTL and
    per-action timeout controls unset until telemetry derives them. The target
-   remains disabled. The first read-only no-op canary telemetry sample is now
-   recorded, and timing derivation correctly blocks without a reviewed sample
-   plan. The next ordered work is declaring that sample plan, running additional
-   canary samples from it, and only then deriving provisional timing candidates.
+   remains disabled. The read-only no-op canary sample plan is now declared,
+   three no-op timing samples are recorded, and timing derivation now proposes
+   provisional candidates from measured evidence only. These candidates are not
+   production controls; the next ordered work is reviewing/accepting them,
+   wiring accepted values through the adapter gate, and keeping desktop live
+   actions disabled until the gate passes.
 
 ---
 
@@ -1632,6 +1634,28 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Desktop timing sample plan and candidates proposed
+
+- **Sample plan declared.** `configs/autonomy.yaml` now includes
+  `desktop_timing_sample_plans[appflowy_browser_staging]`. Its required sample
+  count is derived from the listed repo-relative evidence refs, not from a code
+  default, CLI fallback, or production threshold.
+- **Additional no-op samples recorded.** Two post-merge read-only samples were
+  captured under
+  `evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/`.
+  They perform no desktop actions, screenshots, clipboard reads, password reads,
+  AppFlowy writes, or production config writes.
+- **Candidates are proposed only.** `cc desktop-timing-derive` now reads the
+  config sample plan and proposes TTL/action-timeout candidates from the maximum
+  observed no-op timing values with no multiplier. The artifact records
+  `production_values_written: false`, `desktop_target_enabled: false`, and
+  `placeholder_values_used: false`.
+- **Still blocked before live actions.** `cc desktop-adapter` still blocks until
+  accepted TTL/action-timeout controls are wired into the desktop target. The
+  next ordered work is `enable_desktop_target_only_after_timeout_takeover_and_canary_plan`,
+  which starts with review/acceptance of the proposed candidates, not automatic
+  target enablement.
+
 ### 2026-06-20 — Capability catalog and proactive RCA pilot activated safely
 
 - **Capability catalog added.** `configs/capabilities.yaml` records ARD-style
@@ -1668,16 +1692,16 @@ first commit and reconstruct the record git now preserves.
   timing evidence for `appflowy_browser_staging` from the existing target
   snapshot and verifier. It performs no clicks, typing, screenshots, clipboard
   reads, password reads, AppFlowy writes, or desktop live actions.
-- **Derivation stays blocked.** `cc desktop-timing-derive` can derive
-  provisional candidates only from measured canary evidence and an explicit
-  sample plan. The current merged-main sample proves instrumentation only; it
-  does not set `ttl_minutes` or `action_timeout_seconds`.
+- **Derivation initially stayed blocked.** `cc desktop-timing-derive` could
+  derive provisional candidates only from measured canary evidence and an
+  explicit sample plan. The first merged-main sample proved instrumentation
+  only and did not set `ttl_minutes` or `action_timeout_seconds`.
 - **Evidence recorded.** The current artifacts are
   `desktop-noop-canary.json` and `desktop-timing-candidates.json` under the
   `20260616-autonomy-contracts` system-validation package.
-- **Next ordered work.** Declare the desktop timing sample plan, run additional
-  no-op samples from that plan, then derive provisional timing candidates while
-  keeping desktop live actions disabled.
+- **Next ordered work at that point.** Declare the desktop timing sample plan,
+  run additional no-op samples from that plan, then derive provisional timing
+  candidates while keeping desktop live actions disabled.
 
 ### 2026-06-20 — PR #9 merged through the protected GitHub App path
 

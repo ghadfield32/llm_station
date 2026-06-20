@@ -30,26 +30,26 @@ This document defines the current desktop/browser canary telemetry state for
 
 ## Measurement Boundary
 
-The first read-only canary sample proves instrumentation and target visibility.
-It is not enough to derive production `ttl_minutes` or
-`action_timeout_seconds`.
+The first merged read-only canary sample proves instrumentation and target
+visibility. The declared timing sample plan now adds two post-merge read-only
+samples:
 
-Production timing candidate derivation remains blocked until an
-operator-reviewed sample plan declares:
+- `evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-001.json`
+- `evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-002.json`
 
-- the required sample count;
-- the source evidence for that count;
-- the exact canary type to run;
-- whether samples must cover different UI states;
-- the acceptance rule for rejected or blocked samples.
+The required sample count is derived from
+`configs/autonomy.yaml:desktop_timing_sample_plans[appflowy_browser_staging].required_evidence_refs`.
+It is not a code default or a production threshold.
 
-Until that sample plan exists, `desktop-timing-derive` must report
-`sample_plan_missing` and `insufficient_noop_canary_telemetry`.
+`desktop-timing-derive` now proposes provisional timing candidates from the
+maximum observed read-only no-op timings with no multiplier. It still does not
+write production `ttl_minutes` or `action_timeout_seconds`, and it does not
+enable the desktop target.
 
 ## Next Ordered Work
 
-1. Declare the desktop timing sample plan.
-2. Run additional read-only/no-op canary samples from that plan.
-3. Derive provisional timing candidates from measured evidence only.
-4. Keep desktop live actions disabled until candidates are reviewed, accepted,
+1. Review the provisional timing candidates against the sample evidence.
+2. Keep desktop live actions disabled until candidates are reviewed, accepted,
    and wired through the adapter gate.
+3. Derive the GUI loop-breaker policy from event history before autonomous GUI
+   retries are allowed.

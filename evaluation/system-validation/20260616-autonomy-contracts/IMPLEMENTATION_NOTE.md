@@ -23,7 +23,9 @@
 - PR #8 is obsolete historical evidence: it was user-authored, so `ghadfield32` could not provide the required non-author approval. Replacement PR #9 was created through the GitHub App identity, approved by `ghadfield32`, passed required checks, and merged as squash commit `0eb46bc` without weakening branch protection.
 - Desktop timeout/takeover policy plus human-takeover and screenshot artifact policy are declared for `appflowy_browser_staging`; numeric TTL and action-timeout controls remain unset until no-op canary telemetry derives them.
 - `uv run cc desktop-noop-canary` records the first read-only, redacted telemetry sample for `appflowy_browser_staging` without desktop actions, screenshots, clipboard reads, password reads, or AppFlowy mutation.
-- `uv run cc desktop-timing-derive` blocks with `sample_plan_missing` and `insufficient_noop_canary_telemetry`; no production TTL/action-timeout controls are written.
+- The desktop timing sample plan is declared in `configs/autonomy.yaml`, with required sample count derived from `desktop_timing_sample_plans[appflowy_browser_staging].required_evidence_refs`.
+- Two additional post-merge read-only no-op canary samples are recorded under `desktop-noop-canary-samples/`.
+- `uv run cc desktop-timing-derive` now proposes provisional TTL/action-timeout candidates from the declared sample evidence; no production TTL/action-timeout controls are written and the desktop target remains disabled.
 - Observer verifiers print no token, private key, `.env` value, or raw credential material and perform no writes. The PR/check verifier performs only the explicitly approved feature-branch and draft-PR writes and stores redacted evidence.
 
 ## Blocked
@@ -31,7 +33,7 @@
 - Repository autonomy is no longer blocked for `llm_station` L2 feature-branch-only work; merge/deploy/settings/secrets/branch deletion remain human-gated.
 - Token storage and rotation policy is finalized after branch-protection verification passed.
 - Desktop/browser live actions remain blocked because the target is disabled, no no-op canary policy has approved live actions, and the adapter records missing telemetry-derived TTL/action-timeout controls.
-- Timing candidate derivation remains blocked until a reviewed sample plan declares the required sample count and source evidence.
+- Timing candidates are proposed but not accepted as production controls; adapter readiness still blocks until accepted TTL/action-timeout controls are wired into the desktop target.
 - Canaries remain disabled until their declared blockers clear.
 
 ## Can Be Completed Locally
@@ -41,9 +43,8 @@
 - Re-run `uv run cc pr-check-verify --apply --poll-interval <operator-derived> --poll-timeout <operator-derived> --output evaluation/system-validation/20260616-autonomy-contracts/pr-check-loop.json` only when a fresh PR/check evidence loop is intentionally required.
 - Re-run `uv run cc agent-validation --output evaluation/system-validation/20260616-autonomy-contracts/agent-validation.json` after model-route changes.
 - Re-run `uv run python -m command_center.cli.kanban_surface board-snapshot --output generated/board-snapshot.json`, then `uv run cc desktop-target-verify --output evaluation/system-validation/20260616-autonomy-contracts/desktop-target-verify.json` after AppFlowy target changes.
-- Build read-only/no-op desktop/browser canary telemetry before proposing any desktop target enablement.
-- Declare the desktop timing sample plan, then run additional no-op canary samples from that plan.
-- Enable the desktop target only after timeout/takeover policy and no-op canary plan are verified by evidence, including accepted telemetry-derived TTL/action-timeout controls.
+- Review the proposed desktop TTL/action-timeout candidates before wiring them into production config.
+- Enable the desktop target only after timeout/takeover policy and no-op canary plan are verified by evidence, including accepted telemetry-derived TTL/action-timeout controls and a passing adapter gate.
 - Re-run `uv run cc system-validation --run-id 20260616-autonomy-contracts` after verifier changes.
 - Keep `docs/MASTER.md`, `configs/autonomy.yaml`, and this evidence package synchronized after each verifier result.
 - Add an owner/admin branch-protection observer only if an approved credential path exists and it does not broaden the GitHub App.

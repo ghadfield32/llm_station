@@ -11,6 +11,6 @@
 - Optional: `cc desktop-target-verify --output <package>/desktop-target-verify.json`
 - Optional: `cc desktop-adapter --output <package>/desktop-adapter-readiness.json`
 - Optional: `cc desktop-noop-canary --output <package>/desktop-noop-canary.json`
-- Optional: `cc desktop-timing-derive --target-id <target> --input <canary.json> --required-samples <evidence-derived-count> --required-samples-source <artifact> --output <package>/desktop-timing-candidates.json`
+- Optional: `cc desktop-timing-derive --target-id <target> --output <package>/desktop-timing-candidates.json` (required sample count comes from configs/autonomy.yaml evidence refs)
 
 No live services, desktop actions, board writes, repo mutations, model calls, or notifications were executed by this runner; optional artifacts are produced by their own observer commands.

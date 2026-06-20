@@ -1401,6 +1401,96 @@ class DesktopNoopCanarySpec(Strict):
         return self
 
 
+class DesktopTimingSamplePlan(Strict):
+    target_id: str
+    status: Literal["declared"]
+    source_work_item: str
+    sample_plan_basis: Literal["explicit_read_only_noop_samples_for_current_staging_snapshot"]
+    required_evidence_refs: list[str]
+    required_sample_count_source: str
+    required_measurement_fields: list[Literal[
+        "snapshot_load_ms",
+        "target_verify_ms",
+        "total_duration_ms",
+    ]]
+    candidate_derivation: Literal["max_observed_read_only_noop_timing_without_multiplier"]
+    evidence_policy: Literal["redacted_json_only"]
+    live_actions_allowed: bool = False
+    production_enabling: bool = False
+    blockers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.target_id):
+            raise ValueError(f"desktop timing sample plan target_id {self.target_id!r} must be stable")
+        if not self.source_work_item:
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} must name source_work_item"
+            )
+        if not self.required_evidence_refs:
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} must list evidence refs"
+            )
+        if len(self.required_evidence_refs) != len(set(self.required_evidence_refs)):
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} has duplicate evidence refs"
+            )
+        for ref in self.required_evidence_refs:
+            normalized = ref.replace("\\", "/")
+            parts = [part for part in normalized.split("/") if part]
+            if (
+                not normalized
+                or normalized.startswith("/")
+                or ":" in normalized
+                or ".." in parts
+                or normalized.startswith(".env")
+                or "/.env" in normalized
+                or normalized.endswith(".pem")
+            ):
+                raise ValueError(
+                    f"desktop timing sample plan {self.target_id!r} evidence_ref "
+                    f"{ref!r} must be a repo-relative non-secret artifact"
+                )
+            if not normalized.startswith("evaluation/system-validation/"):
+                raise ValueError(
+                    f"desktop timing sample plan {self.target_id!r} evidence_ref "
+                    f"{ref!r} must stay under evaluation/system-validation"
+                )
+        if "required_evidence_refs" not in self.required_sample_count_source:
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} required_sample_count_source "
+                "must derive from required_evidence_refs"
+            )
+        if len(self.required_measurement_fields) != len(set(self.required_measurement_fields)):
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} measurement fields contain duplicates"
+            )
+        required_measurements = {
+            "snapshot_load_ms",
+            "target_verify_ms",
+            "total_duration_ms",
+        }
+        missing_measurements = required_measurements - set(self.required_measurement_fields)
+        if missing_measurements:
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} missing measurement field(s): "
+                f"{sorted(missing_measurements)}"
+            )
+        if self.live_actions_allowed:
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} cannot allow live actions"
+            )
+        if self.production_enabling:
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} cannot enable production values"
+            )
+        if self.blockers:
+            raise ValueError(
+                f"desktop timing sample plan {self.target_id!r} must clear blockers before declared"
+            )
+        return self
+
+
 class TelemetryDecision(Strict):
     mode: Literal["structured_events_only", "defer_until_event_contracts", "opentelemetry"]
     decision_basis: list[str]
@@ -1588,6 +1678,7 @@ class AutonomyConfig(Strict):
     agent_validation: AgentValidationConfig
     canaries: list[AutonomyCanarySpec] = Field(default_factory=list)
     desktop_noop_canaries: list[DesktopNoopCanarySpec] = Field(default_factory=list)
+    desktop_timing_sample_plans: list[DesktopTimingSamplePlan] = Field(default_factory=list)
     telemetry: TelemetryDecision
     github_app_review: GitHubAppReview
     github_app_auth: GitHubAppAuth
@@ -1627,6 +1718,21 @@ class AutonomyConfig(Strict):
             raise ValueError(
                 "desktop noop canary references unknown target(s): "
                 f"{sorted(unknown_noop_targets)}"
+            )
+        timing_plan_ids = [plan.target_id for plan in self.desktop_timing_sample_plans]
+        if len(timing_plan_ids) != len(set(timing_plan_ids)):
+            raise ValueError("duplicate desktop timing sample plan target ids")
+        unknown_timing_targets = set(timing_plan_ids) - set(desktop_ids)
+        if unknown_timing_targets:
+            raise ValueError(
+                "desktop timing sample plan references unknown target(s): "
+                f"{sorted(unknown_timing_targets)}"
+            )
+        missing_noop_plan_targets = set(timing_plan_ids) - set(desktop_noop_ids)
+        if missing_noop_plan_targets:
+            raise ValueError(
+                "desktop timing sample plan target(s) lack desktop noop canary: "
+                f"{sorted(missing_noop_plan_targets)}"
             )
         event_kinds = {family.kind for family in self.event_contract.families}
         missing_verifier_events = set(self.completion_verifier.required_event_families) - event_kinds
