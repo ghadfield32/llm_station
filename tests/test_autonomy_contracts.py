@@ -126,6 +126,8 @@ def test_enabled_desktop_target_requires_ttl_and_takeover_policy():
     target = raw["desktop_targets"][0]
     target["enabled"] = True
     target["blockers"] = []
+    target.pop("human_takeover_hotkey")
+    target.pop("screenshot_artifact_policy")
 
     with pytest.raises(ValueError, match="ttl_minutes"):
         AutonomyConfig.model_validate(raw)
@@ -135,7 +137,9 @@ def test_enabled_desktop_target_requires_ttl_and_takeover_policy():
     target["enabled"] = True
     target["blockers"] = []
     target["ttl_minutes"] = 5
-    target["ttl_source"] = "test_policy"
+    target["ttl_source"] = "unit_test_measurement_fixture"
+    target.pop("human_takeover_hotkey")
+    target.pop("screenshot_artifact_policy")
 
     with pytest.raises(ValueError, match="action_timeout_seconds"):
         AutonomyConfig.model_validate(raw)

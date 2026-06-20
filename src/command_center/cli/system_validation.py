@@ -59,6 +59,19 @@ def _artifact_status(path: Path) -> str:
     return status if status in {"PASS", "BLOCKED", "FAIL", "MISSING"} else "UNKNOWN"
 
 
+def _artifact_blockers(path: Path, label: str) -> list[str]:
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [f"{label} unreadable"]
+    blockers = data.get("blockers")
+    if not isinstance(blockers, list):
+        return []
+    return [f"{label}: {blocker}" for blocker in blockers if isinstance(blocker, str)]
+
+
 def _repo_lines(cfg: AutonomyConfig) -> list[str]:
     lines = []
     for repo in cfg.repo_manifests:
@@ -199,6 +212,7 @@ def build_package(output_root: Path, run_id: str) -> Path:
     config_names = sorted(CONFIG_CONTRACTS)
     event_kinds = [family.kind for family in cfg.event_contract.families]
     gaps = _gap_lines(cfg)
+    gaps.extend(_artifact_blockers(out / "desktop-adapter-readiness.json", "desktop adapter"))
     github_app_installation_status = (
         "PASS"
         if "github_app_installed_on_selected_llm_station_repo" in cfg.completed_work

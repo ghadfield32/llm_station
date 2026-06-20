@@ -1,11 +1,29 @@
 # Baseline
 
 - Run id: `20260616-autonomy-contracts`
-- Commit: `5abf99a`
-- Dirty entries: 0
+- Commit: `85da0ca`
+- Dirty entries: 19
 
 ## Dirty Worktree
-- none
+- M configs/autonomy.yaml
+-  M docs/MASTER.md
+-  M docs/STATUS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/BASELINE.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/COMMANDS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/FORECASTS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/GAPS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/IMPLEMENTATION_NOTE.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/NEXT.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/PRIVACY.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/SCENARIOS.md
+-  M evaluation/system-validation/20260616-autonomy-contracts/desktop-adapter-readiness.json
+-  M evaluation/system-validation/20260616-autonomy-contracts/desktop-target-verify.json
+-  M src/command_center/cli/desktop_adapter.py
+-  M src/command_center/cli/system_validation.py
+-  M tests/test_autonomy_contracts.py
+-  M tests/test_desktop_adapter.py
+-  M tests/test_system_validation.py
+- ?? docs/desktop-timeout-takeover-policy.md
 
 ## Validated Config Contracts
 - configs/agent_surface.yaml
@@ -47,7 +65,7 @@
 - `llm_station`: enabled; auth=github_app; execution=devcontainer; risk_ceiling=L2_local_edits; devcontainer=.devcontainer/devcontainer.json; blockers=none
 
 ## Desktop Targets
-- `appflowy_browser_staging`: blocked; surface=browser; os=windows; card=mission_intake/card-review q3 odds metrics; snapshot=generated/board-snapshot.json; blockers=desktop_live_actions_not_enabled, desktop_timeout_and_takeover_policy_not_declared
+- `appflowy_browser_staging`: blocked; surface=browser; os=windows; card=mission_intake/card-review q3 odds metrics; snapshot=generated/board-snapshot.json; blockers=desktop_live_actions_not_enabled
 
 ## Agent Validation
 - model_alias=chat

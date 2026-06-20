@@ -55,7 +55,15 @@ def test_desktop_adapter_blocks_current_disabled_manifest(tmp_path):
 
     assert result["status"] == "blocked"
     assert "desktop_target_appflowy_browser_staging_not_enabled" in result["blockers"]
-    assert "desktop_target_appflowy_browser_staging_action_timeout_policy_missing" in result["blockers"]
+    assert "desktop_target_appflowy_browser_staging_timeout_takeover_policy_missing" not in result["blockers"]
+    assert "desktop_target_appflowy_browser_staging_ttl_measurement_missing" in result["blockers"]
+    assert "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing" in result["blockers"]
+    assert result["targets"][0]["timeout_takeover_policy_declared"] is True
+    assert result["targets"][0]["ttl_control_measured"] is False
+    assert result["targets"][0]["action_timeout_control_measured"] is False
+    assert result["targets"][0]["human_takeover_declared"] is True
+    assert result["targets"][0]["human_takeover_value_retained"] is False
+    assert result["targets"][0]["screenshot_artifact_policy"] == "redacted_hashes_and_refs_only"
     assert result["desktop_actions_performed"] is False
     assert result["screenshots_captured"] is False
     assert result["clipboard_read"] is False
@@ -69,9 +77,9 @@ def test_desktop_adapter_passes_fully_declared_manifest_without_actions(tmp_path
     target.update({
         "enabled": True,
         "ttl_minutes": 5,
-        "ttl_source": "test_policy",
+        "ttl_source": "unit_test_measurement_fixture",
         "action_timeout_seconds": 30,
-        "action_timeout_source": "test_policy",
+        "action_timeout_source": "unit_test_measurement_fixture",
         "human_takeover_hotkey": "Ctrl+Alt+Esc",
         "screenshot_artifact_policy": "redacted_hashes_and_refs_only",
         "blockers": [],
@@ -92,4 +100,5 @@ def test_desktop_adapter_passes_fully_declared_manifest_without_actions(tmp_path
     assert result["targets"][0]["live_actions_enabled"] is True
     assert result["desktop_actions_performed"] is False
     assert result["screenshots_captured"] is False
+    assert result["targets"][0]["human_takeover_value_retained"] is False
     assert "Ctrl+Alt+Esc" not in saved

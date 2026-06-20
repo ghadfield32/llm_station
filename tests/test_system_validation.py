@@ -1,6 +1,7 @@
 """System-validation evidence runner tests."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from command_center.cli import system_validation
@@ -77,13 +78,42 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "github_app_auth_verified_after_branch_wall" in next_steps
     assert "tiny_branch_only_repo_mission_passed" in next_steps
     assert "pr_check_evidence_loop_verified" in next_steps
+    assert "desktop_timeout_and_human_takeover_policy_declared" in next_steps
     assert "run_tiny_branch_only_repo_mission" not in next_steps
     assert "verify_pr_check_evidence_loop_before_autonomous_edits" not in next_steps
-    assert "declare_desktop_timeout_and_human_takeover_policy_before_live_actions" in next_steps
+    assert "declare_desktop_timeout_and_human_takeover_policy_before_live_actions" not in next_steps
+    assert "enable_desktop_target_only_after_timeout_takeover_and_canary_plan" in next_steps
     assert "enable_code_owner_reviews_on_active_branch_ruleset" not in next_steps
     assert "rerun_branch_protection_verify_until_verified" not in next_steps
     assert "remove_unneeded_github_app_issues_permission" not in next_steps
     assert "implement_desktop_adapter_after_target_state_verifies" not in next_steps
+
+
+def test_system_validation_surfaces_desktop_adapter_blockers(tmp_path):
+    run_dir = tmp_path / "test-run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "desktop-adapter-readiness.json").write_text(
+        json.dumps({
+            "status": "blocked",
+            "blockers": [
+                "desktop_target_appflowy_browser_staging_ttl_measurement_missing",
+                "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing",
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    system_validation.build_package(tmp_path, "test-run")
+
+    gaps = (run_dir / "GAPS.md").read_text(encoding="utf-8")
+    assert (
+        "desktop adapter: "
+        "desktop_target_appflowy_browser_staging_ttl_measurement_missing"
+    ) in gaps
+    assert (
+        "desktop adapter: "
+        "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing"
+    ) in gaps
 
 
 def test_system_validation_main_uses_requested_run_id(tmp_path, monkeypatch, capsys):

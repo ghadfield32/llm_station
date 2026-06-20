@@ -41,8 +41,8 @@ completed_work:
   - github_app_auth_verified_after_branch_wall
   - tiny_branch_only_repo_mission_passed
   - pr_check_evidence_loop_verified
+  - desktop_timeout_and_human_takeover_policy_declared
 ordered_work:
-  - declare_desktop_timeout_and_human_takeover_policy_before_live_actions
   - enable_desktop_target_only_after_timeout_takeover_and_canary_plan
   - derive_loop_breaker_threshold_from_event_history_before_autonomous_gui
   - enable_no_op_canaries_after_blockers_clear
@@ -151,9 +151,10 @@ desktop_targets:
       must_show: [In Progress]
       evidence_event_family: desktop.observation
     automation_order: [direct_api, browser, os_accessibility, screenshot]
+    human_takeover_hotkey: Ctrl+Alt+Pause
+    screenshot_artifact_policy: redacted_hashes_and_refs_only
     blockers:
       - desktop_live_actions_not_enabled
-      - desktop_timeout_and_takeover_policy_not_declared
 
 completion_verifier:
   enabled: true
@@ -193,7 +194,7 @@ canaries:
     evidence_required: [desktop_target_manifest, completion_verifier]
     blocked_until:
       - desktop_live_actions_not_enabled
-      - desktop_timeout_and_takeover_policy_not_declared
+      - canary_schedule_plan_not_approved
   - name: prompt judge suite
     kind: prompt_judge_suite
     enabled: false

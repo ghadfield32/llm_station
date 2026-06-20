@@ -35,6 +35,9 @@ def verify_readiness(
     }
     targets: list[dict[str, Any]] = []
     blockers: list[str] = []
+    timeout_takeover_policy_declared = (
+        "desktop_timeout_and_human_takeover_policy_declared" in cfg.completed_work
+    )
 
     for target in cfg.desktop_targets:
         target_blockers: list[str] = []
@@ -45,10 +48,16 @@ def verify_readiness(
             target_blockers.append(f"desktop_target_{target.target_id}_surface_not_supported")
         if not target.enabled:
             target_blockers.append(f"desktop_target_{target.target_id}_not_enabled")
+        if not timeout_takeover_policy_declared:
+            target_blockers.append(
+                f"desktop_target_{target.target_id}_timeout_takeover_policy_missing"
+            )
         if target.ttl_minutes is None:
-            target_blockers.append(f"desktop_target_{target.target_id}_ttl_policy_missing")
+            target_blockers.append(f"desktop_target_{target.target_id}_ttl_measurement_missing")
         if target.action_timeout_seconds is None:
-            target_blockers.append(f"desktop_target_{target.target_id}_action_timeout_policy_missing")
+            target_blockers.append(
+                f"desktop_target_{target.target_id}_action_timeout_measurement_missing"
+            )
         if not target.human_takeover_hotkey:
             target_blockers.append(f"desktop_target_{target.target_id}_human_takeover_missing")
         if not target.screenshot_artifact_policy:
@@ -60,6 +69,14 @@ def verify_readiness(
             "target_state_status": target_state.get("status", "missing"),
             "adapter_supported": target.surface in SUPPORTED_SURFACES,
             "live_actions_enabled": target.enabled,
+            "timeout_takeover_policy_declared": timeout_takeover_policy_declared,
+            "ttl_control_measured": target.ttl_minutes is not None,
+            "ttl_source": target.ttl_source,
+            "action_timeout_control_measured": target.action_timeout_seconds is not None,
+            "action_timeout_source": target.action_timeout_source,
+            "human_takeover_declared": bool(target.human_takeover_hotkey),
+            "human_takeover_value_retained": False,
+            "screenshot_artifact_policy": target.screenshot_artifact_policy,
             "allowed_actions": target.allowed_actions,
             "forbidden_actions": target.forbidden_actions,
             "blockers": target_blockers,

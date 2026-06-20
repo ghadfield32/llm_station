@@ -1,10 +1,8 @@
 {
   "blockers": [
     "desktop_target_appflowy_browser_staging_not_enabled",
-    "desktop_target_appflowy_browser_staging_ttl_policy_missing",
-    "desktop_target_appflowy_browser_staging_action_timeout_policy_missing",
-    "desktop_target_appflowy_browser_staging_human_takeover_missing",
-    "desktop_target_appflowy_browser_staging_screenshot_policy_missing"
+    "desktop_target_appflowy_browser_staging_ttl_measurement_missing",
+    "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing"
   ],
   "capabilities": [
     "verify_target_state",
@@ -18,6 +16,8 @@
   "status": "blocked",
   "targets": [
     {
+      "action_timeout_control_measured": false,
+      "action_timeout_source": null,
       "adapter_supported": true,
       "allowed_actions": [
         "click",
@@ -28,10 +28,8 @@
       ],
       "blockers": [
         "desktop_target_appflowy_browser_staging_not_enabled",
-        "desktop_target_appflowy_browser_staging_ttl_policy_missing",
-        "desktop_target_appflowy_browser_staging_action_timeout_policy_missing",
-        "desktop_target_appflowy_browser_staging_human_takeover_missing",
-        "desktop_target_appflowy_browser_staging_screenshot_policy_missing"
+        "desktop_target_appflowy_browser_staging_ttl_measurement_missing",
+        "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing"
       ],
       "forbidden_actions": [
         "clipboard_read",
@@ -39,11 +37,17 @@
         "system_settings_change",
         "file_delete"
       ],
+      "human_takeover_declared": true,
+      "human_takeover_value_retained": false,
       "live_actions_enabled": false,
+      "screenshot_artifact_policy": "redacted_hashes_and_refs_only",
       "status": "blocked",
       "surface": "browser",
       "target_id": "appflowy_browser_staging",
-      "target_state_status": "pass"
+      "target_state_status": "pass",
+      "timeout_takeover_policy_declared": true,
+      "ttl_control_measured": false,
+      "ttl_source": null
     }
   ],
   "writes_performed": false
