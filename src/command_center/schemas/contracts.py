@@ -683,6 +683,93 @@ class KanbanBoardsConfig(Strict):
         return self
 
 
+# ---- memory.yaml + memory records ------------------------------------------
+# Cross-conversation/project memory. Records persist outside any single chat and
+# are injected only when human-approved, namespaced by scope+subject, redacted,
+# and citing provenance. Secrets are never stored. The config NAMES policies; the
+# records carry their own provenance and retention so nothing is a magic global.
+_MEMORY_SCOPES = ("conversation", "project", "board", "user_preference", "artifact")
+# Content that must never be stored as a memory value (secrets / credentials).
+_MEMORY_SECRET_RE = re.compile(
+    r"(BEGIN [A-Z ]*PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|"
+    r"xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|"
+    r"(password|secret|token|api[_-]?key|client[_-]?secret)\s*[:=]\s*\S+)",
+    re.IGNORECASE,
+)
+# retention_policy forms: "keep_until_superseded" or "expire_after_days:<N>"
+_RETENTION_RE = re.compile(r"^(keep_until_superseded|expire_after_days:[1-9][0-9]*)$")
+
+
+class MemoryRecord(Strict):
+    memory_id: str
+    scope: Literal["conversation", "project", "board", "user_preference", "artifact"]
+    subject: str
+    value: str
+    source_ref: str
+    created_at: str
+    updated_at: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    sensitivity: Literal["public", "internal", "confidential"]
+    redaction_status: Literal["redacted", "not_required", "pending"]
+    approved_by_human: bool = False
+    inject_policy: Literal["always", "on_subject_match", "never"]
+    retention_policy: str
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.memory_id:
+            raise ValueError("memory record needs a memory_id")
+        if not self.source_ref:
+            raise ValueError(f"memory {self.memory_id!r} requires a source_ref (provenance)")
+        if not self.value.strip():
+            raise ValueError(f"memory {self.memory_id!r} value cannot be empty")
+        if not self.subject.strip():
+            raise ValueError(f"memory {self.memory_id!r} subject (namespace) cannot be empty")
+        # secrets are never stored as memory values
+        if _MEMORY_SECRET_RE.search(self.value):
+            raise ValueError(f"memory {self.memory_id!r} value looks secret-bearing; not stored")
+        # project/board memory must be namespaced by a stable id (no leakage)
+        if self.scope in ("project", "board") and not _REPO_ID_RE.match(self.subject):
+            raise ValueError(
+                f"memory {self.memory_id!r} {self.scope} subject must be a stable id namespace"
+            )
+        # confidential memory must be redacted before it can persist
+        if self.sensitivity == "confidential" and self.redaction_status != "redacted":
+            raise ValueError(
+                f"memory {self.memory_id!r} confidential records must be redaction_status=redacted"
+            )
+        if not _RETENTION_RE.match(self.retention_policy):
+            raise ValueError(
+                f"memory {self.memory_id!r} retention_policy must be 'keep_until_superseded' "
+                "or 'expire_after_days:<N>'"
+            )
+        return self
+
+
+class MemoryConfig(Strict):
+    schema_version: str
+    store_path: str
+    # No durable memory is created automatically from raw chats unless this is on.
+    auto_durable_from_raw_chat: bool = False
+    sensitivity_classes: list[str] = Field(default_factory=list)
+    default_inject_policy: Literal["always", "on_subject_match", "never"] = "on_subject_match"
+    default_retention_policy: str = "keep_until_superseded"
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.memory.v1":
+            raise ValueError("schema_version must be command-center.memory.v1")
+        if not self.store_path:
+            raise ValueError("memory config needs a store_path")
+        if not _RETENTION_RE.match(self.default_retention_policy):
+            raise ValueError("memory default_retention_policy is malformed")
+        if set(self.sensitivity_classes) != {"public", "internal", "confidential"}:
+            raise ValueError(
+                "memory sensitivity_classes must be exactly public/internal/confidential"
+            )
+        return self
+
+
 # ---- content.yaml ----------------------------------------------------------
 # The LinkedIn content pipeline. Claude Code drafts posts onto per-account
 # AppFlowy boards (config/databases.json); a human approves by dragging In Queue

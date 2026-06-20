@@ -66,6 +66,10 @@ generated/linkedin-token.json
 generated/linkedin-published.json
 generated/linkedin-publish.lock
 
+# ── Cross-conversation memory store — per-deployment runtime state ───────────
+# project/board/user-preference memory; sharing is a deliberate export, not a commit
+generated/memory/
+
 # ── Local staging / scratch ───────────────────────────────────────────────
 _staging/
 .codex_tmp/

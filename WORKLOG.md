@@ -196,4 +196,20 @@ fast "has this been done?" index. Dates are when the line was written.
   `cc repo-enable-autonomy` (refuses unless all gates pass; --apply flips the flag).
 - TESTS 06-20: tests/test_repo_registry.py (12) — gate failures + schema invariants +
   register dry-run/duplicate. repo-verify llm_station PASS.
-- NEXT (Phase 5): cross-conversation persistent memory (provenance/redaction/approval).
+- DONE (Phase 5): see Cross-conversation memory topic below.
+
+## Cross-conversation / project memory — Phase 5
+
+- ADD 06-20: `command_center.memory` (store + MemoryRecord/MemoryConfig) — durable layer
+  the gateway lacked (it kept only an ephemeral per-conversation deque). Scopes:
+  conversation/project/board/user_preference/artifact.
+- RECALL 06-20: `inject` returns a record only if approved_by_human + inject_policy!=never
+  + not stale + scope/subject namespace match → unapproved never recalled; repo memory
+  can't leak across repos; each result cites source_ref.
+- SAFETY 06-20: MemoryRecord rejects secret-bearing values; source_ref required; confidential
+  must be redacted; project/board subject must be stable-id namespace. Store is runtime state
+  (generated/memory/, gitignored), not committed. Staleness is per-record retention_policy
+  (keep_until_superseded | expire_after_days:N) — no global threshold.
+- CMDS 06-20: `cc memory-add` (pending until --approved-by), memory-review/prune/verify.
+- TESTS 06-20: tests/test_cross_conversation_memory.py (11). distinct from growthos.memory.
+- NEXT (Phase 4): productize daily self-improvement DAG (observer/draft-only, scheduled).
