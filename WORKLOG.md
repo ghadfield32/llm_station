@@ -212,4 +212,18 @@ fast "has this been done?" index. Dates are when the line was written.
   (keep_until_superseded | expire_after_days:N) — no global threshold.
 - CMDS 06-20: `cc memory-add` (pending until --approved-by), memory-review/prune/verify.
 - TESTS 06-20: tests/test_cross_conversation_memory.py (11). distinct from growthos.memory.
-- NEXT (Phase 4): productize daily self-improvement DAG (observer/draft-only, scheduled).
+- DONE (Phase 4): see Daily self-improvement topic below.
+
+## Daily self-improvement (observer/draft-only) — Phase 4
+
+- ADD 06-20: cc self-improvement-scan/daily/report (cli/self_improvement.py) over the existing
+  discovery pipeline + ObserverCharter (the self_improvement_daily DAG's engine). scan/report =
+  zero writes; daily --draft-kanban true drafts Proposed cards only.
+- WALL 06-20: daily --apply true (code changes) REFUSED (code_apply_not_supported...); charter
+  structurally forbids promote/canary/merge/deploy/set_status (CharterViolation). Drafted cards
+  are always Proposed — human approval at the kanban wall turns one into a Ledger mission.
+- EVIDENCE 06-20: self-improvement-daily.json (date, findings, drafted ids, applied_code_changes
+  false). Offline (network-free) scanners by default — deterministic, no creds.
+- TESTS 06-20: tests/test_self_improvement.py (5) — observer-no-writes, draft-only-Proposed,
+  code-apply refused, charter forbids promote/merge, report-without-drafting.
+- NEXT (Phase 6): real desktop action-latency evidence (needs sandbox board) → enablement gates.
