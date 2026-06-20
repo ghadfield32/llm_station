@@ -1674,6 +1674,45 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Live kanban sync: one event stream, many projections
+
+- **Source of truth = the kanban event log.** New `command_center.kanban_sync`
+  (`events.py` + `projection.py`): a `KanbanEvent` schema, an append-only event
+  log (`generated/kanban-events.jsonl`, gitignored), and `emit_event` as the
+  **single legal writer**. Wall actions (`approve_card`/`merge`/`deploy`/
+  `delete_card`/`delete_board`) raise `GovernanceViolation` — they can never
+  become an event, so no surface can project them.
+- **The wall is structural on the action AND the status value.** Wall actions
+  raise `GovernanceViolation`; and a permitted verb cannot carry a human-owned
+  **status** — `emit_event`, the `KanbanEvent` validator, and `write_through` all
+  reject any approval status (case/space/underscore-folded, so the lowercase
+  `missions` board's `approved` is protected too). An agent can never emit,
+  project, or write an approval.
+- **Surfaces are projections.** `project_cards` folds events into current state;
+  the UI renders from that. `verify_projection` (PASS/BLOCKED/DEGRADED). `reconcile`
+  classifies each difference as **drift** (repairable) vs **conflict**
+  (`review_required`) for human approval, a human re-opening a terminal card, or a
+  card on the board not in the log. `--apply` repairs drift to the **fold target**
+  only — never conflicts. No silent last-write-wins.
+- **Wired into the one action layer.** `GatewayCore` funnels every governed
+  card/todo verb (Discord/SMS/in-app console) through `emit_event` via
+  `wrap_governed_dispatch`. Opt-in: `KANBAN_EMIT_EVENTS=1` + `KANBAN_PRIMARY_BOARD_ID`
+  (fails loud if unresolvable); the UI `/api/action` is covered (surface `app`).
+- **Level 1 (immediate) internal UI.** `GET /api/events/kanban` (SSE; each frame
+  carries `id:` so `Last-Event-ID` resumes with no replay) + `/api/events/kanban/snapshot`.
+- **Level 2 (near-real-time) AppFlowy.** `AppFlowyProjection.write_through` is a
+  projection-only writer; **fails closed** (`degraded`) without board env, and
+  **refuses** to write a human-owned status — no fake live-sync.
+- **Commands:** `cc kanban-emit` / `kanban-project` / `kanban-verify-projection` /
+  `kanban-reconcile`, plus high-level `cc operate verify --all`. Lower-level
+  evidence commands stay.
+- **Adversarially reviewed before commit** (6-dimension workflow, 36 agents): two
+  critical wall holes (lowercase `approved` unprotected; `status_after` bypass) and
+  the integration-island gap were found and fixed. Tests: `test_kanban_sync.py`
+  (19) + `test_kanban_wiring.py` (4) + `test_kanban_ui_events.py` (4).
+- **Docs:** `docs/LIVE_KANBAN_SYNC.md` (architecture, three levels, conflict
+  policy, activation).
+
 ### 2026-06-20 — Phase 8/9: full-loop demo + "ready for anyone" docs
 
 - **Full-loop demo.** `cc demo full-loop --repo <id> --board <board_id>` verifies

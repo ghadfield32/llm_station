@@ -5,6 +5,31 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## Live kanban sync / projection engine
+- ADD 06-20: command_center.kanban_sync (events/projection/wiring) — KanbanEvent
+  schema + append-only event log (generated/kanban-events.jsonl, gitignored) +
+  emit_event = the ONLY legal writer. Source of truth; surfaces are projections.
+- WALL 06-20: wall on the ACTION (approve_card/merge/deploy/delete_* raise
+  GovernanceViolation) AND the STATUS VALUE (emit_event + KanbanEvent validator +
+  write_through all reject a human-owned approval status, case/space/underscore-folded).
+- PROJECT 06-20: project_cards folds events->state; verify_projection (PASS/BLOCKED/
+  DEGRADED); reconcile = drift (repairable) vs conflict (review_required) for human
+  approval (case-folded incl. lowercase 'approved'), terminal re-open, card-not-in-log.
+  --apply repairs drift to the FOLD target only; write_through fails closed w/o env.
+- WIRE 06-20: GatewayCore funnels every governed card/todo verb (Discord/SMS/UI via
+  wrap_governed_dispatch) through emit_event. Opt-in: KANBAN_EMIT_EVENTS=1 +
+  KANBAN_PRIMARY_BOARD_ID (fails loud if unresolvable). UI /api/action covered (surface app).
+- UI 06-20: GET /api/events/kanban (SSE, id:/Last-Event-ID resume, no replay) +
+  /api/events/kanban/snapshot. stage_card on any surface -> UI without refresh (Level 1).
+- CLI 06-20: cc kanban-emit/kanban-project/kanban-verify-projection/kanban-reconcile +
+  high-level cc operate verify --all. Lower-level commands kept.
+- REVIEW 06-20: 6-dimension adversarial workflow (36 agents) -> 2 critical wall holes
+  (lowercase 'approved' unprotected; status_after bypass) + integration-island gap all
+  FIXED before commit. Tests: test_kanban_sync (19) + test_kanban_wiring (4) +
+  test_kanban_ui_events (4). Docs: docs/LIVE_KANBAN_SYNC.md + MASTER §14.
+- NEXT: persistent push (WebSocket) if poll-stream insufficient; AppFlowy read-back
+  needs sandbox creds (degraded w/o); Phase 6 desktop (gated on APPFLOWY_SANDBOX_*).
+
 ## Channels / gateways (Discord, Slack, Telegram, WhatsApp)
 - CAPABILITY 06-13: full-capability pass so the bot works at every tier, not just
   board hygiene. Scope data-derived (grepped tool usage); repo-work loop was

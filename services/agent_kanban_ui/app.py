@@ -24,13 +24,14 @@ import os
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from command_center.kanban.metrics import (
     compute_metrics, load_calls, log_path, recent_calls)
+from command_center.kanban_sync import EventLog, project_cards
 
 # Chat + governed writes turn the UI into a first-class CHANNEL (it embeds the same
 # GatewayCore Discord uses). OFF by default so the read-only board deployment holds
@@ -54,6 +55,8 @@ BOARD_SNAPSHOT = Path(os.environ.get("KANBAN_BOARD_SNAPSHOT",
 # Read-only config mount — the model lanes + judge stages come from the real
 # configs (no hardcoded model names), for the Router view.
 CONFIGS_DIR = Path(os.environ.get("KANBAN_UI_CONFIGS", "/app/configs"))
+# The kanban event log (source of truth for live board projection). Read-only here.
+KANBAN_EVENT_LOG = Path(os.environ.get("KANBAN_EVENT_LOG", "/app/generated/kanban-events.jsonl"))
 
 # Cline-style columns: live work first, terminal last. Any status the Ledger returns
 # that isn't listed still shows under its own name (nothing is hidden).
@@ -303,6 +306,38 @@ def action(body: ActionIn) -> dict:
     # is recorded in the agent-call log under surface "app" (observable in Activity).
     core = _get_core("chat")
     return {"result": core.dispatch[body.action](**body.params)}
+
+
+# ── Live board projection from the kanban event log (Level 1: immediate UI) ──
+@app.get("/api/events/kanban/snapshot")
+def kanban_snapshot() -> dict:
+    """Folded current card state from the event log — the UI's initial board load."""
+    cards = project_cards(EventLog(KANBAN_EVENT_LOG).read())
+    return {"n_cards": len(cards), "cards": cards}
+
+
+@app.get("/api/events/kanban")
+def kanban_events(request: Request, since: int = 0) -> StreamingResponse:
+    """SSE: emit kanban events with index >= cursor, then close.
+
+    Each frame carries `id: <resume-offset>`, so the browser records it as
+    Last-Event-ID and the auto-reconnect resumes exactly where it left off (no
+    replay, no manual refresh). On reconnect the browser sends `Last-Event-ID`;
+    we honour it over `?since`. A governed action on any surface (Discord/UI/SMS/
+    DAG) shows up live. The UI never holds board authority — it only renders events.
+    """
+    header = request.headers.get("last-event-id")
+    offset = int(header) if (header and header.lstrip("-").isdigit()) else since
+    offset = max(0, offset)
+
+    def gen():
+        new, nxt = EventLog(KANBAN_EVENT_LOG).read_after(offset=offset)
+        for i, ev in enumerate(new):
+            yield f"id: {offset + i + 1}\ndata: {json.dumps(ev, default=str)}\n\n"
+        # final cursor frame (also for non-EventSource pollers)
+        yield f"event: cursor\nid: {nxt}\ndata: {json.dumps({'next': nxt})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 # Serve the built SPA last so /api/* wins. Absent build dir (dev) → a clear note.

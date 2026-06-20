@@ -74,6 +74,38 @@ def load_tool_layer(surface: str = "discord") -> tuple[list[dict], dict[str, Cal
     return tools, dispatch
 
 
+def _resolve_primary_board(env_map: dict[str, str]) -> str | None:
+    """The board governed events are tagged with. Explicit env wins; otherwise the
+    sole registered board. Returns None when ambiguous (multiple boards) so the
+    caller can fail loudly rather than guess."""
+    if env_map.get("KANBAN_PRIMARY_BOARD_ID"):
+        return env_map["KANBAN_PRIMARY_BOARD_ID"]
+    import yaml
+    from command_center.schemas import KanbanBoardsConfig
+    path = REPO_ROOT / "configs" / "kanban_boards.yaml"
+    cfg = KanbanBoardsConfig.model_validate(
+        yaml.safe_load(path.read_text(encoding="utf-8")))
+    return cfg.boards[0].board_id if len(cfg.boards) == 1 else None
+
+
+def _wire_kanban_events(dispatch: dict[str, Callable[..., Any]],
+                        surface: str) -> dict[str, Callable[..., Any]]:
+    """Wrap governed verbs to emit kanban events. Off unless KANBAN_EMIT_EVENTS=1."""
+    env_map = env()
+    if env_map.get("KANBAN_EMIT_EVENTS") != "1":
+        return dispatch
+    from command_center.kanban_sync import EventLog, wrap_governed_dispatch
+    board_id = _resolve_primary_board(env_map)
+    if not board_id:
+        raise RuntimeError(
+            "KANBAN_EMIT_EVENTS=1 but no board resolved — set KANBAN_PRIMARY_BOARD_ID "
+            "or register exactly one board in configs/kanban_boards.yaml")
+    raw = env_map.get("KANBAN_EVENT_LOG", "generated/kanban-events.jsonl")
+    path = Path(raw)
+    log = EventLog(path if path.is_absolute() else REPO_ROOT / path)
+    return wrap_governed_dispatch(dispatch, surface=surface, board_id=board_id, log=log)
+
+
 def build_system(surface: str) -> str:
     """The operator brief + the rules of the wall, identical across surfaces (only
     the surface name varies). It enumerates every capability tier on purpose: a
@@ -187,6 +219,11 @@ class GatewayCore:
         self.cfg = cfg
         self.system = build_system(cfg.surface)
         self.tools, self.dispatch = load_tool_layer(cfg.surface)
+        # Live kanban sync: funnel every governed card/todo verb (this surface
+        # included) through the kanban event log so the internal UI + AppFlowy
+        # project from one source. Opt-in: only when a deployment configures the
+        # event-log path and a resolvable board (no fabricated board/surface).
+        self.dispatch = _wire_kanban_events(self.dispatch, cfg.surface)
         # The harness owns board state: load the (validated) re-injection knobs once
         # and re-state the live board to the model each turn so it never has to call
         # list_* to remember what's on the board (see board_state.py).
