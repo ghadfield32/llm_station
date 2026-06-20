@@ -4,6 +4,7 @@ These are hermetic: no GitHub network, no private key, no token material.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from command_center.cli import github_app_verify
@@ -49,15 +50,20 @@ class _FakeGitHubClient:
             }])
         if method == "POST" and path == "/app/installations/123/access_tokens":
             return _Response(201, {"token": "not-returned-to-user", "permissions": self.permissions})
-        if method == "GET" and path == "/repos/ghadfield32/llm_station":
+        # Repo-scoped reads are matched generically so the fake stays correct as
+        # selected_repositories grows (e.g. betts_basketball alongside llm_station).
+        if method == "GET" and re.fullmatch(r"/repos/ghadfield32/[^/]+", path):
             return _Response(200, {"default_branch": "main"})
-        if method == "GET" and path == "/repos/ghadfield32/llm_station/branches/main":
+        if method == "GET" and re.fullmatch(r"/repos/ghadfield32/[^/]+/branches/main", path):
             return _Response(200, {"commit": {"sha": "abc123"}})
-        if method == "GET" and path == "/repos/ghadfield32/llm_station/commits/abc123/check-runs":
+        if method == "GET" and re.fullmatch(
+                r"/repos/ghadfield32/[^/]+/commits/abc123/check-runs", path):
             return _Response(200, {})
-        if method == "GET" and path == "/repos/ghadfield32/llm_station/commits/abc123/status":
+        if method == "GET" and re.fullmatch(
+                r"/repos/ghadfield32/[^/]+/commits/abc123/status", path):
             return _Response(200, {})
-        if method == "GET" and path == "/repos/ghadfield32/llm_station/branches/main/protection":
+        if method == "GET" and re.fullmatch(
+                r"/repos/ghadfield32/[^/]+/branches/main/protection", path):
             return _Response(200, {
                 "required_status_checks": {"contexts": ["contracts"]},
                 "required_pull_request_reviews": {
@@ -71,7 +77,8 @@ class _FakeGitHubClient:
 class _FakeGitHubClientWithBlockedProtection(_FakeGitHubClient):
     def request(self, method, url, headers=None, json=None):
         path = url.replace(github_app_verify.GITHUB_API, "")
-        if method == "GET" and path == "/repos/ghadfield32/llm_station/branches/main/protection":
+        if method == "GET" and re.fullmatch(
+                r"/repos/ghadfield32/[^/]+/branches/main/protection", path):
             return _Response(403, {})
         return super().request(method, url, headers=headers, json=json)
 

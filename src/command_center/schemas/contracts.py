@@ -1317,6 +1317,10 @@ class RepoManifest(Strict):
     # Where the repo lives on this machine. Stored as 'self' (the control-plane
     # repo) or an 'env:NAME' reference; never a committed absolute path.
     local_path_ref: str | None = None
+    # The repo's OWN required CI check names that gate its PRs (the PR-check loop +
+    # branch protection use these). Empty -> fall back to the global
+    # branch_protection_verification.required_status_check_contexts (the self repo).
+    required_status_check_contexts: list[str] = Field(default_factory=list)
     autonomous_edits_enabled: bool = False
     blockers: list[str] = Field(default_factory=list)
 

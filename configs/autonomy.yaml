@@ -160,6 +160,8 @@ repo_manifests:
     risk_ceiling: L2_local_edits
     kanban_board_id: betts_basketball
     local_path_ref: env:BETTS_BASKETBALL_LOCAL_PATH
+    required_status_check_contexts:
+    - Unit Tests
     autonomous_edits_enabled: false
     blockers:
     - repo_autonomy_not_yet_verified
@@ -365,6 +367,7 @@ github_app_auth:
   webhook_secret_env: GITHUB_WEBHOOK_SECRET
   selected_repositories:
     - ghadfield32/llm_station
+    - ghadfield32/betts_basketball
   allowed_repository_permissions:
     metadata: read
     contents: read_write

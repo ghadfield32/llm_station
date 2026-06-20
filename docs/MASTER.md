@@ -1674,6 +1674,25 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Enabling betts_basketball: App-installed + per-repo CI checks
+
+- **github_app_installed gate now PASSES (verified, not faked).** The user added
+  betts to the existing `llm-station-command-center` App installation; confirmed by
+  read-back (a betts-scoped App token reads betts 200). So
+  `github_app_auth.selected_repositories` now legitimately includes betts.
+- **Per-repo required CI checks.** New `RepoManifest.required_status_check_contexts`
+  + `pr_check_verify.required_checks_for()`: each repo's PR-check loop (and its
+  branch protection) uses ITS OWN checks; the self/control repo falls back to the
+  global list. betts declares `["Unit Tests"]` (its hermetic CI job); llm_station
+  keeps `validate`/`lint-test`. Test added.
+- **CODEOWNERS** opened as a PR on betts (`betts_basketball#6`, via the App on a
+  feature branch — never a direct main push); human merges it, then `git -C betts pull`.
+- **Still blocked (cannot fake):** branch protection — the `GITHUB_OWNER_ADMIN_TOKEN`
+  fine-grained PAT 403s on betts Administration (verified: 404 on llm_station = has
+  admin, 403 on betts = lacks it), so the user must grant Administration on betts to
+  that token or set protection in the UI. The bounded-loop proof needs branch-mission
+  adapted for external repos (next). AppFlowy board-live needs `APPFLOWY_*` creds.
+
 ### 2026-06-20 — Second repo onboarded: betts_basketball (disabled) + multi-board
 
 - **First external repo registered (DISABLED).** `betts_basketball` added to

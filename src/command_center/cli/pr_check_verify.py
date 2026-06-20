@@ -340,6 +340,21 @@ def _write_output(output: Path | None, result: dict[str, Any]) -> None:
     output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def required_checks_for(cfg: AutonomyConfig, repo_id: str) -> tuple[tuple[str, ...], str]:
+    """The required CI check names that gate a repo's PRs, with their source.
+
+    Prefer the repo's OWN declared checks (each repo's CI differs); fall back to
+    the global branch_protection_verification list only when the manifest declares
+    none (the self/control repo keeps its existing behaviour).
+    """
+    manifest = next((r for r in cfg.repo_manifests if r.repo_id == repo_id), None)
+    if manifest is not None and manifest.required_status_check_contexts:
+        return (tuple(manifest.required_status_check_contexts),
+                f"configs/autonomy.yaml:repo_manifests[{repo_id}].required_status_check_contexts")
+    return (tuple(cfg.branch_protection_verification.required_status_check_contexts),
+            "configs/autonomy.yaml:branch_protection_verification.required_status_check_contexts")
+
+
 def run_pr_check_verify(
     *,
     repo_id: str = "llm_station",
@@ -371,7 +386,7 @@ def run_pr_check_verify(
 
     cfg = AutonomyConfig.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8")))
     manifest = next((repo for repo in cfg.repo_manifests if repo.repo_id == repo_id), None)
-    required_checks = tuple(cfg.branch_protection_verification.required_status_check_contexts)
+    required_checks, checks_source = required_checks_for(cfg, repo_id)
     result: dict[str, Any] = {
         "status": "blocked",
         "mission_id": mission_id,
@@ -379,7 +394,7 @@ def run_pr_check_verify(
         "branch": branch,
         "created_at": created_at,
         "required_checks": list(required_checks),
-        "required_checks_source": "configs/autonomy.yaml:branch_protection_verification.required_status_check_contexts",
+        "required_checks_source": checks_source,
         "poll_interval_seconds": poll_interval,
         "poll_timeout_seconds": poll_timeout,
         "poll_budget_source": "operator_cli_args",
