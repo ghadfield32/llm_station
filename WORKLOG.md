@@ -143,3 +143,28 @@ fast "has this been done?" index. Dates are when the line was written.
 - NEXT: wire real collectors to activate checks (local-first: `ledger_mission_stats`
   + `litellm_spend_api` for usage-digest-weekly; `ruff_report`/`tree` for
   *-standards). Until wired the lane is an honest no-op, not fake-green.
+
+## Desktop automation / timing (appflowy_browser_staging)
+
+- ROOT-CAUSED 06-20: `desktop-timing-derive` derived `action_timeout_seconds` from
+  read-only no-op timing (snapshot reads ~15–33 ms) — not real action latency —
+  and labeled it `proposed`; schema (`int ≥ 1`) can't even accept sub-second, so
+  it was misleading, never enabling.
+- FIX 06-20: added `DesktopActionLatencyCanarySpec` + `cc desktop-action-canary` —
+  measures a reversible SANDBOX AppFlowy `direct_api` create→delete row round-trip
+  (`action_create_ms`/`delete_ms`/`roundtrip_ms`); env-ref creds only; FAILS CLOSED
+  (`representative_action_source_not_configured`) when unset. No GUI lib, no
+  production board (guarded by `forbidden_targets`), reversible (row deleted).
+- FIX 06-20: `desktop-timing-derive` now: read-only = observation-only → `blocked`
+  (`action_latency_evidence_required_for_production_candidates`), not `proposed`;
+  `action_timeout` from max action round-trip (ceil sec, no multiplier); `ttl_minutes`
+  flagged `ttl_evidence_required_from_session_durations` (session lifetime ≠ action
+  latency — never fabricated).
+- TESTS 06-20: tests/test_desktop_action_canary.py (fail-closed / measured / forbidden-
+  target) + updated test_desktop_noop_canary derive tests (read-only→blocked,
+  action-latency→action_timeout). Full suite green.
+- STATE 06-20: `enable_desktop_target...` correctly still BLOCKED — no AppFlowy sandbox
+  wired → no action-latency evidence; ttl has no evidence source.
+- NEXT: wire `APPFLOWY_SANDBOX_*` env to a real sandbox board → run `cc desktop-action-
+  canary` N times for real evidence; then design a session-duration evidence source
+  for `ttl_minutes` before any enablement.

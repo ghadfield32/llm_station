@@ -5,11 +5,50 @@
 > every pipeline stage, the full module tree with purposes, and a change log.
 > Deep-dive references for each section are listed in [§12](#12-doc-index-where-the-detail-lives).
 >
-> Last full revision: **2026-06-12**. State at that date: local validation green,
-> LiteLLM pinned by digest, local models installed, virtual keys minted, live smoke
-> passing, Growth OS selftest 22/22, kanban bridge live with writeback.
+> Last full revision: **2026-06-12**. Latest readiness update:
+> **2026-06-20**. Current source of truth is local `main` synced with
+> `origin/main` at `0ac008c`.
 
 ---
+
+## Current readiness snapshot (2026-06-20)
+
+Phase 0 source reconciliation is complete. Local `main` is clean, synced with
+`origin/main`, and the remote advertises only `main` plus `setup/github-ready`.
+PR #10, #11, and #12 are closed and merged. PR #6 is closed unmerged as the
+draft canary proof PR. The merged `main` line contains `configs/autonomy.yaml`,
+the enabled `llm_station` repo manifest, the UI/chat/SSE/SMS work, the
+capability catalog, proactive RCA intake, desktop no-op/timing evidence, and
+the daily self-improvement DAG.
+
+Phase 1 now has a real bootstrap/doctor surface:
+
+- `uv run cc doctor` performs the full readiness doctor and emits PASS, FAIL,
+  BLOCKED, or NOT_RUN for each check.
+- `uv run cc bootstrap-local` is the local bootstrap command for render plus
+  LiteLLM DB, LiteLLM, and Ledger.
+- `uv run cc verify-stack` runs the same full readiness doctor.
+- Redacted evidence for this pass is recorded at
+  `evaluation/system-validation/20260620-phase1-doctor/doctor-report.json`.
+
+Current doctor state: 19 PASS, 0 FAIL, 2 BLOCKED, 0 NOT_RUN. The two blockers
+are real setup gaps, not code failures:
+
+- AppFlowy kanban source is enabled but these env refs are absent:
+  `APPFLOWY_BASE_URL`, `APPFLOWY_WORKSPACE_ID`, `APPFLOWY_EMAIL`,
+  `APPFLOWY_PASSWORD`.
+- `discord-main` is enabled but `DISCORD_ALLOWED_CHANNEL_IDS` is absent.
+
+Next order:
+
+1. Decide whether this machine should run AppFlowy mode now. If yes, set the
+   AppFlowy env refs and run `uv run cc kanban-bridge --dry-run`. If not,
+   disable the AppFlowy source until the new board registry lands.
+2. Either set `DISCORD_ALLOWED_CHANNEL_IDS` or disable `discord-main` until
+   Discord is intentionally live.
+3. Rerun `uv run cc doctor`.
+4. Continue Phase 2: board registry and `kanban-register` /
+   `kanban-verify` / `kanban-sync --dry-run`.
 
 ## Table of contents
 
@@ -1536,6 +1575,7 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [MASTER.md](MASTER.md) | **this doc** — the consolidated system guide |
 | [SETUP-FROM-SCRATCH.md](SETUP-FROM-SCRATCH.md) | **cold-start** — every prerequisite, first boot, and per-channel enablement, in order |
 | [channels.md](channels.md) | chat transports (Discord/Slack/Telegram/WhatsApp): architecture + per-platform setup + how to add a new one |
+| [LINKEDIN_PIPELINE.md](LINKEDIN_PIPELINE.md) | **Living doc** for the LinkedIn/content pipeline — status, architecture, invariants, the content engine, and the improvement roadmap |
 | [linkedin-setup.md](linkedin-setup.md) | **LinkedIn content pipeline runbook** — ordered go-live steps (app → OAuth → live smoke → schedule) + daily operation; `--preflight` self-check |
 | [STATUS.md](STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | multi-session git safety, engineering standards, the uv dependency workflow |
@@ -1633,6 +1673,60 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-06-20 — Representative desktop action-latency measurement (root-cause fix)
+
+- **Root cause found.** `desktop-timing-derive` derived `action_timeout_seconds`
+  from read-only no-op canary timing (snapshot reads, ~15–33 ms), which does not
+  represent real desktop-action latency. It then labeled those sub-second values
+  `proposed` even though the schema (`action_timeout_seconds: int ≥ 1`) can never
+  accept them — misleading, not data-representative.
+- **Fix, no fabrication.** Added `DesktopActionLatencyCanarySpec` +
+  `cc desktop-action-canary`: measures a **reversible sandbox** AppFlowy
+  `direct_api` round-trip (create→delete a throwaway row on a SANDBOX database,
+  never the production board) and records `action_create_ms` / `action_delete_ms`
+  / `action_roundtrip_ms`. Credentials are env refs only; it **fails closed**
+  (`representative_action_source_not_configured`) when absent — verified blocked
+  in this env (no AppFlowy sandbox wired).
+- **Derive made honest.** `desktop-timing-derive` now treats read-only evidence
+  as **observation timing only** and returns `blocked`
+  (`action_latency_evidence_required_for_production_candidates`) instead of
+  `proposed`; `action_timeout` is derived solely from action-latency round-trips
+  (max observed, ceil to whole seconds, no multiplier). `ttl_minutes` is a
+  session lifetime, not an action latency, so it is reported as needing separate
+  session-duration evidence (`ttl_evidence_required_from_session_durations`),
+  never fabricated.
+- **Still correctly blocked.** `enable_desktop_target_only_after_timeout_takeover
+  _and_canary_plan` stays gated: no AppFlowy sandbox is configured, so no real
+  action-latency evidence exists yet, and `ttl` has no evidence source. **Next:**
+  wire `APPFLOWY_SANDBOX_*` env to a sandbox board to produce real action-latency
+  evidence; then design a session-duration evidence source for `ttl`.
+
+### 2026-06-20 — Source reconciled and Phase 1 doctor productized
+
+- **Source of truth reconciled.** Local `main` is clean and synced with
+  `origin/main` at `0ac008c`. The remote has `main` and `setup/github-ready`;
+  `feat/agent-kanban-surface` is no longer a separate ahead branch. PR #10,
+  #11, and #12 are merged. PR #6 is closed unmerged as the draft canary proof
+  PR.
+- **`cc doctor` upgraded.** The doctor now runs the setup checks as structured
+  PASS / FAIL / BLOCKED / NOT_RUN results with exact blockers, next commands,
+  and redacted JSON evidence. It checks Python, uv, `uv sync --frozen --extra
+  dev --extra gateways`, Docker, Docker Compose, Ollama, LiteLLM, Ledger,
+  model role resolution, AppFlowy config, internal UI config, Airflow DAG
+  presence, GitHub App env refs, GitHub App installation, branch protection,
+  CODEOWNERS/devcontainer guardrails, forbidden providers, committed config
+  secret literals, generated/evaluation dirtiness, and enabled channel token
+  refs by presence/name only.
+- **Bootstrap aliases added.** `uv run cc bootstrap-local` now maps to the
+  local bootstrap path, and `uv run cc verify-stack` runs the full doctor.
+- **Current blockers are setup gaps.** Doctor evidence
+  `evaluation/system-validation/20260620-phase1-doctor/doctor-report.json`
+  reports 19 PASS, 0 FAIL, 2 BLOCKED, 0 NOT_RUN: missing AppFlowy env refs and
+  missing `DISCORD_ALLOWED_CHANNEL_IDS` while `discord-main` is enabled.
+- **Next ordered work.** Clear or intentionally disable those two setup
+  blockers, rerun `uv run cc doctor`, then move to Phase 2 board registry and
+  board verification.
 
 ### 2026-06-20 — Desktop timing sample plan and candidates proposed
 

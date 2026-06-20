@@ -1,0 +1,54 @@
+# The content ENGINE (validated by command_center.schemas.ContentPipelineConfig).
+# Distinct from content.yaml (the publisher). Flow:
+#   gather evidence-backed candidates -> draft breakdown posts (best local model)
+#   -> multi-viewpoint judge panel (escalate the advanced parts) -> stage top-N
+#   as In Queue drafts for human approval. No claim ships without evidence.
+schema_version: "1"
+
+# AppFlowy connection (reads the curator DBs + writes In Queue cards) - reuses
+# the same env keys as the publisher / kanban bridge.
+source:
+  growthos_root: appflowy_kanban/growth-os
+  database_map_path: config/databases.json
+
+# Local model routing (LiteLLM). Drafting on a template-parsed instruct model;
+# judging on the local-judge role. Secrets/URLs named, not stored.
+litellm_base_url: http://localhost:4000
+litellm_key_env: LITELLM_MASTER_KEY
+draft_role: chat              # qwen3:30b
+judge_role: local-judge       # qwen3:30b -> devstral:24b failover
+
+own_repos_root: ".."          # docker_projects, relative to llm_station
+lookback_days: 14
+candidates_per_run: 25
+surface_top: 5
+
+# The judge panel - the four viewpoints the user chose. factual_currency needs
+# the live web, so it escalates to the advanced (Claude Code) tier.
+judges:
+  - {key: factual_currency, blocking: true, needs_web: true}
+  - {key: technical,        blocking: true}
+  - {key: brand_voice,      blocking: false}   # voice is advisory, not a hard block
+  - {key: no_overreach,     blocking: true}    # claims must trace to evidence
+
+streams:
+  - name: personal
+    board: geoffhadfield32_content
+    curator_dbs: [papers, repos, signals]
+    topics: []                # take the full ML/AI/data-eng field
+    own_repos: [llm_station, betts_basketball, bball_homography_pipeline]
+    pillar: ML & Data Engineering
+    voice: >
+      First-person voice of an ML / data-science engineer building in public.
+      Mixes external papers/repos with the author's own developments. Credible,
+      specific, no hype; ends with a question. Good for a data-science image.
+  - name: business
+    board: world_model_sports_content
+    curator_dbs: [papers, repos, signals]
+    topics: [basketball, nba, sports, player tracking, pose, homography, court, athlete]
+    own_repos: [bball_homography_pipeline, betts_basketball]
+    pillar: World Model Sports
+    voice: >
+      World Model Sports company voice ("we"). Basketball science and applicable
+      sports science - perception (CV/tracking/3D) plus forecasting. Rigorous,
+      honest about uncertainty, ties to building a world model for basketball.

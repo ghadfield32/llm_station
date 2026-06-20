@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -29,21 +30,10 @@ def _dedupe_paths(paths: list[Path]) -> list[Path]:
     return unique
 
 
-def derive_timing_candidates(
-    *,
-    evidence_paths: list[Path],
-    output: Path | None = None,
-    target_id: str,
-    required_samples: int | None = None,
-    required_samples_source: str | None = None,
-) -> dict[str, Any]:
-    blockers: list[str] = []
-    if required_samples is None or not required_samples_source:
-        blockers.append("sample_plan_missing")
-        blockers.append("insufficient_noop_canary_telemetry")
-    elif required_samples < 1:
-        blockers.append("sample_plan_required_samples_invalid")
-
+def _collect_read_only_samples(
+    evidence_paths: list[Path], target_id: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Collect read-only no-op samples (observation timing) and rejects."""
     samples: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for path in evidence_paths:
@@ -61,43 +51,126 @@ def derive_timing_candidates(
             rejected.append({"path": str(path), "reason": "mode_not_read_only"})
             continue
         measurements = data.get("measurements") or {}
-        required_measurements = [
-            "snapshot_load_ms",
-            "target_verify_ms",
-            "total_duration_ms",
-        ]
-        if any(measurements.get(field) is None for field in required_measurements):
+        if any(measurements.get(f) is None for f in
+               ("snapshot_load_ms", "target_verify_ms", "total_duration_ms")):
             rejected.append({"path": str(path), "reason": "measurement_missing"})
             continue
         samples.append({"path": str(path), "measurements": measurements})
+    return samples, rejected
 
+
+def _collect_action_latency_samples(
+    action_latency_paths: list[Path], target_id: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Collect representative action-latency samples (real action round-trips)."""
+    samples: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for path in action_latency_paths:
+        if not path.is_file():
+            rejected.append({"path": str(path), "reason": "action_evidence_missing"})
+            continue
+        data = _load_evidence(path)
+        if data.get("schema_version") != "command-center.desktop-action-latency.v1":
+            rejected.append({"path": str(path), "reason": "not_action_latency_evidence"})
+            continue
+        if data.get("target_id") != target_id:
+            rejected.append({"path": str(path), "reason": "target_id_mismatch"})
+            continue
+        if data.get("status") != "pass":
+            rejected.append({"path": str(path), "reason": "status_not_pass"})
+            continue
+        measurements = data.get("measurements") or {}
+        if measurements.get("action_roundtrip_ms") is None:
+            rejected.append({"path": str(path), "reason": "action_roundtrip_ms_missing"})
+            continue
+        samples.append({"path": str(path), "measurements": measurements})
+    return samples, rejected
+
+
+def derive_timing_candidates(
+    *,
+    evidence_paths: list[Path],
+    output: Path | None = None,
+    target_id: str,
+    required_samples: int | None = None,
+    required_samples_source: str | None = None,
+    action_latency_paths: list[Path] | None = None,
+) -> dict[str, Any]:
+    """Derive desktop timing candidates from measured evidence only.
+
+    Read-only no-op evidence (snapshot reads) is observation timing only — it
+    cannot define a live-action timeout, so production candidates are BLOCKED
+    until representative action-latency evidence exists. The ``action_timeout``
+    candidate is derived solely from action-latency round-trips; ``ttl_minutes``
+    (a session lifetime) needs separate session-duration evidence and is reported
+    as required, never fabricated.
+    """
+    blockers: list[str] = []
+    if required_samples is None or not required_samples_source:
+        blockers.append("sample_plan_missing")
+        blockers.append("insufficient_noop_canary_telemetry")
+    elif required_samples < 1:
+        blockers.append("sample_plan_required_samples_invalid")
+
+    samples, rejected = _collect_read_only_samples(evidence_paths, target_id)
     if required_samples is not None and len(samples) < required_samples:
         blockers.append("insufficient_noop_canary_telemetry")
 
-    candidates = None
-    if not blockers:
-        max_total_ms = max(float(sample["measurements"]["total_duration_ms"]) for sample in samples)
-        max_action_ms = max(
-            max(
-                float(sample["measurements"]["snapshot_load_ms"]),
-                float(sample["measurements"]["target_verify_ms"]),
-            )
-            for sample in samples
-        )
-        candidates = {
-            "ttl_minutes_candidate": max_total_ms / 60_000,
-            "action_timeout_seconds_candidate": max_action_ms / 1_000,
-            "candidate_source_evidence_refs": [sample["path"] for sample in samples],
-            "candidate_basis": "max observed read-only no-op canary timing; no safety multiplier",
-            "provisional_only_not_production_enabled": True,
+    # Observation timing summary from read-only samples (never an action timeout).
+    observation_timing = None
+    if samples:
+        observation_timing = {
+            "max_total_duration_ms": max(
+                float(s["measurements"]["total_duration_ms"]) for s in samples
+            ),
+            "max_observe_step_ms": max(
+                max(float(s["measurements"]["snapshot_load_ms"]),
+                    float(s["measurements"]["target_verify_ms"]))
+                for s in samples
+            ),
+            "source_evidence_refs": [s["path"] for s in samples],
+            "basis": "read-only no-op observation timing; NOT a live-action timeout",
         }
 
+    action_samples, action_rejected = _collect_action_latency_samples(
+        action_latency_paths or [], target_id
+    )
+
+    # Production candidates require representative action-latency evidence.
+    candidates = None
+    if not action_samples:
+        blockers.append("action_latency_evidence_required_for_production_candidates")
+    else:
+        max_roundtrip_ms = max(
+            float(s["measurements"]["action_roundtrip_ms"]) for s in action_samples
+        )
+        # ceil to whole seconds: the schema requires action_timeout_seconds >= 1
+        # (int). No safety multiplier is applied; the value is the measured max.
+        action_timeout_seconds = max(1, math.ceil(max_roundtrip_ms / 1_000))
+        candidates = {
+            "action_timeout_seconds_candidate": action_timeout_seconds,
+            "action_timeout_candidate_basis": (
+                "max observed reversible sandbox action round-trip; ceil to whole "
+                "seconds; no safety multiplier"
+            ),
+            "action_candidate_source_evidence_refs": [s["path"] for s in action_samples],
+            # TTL is a session lifetime, not an action latency; it cannot be
+            # derived from action round-trips. It needs its own evidence.
+            "ttl_minutes_candidate": None,
+            "ttl_evidence_required": "session_duration_evidence_not_action_latency",
+            "provisional_only_not_production_enabled": True,
+        }
+        # ttl evidence is still missing -> enablement stays blocked, honestly.
+        blockers.append("ttl_evidence_required_from_session_durations")
+
+    status = "proposed" if (candidates and not blockers) else "blocked"
     result = {
         "schema_version": "command-center.desktop-timing-candidates.v1",
         "target_id": target_id,
-        "status": "proposed" if candidates else "blocked",
+        "status": status,
         "blockers": blockers,
         "observed_sample_count": len(samples),
+        "observed_action_latency_sample_count": len(action_samples),
         "required_sample_count": required_samples,
         "required_sample_count_source": required_samples_source,
         "additional_samples_required": (
@@ -105,8 +178,13 @@ def derive_timing_candidates(
             if required_samples is not None
             else None
         ),
-        "required_sample_type": "read_only desktop-noop-canary evidence",
+        "required_sample_type": (
+            "representative desktop-action-latency evidence for production candidates; "
+            "read-only desktop-noop-canary evidence for observation timing only"
+        ),
         "rejected_evidence": rejected,
+        "rejected_action_evidence": action_rejected,
+        "observation_timing": observation_timing,
         "candidates": candidates,
         "production_values_written": False,
         "desktop_target_enabled": False,
@@ -124,6 +202,7 @@ def derive_timing_candidates_from_config(
     root: Path,
     target_id: str,
     evidence_paths: list[Path] | None = None,
+    action_latency_paths: list[Path] | None = None,
     output: Path | None = None,
 ) -> dict[str, Any]:
     cfg = AutonomyConfig.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8")))
@@ -131,6 +210,7 @@ def derive_timing_candidates_from_config(
     if plan is None:
         result = derive_timing_candidates(
             evidence_paths=evidence_paths or [],
+            action_latency_paths=action_latency_paths,
             output=output,
             target_id=target_id,
         )
@@ -147,6 +227,7 @@ def derive_timing_candidates_from_config(
         planned_ref_by_path[str(path)] = ref
     result = derive_timing_candidates(
         evidence_paths=_dedupe_paths([*planned_paths, *(evidence_paths or [])]),
+        action_latency_paths=action_latency_paths,
         output=None,
         target_id=target_id,
         required_samples=len(plan.required_evidence_refs),
@@ -163,9 +244,9 @@ def derive_timing_candidates_from_config(
         "production_enabling": plan.production_enabling,
     }
     if result.get("candidates"):
-        result["candidates"]["candidate_source_evidence_refs"] = [
+        result["candidates"]["action_candidate_source_evidence_refs"] = [
             planned_ref_by_path.get(ref, ref)
-            for ref in result["candidates"]["candidate_source_evidence_refs"]
+            for ref in result["candidates"]["action_candidate_source_evidence_refs"]
         ]
     result["rejected_evidence"] = [
         {
@@ -188,12 +269,21 @@ def _paths_from_args(args) -> list[Path]:
     return paths
 
 
+def _action_paths_from_args(args) -> list[Path]:
+    paths = [Path(item) for item in args.action_input]
+    if args.action_input_dir:
+        paths.extend(sorted(Path(args.action_input_dir).glob("*.json")))
+    return paths
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="desktop-timing-derive")
     parser.add_argument("--config", default="configs/autonomy.yaml")
     parser.add_argument("--target-id", required=True)
     parser.add_argument("--input", action="append", default=[])
     parser.add_argument("--input-dir", default="")
+    parser.add_argument("--action-input", action="append", default=[])
+    parser.add_argument("--action-input-dir", default="")
     parser.add_argument("--required-samples", type=int, default=None)
     parser.add_argument("--required-samples-source", default="")
     parser.add_argument(
@@ -207,12 +297,14 @@ def main() -> int:
             config_path=(ROOT / args.config).resolve(),
             root=ROOT,
             evidence_paths=_paths_from_args(args),
+            action_latency_paths=_action_paths_from_args(args),
             output=output,
             target_id=args.target_id,
         )
     else:
         result = derive_timing_candidates(
             evidence_paths=_paths_from_args(args),
+            action_latency_paths=_action_paths_from_args(args),
             output=output,
             target_id=args.target_id,
             required_samples=args.required_samples,

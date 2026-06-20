@@ -175,7 +175,25 @@ def test_timing_derivation_blocks_on_insufficient_samples(tmp_path):
     assert result["candidates"] is None
 
 
-def test_timing_derivation_uses_only_measured_evidence(tmp_path):
+def _write_action_sample(path: Path, *, status: str = "pass",
+                         target_id: str = "appflowy_browser_staging",
+                         create: float = 600.0, delete: float = 900.0):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "command-center.desktop-action-latency.v1",
+        "status": status,
+        "target_id": target_id,
+        "measurements": {
+            "action_create_ms": create,
+            "action_delete_ms": delete,
+            "action_roundtrip_ms": create + delete,
+        },
+    }), encoding="utf-8")
+
+
+def test_timing_derivation_read_only_is_observation_only_not_production(tmp_path):
+    # Read-only no-op evidence is observation timing, not a live-action timeout:
+    # it must NOT produce production-enabling candidates.
     sample_a = tmp_path / "sample-a.json"
     sample_b = tmp_path / "sample-b.json"
     _write_canary_sample(sample_a, total=120.0, load=40.0, verify=80.0)
@@ -188,14 +206,41 @@ def test_timing_derivation_uses_only_measured_evidence(tmp_path):
         required_samples_source="unit_test_sample_plan",
     )
 
-    assert result["status"] == "proposed"
-    assert result["blockers"] == []
-    assert result["candidates"]["ttl_minutes_candidate"] == 240.0 / 60_000
-    assert result["candidates"]["action_timeout_seconds_candidate"] == 100.0 / 1_000
-    assert result["candidates"]["provisional_only_not_production_enabled"] is True
+    assert result["status"] == "blocked"
+    assert "action_latency_evidence_required_for_production_candidates" in result["blockers"]
+    assert result["candidates"] is None
+    # the read-only numbers are retained as observation timing only
+    assert result["observation_timing"]["max_total_duration_ms"] == 240.0
+    assert "NOT a live-action timeout" in result["observation_timing"]["basis"]
     assert result["production_values_written"] is False
-    assert result["desktop_target_enabled"] is False
-    assert result["placeholder_values_used"] is False
+
+
+def test_timing_derivation_derives_action_timeout_from_action_latency(tmp_path):
+    sample_a = tmp_path / "sample-a.json"
+    sample_b = tmp_path / "sample-b.json"
+    _write_canary_sample(sample_a)
+    _write_canary_sample(sample_b)
+    act_a = tmp_path / "act-a.json"
+    act_b = tmp_path / "act-b.json"
+    _write_action_sample(act_a, create=600.0, delete=900.0)   # roundtrip 1500ms
+    _write_action_sample(act_b, create=800.0, delete=1500.0)  # roundtrip 2300ms
+
+    result = desktop_timing_derive.derive_timing_candidates(
+        evidence_paths=[sample_a, sample_b],
+        action_latency_paths=[act_a, act_b],
+        target_id="appflowy_browser_staging",
+        required_samples=2,
+        required_samples_source="unit_test_sample_plan",
+    )
+
+    # action timeout is derived from the real max round-trip (ceil 2300ms -> 3s)
+    assert result["candidates"]["action_timeout_seconds_candidate"] == 3
+    assert result["candidates"]["ttl_minutes_candidate"] is None
+    assert "action_latency_evidence_required_for_production_candidates" not in result["blockers"]
+    # ttl is a session lifetime; it still needs its own evidence -> not enabled
+    assert "ttl_evidence_required_from_session_durations" in result["blockers"]
+    assert result["status"] == "blocked"
+    assert result["observed_action_latency_sample_count"] == 2
 
 
 def test_timing_derivation_requires_sample_plan(tmp_path):
@@ -240,13 +285,15 @@ def test_timing_derivation_uses_config_sample_plan_refs(tmp_path):
         target_id="appflowy_browser_staging",
     )
 
-    assert result["status"] == "proposed"
+    # read-only sample plan satisfied, but production candidates require
+    # representative action-latency evidence, which the plan does not supply.
+    assert result["status"] == "blocked"
+    assert "action_latency_evidence_required_for_production_candidates" in result["blockers"]
     assert result["required_sample_count"] == 2
     assert "required_evidence_refs" in result["required_sample_count_source"]
     assert result["sample_plan"]["live_actions_allowed"] is False
-    assert result["sample_plan"]["production_enabling"] is False
-    assert result["candidates"]["ttl_minutes_candidate"] == 240.0 / 60_000
-    assert result["candidates"]["action_timeout_seconds_candidate"] == 100.0 / 1_000
+    assert result["candidates"] is None
+    assert result["observation_timing"]["max_total_duration_ms"] == 240.0
     assert result["production_values_written"] is False
 
 

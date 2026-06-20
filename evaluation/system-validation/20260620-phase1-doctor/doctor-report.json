@@ -1,0 +1,511 @@
+{
+  "checks": [
+    {
+      "evidence": {
+        "implementation": "CPython",
+        "version": "3.12.6"
+      },
+      "id": "python_version",
+      "status": "PASS",
+      "title": "Python version"
+    },
+    {
+      "evidence": {
+        "path_present": true
+      },
+      "id": "uv_available",
+      "status": "PASS",
+      "title": "uv available"
+    },
+    {
+      "evidence": {
+        "command": [
+          "uv",
+          "sync",
+          "--frozen",
+          "--extra",
+          "dev",
+          "--extra",
+          "gateways"
+        ],
+        "returncode": 0
+      },
+      "id": "uv_sync_frozen",
+      "status": "PASS",
+      "title": "uv sync frozen"
+    },
+    {
+      "evidence": {
+        "command": [
+          "docker",
+          "info"
+        ],
+        "returncode": 0
+      },
+      "id": "docker_available",
+      "status": "PASS",
+      "title": "Docker daemon"
+    },
+    {
+      "evidence": {
+        "command": [
+          "docker",
+          "compose",
+          "version"
+        ],
+        "returncode": 0
+      },
+      "id": "docker_compose_available",
+      "status": "PASS",
+      "title": "Docker Compose available"
+    },
+    {
+      "evidence": {
+        "failure_count": 0,
+        "failures": [],
+        "validated": [
+          "configs/models.yaml",
+          "configs/model-scout-curated-openweight.yaml",
+          "configs/judges.yaml",
+          "configs/gates.yaml",
+          "configs/environments.yaml",
+          "configs/proactive.yaml",
+          "configs/targets.yaml",
+          "configs/kanban.yaml",
+          "configs/content.yaml",
+          "configs/tools.yaml",
+          "configs/capabilities.yaml",
+          "configs/evals.yaml",
+          "configs/standards.yaml",
+          "configs/ui.yaml",
+          "configs/channels.yaml",
+          "configs/agent_surface.yaml",
+          "configs/autonomy.yaml",
+          "configs/improvement.yaml",
+          "configs/improvement-targets.yaml",
+          "configs/discovery.yaml",
+          "configs/model-benchmarks.yaml"
+        ]
+      },
+      "id": "config_contracts",
+      "status": "PASS",
+      "title": "Config contracts"
+    },
+    {
+      "evidence": {
+        "rendered_roles": [
+          "architect-judge",
+          "chat",
+          "coder",
+          "local-judge",
+          "planner",
+          "security-judge",
+          "triage"
+        ],
+        "roles": [
+          "architect-judge",
+          "chat",
+          "coder",
+          "local-judge",
+          "planner",
+          "security-judge",
+          "triage"
+        ]
+      },
+      "id": "model_roles_resolve",
+      "status": "PASS",
+      "title": "Configured model roles resolve"
+    },
+    {
+      "evidence": {
+        "status_code": 200,
+        "url": "http://127.0.0.1:11434/api/version"
+      },
+      "id": "ollama_reachable",
+      "status": "PASS",
+      "title": "ollama reachable"
+    },
+    {
+      "evidence": {
+        "status_code": 200,
+        "url": "http://127.0.0.1:4000/health/liveliness"
+      },
+      "id": "litellm_reachable",
+      "status": "PASS",
+      "title": "litellm reachable"
+    },
+    {
+      "evidence": {
+        "status_code": 200,
+        "url": "http://127.0.0.1:8091/health"
+      },
+      "id": "ledger_reachable",
+      "status": "PASS",
+      "title": "ledger reachable"
+    },
+    {
+      "blocker": "growth-os-appflowy: missing env APPFLOWY_BASE_URL; growth-os-appflowy: missing env APPFLOWY_WORKSPACE_ID; growth-os-appflowy: missing env APPFLOWY_EMAIL; growth-os-appflowy: missing env APPFLOWY_PASSWORD",
+      "evidence": {
+        "sources": [
+          {
+            "database_map_exists": true,
+            "database_map_path": "appflowy_kanban\\growth-os\\config\\databases.json",
+            "env": [
+              {
+                "length": 0,
+                "name": "APPFLOWY_BASE_URL",
+                "present": false
+              },
+              {
+                "length": 0,
+                "name": "APPFLOWY_WORKSPACE_ID",
+                "present": false
+              },
+              {
+                "length": 0,
+                "name": "APPFLOWY_EMAIL",
+                "present": false
+              },
+              {
+                "length": 0,
+                "name": "APPFLOWY_PASSWORD",
+                "present": false
+              }
+            ],
+            "growthos_root": "appflowy_kanban/growth-os",
+            "growthos_root_exists": true,
+            "name": "growth-os-appflowy"
+          }
+        ]
+      },
+      "id": "appflowy_config",
+      "next_command": "set AppFlowy env refs, then run uv run cc kanban-bridge --dry-run",
+      "status": "BLOCKED",
+      "title": "AppFlowy config"
+    },
+    {
+      "evidence": {
+        "enabled": false,
+        "service_files_present": true
+      },
+      "id": "internal_ui_config",
+      "status": "PASS",
+      "title": "Internal UI config"
+    },
+    {
+      "evidence": {
+        "dags_dir_exists": true,
+        "self_improvement_daily_exists": true
+      },
+      "id": "airflow_dag_folder",
+      "status": "PASS",
+      "title": "Airflow DAG folder"
+    },
+    {
+      "evidence": {
+        "optional": [
+          {
+            "length": 0,
+            "name": "GITHUB_APP_INSTALLATION_ID",
+            "present": false
+          },
+          {
+            "length": 0,
+            "name": "GITHUB_WEBHOOK_SECRET",
+            "present": false
+          }
+        ],
+        "required": [
+          {
+            "length": 7,
+            "name": "GITHUB_APP_ID",
+            "present": true
+          },
+          {
+            "length": 20,
+            "name": "GITHUB_CLIENT_ID",
+            "present": true
+          },
+          {
+            "length": 89,
+            "name": "GITHUB_APP_PRIVATE_KEY_PATH",
+            "present": true
+          }
+        ],
+        "selected_repositories": [
+          "ghadfield32/llm_station"
+        ]
+      },
+      "id": "github_app_env_refs",
+      "status": "PASS",
+      "title": "GitHub App env refs"
+    },
+    {
+      "evidence": {
+        "branch_protection": [
+          {
+            "app_admin_visibility_required": false,
+            "branch": "main",
+            "code_owner_reviews_required": false,
+            "repository": "ghadfield32/llm_station",
+            "required_pull_request_reviews_present": false,
+            "required_status_checks_present": false,
+            "status": 403,
+            "verification_source": "owner_admin_observer_required",
+            "verified": false
+          }
+        ],
+        "env": [
+          {
+            "length": 7,
+            "name": "GITHUB_APP_ID",
+            "present": true
+          },
+          {
+            "length": 20,
+            "name": "GITHUB_CLIENT_ID",
+            "present": true
+          },
+          {
+            "length": 0,
+            "name": "GITHUB_APP_INSTALLATION_ID",
+            "present": false
+          },
+          {
+            "inside_repo": false,
+            "length": 89,
+            "name": "GITHUB_APP_PRIVATE_KEY_PATH",
+            "path_exists": true,
+            "present": true
+          },
+          {
+            "length": 0,
+            "name": "GITHUB_WEBHOOK_SECRET",
+            "present": false
+          }
+        ],
+        "repositories": [
+          {
+            "checks_status": 200,
+            "commit_status_status": 200,
+            "default_branch_status": 200,
+            "repo_status": 200,
+            "repository": "ghadfield32/llm_station"
+          }
+        ],
+        "secrets_printed": false,
+        "status": "pass",
+        "writes_performed": false
+      },
+      "id": "github_app_installed",
+      "status": "PASS",
+      "title": "GitHub App installed"
+    },
+    {
+      "evidence": {
+        "env": [
+          {
+            "length": 93,
+            "name": "GITHUB_OWNER_ADMIN_TOKEN",
+            "present": true
+          }
+        ],
+        "repositories": [
+          {
+            "active_branch_rules": [
+              {
+                "ruleset_id": 17841767,
+                "type": "deletion"
+              },
+              {
+                "ruleset_id": 17841767,
+                "type": "non_fast_forward"
+              },
+              {
+                "ruleset_id": 17841767,
+                "type": "required_linear_history"
+              },
+              {
+                "require_code_owner_review": true,
+                "required_approving_review_count": 1,
+                "required_review_thread_resolution": true,
+                "ruleset_id": 17841767,
+                "type": "pull_request"
+              },
+              {
+                "required_status_checks": [
+                  "lint-test",
+                  "validate"
+                ],
+                "ruleset_id": 17841767,
+                "type": "required_status_checks"
+              }
+            ],
+            "active_branch_rules_status": 200,
+            "branch": "main",
+            "branch_protected": true,
+            "branch_status": 200,
+            "classic_branch_protection_verified": false,
+            "protected_branch_list_status": 200,
+            "protected_branch_names": [
+              "main"
+            ],
+            "protection_mode": "active_branch_ruleset",
+            "protection_status": 404,
+            "repo_status": 200,
+            "repository": "ghadfield32/llm_station",
+            "ruleset_evaluation": {
+              "active_rule_count": 5,
+              "active_ruleset_bypass_actors_count": 0,
+              "code_owner_reviews_required": true,
+              "deletion_restricted": true,
+              "linear_history_required": true,
+              "non_fast_forward_required": true,
+              "required_approving_review_count": 1,
+              "required_pull_request_rule_present": true,
+              "required_status_checks": [
+                "lint-test",
+                "validate"
+              ],
+              "rule_types": [
+                "deletion",
+                "non_fast_forward",
+                "pull_request",
+                "required_linear_history",
+                "required_status_checks"
+              ]
+            },
+            "rulesets": [
+              {
+                "bypass_actors_count": 0,
+                "enforcement": "active",
+                "id": 17841767,
+                "name": "protect-main-command-center",
+                "rule_types": [],
+                "source_type": "Repository",
+                "target": "branch"
+              }
+            ],
+            "rulesets_status": 200,
+            "verified": true
+          }
+        ],
+        "secrets_printed": false,
+        "status": "pass",
+        "workflow_jobs": [
+          "lint-test",
+          "validate"
+        ],
+        "workflow_source": ".github/workflows/contracts.yml",
+        "writes_performed": false
+      },
+      "id": "branch_protection_verified",
+      "status": "PASS",
+      "title": "Branch protection verified"
+    },
+    {
+      "evidence": {
+        "repos": [
+          {
+            "autonomous_edits_enabled": true,
+            "ci_command_count": 2,
+            "codeowners_path": ".github/CODEOWNERS",
+            "codeowners_present": true,
+            "devcontainer_path": ".devcontainer/devcontainer.json",
+            "devcontainer_present": true,
+            "execution_mode": "devcontainer",
+            "repo_id": "llm_station"
+          }
+        ]
+      },
+      "id": "repo_manifest_paths",
+      "status": "PASS",
+      "title": "Repo manifest paths"
+    },
+    {
+      "evidence": {
+        "error_count": 0,
+        "errors": [],
+        "forbidden_keys": [
+          "ANTHROPIC_API_KEY",
+          "OPENAI_API_KEY",
+          "OPENROUTER_API_KEY"
+        ]
+      },
+      "id": "forbidden_provider_scan",
+      "status": "PASS",
+      "title": "Forbidden provider scan"
+    },
+    {
+      "evidence": {
+        "findings": [],
+        "scanned_file_count": 32
+      },
+      "id": "committed_config_secret_scan",
+      "status": "PASS",
+      "title": "Committed config secret scan"
+    },
+    {
+      "evidence": {
+        "dirty_entries": [],
+        "expected_outputs": [
+          "evaluation/system-validation/20260620-phase1-doctor/doctor-report.json"
+        ]
+      },
+      "id": "dirty_generated_evidence",
+      "status": "PASS",
+      "title": "Dirty generated evidence"
+    },
+    {
+      "blocker": "missing enabled channel env ref(s): discord-main: DISCORD_ALLOWED_CHANNEL_IDS",
+      "evidence": {
+        "enabled_channels": [
+          {
+            "env": [
+              {
+                "length": 72,
+                "name": "DISCORD_BOT_TOKEN",
+                "present": true
+              },
+              {
+                "length": 0,
+                "name": "DISCORD_ALLOWED_CHANNEL_IDS",
+                "present": false
+              }
+            ],
+            "model": "chat",
+            "name": "discord-main",
+            "transport": "discord"
+          }
+        ]
+      },
+      "id": "channel_token_refs",
+      "next_command": "set enabled channel token env refs or disable the channel in configs/channels.yaml",
+      "status": "BLOCKED",
+      "title": "Channel token refs"
+    }
+  ],
+  "repo": "llm_station",
+  "safety": {
+    "branch_protection_weakened": false,
+    "desktop_live_actions": false,
+    "direct_main_push": false,
+    "external_writes_performed": false,
+    "merge_automation": false,
+    "provider_api_keys_allowed": false,
+    "repo_source_writes_performed": false,
+    "secret_values_recorded": false,
+    "secrets_printed": false,
+    "venv_sync_may_write": true
+  },
+  "schema_version": "command-center.doctor.v1",
+  "summary": {
+    "counts": {
+      "BLOCKED": 2,
+      "FAIL": 0,
+      "NOT_RUN": 0,
+      "PASS": 19
+    },
+    "status": "BLOCKED"
+  }
+}
