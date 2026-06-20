@@ -1,0 +1,76 @@
+{
+  "blockers": [],
+  "repos_verified": [
+    "llm_station"
+  ],
+  "results": [
+    {
+      "autonomous_edits_enabled": true,
+      "blockers": [],
+      "gates": [
+        {
+          "check": "devcontainer_present",
+          "detail": ".devcontainer/devcontainer.json",
+          "status": "PASS"
+        },
+        {
+          "check": "ci_commands_declared",
+          "detail": "uv run cc validate, uv run --extra dev --extra gateways pytest",
+          "status": "PASS"
+        },
+        {
+          "check": "codeowners_present",
+          "detail": ".github/CODEOWNERS",
+          "status": "PASS"
+        },
+        {
+          "check": "codeowners_required",
+          "detail": "True",
+          "status": "PASS"
+        },
+        {
+          "check": "kanban_board_mapping",
+          "detail": "board=llm_station_command_center; board_repos=['llm_station']",
+          "status": "PASS"
+        },
+        {
+          "check": "local_path_ref_resolves",
+          "detail": "self",
+          "status": "PASS"
+        },
+        {
+          "check": "github_app_installed",
+          "detail": "status=verified; selected=True",
+          "status": "PASS"
+        },
+        {
+          "check": "branch_protection_verified",
+          "detail": "status=verified; selected=True",
+          "status": "PASS"
+        },
+        {
+          "check": "no_runtime_secrets_in_container",
+          "detail": "no_runtime_secrets_inside_container",
+          "status": "PASS"
+        },
+        {
+          "check": "branch_mission_proven",
+          "detail": "branch-mission.json=PASS",
+          "status": "PASS"
+        },
+        {
+          "check": "pr_check_evidence_proven",
+          "detail": "pr-check-loop.json=PASS",
+          "status": "PASS"
+        }
+      ],
+      "repo_id": "llm_station",
+      "repository": "ghadfield32/llm_station",
+      "status": "pass"
+    }
+  ],
+  "schema_version": "command-center.repo-verify.v1",
+  "secrets_printed": false,
+  "status": "pass",
+  "writes_performed": false
+}

@@ -1225,6 +1225,11 @@ class RepoManifest(Strict):
     codeowners_required: bool
     codeowners_path: str | None = None
     risk_ceiling: RiskTier
+    # Binds the repo to a board in kanban_boards.yaml (cross-checked by repo-verify).
+    kanban_board_id: str | None = None
+    # Where the repo lives on this machine. Stored as 'self' (the control-plane
+    # repo) or an 'env:NAME' reference; never a committed absolute path.
+    local_path_ref: str | None = None
     autonomous_edits_enabled: bool = False
     blockers: list[str] = Field(default_factory=list)
 
@@ -1252,6 +1257,15 @@ class RepoManifest(Strict):
             raise ValueError(f"repo {self.repo_id!r} autonomous risk ceiling cannot exceed L2")
         if self.execution_mode == "devcontainer" and not self.devcontainer_path:
             raise ValueError(f"repo {self.repo_id!r} devcontainer execution needs devcontainer_path")
+        if self.kanban_board_id is not None and not _REPO_ID_RE.match(self.kanban_board_id):
+            raise ValueError(f"repo {self.repo_id!r} kanban_board_id must be a stable id")
+        if self.local_path_ref is not None:
+            ref = self.local_path_ref
+            if ref != "self" and not ref.startswith("env:"):
+                raise ValueError(
+                    f"repo {self.repo_id!r} local_path_ref must be 'self' or an 'env:NAME' "
+                    "reference; a committed absolute path would leak machine layout"
+                )
         if self.autonomous_edits_enabled:
             if self.blockers:
                 raise ValueError(f"repo {self.repo_id!r} enabled manifests cannot list blockers")
@@ -1266,6 +1280,14 @@ class RepoManifest(Strict):
             if not self.codeowners_required:
                 raise ValueError(
                     f"repo {self.repo_id!r} autonomous edits require CODEOWNERS review"
+                )
+            if not self.kanban_board_id:
+                raise ValueError(
+                    f"repo {self.repo_id!r} autonomous edits require a kanban_board_id"
+                )
+            if not self.local_path_ref:
+                raise ValueError(
+                    f"repo {self.repo_id!r} autonomous edits require a local_path_ref"
                 )
         elif not self.blockers:
             raise ValueError(f"repo {self.repo_id!r} disabled manifests must list blockers")
