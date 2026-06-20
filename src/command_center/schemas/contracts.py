@@ -1217,6 +1217,100 @@ class AutonomyCanarySpec(Strict):
         return self
 
 
+class DesktopNoopCanarySpec(Strict):
+    target_id: str
+    target_type: Literal["desktop", "browser", "appflowy_browser"]
+    allowed_mode: Literal["read_only", "no_op_roundtrip"]
+    allowed_apps_windows_domains: list[str]
+    allowed_actions: list[str]
+    forbidden_actions: list[str]
+    evidence_policy: Literal["redacted_json_only"]
+    screenshot_policy: Literal["none", "redacted_hashes_and_refs_only"]
+    redaction_policy: Literal["no_raw_content_no_secrets_no_clipboard"]
+    human_takeover_policy_ref: str
+    measurement_fields: list[Literal[
+        "snapshot_load_ms",
+        "target_verify_ms",
+        "total_duration_ms",
+    ]]
+    max_action_count: int | None = Field(default=None, ge=0)
+    max_action_count_source: str | None = None
+    production_enabling: bool = False
+    blockers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.target_id):
+            raise ValueError(f"desktop noop canary target_id {self.target_id!r} must be stable")
+        if not self.allowed_apps_windows_domains:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} must declare allowed targets"
+            )
+        if not self.allowed_actions:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} must declare allowed_actions"
+            )
+        if len(self.allowed_actions) != len(set(self.allowed_actions)):
+            raise ValueError(f"desktop noop canary {self.target_id!r} has duplicate allowed_actions")
+        if len(self.forbidden_actions) != len(set(self.forbidden_actions)):
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} has duplicate forbidden_actions"
+            )
+        overlap = set(self.allowed_actions) & set(self.forbidden_actions)
+        if overlap:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} action(s) both allowed and forbidden: "
+                f"{sorted(overlap)}"
+            )
+        missing_denies = _DEFAULT_DESKTOP_DENIES - set(self.forbidden_actions)
+        if missing_denies:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} missing default deny action(s): "
+                f"{sorted(missing_denies)}"
+            )
+        if self.allowed_mode == "read_only":
+            blocked_live_actions = {"click", "type", "select", "drag", "keyboard_shortcut"}
+            live_overlap = blocked_live_actions & set(self.allowed_actions)
+            if live_overlap:
+                raise ValueError(
+                    f"desktop noop canary {self.target_id!r} read_only mode cannot allow "
+                    f"live action(s): {sorted(live_overlap)}"
+                )
+        if self.screenshot_policy != "none" and not self.redaction_policy:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} screenshot storage needs redaction_policy"
+            )
+        if not self.human_takeover_policy_ref:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} needs human_takeover_policy_ref"
+            )
+        if len(self.measurement_fields) != len(set(self.measurement_fields)):
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} measurement_fields contains duplicates"
+            )
+        required_measurements = {
+            "snapshot_load_ms",
+            "target_verify_ms",
+            "total_duration_ms",
+        }
+        missing_measurements = required_measurements - set(self.measurement_fields)
+        if missing_measurements:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} missing measurement field(s): "
+                f"{sorted(missing_measurements)}"
+            )
+        if (self.max_action_count is None) != (self.max_action_count_source is None):
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} max_action_count and "
+                "max_action_count_source must be declared together"
+            )
+        if self.max_action_count is not None and self.production_enabling:
+            raise ValueError(
+                f"desktop noop canary {self.target_id!r} max_action_count cannot enable production"
+            )
+        return self
+
+
 class TelemetryDecision(Strict):
     mode: Literal["structured_events_only", "defer_until_event_contracts", "opentelemetry"]
     decision_basis: list[str]
@@ -1403,6 +1497,7 @@ class AutonomyConfig(Strict):
     completion_verifier: CompletionVerifierConfig
     agent_validation: AgentValidationConfig
     canaries: list[AutonomyCanarySpec] = Field(default_factory=list)
+    desktop_noop_canaries: list[DesktopNoopCanarySpec] = Field(default_factory=list)
     telemetry: TelemetryDecision
     github_app_review: GitHubAppReview
     github_app_auth: GitHubAppAuth
@@ -1434,6 +1529,15 @@ class AutonomyConfig(Strict):
         canary_names = [canary.name for canary in self.canaries]
         if len(canary_names) != len(set(canary_names)):
             raise ValueError("duplicate canary names")
+        desktop_noop_ids = [canary.target_id for canary in self.desktop_noop_canaries]
+        if len(desktop_noop_ids) != len(set(desktop_noop_ids)):
+            raise ValueError("duplicate desktop noop canary target ids")
+        unknown_noop_targets = set(desktop_noop_ids) - set(desktop_ids)
+        if unknown_noop_targets:
+            raise ValueError(
+                "desktop noop canary references unknown target(s): "
+                f"{sorted(unknown_noop_targets)}"
+            )
         event_kinds = {family.kind for family in self.event_contract.families}
         missing_verifier_events = set(self.completion_verifier.required_event_families) - event_kinds
         if missing_verifier_events:

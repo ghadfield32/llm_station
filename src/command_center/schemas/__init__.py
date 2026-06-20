@@ -17,6 +17,7 @@ from .contracts import (
     BoardStateKnobs, AddressingKnobs, TuningKnobs, AgentSurfaceConfig,
     EventFamilySpec, EventContractConfig, RepoManifest, DesktopVerifierSpec,
     DesktopTarget, CompletionVerifierConfig, AgentValidationConfig, AutonomyCanarySpec,
+    DesktopNoopCanarySpec,
     TelemetryDecision, GitHubAppReview, GitHubAppAuth, BranchProtectionVerification,
     ExternalRuntimeEvaluation, AutonomyConfig,
     ChannelSpec, ChannelsConfig,

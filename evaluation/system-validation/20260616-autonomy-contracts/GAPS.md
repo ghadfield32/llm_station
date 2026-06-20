@@ -5,11 +5,13 @@
 - desktop adapter: desktop_target_appflowy_browser_staging_not_enabled
 - desktop adapter: desktop_target_appflowy_browser_staging_ttl_measurement_missing
 - desktop adapter: desktop_target_appflowy_browser_staging_action_timeout_measurement_missing
+- desktop timing: sample_plan_missing
+- desktop timing: insufficient_noop_canary_telemetry
 
 ## Canaries
 - canary `read-only repo scan` blocked until: canary_schedule_plan_not_approved
 - canary `no-op kanban roundtrip` blocked until: canary_schedule_plan_not_approved
-- canary `browser staging board task` blocked until: desktop_live_actions_not_enabled, canary_schedule_plan_not_approved
+- canary `browser staging board task` blocked until: desktop_live_actions_not_enabled, canary_schedule_plan_not_approved, desktop_timing_sample_plan_not_declared
 - canary `prompt judge suite` blocked until: canary_schedule_plan_not_approved
 - canary `model routing benchmark` blocked until: structured_output_role_repair, canary_schedule_plan_not_approved
 - canary `notification dry run` blocked until: canary_schedule_plan_not_approved

@@ -47,6 +47,8 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "| local agent tool/memory/multi-turn validation | MISSING | agent-validation.json |" in scenarios
     assert "| desktop target snapshot verification | MISSING | desktop-target-verify.json |" in scenarios
     assert "| desktop adapter readiness | MISSING | desktop-adapter-readiness.json |" in scenarios
+    assert "| desktop no-op canary telemetry | MISSING | desktop-noop-canary.json |" in scenarios
+    assert "| desktop timing candidate derivation | MISSING | desktop-timing-candidates.json |" in scenarios
     assert "| GitHub App installation observed | PASS | github-app-verify.json |" in scenarios
     assert "| GitHub App repository permission verification | PASS |" in scenarios
     assert "| GitHub branch protection verification | MISSING | branch-protection-verify.json |" in scenarios
@@ -114,6 +116,34 @@ def test_system_validation_surfaces_desktop_adapter_blockers(tmp_path):
         "desktop adapter: "
         "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing"
     ) in gaps
+
+
+def test_system_validation_surfaces_desktop_noop_and_timing_blockers(tmp_path):
+    run_dir = tmp_path / "test-run"
+    run_dir.mkdir(parents=True)
+    (run_dir / "desktop-noop-canary.json").write_text(
+        json.dumps({
+            "status": "blocked",
+            "blockers": ["desktop_noop_canary_appflowy_browser_staging_snapshot_missing"],
+        }),
+        encoding="utf-8",
+    )
+    (run_dir / "desktop-timing-candidates.json").write_text(
+        json.dumps({
+            "status": "blocked",
+            "blockers": ["insufficient_noop_canary_telemetry"],
+        }),
+        encoding="utf-8",
+    )
+
+    system_validation.build_package(tmp_path, "test-run")
+
+    gaps = (run_dir / "GAPS.md").read_text(encoding="utf-8")
+    assert (
+        "desktop noop canary: "
+        "desktop_noop_canary_appflowy_browser_staging_snapshot_missing"
+    ) in gaps
+    assert "desktop timing: insufficient_noop_canary_telemetry" in gaps
 
 
 def test_system_validation_main_uses_requested_run_id(tmp_path, monkeypatch, capsys):

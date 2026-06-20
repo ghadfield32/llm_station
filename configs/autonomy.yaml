@@ -42,7 +42,14 @@ completed_work:
   - tiny_branch_only_repo_mission_passed
   - pr_check_evidence_loop_verified
   - desktop_timeout_and_human_takeover_policy_declared
+  - github_app_pr9_protected_merge_verified
+  - desktop_noop_canary_contract_and_runner_added
+  - desktop_noop_canary_read_only_sample_recorded
+  - desktop_timing_derivation_blocks_without_sample_plan
 ordered_work:
+  - declare_desktop_timing_sample_plan_before_candidates
+  - run_additional_noop_canary_samples_from_declared_plan
+  - derive_desktop_ttl_action_timeout_candidates_from_noop_telemetry
   - enable_desktop_target_only_after_timeout_takeover_and_canary_plan
   - derive_loop_breaker_threshold_from_event_history_before_autonomous_gui
   - enable_no_op_canaries_after_blockers_clear
@@ -195,6 +202,7 @@ canaries:
     blocked_until:
       - desktop_live_actions_not_enabled
       - canary_schedule_plan_not_approved
+      - desktop_timing_sample_plan_not_declared
   - name: prompt judge suite
     kind: prompt_judge_suite
     enabled: false
@@ -221,6 +229,39 @@ canaries:
     risk_tier: L0_read_only
     evidence_required: [privacy_classes, artifact_paths]
     blocked_until: [canary_schedule_plan_not_approved]
+
+desktop_noop_canaries:
+  - target_id: appflowy_browser_staging
+    target_type: appflowy_browser
+    allowed_mode: read_only
+    allowed_apps_windows_domains: [AppFlowy]
+    allowed_actions:
+      - read_snapshot
+      - verify_target_identity
+      - measure_duration
+      - write_redacted_evidence
+    forbidden_actions:
+      - clipboard_read
+      - password_field_read
+      - system_settings_change
+      - file_delete
+      - click
+      - type
+      - select
+      - drag
+      - keyboard_shortcut
+      - submit_form
+      - move_card
+    evidence_policy: redacted_json_only
+    screenshot_policy: none
+    redaction_policy: no_raw_content_no_secrets_no_clipboard
+    human_takeover_policy_ref: docs/desktop-timeout-takeover-policy.md
+    measurement_fields:
+      - snapshot_load_ms
+      - target_verify_ms
+      - total_duration_ms
+    blockers:
+      - insufficient_noop_canary_telemetry
 
 telemetry:
   mode: structured_events_only

@@ -1,0 +1,19 @@
+{
+  "additional_samples_required": null,
+  "blockers": [
+    "sample_plan_missing",
+    "insufficient_noop_canary_telemetry"
+  ],
+  "candidates": null,
+  "desktop_target_enabled": false,
+  "observed_sample_count": 1,
+  "placeholder_values_used": false,
+  "production_values_written": false,
+  "rejected_evidence": [],
+  "required_sample_count": null,
+  "required_sample_count_source": null,
+  "required_sample_type": "read_only desktop-noop-canary evidence",
+  "schema_version": "command-center.desktop-timing-candidates.v1",
+  "status": "blocked",
+  "target_id": "appflowy_browser_staging"
+}

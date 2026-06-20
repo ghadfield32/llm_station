@@ -344,6 +344,10 @@ COMMANDS: dict[str, tuple] = {
                               "observer-only desktop target snapshot verification"),
     "desktop-adapter": (lambda a: pym("command_center.cli.desktop_adapter", *a),
                         "desktop adapter manifest readiness gate"),
+    "desktop-noop-canary": (lambda a: pym("command_center.cli.desktop_noop_canary", *a),
+                            "read-only desktop/browser canary timing evidence; no live actions"),
+    "desktop-timing-derive": (lambda a: pym("command_center.cli.desktop_timing_derive", *a),
+                              "derive provisional desktop timing candidates from measured canary evidence"),
     # appflowy
     "appflowy-init": (lambda a: pym("command_center.cli.appflowy_init"), "scaffold AppFlowy + growth-os .env"),
     "appflowy-up": (c_appflowy_up, "start the AppFlowy board server + curator"),

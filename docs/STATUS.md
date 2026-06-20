@@ -9,7 +9,7 @@ For the high-level, whole-system map (control plane + knowledge base + managed
 projects + fleet, with the module tree and the strategic order) see
 [system-roadmap.md](system-roadmap.md). This file stays the tactical tracker.
 
-_Last updated: 2026-06-19._
+_Last updated: 2026-06-20._
 
 ## Done
 
@@ -44,6 +44,10 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
   resolution, linear history, deletion + force-push blocked, empty bypass list, required checks
   `validate` + `lint-test`. `uv run cc github-app-verify` **PASS** (App installed on the selected
   repo, mints an in-memory installation token, reads repo + check/status; no Administration).
+  PR #9 proved the correct protected-branch path: the GitHub App authored the PR, `ghadfield32`
+  approved it, required checks passed, and squash merge completed without weakening branch
+  protection. PR #8 is obsolete historical evidence of why user-authored PRs cannot satisfy
+  the same user's required approval.
 - **Repo autonomy.** `uv run cc branch-mission` proves the bounded local
   branch->worktree->docs-only change->declared checks->redacted evidence loop.
   It does not push, open a PR, merge, deploy, change settings, or touch secrets.
@@ -56,7 +60,9 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
   timeout/takeover, human-takeover, and screenshot/evidence policy, but numeric
   TTL and action-timeout controls are intentionally unset until no-op canary
   telemetry derives them. It stays disabled until canary policy and loop-breaker
-  evidence are ready.
+  evidence are ready. `cc desktop-noop-canary` now records the first read-only
+  telemetry sample; `cc desktop-timing-derive` remains blocked until a reviewed
+  sample plan exists.
 
 ## In progress / awaiting a human
 
@@ -76,22 +82,27 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
 
 ## Next (suggested order)
 
-1. **Enable the desktop target only after timeout/takeover and canary policy**
-   are verified by evidence, including telemetry-derived TTL and action-timeout
-   controls.
-2. **Derive the GUI loop-breaker policy from event history** before allowing
+1. **Declare the desktop timing sample plan** before deriving candidates.
+2. **Run additional no-op desktop/browser canary samples from that plan** to
+   measure target-readiness timing without enabling live desktop actions.
+3. **Derive TTL/action-timeout candidates only from measured canary evidence**
+   and keep them provisional until reviewed.
+4. **Enable the desktop target only after timeout/takeover and canary policy**
+   are verified by evidence, including accepted telemetry-derived TTL and
+   action-timeout controls.
+5. **Derive the GUI loop-breaker policy from event history** before allowing
    autonomous GUI retries.
-3. **Enable no-op canaries only after blockers clear**, then decide telemetry
+6. **Enable no-op canaries only after blockers clear**, then decide telemetry
    from structured event gaps.
-4. **Evaluate external runtimes only after measured gaps** show the current
+7. **Evaluate external runtimes only after measured gaps** show the current
    control plane cannot cover the needed capability.
-5. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
+8. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
    webhook, no app review) to exercise `GatewayCore` on a second transport in production.
-6. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
+9. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
    webhook (`docs/channels.md`), confirm the `GET` verify + `POST` inbound round-trip.
-7. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
+10. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
    via `make lint` but not yet wired into CI — tighten types and add it to CI when green.
-8. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
+11. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
    the CWD (run from repo root via `make` / `python -m`). If you want the console scripts to
    work from any directory, anchor their file reads to the repo root and expose the rest as
    entry points.

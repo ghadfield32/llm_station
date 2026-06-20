@@ -202,6 +202,8 @@ def build_package(output_root: Path, run_id: str) -> Path:
     agent_validation_status = _artifact_status(out / "agent-validation.json")
     desktop_target_status = _artifact_status(out / "desktop-target-verify.json")
     desktop_adapter_status = _artifact_status(out / "desktop-adapter-readiness.json")
+    desktop_noop_status = _artifact_status(out / "desktop-noop-canary.json")
+    desktop_timing_status = _artifact_status(out / "desktop-timing-candidates.json")
     branch_protection_status = _artifact_status(out / "branch-protection-verify.json")
     github_app_status = _artifact_status(out / "github-app-verify.json")
     branch_mission_status = _artifact_status(out / "branch-mission.json")
@@ -213,6 +215,8 @@ def build_package(output_root: Path, run_id: str) -> Path:
     event_kinds = [family.kind for family in cfg.event_contract.families]
     gaps = _gap_lines(cfg)
     gaps.extend(_artifact_blockers(out / "desktop-adapter-readiness.json", "desktop adapter"))
+    gaps.extend(_artifact_blockers(out / "desktop-noop-canary.json", "desktop noop canary"))
+    gaps.extend(_artifact_blockers(out / "desktop-timing-candidates.json", "desktop timing"))
     github_app_installation_status = (
         "PASS"
         if "github_app_installed_on_selected_llm_station_repo" in cfg.completed_work
@@ -295,6 +299,10 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "desktop-target-verify.json |",
             f"| desktop adapter readiness | {desktop_adapter_status} | "
             "desktop-adapter-readiness.json |",
+            f"| desktop no-op canary telemetry | {desktop_noop_status} | "
+            "desktop-noop-canary.json |",
+            f"| desktop timing candidate derivation | {desktop_timing_status} | "
+            "desktop-timing-candidates.json |",
             "| no-op canaries scheduled | BLOCKED | GAPS.md#canaries |",
             "| telemetry production backend | BLOCKED | GAPS.md#telemetry |",
             f"| GitHub App production auth | {github_app_production_auth_status} | "
@@ -329,6 +337,10 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "- Optional: `cc agent-validation --output <package>/agent-validation.json`",
             "- Optional: `cc desktop-target-verify --output <package>/desktop-target-verify.json`",
             "- Optional: `cc desktop-adapter --output <package>/desktop-adapter-readiness.json`",
+            "- Optional: `cc desktop-noop-canary --output <package>/desktop-noop-canary.json`",
+            "- Optional: `cc desktop-timing-derive --target-id <target> --input <canary.json> "
+            "--required-samples <evidence-derived-count> --required-samples-source <artifact> "
+            "--output <package>/desktop-timing-candidates.json`",
             "",
             "No live services, desktop actions, board writes, repo mutations, model calls, "
             "or notifications were executed by this runner; optional artifacts are produced "
@@ -362,6 +374,11 @@ def build_package(output_root: Path, run_id: str) -> Path:
             "and stores target identity/status evidence only.",
             "- `cc desktop-adapter`, when run separately, stores manifest readiness "
             "evidence only and performs no desktop actions.",
+            "- `cc desktop-noop-canary`, when run separately, stores redacted timing "
+            "and target-assertion evidence only; it performs no desktop actions.",
+            "- `cc desktop-timing-derive`, when run separately, stores provisional "
+            "candidate timing values only from measured canary evidence and never "
+            "writes production controls.",
             "- The package stores config-derived summaries, git metadata, blockers, and paths only.",
         ]),
     )
