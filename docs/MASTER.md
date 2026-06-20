@@ -1674,6 +1674,28 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Second repo onboarded: betts_basketball (disabled) + multi-board
+
+- **First external repo registered (DISABLED).** `betts_basketball` added to
+  `configs/autonomy.yaml` with `autonomous_edits_enabled: false`,
+  `auth_mode: github_app_pending`, blocker `repo_autonomy_not_yet_verified`,
+  `local_path_ref: env:BETTS_BASKETBALL_LOCAL_PATH` (no absolute path committed).
+- **Two boards, both registered (kanban-verify PASS).** `betts_basketball`
+  (command_center_ui) — validated **live-working** (event→fold→UI projection; the
+  wall holds: agent can't set an approval status). `betts_basketball_appflowy`
+  (appflowy, env refs) — contract-valid; write-through **fail-closed `degraded`**
+  with no AppFlowy creds on this machine (NOT a fake pass — live needs `APPFLOWY_*`).
+- **Bug fixed (surfaced by the 2nd repo): repo-verify gates were control-repo-scoped.**
+  `devcontainer_present`/`codeowners_present` resolved against the *control* repo,
+  and `branch_mission_proven`/`pr_check_evidence_proven` read the control repo's
+  evidence — so an external repo falsely inherited llm_station's files/proof. Now
+  they resolve against the **target** repo's local path, and per-repo loop evidence
+  lives under `RUN_ID/<repo_id>/`. `self` (llm_station) behaviour unchanged. betts's
+  checklist is now honest: devcontainer PASS, codeowners BLOCKED, loop NOT_RUN, plus
+  App-selection + branch-protection blockers — 5 real gates before it can enable.
+- Evidence: `evaluation/system-validation/20260616-autonomy-contracts/betts-onboarding.json`
+  (redacted). Regression test in `tests/test_repo_registry.py`.
+
 ### 2026-06-20 — Operator command wrappers (keep it simple)
 
 - **`cc setup`** runs the real `doctor` (its exit code is returned — a failing

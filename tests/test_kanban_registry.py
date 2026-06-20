@@ -137,6 +137,22 @@ def test_register_apply_writes_and_blocks_duplicate(tmp_path):
     assert dup["status"] == "blocked"
 
 
+def test_register_apply_preserves_header_comments_and_existing_boards(tmp_path):
+    # registering a board must APPEND, not re-dump the whole file (which would strip
+    # the human-authored header comments and reformat existing boards).
+    cfg = _write_cfg(tmp_path, [_board()])
+    header = "# Provider-agnostic registry — do not lose this comment on register.\n"
+    cfg.write_text(header + cfg.read_text(encoding="utf-8"), encoding="utf-8")
+    result = kanban_registry.run_kanban_register(
+        board_id="b2", provider="command_center_ui", workspace_ref="self",
+        board_ref="b2", repo_ids=["other_repo"], config_path=cfg, apply=True)
+    assert result["status"] == "registered"
+    text = cfg.read_text(encoding="utf-8")
+    assert header.strip() in text                      # comment preserved
+    reloaded = KanbanBoardsConfig.model_validate(yaml.safe_load(text))
+    assert {b.board_id for b in reloaded.boards} == {"b1", "b2"}
+
+
 def test_sync_dry_run_plans_without_writing(tmp_path):
     cfg = _write_cfg(tmp_path, [_board()])
     result = kanban_registry.run_kanban_sync(config_path=cfg, dry_run=True)

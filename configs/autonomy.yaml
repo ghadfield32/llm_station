@@ -140,6 +140,30 @@ repo_manifests:
     autonomous_edits_enabled: true
     blockers: []
 
+  - repo_id: betts_basketball
+    remote_url: https://github.com/ghadfield32/betts_basketball.git
+    default_branch: main
+    protected_branches:
+    - main
+    allowed_base_branches:
+    - main
+    branch_write_policy: feature_branch_only
+    auth_mode: github_app_pending
+    execution_mode: devcontainer
+    devcontainer_path: .devcontainer/devcontainer.json
+    ci_commands:
+    - uv run cc validate
+    - uv run pytest
+    secret_policy: no_runtime_secrets_inside_container
+    codeowners_required: true
+    codeowners_path: .github/CODEOWNERS
+    risk_ceiling: L2_local_edits
+    kanban_board_id: betts_basketball
+    local_path_ref: env:BETTS_BASKETBALL_LOCAL_PATH
+    autonomous_edits_enabled: false
+    blockers:
+    - repo_autonomy_not_yet_verified
+
 desktop_targets:
   - target_id: appflowy_browser_staging
     enabled: false

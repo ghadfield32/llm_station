@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -189,20 +190,30 @@ def run_kanban_register(
         allowed_agent_verbs=allowed_agent_verbs or sorted(_KANBAN_GRANTABLE_VERBS),
         forbidden_agent_verbs=forbidden_agent_verbs or sorted(_KANBAN_WALL_VERBS),
     )  # validates the contract or raises
+    # Render ONLY the new board as a list-item block. We append it textually
+    # rather than re-dumping the whole file, so the registry's header comments and
+    # the existing boards' formatting are preserved (no data loss on register).
+    block = yaml.safe_dump([spec.model_dump(mode="json")], sort_keys=False, indent=2)
     if not apply:
         return {
             "status": "validated_dry_run",
             "board_id": board_id,
             "next": "rerun with --apply to write the board into the registry",
             "proposed": spec.model_dump(mode="json"),
+            "board_block": block,
         }
-    new_cfg = KanbanBoardsConfig(
-        schema_version=cfg.schema_version, boards=[*cfg.boards, spec]
-    )  # re-validates the whole registry (duplicate ids etc.)
-    config_path.write_text(
-        yaml.safe_dump(new_cfg.model_dump(mode="json"), sort_keys=False),
-        encoding="utf-8",
-    )
+    text = config_path.read_text(encoding="utf-8")
+    # Match the indentation the existing board list uses so the appended item joins
+    # the SAME yaml list — hand-authored files indent items by 2 spaces, safe_dump'd
+    # files by 0; mixing the two would produce invalid yaml.
+    m = re.search(r"^([ ]*)- ", text, re.MULTILINE)
+    indent = m.group(1) if m else "  "
+    indented = "".join(f"{indent}{line}\n" if line.strip() else "\n"
+                       for line in block.rstrip("\n").splitlines())
+    new_text = text.rstrip("\n") + "\n" + indented
+    # re-validate the whole registry (duplicate ids, contract) before writing
+    KanbanBoardsConfig.model_validate(yaml.safe_load(new_text))
+    config_path.write_text(new_text, encoding="utf-8")
     return {"status": "registered", "board_id": board_id, "registry_path": CONFIG}
 
 

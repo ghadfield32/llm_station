@@ -5,6 +5,22 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## Multi-repo onboarding (second repo: betts_basketball)
+- ADD 06-20: betts_basketball onboarded DISABLED (autonomy.yaml; auth_mode github_app_pending;
+  local_path_ref env:BETTS_BASKETBALL_LOCAL_PATH; blocker repo_autonomy_not_yet_verified).
+- BOARDS 06-20: two boards registered (kanban-verify PASS) — betts_basketball (command_center_ui,
+  validated live-working: event->fold->UI projection, wall holds) + betts_basketball_appflowy
+  (appflowy, env refs; write-through fail-closed degraded w/o creds — NOT faked).
+- BUGFIX 06-20: repo-verify gates were control-repo-scoped — devcontainer/codeowners resolved
+  against the control repo + loop evidence read control repo's, so external repos falsely
+  inherited llm_station's files/proof. Now target-repo-aware (local_path resolution) + per-repo
+  evidence under RUN_ID/<repo_id>/. self unchanged. betts now honest: 5 real blockers.
+- FIX 06-20: cc onboard repo loaded env={} for verify (under-reported gates) -> loads merged .env.
+- EVIDENCE 06-20: betts-onboarding.json (redacted, no abs path). Test: test_repo_registry
+  test_external_repo_gates_check_target_not_control_repo.
+- NEXT (to enable betts): CODEOWNERS + App repo-selection + branch protection + per-repo loop proof.
+  AppFlowy board live needs APPFLOWY_* + BETTS_APPFLOWY_BOARD_REF.
+
 ## Operator command wrappers (keep it simple)
 - ADD 06-20: cc setup (cli/setup.py) = real doctor (exit code returned, never masked)
   + registry summary + live-sync activation env + next steps. cc onboard repo|kanban

@@ -42,3 +42,71 @@ boards:
       - delete_card
       - delete_board
     blockers: []
+  - board_id: betts_basketball
+    provider: command_center_ui
+    workspace_ref: self
+    board_ref: betts_basketball
+    repo_ids:
+    - betts_basketball
+    status_mapping:
+      awaiting_approval: Awaiting Approval
+      backlog: Backlog
+      blocked: Blocked
+      done: Done
+      in_progress: In Progress
+      ready: Ready
+      rejected: Rejected
+    required_fields:
+    - MissionID
+    - RepoID
+    - Risk
+    - LastSync
+    - Section
+    allowed_agent_verbs:
+    - add_mission_card
+    - block_card
+    - finish_todo
+    - reject_card
+    - stage_card
+    - start_todo
+    forbidden_agent_verbs:
+    - approve_card
+    - delete_board
+    - delete_card
+    - deploy
+    - merge
+    blockers: []
+  - board_id: betts_basketball_appflowy
+    provider: appflowy
+    workspace_ref: env:APPFLOWY_WORKSPACE_ID
+    board_ref: env:BETTS_APPFLOWY_BOARD_REF
+    repo_ids:
+    - betts_basketball
+    status_mapping:
+      awaiting_approval: Awaiting Approval
+      backlog: Backlog
+      blocked: Blocked
+      done: Done
+      in_progress: In Progress
+      ready: Ready
+      rejected: Rejected
+    required_fields:
+    - MissionID
+    - RepoID
+    - Risk
+    - LastSync
+    - Section
+    allowed_agent_verbs:
+    - add_mission_card
+    - block_card
+    - finish_todo
+    - reject_card
+    - stage_card
+    - start_todo
+    forbidden_agent_verbs:
+    - approve_card
+    - delete_board
+    - delete_card
+    - deploy
+    - merge
+    blockers: []

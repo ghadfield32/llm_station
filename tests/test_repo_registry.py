@@ -107,6 +107,41 @@ def test_enable_autonomy_refuses_when_gates_block(tmp_path):
     assert any("devcontainer_present" in b for b in result["blockers"])
 
 
+# ---- external repo: gates must check the TARGET repo, not the control repo ---
+def test_external_repo_gates_check_target_not_control_repo(tmp_path):
+    from command_center.schemas import AutonomyConfig, KanbanBoardsConfig
+    # control repo (root) HAS codeowners, devcontainer, and passing loop evidence
+    control = _scaffold(tmp_path, autonomy=_base_autonomy())  # writes those into tmp_path
+    cfg = AutonomyConfig.model_validate(yaml.safe_load(control.read_text(encoding="utf-8")))
+    # external repo: a devcontainer but NO codeowners and NO per-repo evidence
+    ext = tmp_path / "external_repo"
+    (ext / ".devcontainer").mkdir(parents=True)
+    (ext / ".devcontainer/devcontainer.json").write_text("{}", encoding="utf-8")
+    boards = KanbanBoardsConfig.model_validate(yaml.safe_load(
+        (tmp_path / "configs/kanban_boards.yaml").read_text(encoding="utf-8")))
+    boards.boards[0].repo_ids.append("ext")
+    repo = RepoManifest(**_manifest(repo_id="ext", local_path_ref="env:EXT_PATH",
+                                    kanban_board_id="llm_station_command_center",
+                                    autonomous_edits_enabled=False,
+                                    blockers=["onboarding_incomplete"]))
+
+    res = repo_registry.verify_repo(repo=repo, cfg=cfg, boards=boards, root=tmp_path,
+                                    env={"EXT_PATH": str(ext)})
+    g = {x["check"]: x["status"] for x in res["gates"]}
+    # the external repo's OWN files/evidence decide — not the control repo's
+    assert g["devcontainer_present"] == "PASS"        # ext has one
+    assert g["codeowners_present"] == "BLOCKED"       # ext has none (control does)
+    assert g["branch_mission_proven"] != "PASS"       # no per-repo evidence (control's ignored)
+    assert g["pr_check_evidence_proven"] != "PASS"
+    assert g["local_path_ref_resolves"] == "PASS"
+
+    # env unset -> target path unresolved -> file gates cannot verify -> blocked
+    res2 = repo_registry.verify_repo(repo=repo, cfg=cfg, boards=boards, root=tmp_path, env={})
+    g2 = {x["check"]: x["status"] for x in res2["gates"]}
+    assert g2["local_path_ref_resolves"] == "BLOCKED"
+    assert g2["devcontainer_present"] == "BLOCKED"
+
+
 # ---- schema invariants ------------------------------------------------------
 def _manifest(**over):
     base = dict(
