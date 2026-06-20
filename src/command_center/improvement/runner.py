@@ -378,6 +378,14 @@ class ExperimentRunner:
             raise RuntimeError(f"experiment {experiment_id!r} is not registered")
         return ExperimentDefinition.model_validate(raw)
 
+    def _ensure_executable(self, defn: ExperimentDefinition) -> None:
+        if not defn.automated:
+            raise RuntimeError(
+                f"experiment {defn.experiment_id!r} is marked automated=false; "
+                "register it as a proposed experiment only until a real measurement "
+                "harness and evidence source are declared"
+            )
+
     def _evidence_dir(self, experiment_id: str, role: str, run_id: str) -> Path:
         d = self.evidence_root / experiment_id / f"{role}-{run_id}"
         d.mkdir(parents=True, exist_ok=True)
@@ -403,6 +411,7 @@ class ExperimentRunner:
 
     def run_baseline(self, experiment_id: str, *, reps: int = 3) -> dict:
         defn = self._defn(experiment_id)
+        self._ensure_executable(defn)
         harness = self._harness(defn)
         eq_key = harness.equivalence_key()
         run_id = f"{experiment_id}-baseline-{canonical_hash(eq_key)[:8]}"
@@ -436,6 +445,7 @@ class ExperimentRunner:
     def run_candidate(self, experiment_id: str, *, reps: int = 3) -> ComparisonResult:
         from .lifecycle import Actor, ExperimentStatus
         defn = self._defn(experiment_id)
+        self._ensure_executable(defn)
         baseline_runs = [r for r in self.reg.runs(experiment_id, role="baseline")
                          if r["status"].startswith("completed")]
         if not baseline_runs:

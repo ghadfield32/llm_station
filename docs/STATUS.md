@@ -63,6 +63,12 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
   evidence are ready. `cc desktop-noop-canary` now records the first read-only
   telemetry sample; `cc desktop-timing-derive` remains blocked until a reviewed
   sample plan exists.
+- **Future-facing capability routing.** `configs/capabilities.yaml` adds
+  ARD-style metadata for internal tools, workflows, skills, and model
+  candidates. `airflow-failure-rca-intake` is declared but dormant until real
+  redacted snapshots are supplied through `PROACTIVE_AIRFLOW_EVIDENCE_DIR`.
+  Headroom compression is a manual proposed experiment (`automated: false`), and
+  Gemma 4 12B remains a gated candidate, not an active routing change.
 
 ## In progress / awaiting a human
 

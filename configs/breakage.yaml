@@ -38,6 +38,11 @@ changes:
     required_checks: [make tools-validate]
     rollout: [direct]
 
+  configs/capabilities.yaml:
+    affects: [internal capability discovery metadata, tool and skill routing hints, provenance checks]
+    required_checks: [make validate]
+    rollout: [direct]
+
   configs/evals.yaml:
     affects: [routing/judge regression suite, model promotion gate, sealed/adversarial eval registry]
     required_checks: [make evals]
