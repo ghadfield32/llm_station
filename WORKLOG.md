@@ -5,6 +5,21 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## Enabling betts_basketball (gates)
+- APP 06-20: user added betts to the existing llm-station-command-center App install; VERIFIED
+  via read-back (betts-scoped App token reads betts 200). selected_repositories += betts (true,
+  not faked) -> github_app_installed gate PASSES.
+- CHECKS 06-20: RepoManifest.required_status_check_contexts + pr_check_verify.required_checks_for()
+  -> per-repo CI checks (betts uses "Unit Tests"; self falls back to global validate/lint-test). Test added.
+- CODEOWNERS 06-20: opened betts_basketball#6 (App, feature branch + PR; direct main push correctly
+  blocked by guardrail). Human merges + git -C betts pull -> codeowners gate flips (reads local checkout).
+- BLOCKED 06-20: branch protection — GITHUB_OWNER_ADMIN_TOKEN (fine-grained PAT) 403s on betts
+  Administration (llm_station 404=has-admin vs betts 403=lacks-it). User grants Administration on
+  betts to the token, or sets protection in UI. branch_protection_verification NOT updated (honest).
+- NEXT: adapt branch-mission for external repos (target-repo file/worktree resolution + auth_mode),
+  then run branch-mission + pr-check-verify on betts -> loop evidence under RUN_ID/betts_basketball/;
+  set protection; flip attestation; cc repo-enable-autonomy --apply. AppFlowy board needs APPFLOWY_* creds.
+
 ## Multi-repo onboarding (second repo: betts_basketball)
 - ADD 06-20: betts_basketball onboarded DISABLED (autonomy.yaml; auth_mode github_app_pending;
   local_path_ref env:BETTS_BASKETBALL_LOCAL_PATH; blocker repo_autonomy_not_yet_verified).

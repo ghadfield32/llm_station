@@ -9,6 +9,7 @@ import yaml
 
 from command_center.cli.pr_check_verify import (
     parse_check_runs,
+    required_checks_for,
     run_pr_check_verify,
 )
 
@@ -130,6 +131,20 @@ def _checks_payload(validate, lint):
             },
         ]
     }
+
+
+def test_required_checks_are_per_repo_with_global_fallback():
+    from command_center.schemas import AutonomyConfig
+    cfg = AutonomyConfig.model_validate(
+        yaml.safe_load((REPO_ROOT / "configs/autonomy.yaml").read_text(encoding="utf-8")))
+    # an external repo uses ITS OWN declared checks, not the global llm_station list
+    betts_checks, betts_src = required_checks_for(cfg, "betts_basketball")
+    assert betts_checks == ("Unit Tests",)
+    assert "repo_manifests[betts_basketball]" in betts_src
+    # the self/control repo falls back to the global branch_protection list
+    self_checks, self_src = required_checks_for(cfg, "llm_station")
+    assert self_checks == ("validate", "lint-test")
+    assert "branch_protection_verification" in self_src
 
 
 def test_parse_check_runs_requires_all_completed_and_successful():
