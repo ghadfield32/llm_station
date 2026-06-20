@@ -1,0 +1,125 @@
+{
+  "blockers": [],
+  "board_id": "llm_station_command_center",
+  "board_verify": {
+    "blockers": [],
+    "status": "pass"
+  },
+  "human_gates": [
+    4,
+    5,
+    9,
+    10,
+    14
+  ],
+  "loop_ready": true,
+  "merge_automated": false,
+  "repo_id": "llm_station",
+  "repo_verify": {
+    "blockers": [],
+    "status": "pass"
+  },
+  "schema_version": "command-center.demo-full-loop.v1",
+  "status": "ready",
+  "steps": [
+    {
+      "command": "cc start  (or cc up)",
+      "kind": "AUTOMATABLE",
+      "name": "start control plane",
+      "status": "NOT_RUN",
+      "step": 1
+    },
+    {
+      "command": "cc validate",
+      "kind": "VERIFY",
+      "name": "verify model roles resolve",
+      "status": "PASS",
+      "step": 2
+    },
+    {
+      "command": "cc kanban-verify --board-id llm_station_command_center",
+      "kind": "VERIFY",
+      "name": "verify kanban board",
+      "status": "PASS",
+      "step": 3
+    },
+    {
+      "command": "drag/create a card on the board, or cc kanban-bridge --apply",
+      "kind": "HUMAN_GATE",
+      "name": "create a mission card (human directive)",
+      "status": "HUMAN_GATE",
+      "step": 4
+    },
+    {
+      "command": "drag card to Approved (the wall)",
+      "kind": "HUMAN_GATE",
+      "name": "human approves the card",
+      "status": "HUMAN_GATE",
+      "step": 5
+    },
+    {
+      "command": "cc repo-verify --repo-id llm_station",
+      "kind": "VERIFY",
+      "name": "verify repo autonomy gates",
+      "status": "PASS",
+      "step": 6
+    },
+    {
+      "command": "cc branch-mission --repo-id llm_station",
+      "kind": "AUTOMATABLE",
+      "name": "agent: branch/worktree/devcontainer + tiny change + tests",
+      "status": "NOT_RUN",
+      "step": 7
+    },
+    {
+      "command": "cc pr-check-verify --repo-id llm_station --apply",
+      "kind": "AUTOMATABLE",
+      "name": "agent: open PR (GitHub App; cannot merge)",
+      "status": "NOT_RUN",
+      "step": 8
+    },
+    {
+      "command": "review + approve on GitHub (CODEOWNERS)",
+      "kind": "HUMAN_GATE",
+      "name": "human approves the PR",
+      "status": "HUMAN_GATE",
+      "step": 9
+    },
+    {
+      "command": "Squash and merge on GitHub (NEVER automated)",
+      "kind": "HUMAN_GATE",
+      "name": "human merges the PR",
+      "status": "HUMAN_GATE",
+      "step": 10
+    },
+    {
+      "command": "cc self-improvement-daily --draft-kanban true --apply false",
+      "kind": "AUTOMATABLE",
+      "name": "daily DAG observes the outcome",
+      "status": "NOT_RUN",
+      "step": 11
+    },
+    {
+      "command": "(drafted Proposed by step 11; human approves to act)",
+      "kind": "AUTOMATABLE",
+      "name": "self-improvement card proposed",
+      "status": "NOT_RUN",
+      "step": 12
+    },
+    {
+      "command": "cc self-improvement-report",
+      "kind": "AUTOMATABLE",
+      "name": "decision report generated",
+      "status": "NOT_RUN",
+      "step": 13
+    },
+    {
+      "command": "read generated/self-improvement-report.md",
+      "kind": "HUMAN_GATE",
+      "name": "report reviewed (human)",
+      "status": "HUMAN_GATE",
+      "step": 14
+    }
+  ],
+  "writes_performed": false
+}

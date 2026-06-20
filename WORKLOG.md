@@ -226,4 +226,16 @@ fast "has this been done?" index. Dates are when the line was written.
   false). Offline (network-free) scanners by default — deterministic, no creds.
 - TESTS 06-20: tests/test_self_improvement.py (5) — observer-no-writes, draft-only-Proposed,
   code-apply refused, charter forbids promote/merge, report-without-drafting.
-- NEXT (Phase 6): real desktop action-latency evidence (needs sandbox board) → enablement gates.
+- DONE (Phase 8/9): see Demo + docs topic below.
+
+## Full-loop demo + docs — Phase 8/9
+
+- ADD 06-20: `cc demo full-loop --repo --board` (cli/demo.py) — verifies board+repo (read-only)
+  and documents the 14-step loop with VERIFY/AUTOMATABLE/HUMAN_GATE markers. No writes; merge is
+  NEVER automated (steps 5/9/10/14 are human gates). tests/test_demo.py (3).
+- DOCS 06-20: GETTING_STARTED, INSTALL_WINDOWS, INSTALL_WSL, ADDING_A_REPO, ADDING_A_KANBAN,
+  RUNNING_DAILY_SELF_IMPROVEMENT, SECURITY_MODEL, OPERATIONS_RUNBOOK, TROUBLESHOOTING + MASTER §14.
+  Known gotchas documented (no workflows:write; workflow PRs need human creds; dev/gateway extras;
+  most-recent-push approval rule; retrieval-equivalence file-write flake).
+- STATE 06-20: Phases 2–5 + 8/9 done. Remaining: Phase 6 (live desktop) — correctly blocked until
+  APPFLOWY_SANDBOX_* is wired so action-latency evidence is measured, not fabricated.
