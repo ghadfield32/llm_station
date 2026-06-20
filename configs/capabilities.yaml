@@ -1,0 +1,187 @@
+schema_version: command-center.capabilities.v1
+
+# ARD-style internal discovery catalog. This does not grant permissions; it
+# gives agents and judges better routing metadata for capabilities already
+# governed by configs/tools.yaml, configs/proactive.yaml, and the improvement
+# lifecycle.
+
+entries:
+  - identifier: urn:air:command-center.local:tool:github
+    display_name: GitHub protected-branch workflow
+    type: tool
+    owner: geoff
+    risk_tier: L3_external_write
+    summary: Feature-branch pushes, draft PRs, PR comments, and protected-branch evidence.
+    artifact_ref: configs/tools.yaml#tools.github
+    capabilities: [push_feature_branch, open_pr, comment_on_own_pr, read_checks]
+    tags: [git, github, pr, protected-branch]
+    representative_queries:
+      - push a feature branch and open a draft PR
+      - check whether required GitHub PR checks passed
+      - comment on the agent's own pull request
+    updated_at: "2026-06-20"
+    trust:
+      publisher: command-center
+      identity: local-config:configs/tools.yaml
+      identity_type: local_config
+      verification: validated by configs/tools.yaml and GitHub wall checks
+      attestations: [branch_protection_verified, human_merge_required]
+    provenance:
+      - relation: declaredIn
+        source_ref: configs/tools.yaml#tools.github
+      - relation: gatedBy
+        source_ref: docs/github-safety.md
+
+  - identifier: urn:air:command-center.local:tool:shell
+    display_name: Local shell and RTK command surface
+    type: tool
+    owner: geoff
+    risk_tier: L2_local_edits
+    summary: Read/search/test/build commands inside the leased workspace with destructive operations gated separately.
+    artifact_ref: configs/tools.yaml#tools.shell
+    capabilities: [git, rg, pytest, ruff, pyright, mypy, semgrep, gitleaks]
+    tags: [shell, rtk, tests, static-analysis]
+    representative_queries:
+      - search the repository for a symbol
+      - run the focused pytest suite for this change
+      - inspect git status without changing files
+    updated_at: "2026-06-20"
+    trust:
+      publisher: command-center
+      identity: local-config:configs/tools.yaml
+      identity_type: local_config
+      verification: validated by tools contract and sandbox approvals
+      attestations: [destructive_commands_manual_only]
+    provenance:
+      - relation: declaredIn
+        source_ref: configs/tools.yaml#tools.shell
+      - relation: instructedBy
+        source_ref: operator-local:codex-rtk
+
+  - identifier: urn:air:command-center.local:tool:filesystem
+    display_name: Leased-worktree filesystem
+    type: tool
+    owner: geoff
+    risk_tier: L2_local_edits
+    summary: Read and write only within the active leased worktree; secrets and outside-worktree writes stay denied.
+    artifact_ref: configs/tools.yaml#tools.filesystem
+    capabilities: [read, write_worktree]
+    tags: [filesystem, worktree, lease]
+    representative_queries:
+      - edit a tracked source file in the current worktree
+      - read a local config file before changing it
+      - verify generated artifacts without reading secrets
+    updated_at: "2026-06-20"
+    trust:
+      publisher: command-center
+      identity: local-config:configs/tools.yaml
+      identity_type: local_config
+      verification: validated by filesystem sandbox and repo-task isolation contracts
+      attestations: [repo_task_no_secrets, write_outside_worktree_denied]
+    provenance:
+      - relation: declaredIn
+        source_ref: configs/tools.yaml#tools.filesystem
+      - relation: constrainedBy
+        source_ref: configs/environments.yaml
+
+  - identifier: urn:air:command-center.local:workflow:airflow-failure-rca
+    display_name: Airflow failure RCA evidence adapter
+    type: workflow
+    owner: geoff
+    risk_tier: L2_local_edits
+    summary: Collect failed DAG run context, task logs, changed files, output partitions, and deterministic checks before opening a gated RCA mission.
+    artifact_ref: configs/proactive.yaml#airflow-failure-rca-intake
+    capabilities: [dag_run_context, task_log_context, changed_file_context, deterministic_preflight]
+    tags: [airflow, rca, proactive, evidence]
+    representative_queries:
+      - diagnose a failed Airflow DAG from real run evidence
+      - open an RCA mission for a broken odds ingest run
+      - propose a minimal PR after deterministic Airflow checks fail
+    updated_at: "2026-06-20"
+    trust:
+      publisher: command-center
+      identity: local-config:configs/proactive.yaml
+      identity_type: local_config
+      verification: dormant until PROACTIVE_AIRFLOW_EVIDENCE_DIR provides real snapshots
+      attestations: [no_fabricated_evidence, gated_mission_only]
+    provenance:
+      - relation: declaredIn
+        source_ref: configs/proactive.yaml#airflow-failure-rca-intake
+      - relation: implementedBy
+        source_ref: services/proactive_runner/collectors.py
+
+  - identifier: urn:air:command-center.local:workflow:headroom-compression-pilot
+    display_name: Headroom context compression pilot
+    type: workflow
+    owner: geoff
+    risk_tier: L2_local_edits
+    summary: Evaluate local compression of large logs and tool outputs before judge calls without making it the default path.
+    artifact_ref: configs/improvement.yaml#EXP-headroom-context-compression-001
+    capabilities: [context_compression, token_measurement, reversible_retrieval_check]
+    tags: [headroom, compression, judges, logs]
+    representative_queries:
+      - compress large tool outputs before a judge call
+      - compare judge accuracy with raw versus compressed logs
+      - verify that original log snippets can be retrieved after compression
+    updated_at: "2026-06-20"
+    trust:
+      publisher: command-center
+      identity: local-config:configs/improvement.yaml
+      identity_type: local_config
+      verification: proposed pilot only; no global wrapper or proxy enabled
+      attestations: [human_promotion_required, raw_evidence_retained]
+    provenance:
+      - relation: declaredIn
+        source_ref: configs/improvement.yaml#EXP-headroom-context-compression-001
+      - relation: evaluates
+        source_ref: https://github.com/chopratejas/headroom
+
+  - identifier: urn:air:command-center.local:model-candidate:gemma-4-12b
+    display_name: Gemma 4 12B candidate model
+    type: model_candidate
+    owner: geoff
+    risk_tier: L2_local_edits
+    summary: Candidate local model to evaluate through model-scout, model-fit, canary, evals, and human promotion only.
+    artifact_ref: docs/agentic-process-improvements-2026-06-20.md#gemma-4-12b
+    capabilities: [local_model_candidate, coding_eval_candidate, local_resilience_candidate]
+    tags: [gemma, ollama, model-scout, canary]
+    representative_queries:
+      - evaluate Gemma 4 12B as a local coder candidate
+      - check whether a new local model fits the 4090 worker
+      - canary a local model after model-scout and evals pass
+    updated_at: "2026-06-20"
+    trust:
+      publisher: command-center
+      identity: manual-review:gemma-4-12b
+      identity_type: manual_review
+      verification: pending exact Ollama tag, digest, license, and local fit evidence before curated scout registration
+      attestations: [not_promoted, identity_pending]
+    provenance:
+      - relation: evaluatedFrom
+        source_ref: https://deepmind.google/models/gemma/
+      - relation: gate
+        source_ref: docs/model-update.md
+
+  - identifier: urn:air:command-center.local:skill:agent-idea-evaluation
+    display_name: Agent idea evaluation prompt
+    type: skill
+    owner: geoff
+    risk_tier: L1_plan_only
+    summary: Structured evaluation rubric for external agent tools, memory systems, model servers, and self-improvement claims.
+    artifact_ref: docs/agent-ideas-evaluation-prompt.md
+    capabilities: [candidate_decomposition, overlap_review, threat_model, experiment_plan]
+    tags: [evaluation, skills, architecture, safety]
+    representative_queries:
+      - evaluate a new agent tool against the current command center
+      - decide whether to adopt, pilot, extract, defer, or reject an AI workflow
+      - produce an experiment plan for an external agent capability
+    updated_at: "2026-06-20"
+    trust:
+      publisher: command-center
+      identity: local-doc:docs/agent-ideas-evaluation-prompt.md
+      identity_type: local_doc
+      verification: repository-owned prompt; no runtime authority
+      attestations: [evaluation_only, no_install_without_approval]
+    provenance:
+      - relation: declaredIn
+        source_ref: docs/agent-ideas-evaluation-prompt.md

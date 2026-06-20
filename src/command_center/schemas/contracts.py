@@ -692,6 +692,96 @@ class ToolsConfig(Strict):
         return self
 
 
+# ---- capabilities.yaml -----------------------------------------------------
+# ARD-style discovery metadata for internal tools, skills, workflows, and model
+# candidates. This is intentionally separate from tools.yaml: tools.yaml is the
+# permission policy judges cite, while this catalog is the routing/discovery
+# surface that says what exists, who owns it, when it was last reviewed, and what
+# queries should retrieve it.
+class CapabilityTrust(Strict):
+    publisher: str
+    identity: str
+    identity_type: Literal["local_config", "local_doc", "upstream_project", "domain", "manual_review"]
+    verification: str
+    attestations: list[str] = []
+
+
+class CapabilityProvenance(Strict):
+    relation: str
+    source_ref: str
+    digest: str | None = None
+
+    @model_validator(mode="after")
+    def _checks(self):
+        normalized = self.source_ref.replace("\\", "/")
+        if re.match(r"^[A-Za-z]:/", normalized) or normalized.startswith("/"):
+            raise ValueError("capability provenance source_ref must not be a local absolute path")
+        if not self.relation:
+            raise ValueError("capability provenance relation is required")
+        if not self.source_ref:
+            raise ValueError("capability provenance source_ref is required")
+        return self
+
+
+class CapabilityEntry(Strict):
+    identifier: str
+    display_name: str
+    type: Literal[
+        "tool",
+        "skill",
+        "workflow",
+        "model_candidate",
+        "mcp_server",
+        "openapi_tool",
+        "a2a_agent",
+        "registry",
+    ]
+    owner: str
+    risk_tier: RiskTier
+    summary: str
+    artifact_ref: str
+    capabilities: list[str] = []
+    tags: list[str] = []
+    representative_queries: list[str] = Field(min_length=2, max_length=5)
+    updated_at: str
+    trust: CapabilityTrust
+    provenance: list[CapabilityProvenance] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.identifier.startswith("urn:air:"):
+            raise ValueError(
+                f"capability {self.identifier!r} must use the ARD-style urn:air namespace"
+            )
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", self.updated_at):
+            raise ValueError(
+                f"capability {self.identifier!r} updated_at must be YYYY-MM-DD"
+            )
+        if len(self.representative_queries) != len(set(self.representative_queries)):
+            raise ValueError(
+                f"capability {self.identifier!r} has duplicate representative_queries"
+            )
+        if not self.owner:
+            raise ValueError(f"capability {self.identifier!r} must declare an owner")
+        return self
+
+
+class CapabilityCatalogConfig(Strict):
+    schema_version: str
+    entries: list[CapabilityEntry]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.capabilities.v1":
+            raise ValueError("schema_version must be command-center.capabilities.v1")
+        if not self.entries:
+            raise ValueError("capability catalog must define at least one entry")
+        ids = [entry.identifier for entry in self.entries]
+        if len(ids) != len(set(ids)):
+            raise ValueError("capability catalog contains duplicate identifiers")
+        return self
+
+
 # ---- evals.yaml ------------------------------------------------------------
 # Regression suite for the command center itself. Becomes the model-promotion
 # gate: a new model/prompt/judge must pass these before it's trusted. Each case

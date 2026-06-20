@@ -19,6 +19,16 @@ runtime_checks:
     on_fail: open_rca_mission
     auto_patch_max_risk: L0_read_only          # freshness misses are usually data-source, not code
 
+  - name: airflow-failure-rca-intake
+    target: airflow
+    schedule: "*/15 * * * *"
+    owner: geoff
+    checks: [failed_dag_triage, deterministic_preflight, output_partition_presence]
+    evidence: [dag_runs, task_logs, changed_files, output_partitions, deterministic_checks]
+    judges: [log-scanner, root-cause-debugger]
+    on_fail: open_rca_mission
+    auto_patch_max_risk: L2_local_edits
+
   - name: data-quality-critical-assets
     target: data_assets
     schedule: "0 */6 * * *"

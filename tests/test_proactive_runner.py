@@ -8,6 +8,7 @@ runner is a standalone service module, not part of the package.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -83,3 +84,70 @@ def test_run_check_judges_when_fully_wired(runner, monkeypatch):
     result = app.run_check(check)
     assert result == {"name": "svc-perf", "result": "healthy"}
     assert recorded.get("called") is True
+
+
+def test_airflow_snapshot_collectors_stay_unwired_without_env(monkeypatch):
+    monkeypatch.delenv("PROACTIVE_AIRFLOW_EVIDENCE_DIR", raising=False)
+    collectors = _load("collectors_airflow_no_env", SVC / "collectors.py")
+    assert "dag_runs" not in collectors.COLLECTORS
+    assert "task_logs" not in collectors.COLLECTORS
+
+
+def test_airflow_snapshot_collectors_read_configured_json(monkeypatch, tmp_path):
+    root = tmp_path / "airflow"
+    target_dir = root / "airflow"
+    target_dir.mkdir(parents=True)
+    payload = {"dag_id": "odds_ingest_daily", "state": "failed"}
+    snapshot = {
+        "schema_version": "command-center.airflow-evidence.v1",
+        "redaction_status": "redacted",
+        "data": payload,
+    }
+    (target_dir / "dag_runs.json").write_text(json.dumps(snapshot), encoding="utf-8")
+
+    monkeypatch.setenv("PROACTIVE_AIRFLOW_EVIDENCE_DIR", str(root))
+    collectors = _load("collectors_airflow_with_env", SVC / "collectors.py")
+
+    evidence, unwired = collectors.collect_evidence(
+        {"name": "airflow-failure-rca-intake", "target": "airflow", "evidence": ["dag_runs"]}
+    )
+
+    assert unwired == []
+    assert evidence["dag_runs"]["status"] == "available"
+    assert evidence["dag_runs"]["evidence_ref"] == "airflow/dag_runs.json"
+    assert "path" not in evidence["dag_runs"]
+    assert evidence["dag_runs"]["snapshot_schema"] == "command-center.airflow-evidence.v1"
+    assert evidence["dag_runs"]["data"] == payload
+
+
+def test_airflow_snapshot_collectors_fail_loud_on_missing_json(monkeypatch, tmp_path):
+    root = tmp_path / "airflow"
+    root.mkdir()
+
+    monkeypatch.setenv("PROACTIVE_AIRFLOW_EVIDENCE_DIR", str(root))
+    collectors = _load("collectors_airflow_missing_refs", SVC / "collectors.py")
+
+    with pytest.raises(FileNotFoundError, match="task_logs"):
+        collectors.collect_evidence(
+            {"name": "airflow-failure-rca-intake", "target": "airflow", "evidence": ["task_logs"]}
+        )
+
+
+def test_airflow_snapshot_collectors_reject_secret_fields(monkeypatch, tmp_path):
+    root = tmp_path / "airflow"
+    target_dir = root / "airflow"
+    target_dir.mkdir(parents=True)
+    snapshot = {
+        "schema_version": "command-center.airflow-evidence.v1",
+        "redaction_status": "redacted",
+        "data": {"dag_id": "odds_ingest_daily", "api_key": "redacted"},
+    }
+    (target_dir / "dag_runs.json").write_text(json.dumps(snapshot), encoding="utf-8")
+
+    monkeypatch.setenv("PROACTIVE_AIRFLOW_EVIDENCE_DIR", str(root))
+    collectors = _load("collectors_airflow_secret_field", SVC / "collectors.py")
+
+    with pytest.raises(ValueError, match="secret-bearing field"):
+        collectors.collect_evidence(
+            {"name": "airflow-failure-rca-intake", "target": "airflow", "evidence": ["dag_runs"]}
+        )

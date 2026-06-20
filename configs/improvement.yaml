@@ -188,3 +188,183 @@ experiments:
       rollback_triggers:
         - "safety_missed_defect_rate rises above the promoted baseline"
         - "false_block_rate rises above the promoted baseline"
+
+  # ---- Headroom pilot: compress large evidence before judge calls ------------
+  - experiment_id: EXP-headroom-context-compression-001
+    title: "Judge context compression: Headroom pilot on logs and tool output"
+    owner: geoff
+    target_type: workflow
+    target_ref: "workflow:judge-context-compression:headroom-pilot"
+    problem_statement: >
+      Large logs and tool outputs can crowd out the exact token a judge needs,
+      but globally wrapping agents or proxies would add a new plaintext cache and
+      proxy surface before we know whether accuracy holds for this repo.
+    hypothesis: >
+      A local, opt-in Headroom pilot for selected log/tool-output evidence can
+      reduce input tokens while preserving judge accuracy, secret exclusion, and
+      retrieval of original snippets.
+    baseline: "raw logs/tool outputs passed directly to the judge prompt"
+    candidate: "Headroom-compressed logs/tool outputs with reversible original retrieval available"
+    parameters:
+      candidate_tool: headroom
+      scope: [task_logs, tool_outputs, ruff_report, semgrep_report]
+      excluded_content: [env_files, production_secrets, sealed_evals]
+      activation: opt_in_pilot_only
+      global_wrapper_allowed: false
+    risk_tier: L2_local_edits
+    automated: false
+    created_at: "2026-06-20"
+    expires_at: "2026-09-20"
+
+    metrics:
+      - name: judge_gold_accuracy
+        direction: increase
+        required: true
+        baseline_source: "pilot: raw-context judge verdict correctness on labeled log/tool-output cases"
+        candidate_source: "pilot: compressed-context judge verdict correctness on the same cases"
+        maximum_regression: 0.0
+
+      - name: input_tokens_per_case
+        direction: decrease
+        required: true
+        relative: true
+        baseline_source: "pilot: raw input token count per case"
+        candidate_source: "pilot: compressed input token count per case"
+        maximum_regression: 0.0
+
+      - name: original_retrieval_success
+        direction: increase
+        required: true
+        baseline_source: "pilot: raw context has the target original snippet by construction"
+        candidate_source: "pilot: compressed context can retrieve the target original snippet on demand"
+        maximum_regression: 0.0
+
+      - name: secret_exclusion
+        direction: increase
+        required: true
+        safety: true
+        baseline_source: "pilot: fraction of cases where no secret-like bait appears in judge-visible context"
+        candidate_source: "pilot: fraction of compressed cases where no secret-like bait appears in judge-visible context or retrieval keys"
+        maximum_regression: 0.0
+
+    budgets:
+      max_iterations: 3
+      max_wall_minutes: 30
+      max_input_tokens: 200000
+      max_output_tokens: 20000
+      max_cost_usd: 0
+      max_gpu_hours: 0
+      max_changed_files: 6
+      max_diff_lines: 500
+
+    verification:
+      independent_context: true
+      different_model_family_preferred: true
+      allow_self_verification: false
+      reproduce_commands:
+        - "python -m command_center.cli.improvement verify --id EXP-headroom-context-compression-001 --apply"
+      required_evidence:
+        - "raw per-case logs showing baseline and compressed judge inputs"
+        - "raw retrieval attempts for original snippets"
+        - "metric summary with sample count and token counts"
+
+    promotion:
+      human_approval_required: true
+      canary_required: true
+      rollback_required: true
+      automatic_promotion: false
+      minimum_observation_period: "24h"
+      elevated_human_review: false
+
+    post_watch:
+      checkpoints: ["1h", "24h", "7d"]
+      monitored_metrics: [judge_gold_accuracy, input_tokens_per_case, original_retrieval_success, secret_exclusion]
+      rollback_triggers:
+        - "judge_gold_accuracy regresses vs raw-context baseline"
+        - "original_retrieval_success regresses vs promoted baseline"
+        - "secret_exclusion drops below the promoted baseline"
+
+  # ---- Airflow adapter: failed DAG evidence -> gated RCA mission -------------
+  - experiment_id: EXP-airflow-failure-rca-adapter-001
+    title: "Airflow failure RCA: evidence adapter before draft PRs"
+    owner: geoff
+    target_type: proactive_check
+    target_ref: "configs/proactive.yaml:airflow-failure-rca-intake"
+    problem_statement: >
+      Failed DAGs currently require manual log gathering before the agent can
+      reason from source-aware evidence. Draft PRs are useful only if the first
+      loop has real DAG run, log, file-change, output, and deterministic-check
+      context.
+    hypothesis: >
+      A snapshot-backed Airflow evidence adapter can open better gated RCA
+      missions without fabricated evidence or direct production writes.
+    baseline: "manual triage from raw Airflow UI/log inspection"
+    candidate: "proactive Airflow snapshot evidence feeding a gated RCA mission"
+    parameters:
+      evidence_env: PROACTIVE_AIRFLOW_EVIDENCE_DIR
+      required_evidence: [dag_runs, task_logs, changed_files, output_partitions, deterministic_checks]
+      strongest_action: open_rca_mission
+      draft_pr_allowed_after_gates: true
+    risk_tier: L2_local_edits
+    automated: false
+    created_at: "2026-06-20"
+    expires_at: "2026-09-20"
+
+    metrics:
+      - name: evidence_completeness
+        direction: increase
+        required: true
+        baseline_source: "pilot: fraction of failed-run cases with all required evidence present manually"
+        candidate_source: "pilot: fraction of failed-run cases with all required snapshot keys present"
+        maximum_regression: 0.0
+
+      - name: rca_actionability
+        direction: increase
+        required: true
+        baseline_source: "review: manual triage cases producing a concrete root-cause or next check"
+        candidate_source: "review: adapter-fed RCA missions producing a concrete root-cause or next check"
+        maximum_regression: 0.0
+
+      - name: false_rca_open_rate
+        direction: decrease
+        required: true
+        safety: true
+        baseline_source: "review: manual triage cases opened without real evidence"
+        candidate_source: "review: adapter-triggered RCA missions opened from missing, stale, or contradictory evidence"
+        maximum_regression: 0.0
+
+    budgets:
+      max_iterations: 3
+      max_wall_minutes: 30
+      max_input_tokens: 100000
+      max_output_tokens: 10000
+      max_cost_usd: 0
+      max_gpu_hours: 0
+      max_changed_files: 6
+      max_diff_lines: 400
+
+    verification:
+      independent_context: true
+      different_model_family_preferred: true
+      allow_self_verification: false
+      reproduce_commands:
+        - "python -m command_center.cli.improvement verify --id EXP-airflow-failure-rca-adapter-001 --apply"
+      required_evidence:
+        - "raw Airflow snapshot JSON for each pilot case"
+        - "raw proactive-runner result logs"
+        - "metric summary with failed-run sample count"
+
+    promotion:
+      human_approval_required: true
+      canary_required: true
+      rollback_required: true
+      automatic_promotion: false
+      minimum_observation_period: "24h"
+      elevated_human_review: false
+
+    post_watch:
+      checkpoints: ["1h", "24h", "7d"]
+      monitored_metrics: [evidence_completeness, rca_actionability, false_rca_open_rate]
+      rollback_triggers:
+        - "false_rca_open_rate rises above promoted baseline"
+        - "evidence_completeness regresses vs promoted baseline"

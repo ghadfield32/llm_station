@@ -147,6 +147,7 @@ The config files and their contracts:
 | `configs/proactive.yaml` | scheduled checks on already-done work, RCA caps, daily self-improvement scan |
 | `configs/targets.yaml` | the watch inventory: repos, DAGs, data assets, services + SLOs |
 | `configs/tools.yaml` | tool permissions the judges can cite |
+| `configs/capabilities.yaml` | ARD-style internal capability discovery metadata: owner, type, representative queries, trust, provenance |
 | `configs/evals.yaml` | routing/judge regression suite = the model-promotion gate |
 | `configs/kanban.yaml` | bridge dispatch contract: sections, risk ceilings, ready statuses |
 | `configs/ui.yaml` | WebUI safety defaults (single-container, password, ledger-governed writes) |
@@ -1561,6 +1562,7 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 | [growth-os-engineering.md](growth-os-engineering.md) | Growth OS living engineering reference (module tree, standards, cross-session rules) |
 | [capability-evaluation-loop.md](capability-evaluation-loop.md) | reusable mission brief for evaluating external tools/repos/skills — staged, evidence-first, L2-capped, with command-center mapping |
 | [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md) | broad copy-paste prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, multi-agent frameworks, and similar ideas before any install/adoption |
+| [agentic-process-improvements-2026-06-20.md](agentic-process-improvements-2026-06-20.md) | decision note for Headroom, Airflow RCA, ARD-style metadata, and Gemma 4 12B candidate handling |
 | [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md) | read-only one-by-one verdicts for the broad candidate batch, focused on routing/performance impact and ordered next work |
 | [improvement-loop.md](improvement-loop.md) | **the coded improvement loop** — lifecycle, runner, promotion/canary/rollback, operator CLI (the system improves itself, human-gated) |
 | [experiment-registry.md](experiment-registry.md) | the experiment tables added to the one `ledger.db` — schema, events, negative-result memory, migration |
@@ -1629,6 +1631,36 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-06-20 — Capability catalog and proactive RCA pilot activated safely
+
+- **Capability catalog added.** `configs/capabilities.yaml` records ARD-style
+  routing/discovery metadata for internal tools, workflows, skills, and model
+  candidates. It grants no execution authority; `configs/tools.yaml`,
+  `configs/autonomy.yaml`, and the approval wall still control actions.
+- **No local path leakage.** Capability provenance avoids workstation paths.
+  Airflow snapshot evidence records repo-neutral `evidence_ref` values, not
+  local absolute paths; missing required snapshots now fail loudly instead of
+  becoming judge-visible partial evidence.
+- **Airflow RCA intake wired behind real evidence.**
+  `configs/proactive.yaml#airflow-failure-rca-intake` can collect failed DAG
+  snapshots only when `PROACTIVE_AIRFLOW_EVIDENCE_DIR` points at real redacted
+  JSON. Without that env var, collectors remain unwired and the proactive runner
+  skips the check instead of fabricating evidence. With the env var set, every
+  snapshot must declare `schema_version: command-center.airflow-evidence.v1`,
+  `redaction_status: redacted`, and `data`; wrong schema versions, unredacted
+  snapshots, missing files, and secret-bearing field names fail closed.
+- **Headroom and Gemma stay gated.** Headroom compression is a proposed
+  manual improvement experiment, not a global wrapper; `automated: false` keeps
+  the runner from fabricating a lifecycle run before a real measurement harness
+  and evidence source exist. Gemma 4 12B is cataloged as a model candidate only
+  and still needs exact tag, digest, license, fit, canary, evals, and human
+  promotion evidence before any routing change.
+- **What remains, in order.** First build the external Airflow snapshot producer
+  that emits the redacted schema above. Second assemble labeled Headroom
+  raw/compressed cases and run the independent verifier. Third collect exact
+  Gemma identity and fit evidence before editing model routing. Fourth add
+  representative-query tests before using the capability catalog for routing.
 
 ### 2026-06-20 — Desktop no-op canary telemetry added
 

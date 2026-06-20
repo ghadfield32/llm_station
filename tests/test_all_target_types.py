@@ -34,7 +34,9 @@ def _all_experiments() -> list[ExperimentDefinition]:
 
 
 ALL = _all_experiments()
-IDS = [e.experiment_id for e in ALL]
+EXECUTABLE = [e for e in ALL if e.automated]
+MANUAL_PROPOSALS = [e for e in ALL if not e.automated]
+IDS = [e.experiment_id for e in EXECUTABLE]
 
 
 def test_all_thirteen_target_types_present():
@@ -43,13 +45,18 @@ def test_all_thirteen_target_types_present():
                 "memory", "standard", "proactive_check", "workflow", "documentation",
                 "repository_template"}
     assert expected <= types, f"missing target types: {expected - types}"
-    # every experiment's target_ref resolves to a registered harness + adapter
+    # every executable experiment's target_ref resolves to a registered harness + adapter
     for e in ALL:
-        assert e.target_ref in HARNESSES, f"no harness for {e.target_ref}"
         assert adapter_for(e) is not None, f"no adapter for {e.target_type.value}"
+        if e.automated:
+            assert e.target_ref in HARNESSES, f"no harness for {e.target_ref}"
+        else:
+            assert not e.promotion.automatic_promotion
+            assert e.status.value == "Proposed"
+            assert e.verification.required_evidence
 
 
-@pytest.mark.parametrize("defn", ALL, ids=IDS)
+@pytest.mark.parametrize("defn", EXECUTABLE, ids=IDS)
 def test_target_type_full_lifecycle(defn, tmp_path):
     reg = ExperimentRegistry(db_path=str(tmp_path / "ledger.db"))
     eid = defn.experiment_id
@@ -79,6 +86,15 @@ def test_target_type_full_lifecycle(defn, tmp_path):
     ctrl.promote(eid, approver="geoff")
     assert reg.get(eid)["status"] == "Promoted"
     assert adapter.active_version() != before
+
+
+@pytest.mark.parametrize("defn", MANUAL_PROPOSALS, ids=[e.experiment_id for e in MANUAL_PROPOSALS])
+def test_manual_proposals_are_not_runner_executable_until_harnessed(defn, tmp_path):
+    reg = ExperimentRegistry(db_path=str(tmp_path / "ledger.db"))
+    reg.register(defn)
+    runner = ExperimentRunner(reg, repo_root=str(REPO_ROOT), evidence_root=str(tmp_path / "ev"))
+    with pytest.raises(RuntimeError, match="automated=false"):
+        runner.run_baseline(defn.experiment_id, reps=1)
 
 
 # ---- targeted safety properties --------------------------------------------
