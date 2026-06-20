@@ -355,6 +355,8 @@ COMMANDS: dict[str, tuple] = {
                                "daily observer/draft-only loop: --draft-kanban true drafts Proposed cards; never applies code"),
     "self-improvement-report": (lambda a: pym("command_center.cli.self_improvement", "report", *a),
                                 "write the decision-grade self-improvement report (no cards drafted)"),
+    "demo": (lambda a: pym("command_center.cli.demo", *a),
+             "full-loop demo: verify board+repo and document the 14-step loop (no writes, no merge)"),
     "linkedin-publish": (lambda a: pym("command_center.cli.linkedin_publish", *a), "publish approved+due LinkedIn content rows (--login | --apply)"),
     "system-validation": (lambda a: pym("command_center.cli.system_validation", *a),
                           "write whole-system validation evidence from real config state"),

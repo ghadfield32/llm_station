@@ -1674,6 +1674,26 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Phase 8/9: full-loop demo + "ready for anyone" docs
+
+- **Full-loop demo.** `cc demo full-loop --repo <id> --board <board_id>` verifies
+  the loop is wired (runs `kanban-verify` + `repo-verify`, read-only) and prints
+  the canonical 14-step sequence, marking each step `VERIFY` / `AUTOMATABLE` /
+  `HUMAN_GATE`. It performs **no writes and never merges**; steps 5/9/10/14 are
+  human gates. 3 hermetic tests.
+- **Docs for fresh setup → daily operation.** Added `docs/GETTING_STARTED.md`,
+  `INSTALL_WINDOWS.md`, `INSTALL_WSL.md`, `ADDING_A_REPO.md`, `ADDING_A_KANBAN.md`,
+  `RUNNING_DAILY_SELF_IMPROVEMENT.md`, `SECURITY_MODEL.md`,
+  `OPERATIONS_RUNBOOK.md`, `TROUBLESHOOTING.md` — covering UI vs AppFlowy board
+  selection, repo/kanban registration, the daily DAG, the human approval/merge
+  walls, emergency stop, and the known gotchas (App has no `workflows:write`;
+  workflow PRs need human creds; tests need dev/gateway extras;
+  most-recent-push approval rule).
+- **"Ready for anyone" status.** Phases 2–5 + 8/9 are done. The only remaining
+  gated item is Phase 6 (live desktop actions), correctly blocked until a real
+  AppFlowy sandbox board is wired (`APPFLOWY_SANDBOX_*`) so action-latency
+  evidence can be measured — never fabricated.
+
 ### 2026-06-20 — Phase 4: daily self-improvement commands (observer/draft-only)
 
 - **Operator surface for the existing observer pipeline.** Added
