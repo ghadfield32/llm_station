@@ -59,7 +59,12 @@ def _onboard_repo(args: argparse.Namespace) -> int:
     _print_verify("  register", reg)
     if reg.get("status") == "blocked":
         return 1
-    ver = run_repo_verify(repo_id=repo_id, root=ROOT, env={})
+    # verify against the real merged env so the gate checklist is accurate (the
+    # local-path ref + GitHub App + branch-protection gates read env/creds — an
+    # empty env would under-report them as failures).
+    from command_center.cli.github_app_verify import _merged_env, _read_dotenv
+    env = _merged_env(_read_dotenv(ROOT / ".env"))
+    ver = run_repo_verify(repo_id=repo_id, root=ROOT, env=env)
     _print_verify("  verify", ver)
     print("  (autonomy stays DISABLED until you clear the blockers and run "
           "`cc repo-enable-autonomy --repo-id " + repo_id + " --apply`)")

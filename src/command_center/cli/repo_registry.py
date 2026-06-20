@@ -73,15 +73,31 @@ def verify_repo(
 ) -> dict[str, Any]:
     gates: list[dict[str, Any]] = []
 
-    devc = root / (repo.devcontainer_path or "")
-    gates.append(_gate("devcontainer_present", bool(repo.devcontainer_path) and devc.is_file(),
-                       repo.devcontainer_path or "none"))
+    # Resolve the TARGET repo root. A 'self' repo IS this control repo; an external
+    # repo's files live at its resolved local path. Gates that inspect repo files
+    # (devcontainer, CODEOWNERS) and per-repo loop evidence must check the target,
+    # not the control repo — otherwise an external repo falsely inherits the control
+    # repo's files/evidence.
+    ref = repo.local_path_ref
+    if ref == "self":
+        target_root: Path | None = root
+    elif ref and ref.startswith("env:") and env.get(ref.split(":", 1)[1]):
+        target_root = Path(env[ref.split(":", 1)[1]])
+    else:
+        target_root = None  # unresolved -> file gates cannot verify the real repo
+
+    where = "self" if ref == "self" else (str(target_root) if target_root else f"{ref}(unresolved)")
+    devc_ok = (target_root is not None and bool(repo.devcontainer_path)
+               and (target_root / repo.devcontainer_path).is_file())
+    gates.append(_gate("devcontainer_present", devc_ok,
+                       f"{repo.devcontainer_path or 'none'} in {where}"))
     gates.append(_gate("ci_commands_declared", bool(repo.ci_commands),
                        ", ".join(repo.ci_commands) or "none"))
-    codeowners = root / (repo.codeowners_path or "")
-    gates.append(_gate("codeowners_present",
-                       (not repo.codeowners_required) or codeowners.is_file(),
-                       repo.codeowners_path or "none"))
+    co_ok = (not repo.codeowners_required) or (
+        target_root is not None and bool(repo.codeowners_path)
+        and (target_root / repo.codeowners_path).is_file())
+    gates.append(_gate("codeowners_present", co_ok,
+                       f"{repo.codeowners_path or 'none'} in {where}"))
     gates.append(_gate("codeowners_required", repo.codeowners_required, str(repo.codeowners_required)))
 
     # board mapping: kanban_board_id exists AND that board drives this repo
@@ -91,14 +107,14 @@ def verify_repo(
                        f"board={repo.kanban_board_id}; "
                        f"board_repos={board.repo_ids if board else 'missing'}"))
 
-    # local_path_ref: 'self' or env:NAME that resolves (presence by name only)
-    ref = repo.local_path_ref
+    # local_path_ref: 'self' or env:NAME that resolves to a real directory.
     if ref == "self":
         lp_ok, lp_detail = True, "self"
     elif ref and ref.startswith("env:"):
         name = ref.split(":", 1)[1]
-        lp_ok = bool(env.get(name))
-        lp_detail = f"env:{name} present={lp_ok}"
+        lp_ok = target_root is not None and target_root.is_dir()
+        lp_detail = (f"env:{name} -> {target_root} dir_exists={lp_ok}" if env.get(name)
+                     else f"env:{name} not set")
     else:
         lp_ok, lp_detail = False, f"invalid local_path_ref={ref!r}"
     gates.append(_gate("local_path_ref_resolves", lp_ok, lp_detail))
@@ -117,9 +133,13 @@ def verify_repo(
                        repo.secret_policy == "no_runtime_secrets_inside_container",
                        repo.secret_policy))
 
-    # bounded-loop evidence (proven once per repo, never faked)
-    bm = _evidence_status(root / RUN_ID_DIR / "branch-mission.json")
-    pc = _evidence_status(root / RUN_ID_DIR / "pr-check-loop.json")
+    # bounded-loop evidence (proven once PER REPO, never faked). The self/control
+    # repo's evidence lives at RUN_ID_DIR/*.json; an external repo's loop must be
+    # proven under RUN_ID_DIR/<repo_id>/*.json — it does not inherit the control
+    # repo's proof.
+    ev_dir = root / RUN_ID_DIR if ref == "self" else root / RUN_ID_DIR / repo.repo_id
+    bm = _evidence_status(ev_dir / "branch-mission.json")
+    pc = _evidence_status(ev_dir / "pr-check-loop.json")
     gates.append(_gate("branch_mission_proven", bm == "PASS", f"branch-mission.json={bm}", status=bm))
     gates.append(_gate("pr_check_evidence_proven", pc == "PASS",
                        f"pr-check-loop.json={pc}", status=pc))

@@ -1,0 +1,94 @@
+{
+  "onboarding": "betts_basketball",
+  "run_id": "20260616-autonomy-contracts",
+  "boards": [
+    {
+      "board_id": "betts_basketball",
+      "provider": "command_center_ui",
+      "kanban_verify": "pass",
+      "live_sync": "working",
+      "evidence": "event(add_mission_card->stage_card) folds to Ready; UI /api/events/kanban projects it; agent cannot set an approval status (wall holds)"
+    },
+    {
+      "board_id": "betts_basketball_appflowy",
+      "provider": "appflowy",
+      "kanban_verify": "pass",
+      "live_sync": "degraded",
+      "evidence": "write_through fail-closed (appflowy_projection_not_configured); contract-valid; live requires APPFLOWY_* creds (NOT faked)"
+    }
+  ],
+  "repo_verify": {
+    "status": "blocked",
+    "gates": [
+      {
+        "check": "devcontainer_present",
+        "status": "PASS"
+      },
+      {
+        "check": "ci_commands_declared",
+        "status": "PASS"
+      },
+      {
+        "check": "codeowners_present",
+        "status": "BLOCKED"
+      },
+      {
+        "check": "codeowners_required",
+        "status": "PASS"
+      },
+      {
+        "check": "kanban_board_mapping",
+        "status": "PASS"
+      },
+      {
+        "check": "local_path_ref_resolves",
+        "status": "PASS"
+      },
+      {
+        "check": "github_app_installed",
+        "status": "BLOCKED"
+      },
+      {
+        "check": "branch_protection_verified",
+        "status": "BLOCKED"
+      },
+      {
+        "check": "no_runtime_secrets_in_container",
+        "status": "PASS"
+      },
+      {
+        "check": "branch_mission_proven",
+        "status": "NOT_RUN"
+      },
+      {
+        "check": "pr_check_evidence_proven",
+        "status": "NOT_RUN"
+      }
+    ],
+    "blockers": [
+      "betts_basketball:codeowners_present",
+      "betts_basketball:github_app_installed",
+      "betts_basketball:branch_protection_verified",
+      "betts_basketball:branch_mission_proven",
+      "betts_basketball:pr_check_evidence_proven"
+    ]
+  },
+  "manifest": {
+    "autonomous_edits_enabled": false,
+    "blockers": [
+      "repo_autonomy_not_yet_verified"
+    ],
+    "auth_mode": "github_app_pending"
+  },
+  "local_path": "stored as env:BETTS_BASKETBALL_LOCAL_PATH (no absolute path committed)",
+  "to_enable_betts": [
+    "add CODEOWNERS to betts_basketball",
+    "add betts_basketball to the GitHub App selected repositories",
+    "set branch protection on betts main",
+    "prove the bounded loop per-repo under RUN_ID/betts_basketball/"
+  ],
+  "to_enable_appflowy_board": [
+    "set APPFLOWY_BASE_URL/WORKSPACE_ID + BETTS_APPFLOWY_BOARD_REF + creds; then snapshot + write-through reach the board"
+  ],
+  "writes_performed": false
+}
