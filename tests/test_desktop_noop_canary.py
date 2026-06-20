@@ -144,6 +144,7 @@ def test_desktop_noop_canary_blocks_if_live_actions_already_enabled(tmp_path):
 
 
 def _write_canary_sample(path: Path, *, status: str = "pass", target_id: str = "appflowy_browser_staging", total: float = 120.0, load: float = 40.0, verify: float = 80.0):
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "status": status,
         "target_id": target_id,
@@ -208,3 +209,67 @@ def test_timing_derivation_requires_sample_plan(tmp_path):
 
     assert result["status"] == "blocked"
     assert "sample_plan_missing" in result["blockers"]
+
+
+def test_timing_derivation_uses_config_sample_plan_refs(tmp_path):
+    raw = _raw_config()
+    raw["desktop_timing_sample_plans"][0]["required_evidence_refs"] = [
+        "evaluation/system-validation/unit/sample-a.json",
+        "evaluation/system-validation/unit/sample-b.json",
+    ]
+    raw["desktop_timing_sample_plans"][0]["required_sample_count_source"] = (
+        "configs/autonomy.yaml:desktop_timing_sample_plans[unit].required_evidence_refs"
+    )
+    config_path = _write_config(tmp_path, raw)
+    _write_canary_sample(
+        tmp_path / "evaluation/system-validation/unit/sample-a.json",
+        total=120.0,
+        load=40.0,
+        verify=80.0,
+    )
+    _write_canary_sample(
+        tmp_path / "evaluation/system-validation/unit/sample-b.json",
+        total=240.0,
+        load=100.0,
+        verify=90.0,
+    )
+
+    result = desktop_timing_derive.derive_timing_candidates_from_config(
+        config_path=config_path,
+        root=tmp_path,
+        target_id="appflowy_browser_staging",
+    )
+
+    assert result["status"] == "proposed"
+    assert result["required_sample_count"] == 2
+    assert "required_evidence_refs" in result["required_sample_count_source"]
+    assert result["sample_plan"]["live_actions_allowed"] is False
+    assert result["sample_plan"]["production_enabling"] is False
+    assert result["candidates"]["ttl_minutes_candidate"] == 240.0 / 60_000
+    assert result["candidates"]["action_timeout_seconds_candidate"] == 100.0 / 1_000
+    assert result["production_values_written"] is False
+
+
+def test_timing_derivation_from_config_blocks_missing_plan_evidence(tmp_path):
+    raw = _raw_config()
+    raw["desktop_timing_sample_plans"][0]["required_evidence_refs"] = [
+        "evaluation/system-validation/unit/sample-a.json",
+        "evaluation/system-validation/unit/sample-missing.json",
+    ]
+    config_path = _write_config(tmp_path, raw)
+    _write_canary_sample(tmp_path / "evaluation/system-validation/unit/sample-a.json")
+
+    result = desktop_timing_derive.derive_timing_candidates_from_config(
+        config_path=config_path,
+        root=tmp_path,
+        target_id="appflowy_browser_staging",
+    )
+
+    assert result["status"] == "blocked"
+    assert "insufficient_noop_canary_telemetry" in result["blockers"]
+    assert result["observed_sample_count"] == 1
+    assert result["additional_samples_required"] == 1
+    assert {
+        "path": "evaluation/system-validation/unit/sample-missing.json",
+        "reason": "evidence_missing",
+    } in result["rejected_evidence"]

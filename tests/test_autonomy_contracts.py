@@ -273,3 +273,37 @@ def test_desktop_noop_canary_rejects_unknown_target():
 
     with pytest.raises(ValueError, match="unknown target"):
         AutonomyConfig.model_validate(raw)
+
+
+def test_desktop_timing_sample_plan_rejects_unknown_target():
+    raw = _raw()
+    raw["desktop_timing_sample_plans"][0]["target_id"] = "unknown_target"
+
+    with pytest.raises(ValueError, match="unknown target"):
+        AutonomyConfig.model_validate(raw)
+
+
+def test_desktop_timing_sample_plan_requires_repo_relative_evidence_refs():
+    raw = _raw()
+    raw["desktop_timing_sample_plans"][0]["required_evidence_refs"][0] = (
+        r"C:\tmp\desktop-noop-canary.json"
+    )
+
+    with pytest.raises(ValueError, match="repo-relative non-secret artifact"):
+        AutonomyConfig.model_validate(raw)
+
+    raw = _raw()
+    raw["desktop_timing_sample_plans"][0]["required_evidence_refs"][0] = ".env"
+
+    with pytest.raises(ValueError, match="repo-relative non-secret artifact"):
+        AutonomyConfig.model_validate(raw)
+
+
+def test_desktop_timing_sample_plan_count_source_must_name_evidence_refs():
+    raw = _raw()
+    raw["desktop_timing_sample_plans"][0]["required_sample_count_source"] = (
+        "operator_cli_args"
+    )
+
+    with pytest.raises(ValueError, match="required_evidence_refs"):
+        AutonomyConfig.model_validate(raw)

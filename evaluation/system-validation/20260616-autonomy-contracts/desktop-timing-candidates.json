@@ -1,19 +1,40 @@
 {
-  "additional_samples_required": null,
-  "blockers": [
-    "sample_plan_missing",
-    "insufficient_noop_canary_telemetry"
-  ],
-  "candidates": null,
+  "additional_samples_required": 0,
+  "blockers": [],
+  "candidates": {
+    "action_timeout_seconds_candidate": 0.0148302,
+    "candidate_basis": "max observed read-only no-op canary timing; no safety multiplier",
+    "candidate_source_evidence_refs": [
+      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary.json",
+      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-001.json",
+      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-002.json"
+    ],
+    "provisional_only_not_production_enabled": true,
+    "ttl_minutes_candidate": 0.0005574016666666667
+  },
   "desktop_target_enabled": false,
-  "observed_sample_count": 1,
+  "observed_sample_count": 3,
   "placeholder_values_used": false,
   "production_values_written": false,
   "rejected_evidence": [],
-  "required_sample_count": null,
-  "required_sample_count_source": null,
+  "required_sample_count": 3,
+  "required_sample_count_source": "configs/autonomy.yaml:desktop_timing_sample_plans[appflowy_browser_staging].required_evidence_refs",
   "required_sample_type": "read_only desktop-noop-canary evidence",
+  "sample_plan": {
+    "candidate_derivation": "max_observed_read_only_noop_timing_without_multiplier",
+    "live_actions_allowed": false,
+    "production_enabling": false,
+    "required_evidence_refs": [
+      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary.json",
+      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-001.json",
+      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-002.json"
+    ],
+    "required_sample_count_source": "configs/autonomy.yaml:desktop_timing_sample_plans[appflowy_browser_staging].required_evidence_refs",
+    "sample_plan_basis": "explicit_read_only_noop_samples_for_current_staging_snapshot",
+    "source_work_item": "declare_desktop_timing_sample_plan_before_candidates",
+    "status": "declared"
+  },
   "schema_version": "command-center.desktop-timing-candidates.v1",
-  "status": "blocked",
+  "status": "proposed",
   "target_id": "appflowy_browser_staging"
 }

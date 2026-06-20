@@ -46,8 +46,9 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
   repo, mints an in-memory installation token, reads repo + check/status; no Administration).
   PR #9 proved the correct protected-branch path: the GitHub App authored the PR, `ghadfield32`
   approved it, required checks passed, and squash merge completed without weakening branch
-  protection. PR #8 is obsolete historical evidence of why user-authored PRs cannot satisfy
-  the same user's required approval.
+  protection. PR #10 repeated the same pattern for the desktop no-op canary telemetry work.
+  PR #8 is obsolete historical evidence of why user-authored PRs cannot satisfy the same
+  user's required approval.
 - **Repo autonomy.** `uv run cc branch-mission` proves the bounded local
   branch->worktree->docs-only change->declared checks->redacted evidence loop.
   It does not push, open a PR, merge, deploy, change settings, or touch secrets.
@@ -57,12 +58,12 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
   repo autonomy is now enabled only for registered L2 feature-branch-only work;
   merge, deploy, settings, secrets, and branch deletion remain human-gated.
 - **Desktop automation** (`appflowy_browser_staging`) has declared
-  timeout/takeover, human-takeover, and screenshot/evidence policy, but numeric
-  TTL and action-timeout controls are intentionally unset until no-op canary
-  telemetry derives them. It stays disabled until canary policy and loop-breaker
-  evidence are ready. `cc desktop-noop-canary` now records the first read-only
-  telemetry sample; `cc desktop-timing-derive` remains blocked until a reviewed
-  sample plan exists.
+  timeout/takeover, human-takeover, screenshot/evidence policy, a read-only
+  no-op sample plan, and three no-op timing samples. `cc desktop-timing-derive`
+  now proposes provisional TTL/action-timeout candidates from measured evidence
+  only. The target remains disabled: no production TTL/action-timeout controls
+  are written, and no desktop live actions are enabled until the candidates are
+  reviewed and the adapter gate passes.
 - **Future-facing capability routing.** `configs/capabilities.yaml` adds
   ARD-style metadata for internal tools, workflows, skills, and model
   candidates. `airflow-failure-rca-intake` is declared but dormant until real
@@ -88,27 +89,27 @@ The whole-system autonomy track is contract-backed in `configs/autonomy.yaml` (v
 
 ## Next (suggested order)
 
-1. **Declare the desktop timing sample plan** before deriving candidates.
-2. **Run additional no-op desktop/browser canary samples from that plan** to
-   measure target-readiness timing without enabling live desktop actions.
-3. **Derive TTL/action-timeout candidates only from measured canary evidence**
-   and keep them provisional until reviewed.
-4. **Enable the desktop target only after timeout/takeover and canary policy**
+1. **Review the provisional desktop TTL/action-timeout candidates** and keep
+   them non-production until accepted by the operator.
+2. **Wire accepted timing controls only through the adapter gate**, then rerun
+   `cc desktop-adapter`; do not enable desktop live actions while the adapter
+   still reports missing production controls.
+3. **Enable the desktop target only after timeout/takeover and canary policy**
    are verified by evidence, including accepted telemetry-derived TTL and
    action-timeout controls.
-5. **Derive the GUI loop-breaker policy from event history** before allowing
+4. **Derive the GUI loop-breaker policy from event history** before allowing
    autonomous GUI retries.
-6. **Enable no-op canaries only after blockers clear**, then decide telemetry
+5. **Enable no-op canaries only after blockers clear**, then decide telemetry
    from structured event gaps.
-7. **Evaluate external runtimes only after measured gaps** show the current
+6. **Evaluate external runtimes only after measured gaps** show the current
    control plane cannot cover the needed capability.
-8. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
+7. **Bring one new channel live end-to-end** (Telegram is the lowest-friction — no public
    webhook, no app review) to exercise `GatewayCore` on a second transport in production.
-9. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
+8. **WhatsApp webhook** when wanted: stand up the public tunnel + Meta app, register the
    webhook (`docs/channels.md`), confirm the `GET` verify + `POST` inbound round-trip.
-10. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
+9. **`make lint` mypy pass.** Ruff is clean and CI runs ruff; mypy over `src/` is available
    via `make lint` but not yet wired into CI — tighten types and add it to CI when green.
-11. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
+10. **Path-independence (optional).** The config-pipeline CLIs read `configs/` relative to
    the CWD (run from repo root via `make` / `python -m`). If you want the console scripts to
    work from any directory, anchor their file reads to the repo root and expose the rest as
    entry points.
