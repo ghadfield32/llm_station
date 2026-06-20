@@ -20,7 +20,7 @@
 - `uv run cc pr-check-verify --apply --poll-interval 15 --poll-timeout 1800` passes the remote branch/draft-PR/required-check evidence loop through draft PR #6.
 - `llm_station` repo autonomy is enabled for registered L2 feature-branch-only work after local and remote evidence gates passed.
 - PR #7 merged via squash auto-merge after CODEOWNERS approval; obsolete draft proof PR #6 was closed without deleting its branch.
-- PR #8 uses the GitHub App bot-final-push approval pattern: the final reviewable evidence-only commit is made by `llm-station-command-center[bot]` so the human owner can approve without weakening branch protection or bypassing required checks.
+- PR #8 uses the GitHub App bot-final-push approval pattern: after connector attribution was checked, the final reviewable evidence-only push is performed through the configured GitHub App installation token so the human owner can approve without weakening branch protection or bypassing required checks.
 - Desktop timeout/takeover policy plus human-takeover and screenshot artifact policy are declared for `appflowy_browser_staging`; numeric TTL and action-timeout controls remain unset until no-op canary telemetry derives them.
 - Observer verifiers print no token, private key, `.env` value, or raw credential material and perform no writes. The PR/check verifier performs only the explicitly approved feature-branch and draft-PR writes and stores redacted evidence.
 
