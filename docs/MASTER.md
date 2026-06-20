@@ -1674,6 +1674,20 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Operator command wrappers (keep it simple)
+
+- **`cc setup`** runs the real `doctor` (its exit code is returned — a failing
+  machine is never masked as ready) then prints a registry summary + the live-sync
+  activation env (`KANBAN_EMIT_EVENTS`/`KANBAN_PRIMARY_BOARD_ID`) + next steps.
+- **`cc onboard repo --path <dir>`** infers repo id (folder), remote URL (git
+  origin), and board id, then runs `repo-register` (dry-run) + `repo-verify` and
+  prints the gate checklist. Writes nothing without `--apply`; local path stored as
+  an `env:` ref. **`cc onboard kanban --provider <p> --repo <id>`** wraps
+  `kanban-register` (dry-run) + `kanban-verify`; appflowy boards demand `env:` refs.
+- The friendly set is now `doctor / setup / onboard repo|kanban / operate /
+  improve / demo`; every lower-level evidence command stays. Docs:
+  `docs/OPERATOR_COMMANDS.md`. Tests: `tests/test_operator_wrappers.py` (7).
+
 ### 2026-06-20 — Live kanban sync: one event stream, many projections
 
 - **Source of truth = the kanban event log.** New `command_center.kanban_sync`

@@ -305,6 +305,10 @@ COMMANDS: dict[str, tuple] = {
     "forbidden-providers": (lambda a: pym("command_center.cli.check_forbidden_providers"), "local-only boundary"),
     # lifecycle
     "doctor": (lambda a: pym("command_center.cli.doctor", *a), "preflight checklist"),
+    "setup": (lambda a: pym("command_center.cli.setup", *a),
+              "friendly readiness: doctor + registry summary + next steps"),
+    "onboard": (lambda a: pym("command_center.cli.onboard", *a),
+                "friendly: onboard repo|kanban (dry-run + verify; --apply writes)"),
     "init-env": (lambda a: pym("command_center.cli.init_env"), "create .env with local secrets"),
     "verify-base": (lambda a: pym("command_center.cli.verify_env", "--mode", "base"), "pre-bootstrap checks"),
     "verify": (lambda a: pym("command_center.cli.verify_env", "--mode", "full"), "pre-up checks"),

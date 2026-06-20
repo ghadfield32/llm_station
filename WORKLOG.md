@@ -5,6 +5,17 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## Operator command wrappers (keep it simple)
+- ADD 06-20: cc setup (cli/setup.py) = real doctor (exit code returned, never masked)
+  + registry summary + live-sync activation env + next steps. cc onboard repo|kanban
+  (cli/onboard.py) = friendly sugar over repo-register/kanban-register (dry-run) +
+  *-verify; infers repo-id/remote/board; writes nothing without --apply; appflowy
+  demands env: refs; local path stored as env: ref.
+- FRIENDLY SET 06-20: doctor/setup/onboard/operate/improve/demo. Lower-level evidence
+  commands all kept. Docs: docs/OPERATOR_COMMANDS.md. Tests: test_operator_wrappers.py (7).
+- FIX 06-20: setup output is ASCII (Windows cp1252 console can't encode box-drawing).
+- NEXT: onboard a 2nd real local repo in disabled mode (needs a real repo path).
+
 ## Live kanban sync / projection engine
 - ADD 06-20: command_center.kanban_sync (events/projection/wiring) — KanbanEvent
   schema + append-only event log (generated/kanban-events.jsonl, gitignored) +
