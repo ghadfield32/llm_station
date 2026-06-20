@@ -1,0 +1,34 @@
+{
+  "allowed_mode": "reversible_sandbox_roundtrip",
+  "blockers": [
+    "representative_action_source_not_configured"
+  ],
+  "clipboard_read": false,
+  "created_row_deleted": false,
+  "desktop_live_actions_enabled": false,
+  "desktop_target_enabled": false,
+  "human_takeover_policy_ref": "docs/desktop-timeout-takeover-policy.md",
+  "measurement_fields": [
+    "action_create_ms",
+    "action_delete_ms",
+    "action_roundtrip_ms"
+  ],
+  "measurements": {
+    "action_create_ms": null,
+    "action_delete_ms": null,
+    "action_roundtrip_ms": null
+  },
+  "production_board_touched": false,
+  "production_values_written": false,
+  "raw_content_retained": false,
+  "reversible_action": "create_then_delete_row",
+  "run_id": "20260620T152754539818Z",
+  "sandbox_database_used": false,
+  "schema_version": "command-center.desktop-action-latency.v1",
+  "screenshots_captured": false,
+  "secrets_printed": false,
+  "start_time": "2026-06-20T15:27:54.539818+00:00",
+  "status": "blocked",
+  "surface": "direct_api",
+  "target_id": "appflowy_browser_staging"
+}

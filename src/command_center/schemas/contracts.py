@@ -656,6 +656,56 @@ class ContentConfig(Strict):
         return self
 
 
+# ---- content_pipeline.yaml -------------------------------------------------
+# The content ENGINE (distinct from content.yaml, which is the publisher). It
+# gathers evidence-backed candidates, drafts breakdown posts on the best local
+# model, validates them with a multi-viewpoint judge panel (escalating the
+# advanced parts), and stages the top few as In Queue drafts for human approval.
+# No claim ships that isn't traceable to evidence (the no-overreach rule).
+class ContentStream(Strict):
+    name: str                                    # personal | business (free label)
+    board: str                                   # content board to stage into
+    curator_dbs: list[str] = ["papers", "repos", "signals"]
+    topics: list[str] = []                       # keyword filter; empty = take all
+    own_repos: list[str] = []                    # repo dir names to mine (git log + README)
+    pillar: str = ""                             # default Pillar for staged cards
+    voice: str                                   # short voice brief for the drafter
+
+
+class ContentViewpoint(Strict):
+    """One judge in the accuracy/quality panel."""
+    key: Literal["factual_currency", "technical", "brand_voice", "no_overreach"]
+    blocking: bool = True
+    needs_web: bool = False                      # true -> escalate to the advanced (web) tier
+
+
+class ContentPipelineConfig(Strict):
+    schema_version: str
+    source: ContentSource = ContentSource()      # AppFlowy connection (reused)
+    litellm_base_url: str = "http://localhost:4000"   # infra (host port), not a secret
+    litellm_key_env: str = "LITELLM_MASTER_KEY"       # the secret, named not stored
+    draft_role: str = "chat"                     # LiteLLM role for drafting (qwen3:30b)
+    judge_role: str = "local-judge"              # LiteLLM role for the panel
+    own_repos_root: str = ".."                   # repos dir relative to llm_station
+    lookback_days: int = Field(default=14, ge=1)
+    candidates_per_run: int = Field(default=25, ge=1)
+    surface_top: int = Field(default=5, ge=1)
+    brief_path: str = "generated/content-brief.json"
+    claims_path: str = "generated/content-claims.json"   # the evidence ledger
+    streams: list[ContentStream] = []
+    judges: list[ContentViewpoint] = []
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if len({s.board for s in self.streams}) != len(self.streams):
+            raise ValueError("duplicate stream board names")
+        if self.surface_top > self.candidates_per_run:
+            raise ValueError("surface_top cannot exceed candidates_per_run")
+        if not self.judges:
+            raise ValueError("at least one judge viewpoint is required")
+        return self
+
+
 # ---- tools.yaml ------------------------------------------------------------
 # Explicit tool permissions the judges can cite. One tier owns each action.
 # The same L3/L4 discipline as gates.yaml: dangerous actions are manual-only,
@@ -1491,6 +1541,105 @@ class DesktopTimingSamplePlan(Strict):
         return self
 
 
+class DesktopActionLatencyCanarySpec(Strict):
+    """Representative desktop ACTION-latency canary contract.
+
+    The read-only no-op canary times snapshot reads (~milliseconds), which is not
+    representative of how long a real desktop action takes; deriving an
+    action-timeout from it is meaningless. This canary instead measures the
+    latency of the target's PRIMARY automation path (``direct_api``) performing a
+    *reversible sandbox* round-trip: create then delete a throwaway row on a
+    SANDBOX database — never the production board. It produces the real
+    action-latency evidence that TTL/action-timeout candidates must be derived
+    from.
+
+    Credentials are env references only (no secrets in config); the canary fails
+    closed when those env vars are absent. The sandbox database/workspace must be
+    distinct from the target's production board, which is named in
+    ``forbidden_targets``.
+    """
+    target_id: str
+    surface: Literal["direct_api"]
+    allowed_mode: Literal["reversible_sandbox_roundtrip"]
+    reversible_action: Literal["create_then_delete_row"]
+    sandbox_base_url_env: str
+    sandbox_workspace_id_env: str
+    sandbox_database_id_env: str
+    sandbox_user_env: str
+    sandbox_password_env: str
+    forbidden_actions: list[str]
+    forbidden_targets: list[str]
+    measurement_fields: list[Literal[
+        "action_create_ms",
+        "action_delete_ms",
+        "action_roundtrip_ms",
+    ]]
+    evidence_policy: Literal["redacted_json_only"]
+    redaction_policy: Literal["no_raw_content_no_secrets_no_clipboard"]
+    human_takeover_policy_ref: str
+    production_enabling: bool = False
+    blockers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.target_id):
+            raise ValueError(
+                f"desktop action latency canary target_id {self.target_id!r} must be stable"
+            )
+        env_refs = [
+            self.sandbox_base_url_env,
+            self.sandbox_workspace_id_env,
+            self.sandbox_database_id_env,
+            self.sandbox_user_env,
+            self.sandbox_password_env,
+        ]
+        for env_name in env_refs:
+            if not re.match(r"^[A-Z][A-Z0-9_]*$", env_name):
+                raise ValueError(
+                    f"desktop action latency canary {self.target_id!r} env ref "
+                    f"{env_name!r} is not a valid env name"
+                )
+        if len(env_refs) != len(set(env_refs)):
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} has duplicate env refs"
+            )
+        if len(self.forbidden_actions) != len(set(self.forbidden_actions)):
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} has duplicate forbidden_actions"
+            )
+        missing_denies = _DEFAULT_DESKTOP_DENIES - set(self.forbidden_actions)
+        if missing_denies:
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} missing default deny "
+                f"action(s): {sorted(missing_denies)}"
+            )
+        if not self.forbidden_targets:
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} must name the production "
+                "board/database in forbidden_targets so the sandbox cannot touch it"
+            )
+        if len(self.measurement_fields) != len(set(self.measurement_fields)):
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} measurement_fields has duplicates"
+            )
+        required_measurements = {"action_create_ms", "action_delete_ms", "action_roundtrip_ms"}
+        missing = required_measurements - set(self.measurement_fields)
+        if missing:
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} missing measurement field(s): "
+                f"{sorted(missing)}"
+            )
+        if not self.human_takeover_policy_ref:
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} needs human_takeover_policy_ref"
+            )
+        if self.production_enabling:
+            raise ValueError(
+                f"desktop action latency canary {self.target_id!r} cannot enable production by itself"
+            )
+        return self
+
+
 class TelemetryDecision(Strict):
     mode: Literal["structured_events_only", "defer_until_event_contracts", "opentelemetry"]
     decision_basis: list[str]
@@ -1679,6 +1828,9 @@ class AutonomyConfig(Strict):
     canaries: list[AutonomyCanarySpec] = Field(default_factory=list)
     desktop_noop_canaries: list[DesktopNoopCanarySpec] = Field(default_factory=list)
     desktop_timing_sample_plans: list[DesktopTimingSamplePlan] = Field(default_factory=list)
+    desktop_action_latency_canaries: list[DesktopActionLatencyCanarySpec] = Field(
+        default_factory=list
+    )
     telemetry: TelemetryDecision
     github_app_review: GitHubAppReview
     github_app_auth: GitHubAppAuth
@@ -1718,6 +1870,17 @@ class AutonomyConfig(Strict):
             raise ValueError(
                 "desktop noop canary references unknown target(s): "
                 f"{sorted(unknown_noop_targets)}"
+            )
+        action_latency_ids = [
+            canary.target_id for canary in self.desktop_action_latency_canaries
+        ]
+        if len(action_latency_ids) != len(set(action_latency_ids)):
+            raise ValueError("duplicate desktop action latency canary target ids")
+        unknown_action_targets = set(action_latency_ids) - set(desktop_ids)
+        if unknown_action_targets:
+            raise ValueError(
+                "desktop action latency canary references unknown target(s): "
+                f"{sorted(unknown_action_targets)}"
             )
         timing_plan_ids = [plan.target_id for plan in self.desktop_timing_sample_plans]
         if len(timing_plan_ids) != len(set(timing_plan_ids)):

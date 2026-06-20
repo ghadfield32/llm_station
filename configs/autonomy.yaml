@@ -281,6 +281,39 @@ desktop_timing_sample_plans:
     production_enabling: false
     blockers: []
 
+# Representative ACTION-latency canary: measures real action round-trip latency
+# through the primary direct_api path against a reversible SANDBOX database, so
+# the action-timeout candidate is derived from real action timing rather than
+# read-only no-op reads. Credentials are env references only; the canary fails
+# closed when they are absent (no AppFlowy sandbox is configured yet).
+desktop_action_latency_canaries:
+  - target_id: appflowy_browser_staging
+    surface: direct_api
+    allowed_mode: reversible_sandbox_roundtrip
+    reversible_action: create_then_delete_row
+    sandbox_base_url_env: APPFLOWY_SANDBOX_BASE_URL
+    sandbox_workspace_id_env: APPFLOWY_SANDBOX_WORKSPACE_ID
+    sandbox_database_id_env: APPFLOWY_SANDBOX_DATABASE_ID
+    sandbox_user_env: APPFLOWY_SANDBOX_USER
+    sandbox_password_env: APPFLOWY_SANDBOX_PASSWORD
+    forbidden_actions:
+      - clipboard_read
+      - password_field_read
+      - system_settings_change
+      - file_delete
+    forbidden_targets:
+      - mission_intake
+      - card-review q3 odds metrics
+    measurement_fields:
+      - action_create_ms
+      - action_delete_ms
+      - action_roundtrip_ms
+    evidence_policy: redacted_json_only
+    redaction_policy: no_raw_content_no_secrets_no_clipboard
+    human_takeover_policy_ref: docs/desktop-timeout-takeover-policy.md
+    production_enabling: false
+    blockers: []
+
 telemetry:
   mode: structured_events_only
   decision_basis:

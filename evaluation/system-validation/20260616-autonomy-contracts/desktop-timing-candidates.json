@@ -1,25 +1,29 @@
 {
   "additional_samples_required": 0,
-  "blockers": [],
-  "candidates": {
-    "action_timeout_seconds_candidate": 0.0148302,
-    "candidate_basis": "max observed read-only no-op canary timing; no safety multiplier",
-    "candidate_source_evidence_refs": [
-      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary.json",
-      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-001.json",
-      "evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-002.json"
-    ],
-    "provisional_only_not_production_enabled": true,
-    "ttl_minutes_candidate": 0.0005574016666666667
-  },
+  "blockers": [
+    "action_latency_evidence_required_for_production_candidates"
+  ],
+  "candidates": null,
   "desktop_target_enabled": false,
+  "observation_timing": {
+    "basis": "read-only no-op observation timing; NOT a live-action timeout",
+    "max_observe_step_ms": 14.8302,
+    "max_total_duration_ms": 33.4441,
+    "source_evidence_refs": [
+      "C:\\Users\\ghadf\\vscode_projects\\docker_projects\\llm_station\\evaluation\\system-validation\\20260616-autonomy-contracts\\desktop-noop-canary.json",
+      "C:\\Users\\ghadf\\vscode_projects\\docker_projects\\llm_station\\evaluation\\system-validation\\20260616-autonomy-contracts\\desktop-noop-canary-samples\\post-pr10-sample-001.json",
+      "C:\\Users\\ghadf\\vscode_projects\\docker_projects\\llm_station\\evaluation\\system-validation\\20260616-autonomy-contracts\\desktop-noop-canary-samples\\post-pr10-sample-002.json"
+    ]
+  },
+  "observed_action_latency_sample_count": 0,
   "observed_sample_count": 3,
   "placeholder_values_used": false,
   "production_values_written": false,
+  "rejected_action_evidence": [],
   "rejected_evidence": [],
   "required_sample_count": 3,
   "required_sample_count_source": "configs/autonomy.yaml:desktop_timing_sample_plans[appflowy_browser_staging].required_evidence_refs",
-  "required_sample_type": "read_only desktop-noop-canary evidence",
+  "required_sample_type": "representative desktop-action-latency evidence for production candidates; read-only desktop-noop-canary evidence for observation timing only",
   "sample_plan": {
     "candidate_derivation": "max_observed_read_only_noop_timing_without_multiplier",
     "live_actions_allowed": false,
@@ -35,6 +39,6 @@
     "status": "declared"
   },
   "schema_version": "command-center.desktop-timing-candidates.v1",
-  "status": "proposed",
+  "status": "blocked",
   "target_id": "appflowy_browser_staging"
 }
