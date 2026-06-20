@@ -1674,6 +1674,26 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Phase 2: provider-agnostic kanban board registry
+
+- **New registry contract.** `configs/kanban_boards.yaml` (`KanbanBoardsConfig`)
+  maps a `board_id` to a surface (`provider: appflowy` OR `command_center_ui`),
+  the repos it drives, the canonical status workflow (backlog/ready/in_progress/
+  done/blocked/rejected/awaiting_approval), required mission-card fields, and the
+  agent verb contract. Both providers share ONE action contract by construction.
+- **Wall verbs enforced in the contract.** `approve_card`, `merge`, `deploy`,
+  `delete_card`, `delete_board` must be forbidden on every board; `allowed_agent_
+  verbs` may only grant the non-destructive set (add/stage/start/finish/block/
+  reject). AppFlowy `workspace_ref` must be an `env:` reference, never an inline
+  secret.
+- **Commands.** `cc kanban-verify` (status/field/verb contract + board-snapshot
+  duplicate-MissionID and unredacted-secret detection; NOT_RUN without a
+  snapshot, never faked); `cc kanban-register` (dry-run validate by default,
+  `--apply` writes); `cc kanban-sync --dry-run` (read-only plan; actual mutation
+  stays with `cc kanban-bridge`). No writes, no approvals, no merges.
+- **Next (Phase 3).** `cc repo-register/repo-verify/repo-enable-autonomy` to
+  onboard other local repos, each bound to a registered `kanban_board_id`.
+
 ### 2026-06-20 — Representative desktop action-latency measurement (root-cause fix)
 
 - **Root cause found.** `desktop-timing-derive` derived `action_timeout_seconds`

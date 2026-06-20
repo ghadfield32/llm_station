@@ -1,0 +1,44 @@
+schema_version: command-center.kanban-boards.v1
+
+# Provider-agnostic registry of kanban boards. A board_id maps one surface
+# (AppFlowy OR the internal Command Center UI) to the repos it drives, the
+# canonical status workflow, the required mission-card fields, and the agent verb
+# contract. Both providers expose the SAME canonical verbs/statuses so the action
+# layer and the human approval wall behave identically regardless of surface.
+#
+# Wall verbs (approve_card, merge, deploy, delete_card, delete_board) must always
+# be forbidden; the agent drafts and moves cards but never approves or merges.
+boards:
+  - board_id: llm_station_command_center
+    provider: appflowy
+    workspace_ref: env:APPFLOWY_WORKSPACE_ID
+    board_ref: mission_intake
+    repo_ids: [llm_station]
+    status_mapping:
+      backlog: Backlog
+      ready: Ready
+      in_progress: In Progress
+      done: Done
+      blocked: Blocked
+      rejected: Rejected
+      awaiting_approval: Awaiting Approval
+    required_fields:
+      - MissionID
+      - RepoID
+      - Risk
+      - LastSync
+      - Section
+    allowed_agent_verbs:
+      - add_mission_card
+      - stage_card
+      - start_todo
+      - finish_todo
+      - block_card
+      - reject_card
+    forbidden_agent_verbs:
+      - approve_card
+      - merge
+      - deploy
+      - delete_card
+      - delete_board
+    blockers: []

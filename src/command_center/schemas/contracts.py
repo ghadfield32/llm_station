@@ -571,6 +571,118 @@ class KanbanConfig(Strict):
         return self
 
 
+# ---- kanban_boards.yaml ----------------------------------------------------
+# A provider-agnostic registry of kanban boards. One board_id maps a surface
+# (AppFlowy OR the internal Command Center UI) to the repos it drives, the
+# canonical status workflow, the fields a mission card must carry, and the agent
+# verb contract. Both providers MUST expose the same canonical verbs/statuses so
+# the action layer + approval wall behave identically regardless of surface.
+_KANBAN_CANONICAL_STATUSES = frozenset({
+    "backlog", "ready", "in_progress", "done", "blocked", "rejected", "awaiting_approval",
+})
+# Verbs the agent may be granted (none of these approve, merge, deploy, or delete).
+_KANBAN_GRANTABLE_VERBS = frozenset({
+    "add_mission_card", "stage_card", "start_todo", "finish_todo", "block_card", "reject_card",
+})
+# Verbs that must NEVER be available to the model/action layer on any board —
+# they are the human approval/merge wall and destructive operations.
+_KANBAN_WALL_VERBS = frozenset({
+    "approve_card", "merge", "deploy", "delete_card", "delete_board",
+})
+
+
+class KanbanBoardSpec(Strict):
+    board_id: str
+    provider: Literal["appflowy", "command_center_ui"]
+    workspace_ref: str
+    board_ref: str
+    repo_ids: list[str]
+    status_mapping: dict[str, str]
+    required_fields: list[str]
+    allowed_agent_verbs: list[str]
+    forbidden_agent_verbs: list[str]
+    blockers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.board_id):
+            raise ValueError(f"kanban board board_id {self.board_id!r} must be a stable id")
+        if not self.workspace_ref:
+            raise ValueError(f"kanban board {self.board_id!r} needs a workspace_ref")
+        # AppFlowy workspace must be an env reference, never an inline secret/value.
+        if self.provider == "appflowy" and not self.workspace_ref.startswith("env:"):
+            raise ValueError(
+                f"kanban board {self.board_id!r} appflowy workspace_ref must be an env "
+                "reference like 'env:APPFLOWY_WORKSPACE', not an inline value"
+            )
+        if not self.board_ref:
+            raise ValueError(f"kanban board {self.board_id!r} needs a board_ref")
+        if not self.repo_ids:
+            raise ValueError(f"kanban board {self.board_id!r} must list at least one repo_id")
+        if len(self.repo_ids) != len(set(self.repo_ids)):
+            raise ValueError(f"kanban board {self.board_id!r} has duplicate repo_ids")
+        # status_mapping must cover exactly the canonical workflow statuses.
+        keys = set(self.status_mapping)
+        missing = _KANBAN_CANONICAL_STATUSES - keys
+        extra = keys - _KANBAN_CANONICAL_STATUSES
+        if missing:
+            raise ValueError(
+                f"kanban board {self.board_id!r} status_mapping missing canonical "
+                f"status(es): {sorted(missing)}"
+            )
+        if extra:
+            raise ValueError(
+                f"kanban board {self.board_id!r} status_mapping has unknown status(es): "
+                f"{sorted(extra)}"
+            )
+        if any(not label for label in self.status_mapping.values()):
+            raise ValueError(f"kanban board {self.board_id!r} status_mapping has blank label(s)")
+        if not self.required_fields:
+            raise ValueError(f"kanban board {self.board_id!r} must declare required_fields")
+        if len(self.required_fields) != len(set(self.required_fields)):
+            raise ValueError(f"kanban board {self.board_id!r} has duplicate required_fields")
+        # verb contract: allowed/forbidden disjoint; wall verbs always forbidden;
+        # allowed may only be grantable verbs (never the wall verbs).
+        allowed = set(self.allowed_agent_verbs)
+        forbidden = set(self.forbidden_agent_verbs)
+        if len(self.allowed_agent_verbs) != len(allowed):
+            raise ValueError(f"kanban board {self.board_id!r} has duplicate allowed_agent_verbs")
+        if len(self.forbidden_agent_verbs) != len(forbidden):
+            raise ValueError(f"kanban board {self.board_id!r} has duplicate forbidden_agent_verbs")
+        overlap = allowed & forbidden
+        if overlap:
+            raise ValueError(
+                f"kanban board {self.board_id!r} verb(s) both allowed and forbidden: "
+                f"{sorted(overlap)}"
+            )
+        wall_missing = _KANBAN_WALL_VERBS - forbidden
+        if wall_missing:
+            raise ValueError(
+                f"kanban board {self.board_id!r} must forbid wall verb(s): {sorted(wall_missing)}"
+            )
+        ungrantable = allowed - _KANBAN_GRANTABLE_VERBS
+        if ungrantable:
+            raise ValueError(
+                f"kanban board {self.board_id!r} allowed_agent_verbs may only grant "
+                f"{sorted(_KANBAN_GRANTABLE_VERBS)}; got disallowed: {sorted(ungrantable)}"
+            )
+        return self
+
+
+class KanbanBoardsConfig(Strict):
+    schema_version: str
+    boards: list[KanbanBoardSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.kanban-boards.v1":
+            raise ValueError("schema_version must be command-center.kanban-boards.v1")
+        board_ids = [b.board_id for b in self.boards]
+        if len(board_ids) != len(set(board_ids)):
+            raise ValueError("duplicate kanban board_ids")
+        return self
+
+
 # ---- content.yaml ----------------------------------------------------------
 # The LinkedIn content pipeline. Claude Code drafts posts onto per-account
 # AppFlowy boards (config/databases.json); a human approves by dragging In Queue

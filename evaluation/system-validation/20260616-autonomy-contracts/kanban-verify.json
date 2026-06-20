@@ -1,0 +1,54 @@
+{
+  "blockers": [],
+  "board_results": [
+    {
+      "blockers": [],
+      "board_id": "llm_station_command_center",
+      "provider": "appflowy",
+      "repo_ids": [
+        "llm_station"
+      ],
+      "snapshot_check": {
+        "reason": "no_board_snapshot_supplied",
+        "status": "NOT_RUN"
+      },
+      "status": "pass"
+    }
+  ],
+  "boards_verified": [
+    "llm_station_command_center"
+  ],
+  "canonical_statuses": [
+    "awaiting_approval",
+    "backlog",
+    "blocked",
+    "done",
+    "in_progress",
+    "ready",
+    "rejected"
+  ],
+  "grantable_verbs": [
+    "add_mission_card",
+    "block_card",
+    "finish_todo",
+    "reject_card",
+    "stage_card",
+    "start_todo"
+  ],
+  "providers_present": [
+    "appflowy"
+  ],
+  "registry_path": "configs/kanban_boards.yaml",
+  "schema_version": "command-center.kanban-verify.v1",
+  "secrets_printed": false,
+  "shared_action_contract": true,
+  "status": "pass",
+  "wall_verbs_forbidden": [
+    "approve_card",
+    "delete_board",
+    "delete_card",
+    "deploy",
+    "merge"
+  ],
+  "writes_performed": false
+}
