@@ -1,0 +1,17 @@
+{
+  "applied_code_changes": false,
+  "drafted_cards": false,
+  "drafted_ids": [],
+  "mode": "observer",
+  "n_failed": 0,
+  "n_findings": 4,
+  "n_sources": 2,
+  "schema_version": "command-center.self-improvement-scan.v1",
+  "status": "observed",
+  "would_draft_ids": [
+    "EXP-scan-code-remove-swallowed-excepti-1f191e01",
+    "EXP-scan-code-refactor-over-long-funct-9188489d",
+    "EXP-scan-stru-split-oversized-modules-3559a76c",
+    "EXP-scan-code-burn-down-todo-fixme-deb-ff05c1f2"
+  ]
+}

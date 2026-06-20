@@ -1674,6 +1674,26 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Phase 4: daily self-improvement commands (observer/draft-only)
+
+- **Operator surface for the existing observer pipeline.** Added
+  `cc self-improvement-scan` / `self-improvement-daily` / `self-improvement-report`
+  over `command_center.improvement.discovery` (the `self_improvement_daily` DAG's
+  pipeline). The scan reads network-free sources, ranks findings, and drafts ONLY
+  `Proposed` experiment cards through the `ObserverCharter`.
+- **Observer/draft-only by design.** `scan`/`report` make zero registry writes;
+  `daily --draft-kanban true` drafts `Proposed` cards (human approval still
+  required before any code change); `daily --apply true` (applying code) is
+  **refused** — `code_apply_not_supported_daily_is_observer_draft_only`. The
+  charter structurally forbids promote/canary/merge/deploy/set_status
+  (`CharterViolation`), so even a buggy scan can't escalate.
+- **Evidence.** `self-improvement-daily.json` records date, findings, drafted
+  card ids, and `applied_code_changes: false`. Drafted cards are always
+  `Proposed`; an approved card becomes a Ledger mission running the
+  branch/worktree/devcontainer/PR loop. 5 hermetic tests.
+- **Next (Phase 6).** Real desktop action-latency evidence (needs a wired sandbox
+  board) → desktop enablement gates; then Phase 8/9 (full-loop demo + docs).
+
 ### 2026-06-20 — Phase 5: safe cross-conversation / project memory
 
 - **Durable memory layer.** `command_center.memory` (store + `MemoryRecord`/
