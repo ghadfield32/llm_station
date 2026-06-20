@@ -1674,6 +1674,28 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Phase 5: safe cross-conversation / project memory
+
+- **Durable memory layer.** `command_center.memory` (store + `MemoryRecord`/
+  `MemoryConfig`) adds the persistent cross-conversation layer the gateway lacked
+  (it kept only an ephemeral per-conversation deque). Scopes: conversation,
+  project, board, user_preference, artifact.
+- **Recall is approval-gated + namespaced + provenanced.** `inject` returns a
+  record only if `approved_by_human`, `inject_policy != never`, not stale, and
+  the scope+subject namespace matches — so unapproved memory is never recalled in
+  another conversation and one repo's project memory can't leak into another.
+  Every recalled record cites its `source_ref`.
+- **Secrets never stored.** `MemoryRecord` rejects secret-bearing values at add
+  time; `source_ref` is required; confidential records must be `redaction_status:
+  redacted`; project/board subjects must be stable-id namespaces. The store is
+  per-deployment runtime state (`generated/memory/`, gitignored), not committed.
+- **No magic thresholds.** Staleness is per-record (`retention_policy:
+  keep_until_superseded` or `expire_after_days:<N>`), not a global constant.
+- **Commands.** `cc memory-add` (pending until `--approved-by`), `cc
+  memory-review`, `cc memory-prune [--apply]`, `cc memory-verify`. 11 tests.
+- **Next (Phase 4).** Productize the daily self-improvement DAG (observer/
+  draft-only, scheduled).
+
 ### 2026-06-20 — Phase 3: generalized repo registration + autonomy gates
 
 - **RepoManifest extended.** Added `kanban_board_id` (binds a repo to a board in

@@ -1,0 +1,23 @@
+schema_version: command-center.memory.v1
+
+# Cross-conversation / project memory store. Records persist outside any single
+# chat and are injected ONLY when human-approved, namespaced by scope+subject,
+# redacted, and citing provenance (source_ref). Secrets are never stored.
+#
+# The store is per-deployment runtime state (like the Ledger), not committed —
+# generated/memory/ is gitignored. Sharing a project memory is a deliberate,
+# separate export, never an automatic commit.
+store_path: generated/memory/store.jsonl
+
+# No durable memory is created automatically from raw chat history. Durable
+# records are added explicitly (cc memory-add) and require human approval before
+# they can be recalled in another conversation.
+auto_durable_from_raw_chat: false
+
+sensitivity_classes:
+  - public
+  - internal
+  - confidential
+
+default_inject_policy: on_subject_match
+default_retention_policy: keep_until_superseded
