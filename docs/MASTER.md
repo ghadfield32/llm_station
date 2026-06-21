@@ -1674,6 +1674,27 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Merge-wall postures: local pre-push guard for private+free repos
+
+- **Why:** GitHub won't allow branch protection / rulesets on a **private repo on a
+  free plan** (verified: betts returns *"Upgrade to GitHub Pro or make this
+  repository public"*; llm_station's ruleset works only because it's public). So a
+  private+free repo can't have a server-side merge wall.
+- **New posture.** `RepoManifest.merge_wall`:
+  - `github_branch_protection` (default) — server-side ruleset/protection (strongest).
+  - `local_pre_push_and_human_merge` — a real local `pre-push` guard blocks direct
+    pushes to protected branches on this machine; the agent stays PR-only
+    (structural, via the action layer); a human merges. **LOWER ASSURANCE** (no
+    server backstop) — recorded as such, never as "branch protection verified".
+- **`cc repo-merge-guard install|verify`** writes/verifies the guard hook (tested:
+  it rejects a `main` push exit 1, allows a feature push exit 0). repo-verify's
+  `branch_protection_verified` gate is generalized to `merge_wall_verified` and is
+  posture-aware.
+- **betts** set to `merge_wall: local_pre_push_and_human_merge` + `auth_mode:
+  github_app` (App verified on betts); guard installed; `merge_wall_verified` PASSES.
+  Remaining betts gates: CODEOWNERS (PR betts#6, merge + pull) and the bounded-loop
+  proof (branch-mission needs external-repo adaptation — next). Tests added.
+
 ### 2026-06-20 — Enabling betts_basketball: App-installed + per-repo CI checks
 
 - **github_app_installed gate now PASSES (verified, not faked).** The user added

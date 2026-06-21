@@ -5,6 +5,23 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## Merge-wall postures (local pre-push guard)
+- WHY 06-20: GitHub blocks branch protection/rulesets on PRIVATE repos on a FREE plan
+  (betts 403 "Upgrade to Pro or make public"; llm_station works because it's PUBLIC). So
+  private+free repos can't have a server-side merge wall.
+- ADD 06-20: RepoManifest.merge_wall (github_branch_protection | local_pre_push_and_human_merge).
+  cli/merge_guard.py: cc repo-merge-guard install|verify writes/verifies a real pre-push hook that
+  rejects pushes to protected branches (tested: main push exit 1, feature exit 0). repo-verify gate
+  renamed branch_protection_verified -> merge_wall_verified, posture-aware.
+- POSTURE 06-20: local_pre_push_and_human_merge = local belt + agent PR-only (structural) + human
+  merge. LOWER ASSURANCE (no server backstop) — recorded as such, NEVER faked as branch protection.
+- BETTS 06-20: merge_wall=local_pre_push_and_human_merge + auth_mode github_app (App verified);
+  guard installed on the local betts checkout; merge_wall_verified PASSES. Tests:
+  test_merge_guard.py (4) + repo-registry posture test.
+- NEXT: CODEOWNERS (betts#6 merge + git pull) + bounded-loop proof (adapt branch-mission for
+  external repos: target-repo file/worktree resolution + betts's real local ci_commands) -> run ->
+  cc repo-enable-autonomy --apply.
+
 ## Enabling betts_basketball (gates)
 - APP 06-20: user added betts to the existing llm-station-command-center App install; VERIFIED
   via read-back (betts-scoped App token reads betts 200). selected_repositories += betts (true,

@@ -92,11 +92,12 @@ def test_verify_blocks_when_github_app_not_installed_for_repo(tmp_path):
 
 
 def test_verify_blocks_when_branch_protection_unverified(tmp_path):
+    # github_branch_protection posture (default): the server-side attestation gates
     raw = _base_autonomy()
     raw["branch_protection_verification"]["status"] = "blocked"
     cfg = _scaffold(tmp_path, autonomy=raw)
     result = repo_registry.run_repo_verify(repo_id="llm_station", config_path=cfg, root=tmp_path)
-    assert "llm_station:branch_protection_verified" in result["blockers"]
+    assert "llm_station:merge_wall_verified" in result["blockers"]
 
 
 def test_enable_autonomy_refuses_when_gates_block(tmp_path):
@@ -140,6 +141,43 @@ def test_external_repo_gates_check_target_not_control_repo(tmp_path):
     g2 = {x["check"]: x["status"] for x in res2["gates"]}
     assert g2["local_path_ref_resolves"] == "BLOCKED"
     assert g2["devcontainer_present"] == "BLOCKED"
+
+
+def test_local_merge_wall_posture_verifies_the_guard(tmp_path):
+    import subprocess
+    from command_center.cli import merge_guard
+    from command_center.schemas import AutonomyConfig, KanbanBoardsConfig
+    control = _scaffold(tmp_path, autonomy=_base_autonomy())
+    cfg = AutonomyConfig.model_validate(yaml.safe_load(control.read_text(encoding="utf-8")))
+    boards = KanbanBoardsConfig.model_validate(yaml.safe_load(
+        (tmp_path / "configs/kanban_boards.yaml").read_text(encoding="utf-8")))
+    boards.boards[0].repo_ids.append("ext")
+    # external repo with devcontainer + codeowners so only the wall gate varies
+    ext = tmp_path / "ext_repo"
+    (ext / ".devcontainer").mkdir(parents=True)
+    (ext / ".devcontainer/devcontainer.json").write_text("{}", encoding="utf-8")
+    (ext / ".github").mkdir()
+    (ext / ".github/CODEOWNERS").write_text("* @ghadfield32\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q", str(ext)], check=True)
+    repo = RepoManifest(**_manifest(
+        repo_id="ext", local_path_ref="env:EXT_PATH",
+        kanban_board_id="llm_station_command_center",
+        merge_wall="local_pre_push_and_human_merge",
+        autonomous_edits_enabled=False, blockers=["onboarding_incomplete"]))
+
+    # no guard installed yet -> the local merge-wall gate BLOCKS (not faked as pass)
+    res = repo_registry.verify_repo(repo=repo, cfg=cfg, boards=boards, root=tmp_path,
+                                    env={"EXT_PATH": str(ext)})
+    g = {x["check"]: x["status"] for x in res["gates"]}
+    assert g["merge_wall_verified"] == "BLOCKED"
+
+    # install the real guard -> the gate PASSES (lower assurance, recorded)
+    merge_guard._hook_path(ext).write_text(merge_guard.guard_hook(["main"]), encoding="utf-8")
+    res2 = repo_registry.verify_repo(repo=repo, cfg=cfg, boards=boards, root=tmp_path,
+                                     env={"EXT_PATH": str(ext)})
+    g2 = {x["check"]: x for x in res2["gates"]}
+    assert g2["merge_wall_verified"]["status"] == "PASS"
+    assert "local_pre_push_and_human_merge" in g2["merge_wall_verified"]["detail"]
 
 
 # ---- schema invariants ------------------------------------------------------

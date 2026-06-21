@@ -124,10 +124,22 @@ def verify_repo(
     gates.append(_gate("github_app_installed",
                        app.status == "verified" and full in app.selected_repositories,
                        f"status={app.status}; selected={full in app.selected_repositories}"))
-    bp = cfg.branch_protection_verification
-    gates.append(_gate("branch_protection_verified",
-                       bp.status == "verified" and full in bp.selected_repositories,
-                       f"status={bp.status}; selected={full in bp.selected_repositories}"))
+    # Merge wall — posture-aware. The default github_branch_protection posture is
+    # the server-side attestation (strongest). The local_pre_push_and_human_merge
+    # posture (private+free repos) verifies a real local pre-push guard is installed
+    # in the target repo; it is recorded as LOWER ASSURANCE, never as server-side
+    # branch protection.
+    if repo.merge_wall == "local_pre_push_and_human_merge":
+        from command_center.cli.merge_guard import verify_guard
+        guard_ok, guard_detail = verify_guard(target_root)
+        gates.append(_gate("merge_wall_verified", guard_ok,
+                           f"local_pre_push_and_human_merge (lower_assurance); {guard_detail}"))
+    else:
+        bp = cfg.branch_protection_verification
+        gates.append(_gate("merge_wall_verified",
+                           bp.status == "verified" and full in bp.selected_repositories,
+                           f"github_branch_protection; status={bp.status}; "
+                           f"selected={full in bp.selected_repositories}"))
 
     gates.append(_gate("no_runtime_secrets_in_container",
                        repo.secret_policy == "no_runtime_secrets_inside_container",

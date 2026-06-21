@@ -15,6 +15,24 @@ states the boundaries and why each one holds.
    deletion, empty bypass list). The GitHub App can push a feature branch and
    open a PR; it **cannot merge**.
 
+### Merge-wall postures (`RepoManifest.merge_wall`)
+
+The merge wall above is the strongest posture, but GitHub does **not** offer
+branch protection / rulesets for a **private repo on a free plan**. Each repo
+declares how its merge wall is enforced:
+
+- **`github_branch_protection`** (default, strongest) — server-side ruleset /
+  branch protection enforces "no merge without PR + Code Owner review", even if
+  the agent misbehaves. Requires a public repo or a paid plan for private repos.
+- **`local_pre_push_and_human_merge`** (lower assurance) — for a private repo on a
+  free plan. Enforcement = the global agent discipline (the action layer has no
+  `merge` verb; direct `main` pushes are refused) **plus** a local `pre-push` guard
+  (`cc repo-merge-guard`) that blocks direct pushes to protected branches on this
+  machine, **plus** a human doing the merge. There is **no server-side backstop**:
+  the App token technically *could* push `main` if the agent code were buggy or
+  compromised. This posture is chosen deliberately, per repo, and is always
+  recorded as `lower_assurance` — never reported as "branch protection verified".
+
 ## What the agent can and cannot do
 
 | Can | Cannot |
