@@ -1,0 +1,91 @@
+schema_version: command-center.frontier-router-providers.v1
+
+# Paid frontier-API BACKUP lane (separate from the local-only LiteLLM gateway). For open-weight
+# models too large to run locally (GLM-5.2, Kimi K2). This file is PURE METADATA — it executes
+# nothing. Naming `secret_env: OPENROUTER_API_KEY` here is the env var to read at runtime, NOT a
+# key in .env (the local-only contract + check_forbidden_providers stay intact). The lane is OFF
+# by default; turning it on is a deliberate, budgeted operator decision (see
+# configs/frontier-router-budgets.yaml + docs/MASTER.md "Frontier router backup lane"). Prices
+# are public signals as of 2026-06-20; the runner ranks providers by ESTIMATED cost at run time
+# (never a hardcoded "cheapest"). Router-backed models are NEVER local incumbents.
+
+providers:
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    api_style: openai_compatible
+    secret_env: OPENROUTER_API_KEY
+    default_policy: disabled_until_budgeted
+    data_policy_required: true
+
+  z_ai_direct:
+    base_url: https://api.z.ai/api/coding/paas/v4
+    api_style: anthropic_compatible
+    secret_env: ZAI_API_KEY
+    default_policy: disabled_until_budgeted
+    data_policy_required: true
+
+# Prices drift — they are dated public signals, not frozen truth. `router_price_audit`
+# flags any candidate whose price_observed_at is older than price_freshness.max_age_days;
+# it NEVER auto-overwrites a price (auto_update is contract-refused).
+price_freshness:
+  max_age_days: 14
+  stale_action: warn_in_scan
+  auto_update: false
+
+models:
+  glm-5.2:                       # local_lane stays frontier_watch (does_not_fit 24/16/56 GB)
+    local_lane: frontier_watch
+    router_candidates:
+      - provider: openrouter
+        model: z-ai/glm-5.2
+        input_usd_per_mtok: 1.20
+        output_usd_per_mtok: 4.10
+        context_tokens: 1000000
+        price_source: public_provider_page
+        price_observed_at: "2026-06-20"
+        price_is_drift_prone: true
+      - provider: z_ai_direct
+        model: glm-5.2
+        input_usd_per_mtok: 1.40
+        cached_input_usd_per_mtok: 0.26
+        output_usd_per_mtok: 4.40
+        context_tokens: 200000
+        price_source: public_provider_page
+        price_observed_at: "2026-06-20"
+        price_is_drift_prone: true
+
+  kimi-k2:
+    local_lane: frontier_watch
+    router_candidates:
+      - provider: openrouter
+        model: moonshotai/kimi-k2
+        input_usd_per_mtok: 0.57
+        output_usd_per_mtok: 2.30
+        context_tokens: 131000
+        price_source: public_provider_page
+        price_observed_at: "2026-06-20"
+        price_is_drift_prone: true
+
+  kimi-k2-thinking:
+    local_lane: frontier_watch
+    router_candidates:
+      - provider: openrouter
+        model: moonshotai/kimi-k2-thinking
+        input_usd_per_mtok: 0.60
+        output_usd_per_mtok: 2.50
+        context_tokens: 262000
+        price_source: public_provider_page
+        price_observed_at: "2026-06-20"
+        price_is_drift_prone: true
+
+  kimi-k2.7-code:
+    local_lane: frontier_watch
+    router_candidates:
+      - provider: openrouter
+        model: moonshotai/kimi-k2.7-code
+        input_usd_per_mtok: 0.612
+        output_usd_per_mtok: 3.069
+        context_tokens: 262000
+        price_source: public_provider_page
+        price_observed_at: "2026-06-20"
+        price_is_drift_prone: true

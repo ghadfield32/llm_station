@@ -58,6 +58,13 @@ _CONTROL_PLANE_MARKERS = (
     "branch_protection", "codeowners",
 )
 
+# The live local-model A/B harness target_ref (kept in sync with
+# live_model_benchmark.TARGET_REF). A MODEL card pointing here MUST carry runnable
+# parameters.model_benchmark — otherwise it is an inert card that validates clean but can
+# never run. (Pull-to-verify proposals deliberately target a different, non-harness ref.)
+LIVE_MODEL_BENCHMARK_TARGET_REF = "command_center.improvement.live_model_benchmark"
+_MODEL_BENCHMARK_REQUIRED = ("role", "suite", "suite_path", "baseline_model", "candidate_model")
+
 
 class MetricDefinition(Strict):
     name: str
@@ -243,6 +250,22 @@ class ExperimentDefinition(Strict):
                 "raw positive and negative evidence must be preserved"
             )
 
+        # A MODEL card that targets the LIVE benchmark harness must carry a runnable
+        # parameters.model_benchmark, or it is an inert card that validates clean yet can
+        # never run (the harness raises without it). This makes the inert-card defect fail
+        # loud at validate/draft time. Pull-to-verify proposals target a different ref and
+        # are intentionally exempt (you cannot benchmark an un-pulled model).
+        if (self.target_type == TargetType.MODEL
+                and self.target_ref == LIVE_MODEL_BENCHMARK_TARGET_REF):
+            mb = self.parameters.get("model_benchmark")
+            if not isinstance(mb, dict) or any(not mb.get(k) for k in _MODEL_BENCHMARK_REQUIRED):
+                raise ValueError(
+                    f"experiment '{self.experiment_id}' targets the live model benchmark "
+                    f"but parameters.model_benchmark is missing/incomplete (needs "
+                    f"{list(_MODEL_BENCHMARK_REQUIRED)}); an unrunnable MODEL card must not "
+                    "validate. (The Ollama endpoint via base_url/base_url_env is resolved and "
+                    "enforced by the harness at run time.)")
+
         # Control-plane targets (approval / Ledger / GitHub wall) need elevated human review.
         ref = self.target_ref.lower()
         if any(marker in ref for marker in _CONTROL_PLANE_MARKERS):
@@ -401,6 +424,56 @@ class ModelBenchmarksConfig(Strict):
     def _checks(self):
         if not self.suites:
             raise ValueError("model benchmark config must define at least one suite")
+        return self
+
+
+# ---------------------------------------------------------------------------
+# model-serving-benchmarks.yaml — SERVING evaluation (distinct from QUALITY above).
+# A model can be the smartest and still lose if it is unusably slow for the workflow:
+# quality_eval != serving_eval. Each scenario declares a realistic Command Center workload
+# (input/output token sizes) and a latency SLO; the harness sweeps request rates and reports
+# the OPERATING POINT (highest sustainable rate under the p90 SLO). tokens/sec alone is never
+# a gate. (See serving_slo.py for the pure analysis; serving_benchmark.py for measurement.)
+# ---------------------------------------------------------------------------
+
+class ServingScenario(Strict):
+    input_tokens_p50: int = Field(ge=1)
+    input_tokens_p90: int = Field(ge=1)
+    output_tokens_p50: int = Field(ge=1)
+    output_tokens_p90: int = Field(ge=1)
+    slo_p90_ttft_seconds: float = Field(gt=0)   # time-to-first-token p90 ceiling
+    slo_p90_ttlt_seconds: float = Field(gt=0)   # time-to-last-token p90 ceiling
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.input_tokens_p90 < self.input_tokens_p50:
+            raise ValueError("input_tokens_p90 must be >= input_tokens_p50")
+        if self.output_tokens_p90 < self.output_tokens_p50:
+            raise ValueError("output_tokens_p90 must be >= output_tokens_p50")
+        if self.slo_p90_ttlt_seconds < self.slo_p90_ttft_seconds:
+            raise ValueError("slo_p90_ttlt_seconds must be >= slo_p90_ttft_seconds")
+        return self
+
+
+class ServingBenchmarksConfig(Strict):
+    schema_version: str
+    scenarios: dict[str, ServingScenario]
+    # request-rate sweep points (concurrent in-flight requests): single -> saturation.
+    concurrency_sweep: list[int] = Field(default_factory=lambda: [1, 2, 4, 8, 16])
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.model-serving-benchmarks.v1":
+            raise ValueError(
+                "schema_version must be command-center.model-serving-benchmarks.v1")
+        if not self.scenarios:
+            raise ValueError("serving benchmark config must define at least one scenario")
+        if not self.concurrency_sweep:
+            raise ValueError("concurrency_sweep must define at least one rate point")
+        if any(c < 1 for c in self.concurrency_sweep):
+            raise ValueError("concurrency_sweep points must be >= 1")
+        if len(self.concurrency_sweep) != len(set(self.concurrency_sweep)):
+            raise ValueError("concurrency_sweep has duplicate points")
         return self
 
 

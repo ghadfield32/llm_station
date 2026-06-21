@@ -1,0 +1,28 @@
+schema_version: command-center.framework-evals.v1
+
+# External code-eval frameworks as SUPPORTING evidence only (trust is contract-pinned to
+# supporting_evidence_only — they can never be a promotion gate; the repo role suites decide).
+# They run against the local Ollama OpenAI-compatible endpoint, are OFF by default, and are
+# bounded by a sample budget (full runs are minutes-hours on a 24 GB card). Priority order:
+# EvalPlus first (execution-based pass@1), then BigCodeBench (realistic function-call tasks).
+
+frameworks:
+  evalplus:
+    enabled: false
+    cli_command: evalplus.evaluate
+    backend: openai_compatible
+    base_url_env: OLLAMA_OPENAI_BASE_URL          # e.g. http://localhost:11434/v1
+    sample_budget: 20
+    informs_role: coder
+    trust: supporting_evidence_only
+    datasets: [humaneval_plus, mbpp_plus]
+
+  bigcodebench:
+    enabled: false
+    cli_command: bigcodebench.evaluate
+    backend: openai_compatible
+    base_url_env: OLLAMA_OPENAI_BASE_URL
+    sample_budget: 30
+    informs_role: coder
+    trust: supporting_evidence_only
+    subset: hard

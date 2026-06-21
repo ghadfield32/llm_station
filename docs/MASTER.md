@@ -177,7 +177,13 @@ The config files and their contracts:
 
 | File | Governs |
 |---|---|
-| `configs/models.yaml` | which model each role maps to (local-only, ranked candidates) |
+| `configs/models.yaml` | which model each role maps to (local-only, ranked candidates) + the `scout` source list |
+| `configs/model-scout-curated-openweight.yaml` | strict, installed-and-digest-joined scored open-weight candidates (promotion-grade provenance) |
+| `configs/model-scout-watchlist.yaml` | un-pulled frontier (GLM-5.2/Kimi) + pull-to-verify models, tracked by name with honest dual-budget fit (context, not promotion evidence) |
+| `configs/model-benchmarks.yaml` | role-specific local A/B **quality** suites + metric policy + the "deep enough" methodology bar |
+| `configs/model-serving-benchmarks.yaml` | **serving** SLO scenarios (TTFT/ITL/TTLT + operating point) — `quality_eval != serving_eval` |
+| `configs/frontier-router-providers.yaml` | paid frontier-API backup lane: provider/model pricing metadata (off by default; not the local lane) |
+| `configs/frontier-router-budgets.yaml` | hard caps + redaction + blocked-payload gate for the frontier-router lane (`enabled: false`) |
 | `configs/judges.yaml` | judge arrays per stage, cross-provider pairing, budgets |
 | `configs/gates.yaml` | L0–L4 risk/approval policy |
 | `configs/environments.yaml` | one environment per activity, isolation rules |
@@ -474,12 +480,206 @@ Remaining order:
    evidence artifacts.
 3. Start Mission 2 next: typed Ledger routing artifacts.
 
-### 5.4 Open-weight model discovery and benchmark loop
+### 5.4 Open-weight model evaluation — discover → fit → benchmark → promote (CANONICAL)
 
-This is now the ordered path for finding better local/open-weight LLMs without
-letting a leaderboard or scheduled scan change production routing.
+**This is the single canonical section for "how Command Center discovers, fit-checks,
+evaluates, and promotes a local model."** It is local-first, propose-only, and human-gated:
+discovery may only draft a `Proposed` card; only a human moves anything to Canary or
+Promoted; no provider keys; no fabricated fit or score. Every live number comes from the
+repo's own runs (`cc model-scout`, the `model_baselines`/`model_candidate_audit` harnesses),
+never a vendor leaderboard. (The legacy detail below is retained; the 2026-06-20 update is the
+current source of truth.)
 
-What is done:
+#### 2026-06-20 update — watchlist, dual-budget fit, frontier-watch, runnable cards, DAG wiring
+
+The discovery layer previously could only see a model **already installed locally** (the
+`curated-openweight` source fails closed unless the exact tag/digest/quant/param is present)
+or one surfaced by a keyed Artificial Analysis call. So it could not "check on GLM/Kimi and
+implement them when found." That gap is now closed end-to-end.
+
+**The four model lanes** (a model only earns the next lane by passing the prior gate):
+
+| Lane | Purpose | Examples | Runs here? | DAG action |
+|---|---|---|---|---|
+| **Installed local** | benchmark what is already pulled | `qwen3:30b`, `qwen3-coder:30b`, `devstral:24b`, `qwen3:8b` | yes | full local quality + serving eval |
+| **Laptop-fit candidate** | models worth pulling next | GLM 9B-class, Qwen 14B/30B-class, Gemma/Phi/Devstral-sized, `gpt-oss-20b` | usually | propose pull → benchmark → compare |
+| **Frontier-watch** | huge models that shape strategy but cannot fit | GLM-5.2, Kimi K2, DeepSeek-large MoEs | no | record facts; **never** a local benchmark |
+| **External-framework** | popular eval signals | Aider, EvalPlus, BigCodeBench, LiveBench, lm-eval | partly | attach signal + optional local runner |
+| **Frontier-router backup** | budgeted paid-API escalation for too-big models | GLM-5.2, Kimi K2 via OpenRouter / Z.ai | no (external) | **off by default**; preflight + budget + redaction gate, then *optional* call |
+
+The clean principle: **frontier models inform strategy; laptop-fit models get pulled; installed
+models get benchmarked; only benchmarked models become incumbents; only human-approved
+incumbents get promoted.** A model is never promoted for trending — it must pass the local role
+**quality** suite, the **serving** SLO check, the **fit** gate, and the **human** wall.
+
+The implementation:
+
+1. **Watchlist source** (`configs/model-scout-watchlist.yaml`, `ModelWatchlistConfig`) tracks
+   open-weight models **by name without installing them**, in two tiers:
+   - `frontier_watch` — real flagships too large for this hardware. **Track-as-context only;
+     never benchmarked locally.** Seeded with the verified landscape:
+     - **GLM-5.2** (Z.ai) is REAL and is the current flagship: **~744B total / ~40B active
+       MoE, ~1M context, MIT**. Full weights ~1.51 TB; the smallest Unsloth dynamic GGUF is
+       still ~217 GB (1-bit) → ~245 GB (2-bit) → ~420 GB (Q4). It needs a 256 GB
+       unified-memory class machine; on this 24 GB VRAM + 32 GB RAM box it is **~4–18× too
+       large** and is cloud-only on Ollama (`glm-5.2:cloud`).
+     - **Kimi K2** (~1T / 32B MoE, ~540–584 GB Q4), **DeepSeek-V3** (671B/37B), **Qwen3-235B-
+       A22B** (235B/22B), **GLM-4.5-Air** (106B/12B, ~60–73 GB Q4 — even this exceeds the full
+       56 GB combined budget). All NO on both budgets.
+   - `pull_to_verify` — plausibly-fitting models not yet pulled (seed: **gpt-oss-20b**,
+     21B/3.6B MoE, Apache-2.0, ~14 GB). The scan drafts a **propose-only "ollama pull +
+     benchmark"** card for the declared role; it never auto-pulls.
+2. **Dual-budget, honest fit + named verdicts.** `configs/environments.yaml` now declares the
+   **16 GB `cc-dev-5080`** laptop budget alongside the 24 GB `cc-worker-4090`, and the scout
+   reports fit for **both**, plus a **256 GB-class unified-memory reference** (where the biggest
+   dynamic quants run, slowly; promotion-disallowed). Each watchlist record gets named
+   `runnable_targets` verdicts — `does_not_fit` / `ram_only_frontier_experiment` /
+   `unknown_pull_to_verify`. When a record declares a **verified `local_artifact`** (e.g.
+   GLM-5.2's Unsloth dynamic 2-bit at **~238 GB**) that real size is authoritative; otherwise
+   `vram.weights_only_verdict` uses a conservative params×bpw **lower bound** — either way a
+   frontier flagship is a decisive `does_not_fit` on 24/16 GB and `ram_only_frontier_experiment`
+   only at 256 GB, and the verdict is never a fabricated `FITS`. `vram.py` also records MoE expert
+   counts and clamps `max_ctx_fits` to the model's native context.
+3. **The daily DAG now sees these.** `model_scout.scan_feed_records` is the single feed shared
+   by the CLI (`make model-scout-scan`) and the Airflow DAG; the DAG's model pillar fetch now
+   calls it (the old "phantom upstream ingestion DAG" is real for this pillar). `frontier_watch`
+   records become low-priority **track-as-context** findings (DOCUMENTATION target, never a
+   local benchmark); `pull_to_verify` records become **propose-pull** findings.
+4. **Discovered cards are runnable (no longer inert).** When the scout can bind a candidate to
+   a role incumbent, the feed record carries a resolved `model_benchmark` block, and
+   `Finding.to_experiment_definition` drafts a **runnable** live-A/B card
+   (role/suite/baseline/candidate/endpoint/fit-derived context). The contract now **fails loud**
+   on a MODEL card that targets the live harness without runnable params (an inert card can no
+   longer validate clean); a paramless candidate is retargeted to a `model_benchmark_needed`
+   proposal. Canary/promotion remain human-only.
+5. **Source hardening.** `scout.sources` is validated against `KNOWN_SCOUT_SOURCES` at
+   `make validate` (a typo is rejected, not a silent skip); an Artificial Analysis `ollama_tag`
+   is verified against the local install before it can ever draft a runnable benchmark.
+
+**Methodology — the "deep enough" bar.** The role suites score quality well, but the runtime
+side follows the discipline documented in `configs/model-benchmarks.yaml`: tokens/sec alone is
+a *fake* metric; latency is three numbers (**TTFT / ITL / TTLT**, all derivable from Ollama's
+`/api/generate` timings); the operating point is the request rate where **p90** latency still
+meets the SLO (predict via the three-nineties rule `p90 TTLT ≈ p90 TTFT + p90 ITL × output`).
+A suite gates a promotion only at ≥8 labeled cases/role, execution-based or judged scoring for
+coder/judge, decoupled per-tag scoring, and `require_significance=true` with a pre-registered
+MDE — otherwise it is context, not a gate.
+
+**Serving-performance benchmark — `quality_eval != serving_eval`.** A model can be the smartest
+and still lose if it is unusably slow. `configs/model-serving-benchmarks.yaml`
+(`ServingBenchmarksConfig`) declares realistic workloads (`repo_triage` / `code_patch` /
+`long_repo_reader`) with p90 SLOs; `serving_benchmark.parse_ollama_timings` derives **TTFT /
+ITL / TTLT** from Ollama's `/api/generate` timings; `serving_slo.py` computes p50/p90/p95/p99,
+the three-nineties prediction, and the **operating point** = the highest request rate whose p90
+still meets the SLO. `serving_load_driver.py` is the implemented concurrency-sweep executor
+(injectable measure_fn + clock, fully unit-tested without live Ollama); a real run binds it via
+`build_measure_fn`. Full detail:
+[model-serving-benchmarks.md](model-serving-benchmarks.md). Serving **engines** (vLLM → SGLang →
+TensorRT-LLM) are a separate `runtime` axis — measured experiments behind the same human wall,
+**not** quality signals; Ollama stays the default, vLLM is the first throughput experiment.
+
+**Popularized-framework integration (priority order).** Evaluate *through* standard frameworks
+without leaderboard-chasing — popular frameworks are **signal + optional local runner; the repo
+harness is the final gate**:
+
+1. **EvalPlus** (HumanEval+/MBPP+, Apache-2.0, Ollama OpenAI endpoint) — first **local runner**;
+   replaces the substring coder check with execution-based pass@1.
+2. **BigCodeBench** — more realistic code tasks (diverse function calls, ~1,140 tasks); fits the
+   repo-agent/code-change use case.
+3. **lm-evaluation-harness** — general academic runner (local/OpenAI-compatible, esp. via vLLM).
+4. **LiveBench** — contamination-resistant **discovery signal** (objective, refreshed).
+5. **Aider polyglot** — keep as a coding discovery/ranking signal (not the only truth).
+6. **SWE-bench** — heavier; milestone/periodic eval, not daily; do not run it locally by default
+   (agent scaffold + ~120 GB Docker, contaminated). **Skip** OpenCompass/HELM (redundant; HELM
+   frozen) and the dead HF Open LLM Leaderboard.
+
+EvalPlus + BigCodeBench are now **scaffolded** (`configs/framework-evals.yaml` +
+`FrameworkEvalsConfig` + `improvement/frameworks/{evalplus,bigcodebench}_runner.py`): config,
+result parsers (pass@1), and a fail-soft availability gate are unit-tested; `trust` is
+contract-pinned to `supporting_evidence_only` (a framework result can never gate a promotion —
+`is_decision_gate()` is always False). They are off by default and never auto-launch the heavy
+tool — enabling = install the tool + set `enabled: true` + pass an executor.
+
+**Frontier-router backup lane (paid APIs, off by default).** Some open-weight frontier models
+(GLM-5.2, Kimi K2) are too large for the local hardware but useful as external reference models.
+They stay `frontier_watch` for fit, and may *optionally* enter `frontier_router_backup` for
+**budgeted** API evaluation — they are **never** local incumbents and a router result can never
+promote a local model or bypass the local/quality/serving/canary/human gates. Metadata lives in
+`configs/frontier-router-providers.yaml` (OpenRouter + Z.ai pricing, `disabled_until_budgeted`)
+and `configs/frontier-router-budgets.yaml` (`enabled: false`, monthly/run/request caps,
+mandatory redaction, blocked-payload classes). `improvement/router_cost.py` estimates cost and
+ranks providers by the *cheapest eligible* route per workload (data-derived, never hardcoded);
+`improvement/frontier_router_eval.py` runs a **fail-closed preflight** — lane-enabled → task
+class → known model/provider → payload redacted → API key present → cost under the per-request
+cap — and **makes no live call in this build**. Router-backed runs serve only
+`frontier_reference_eval`, `long_context_comparison`, `local_failure_fallback`, and
+`external_framework_calibration`. Full lane spec is below in this doc.
+
+**The local-only contract is intact.** `check_forbidden_providers` still forbids
+`OPENROUTER_API_KEY` / `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in `.env` / process env / compose
+and forbids any cloud route in `models.yaml` / the LiteLLM config — and still **passes**,
+because the router configs are pure metadata (no key added) and the lane makes no call.
+**Enabling real egress is a deliberate, separate operator decision:** set the provider key,
+reconcile `check_forbidden_providers` to treat the router-lane keys as an explicit exception
+(distinct from the local lane), then run a tiny budgeted smoke test. Until then the lane is
+documented scaffolding, not a live capability.
+
+**External note (not model-eval):** Google's **ARD** (Agentic Resource Discovery, `ai-catalog.json`
++ registries) is a *tool/agent* discovery standard, adjacent to this model-discovery work and to
+the repo's existing `configs/capabilities.yaml` (ARD-style internal capability metadata). It is
+routed to the external-idea-evaluation loop ([§5.2](#52-external-ai-agent-idea-intake--broad-prompt-first)),
+not the model-eval core.
+
+#### Frontier router backup lane (full spec)
+
+Some open-weight frontier models are too large for the local hardware targets but still useful
+as external reference models. These models remain in `frontier_watch` for fit purposes and may
+optionally enter `frontier_router_backup` for budgeted API evaluation.
+
+Router-backed models are never local incumbents. They are used only for: long-context
+comparison · local failure fallback · frontier reference evaluation · external framework
+calibration.
+
+Every router-backed run must pass, in order (fail-closed, no silent fallback):
+
+1. lane enabled (`budgets.default.enabled`) — **false by default**,
+2. task class in `allowed_task_classes`,
+3. model + provider known in `frontier-router-providers.yaml`,
+4. payload redaction (`require_redaction` is always true),
+5. provider API key present,
+6. token preflight estimate under the per-request cap,
+7. post-run cost reconciliation when the provider returns real usage (the estimate is never
+   overwritten; missing usage fails when `fail_on_missing_usage`).
+
+A router-backed result can inform model strategy, but it cannot promote a local model by itself
+and cannot bypass the local benchmark, serving benchmark, canary, or human approval gates. In
+this build `frontier_router_eval.call_frontier` runs the preflight and then **refuses to make a
+live call** — enabling real egress requires reconciling `check_forbidden_providers` (which
+forbids the provider keys by design) plus an explicit operator opt-in and a tiny budgeted smoke
+test. Provider pricing is a public signal; the cheapest *eligible* route is computed per
+workload, never hardcoded.
+
+**Operator commands (all read-only / no egress):**
+
+- `make frontier-router-dry-run MODEL=glm-5.2 IN=120000 OUT=8000` — preview cost + policy
+  verdict (`live_call: false`), even while the lane is disabled. Cheapest eligible provider if
+  `PROVIDER=` is omitted.
+- `make frontier-router-price-audit` — flag any provider price whose `price_observed_at` is
+  older than `price_freshness.max_age_days` (default 14d). Prices are dated public signals;
+  `auto_update` is **contract-refused** — stale prices are surfaced for a human, never patched.
+- `make frontier-router-egress-check` — the explicit egress reconciliation:
+  `check_forbidden_providers --allow-frontier-router-egress`. It permits the router-lane keys
+  (`OPENROUTER_API_KEY` / `ZAI_API_KEY`) **only** when `frontier-router-budgets.yaml` is
+  `enabled` with redaction + usage accounting; the local LiteLLM lane stays cloud-free in both
+  modes, and `OPENAI`/`ANTHROPIC` keys are never permitted. Default `make validate` /
+  `cc validate` is unchanged and stays strict (`forbidden-providers: PASS`).
+
+The deliberate enablement sequence stays: dry-run → price-audit → `make frontier-router-egress-check`
+(with the key set + budget enabled) → a tiny budgeted smoke test (≤$0.10, ≤2k in / 500 out, no
+private repo content) whose first goal is to verify usage/cost/latency/refusal accounting, not
+"is the model smart."
+
+What is done (legacy detail):
 
 1. `model-scout` now emits an open-weight-only candidate set by default. A source
    row is kept only when it has explicit open-weight evidence or is a local
@@ -689,32 +889,42 @@ Deep live audit evidence:
   candidate artifacts by hash. This is evidence that the harness works at the
   lower context, not evidence to canary or promote Devstral.
 
-Remaining order:
+Remaining order (2026-06-20, after the watchlist/fit/DAG work above):
 
-1. Treat the Devstral lower-context coder result as `revise`, not promote. The
-   next useful Devstral work is richer coder fixtures plus more repetitions only
-   if there is a real hypothesis for a narrower specialization.
-2. If 64k is required, add or ingest another scored open-weight source whose
-   exact installed candidate fits the 64k machine budget.
-3. Increase incumbent baseline repetitions according to a declared precision or
-   minimum-detectable-change plan derived from pilot variance and resource
-   budget. If pilot evidence is insufficient, record the result as inconclusive.
-4. Debug structured-output role behavior as its own Proposed experiment:
-   compare prompt wording, Ollama JSON mode behavior, role model, and context
-   settings on synthetic/public cases only. Do not add a parser fallback or
-   accept raw prose for JSON-scored cases; a malformed or empty response remains
-   a failed sample.
-5. Repair chat/planner/judge prompt-format contracts or role prompts before
-   using their current benchmark pass rates for promotion decisions; the audit
-   shows malformed or empty structured output dominates several roles.
-6. Register any future live model experiment against
-   `command_center.improvement.live_model_benchmark`; run baseline, candidate,
-   and independent verification on identical fixtures.
-7. If verified, manually start a canary with `make models-canary`, compare
-   canary telemetry against the preregistered plan, then manually promote or
-   roll back.
-8. Keep Mission 2 routing artifacts separate: model discovery can inform
-   routing, but it does not replace the typed Ledger route-decision work.
+1. **Wire the three latency numbers.** Record TTFT / ITL / TTLT in
+   `live_model_benchmark.measure` from Ollama's `/api/generate` timings (TTFT ≈
+   `load_duration + prompt_eval_duration`; ITL ≈ `eval_duration / eval_count`; TTLT ≈
+   `total_duration`) and add them as supporting metrics to each suite, updating the
+   metric-audit expected sample counts. This is the highest-value methods deepening.
+2. **Add EvalPlus as a code-execution coder runner** (new `EvalPlusHarness` in `HARNESSES`,
+   shelling to the `evalplus` CLI against the Ollama OpenAI endpoint in an isolated step,
+   parsing pass@1 into `MeasureResult`). Specify a sampling budget (subset + n) — full
+   HumanEval+/MBPP+ is minutes–hours per 20–30B model on a 24 GB card. Then optional
+   `lighteval` (generative tasks via the LiteLLM backend) as a general harness.
+3. **Add a live registry/HF discovery source** so genuinely new models are found by name
+   (recent open-weight releases filtered by license/task), feeding the watchlist's
+   `pull_to_verify` tier. Propose-only: never auto-pull, never edit `models.yaml`.
+4. **Make significance mandatory for model promotions** (`StatisticalPlan.require_significance`
+   = true + pre-registered MDE) and grow each suite to ≥8 cases with decoupled per-tag scoring;
+   today co-tagged metrics share one boolean and live suites are pilot-grade.
+5. **Enforce `canary_required` at the promote transition** and add the Ollama model digest to
+   the live-benchmark equivalence key so a silently re-pulled/re-quantized tag invalidates
+   equivalence.
+6. **pull_to_verify follow-through:** when a `pull_to_verify` candidate (e.g. gpt-oss-20b) is
+   pulled, add a `curated-openweight` record (digest join) so it returns as a runnable
+   `model_scout_candidate`; canary tool-call template behavior before any chat/planner use
+   (the qwen3-coder XML-leak history applies to every new tool-using model).
+7. **Frontier flagships stay track-as-context.** GLM-5.2 / Kimi K2 / DeepSeek-V3 are recorded
+   for awareness only; reaching their quality means a hosted API, which is outside this
+   local-only, no-provider-keys pipeline. Re-tier to `pull_to_verify` only if a genuinely
+   fitting variant/quant appears (and prove it with the weights-only bound first).
+8. Keep Mission 2 routing artifacts separate: model discovery can inform routing, but it does
+   not replace the typed Ledger route-decision work.
+
+Historical evidence from the earlier pilot (incumbent baselines, the Devstral lower-context
+`revise` result, deep-audit latencies, specific digests/contexts) lives in the change log
+(§14) and under `data/improvement/` and `generated/`; it is dated pilot evidence, not current
+production guidance.
 
 ### 5.5 Whole-system validation prompt
 

@@ -3,6 +3,12 @@ from .base import Strict, RiskTier, Decision, Provider, EnvKind
 from .contracts import (
     ModelCandidate, ModelRegistry, ExecutorSpec,
     CuratedModelScoutConfig,
+    WatchlistBenchmark, WatchlistLocalArtifact, ModelWatchlistRecord, ModelWatchlistConfig,
+    FrontierRouterProvider, FrontierRouterCandidate, FrontierRouterModel,
+    FrontierRouterPriceFreshness,
+    FrontierRouterProvidersConfig, FrontierRouterBudgetPolicy, FrontierRouterBudgetsConfig,
+    FrameworkEvalSpec, FrameworkEvalsConfig,
+    KNOWN_SCOUT_SOURCES,
     JudgeSpec, JudgeStage, JudgeConfig,
     TierPolicy, GatesConfig,
     EnvironmentSpec, EnvironmentsConfig,
@@ -32,6 +38,10 @@ from .contracts import (
 CONFIG_CONTRACTS = {
     "configs/models.yaml": ModelRegistry,
     "configs/model-scout-curated-openweight.yaml": CuratedModelScoutConfig,
+    "configs/model-scout-watchlist.yaml": ModelWatchlistConfig,
+    "configs/frontier-router-providers.yaml": FrontierRouterProvidersConfig,
+    "configs/frontier-router-budgets.yaml": FrontierRouterBudgetsConfig,
+    "configs/framework-evals.yaml": FrameworkEvalsConfig,
     "configs/judges.yaml": JudgeConfig,
     "configs/gates.yaml": GatesConfig,
     "configs/environments.yaml": EnvironmentsConfig,
@@ -60,6 +70,7 @@ from ..improvement.schema import (  # noqa: E402
     DiscoveryConfig,
     ImprovementConfig,
     ModelBenchmarksConfig,
+    ServingBenchmarksConfig,
 )
 
 CONFIG_CONTRACTS["configs/improvement.yaml"] = ImprovementConfig
@@ -70,3 +81,4 @@ CONFIG_CONTRACTS["configs/improvement-targets.yaml"] = ImprovementConfig
 # so no scan decision is an inline literal.
 CONFIG_CONTRACTS["configs/discovery.yaml"] = DiscoveryConfig
 CONFIG_CONTRACTS["configs/model-benchmarks.yaml"] = ModelBenchmarksConfig
+CONFIG_CONTRACTS["configs/model-serving-benchmarks.yaml"] = ServingBenchmarksConfig

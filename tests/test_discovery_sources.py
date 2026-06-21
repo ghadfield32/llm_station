@@ -154,6 +154,116 @@ def test_model_registry_skips_unverified_model_scout_record():
     assert ModelRegistryScanner(lambda: feed).scan() == []
 
 
+def test_frontier_watch_is_track_as_context_never_a_local_benchmark():
+    feed = [{
+        "record_type": "frontier_watch", "tier": "frontier_watch", "model": "GLM-5.2",
+        "model_family": "glm", "release_id": "GLM-5.2", "open_weight": True,
+        "open_weight_evidence": "MIT on HF", "license": "MIT",
+        "parameter_count_b": 744.0, "fit_24gb": "NO @ 24GB (...)", "fit_16gb": "NO @ 16GB (...)",
+        "source_model_url": "https://hf/zai-org/GLM-5.2", "notes": "track-as-context",
+    }]
+    findings = ModelRegistryScanner(lambda: feed).scan()
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.suggested_target_type.value == "documentation"   # never MODEL
+    assert "frontier-watch" in f.target_ref
+    assert f.target_ref != "command_center.improvement.live_model_benchmark"
+    assert "do not benchmark locally" in f.claim
+
+
+def test_model_pull_candidate_proposes_pull_not_a_live_run():
+    from command_center.improvement.discovery.sources import MODEL_PULL_TARGET_REF
+    feed = [{
+        "record_type": "model_pull_candidate", "tier": "pull_to_verify",
+        "model": "gpt-oss-20b", "ollama_tag": "gpt-oss:20b", "open_weight": True,
+        "open_weight_evidence": "Apache-2.0 on HF", "license": "Apache-2.0",
+        "candidate_roles": ["planner"], "fit_24gb": "unknown - pull to verify",
+        "fit_16gb": "unknown - pull to verify", "source_model_url": "https://hf/openai/gpt-oss-20b",
+    }]
+    findings = ModelRegistryScanner(lambda: feed).scan()
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.suggested_target_type.value == "model"
+    assert f.target_ref == MODEL_PULL_TARGET_REF        # NOT the live harness (can't run un-pulled)
+    assert f.detail["requires_pull"] is True
+    # propose-only: it must NOT become a runnable live-benchmark experiment
+    defn = f.to_experiment_definition()
+    assert defn.target_ref == MODEL_PULL_TARGET_REF
+
+
+def test_resolved_model_scout_candidate_drafts_a_runnable_card():
+    # WITH a bound model_benchmark, the drafted MODEL card is runnable (rank-1) and validates.
+    mb = {
+        "role": "coder", "suite": "coder", "suite_path": "configs/model-benchmarks.yaml",
+        "baseline_model": "qwen3-coder:30b", "candidate_model": "devstral:24b",
+        "base_url_env": "OLLAMA_API_BASE", "context_length": 40000,
+    }
+    feed = [{
+        "record_type": "model_scout_candidate", "model": "devstral:24b", "provider": "ollama",
+        "metric": "coding_score", "candidate": 46.8, "direction": "increase",
+        "source_name": "curated-openweight", "source_url": "https://example.test",
+        "candidate_roles": ["coder"], "open_weight": True,
+        "open_weight_evidence": "explicit", "ollama_tag": "devstral:24b",
+        "model_benchmark": mb,
+    }]
+    f = ModelRegistryScanner(lambda: feed).scan()[0]
+    assert f.detail["model_benchmark"] == mb
+    defn = f.to_experiment_definition()
+    assert defn.target_ref == "command_center.improvement.live_model_benchmark"
+    assert defn.parameters["model_benchmark"]["candidate_model"] == "devstral:24b"
+    assert defn.parameters["model_benchmark"]["baseline_model"] == "qwen3-coder:30b"
+
+
+def test_inert_model_scout_card_retargets_off_the_live_harness():
+    # WITHOUT a bound model_benchmark the card must NOT pose as runnable (rank-2 would reject it);
+    # to_experiment_definition retargets it to a needs-params proposal that validates.
+    feed = [{
+        "record_type": "model_scout_candidate", "model": "open-coder:q4",
+        "metric": "coding_score", "candidate": 76.0, "candidate_roles": ["coder"],
+        "open_weight": True, "open_weight_evidence": "explicit", "ollama_tag": "open-coder:q4",
+    }]
+    f = ModelRegistryScanner(lambda: feed).scan()[0]
+    assert f.target_ref == "command_center.improvement.live_model_benchmark"   # finding intent
+    defn = f.to_experiment_definition()                                        # but the card...
+    assert defn.target_ref == "command_center.improvement.model_benchmark_needed"
+
+
+def test_schema_rejects_inert_live_benchmark_model_card():
+    # rank-2 at the contract layer: a MODEL card pointing at the live harness with no params fails.
+    from command_center.improvement.schema import (
+        LIVE_MODEL_BENCHMARK_TARGET_REF, BudgetDefinition, ExperimentDefinition,
+        MetricDefinition, MetricDirection, PostWatchDefinition, PromotionDefinition,
+        TargetType, VerificationDefinition,
+    )
+
+    def _build(parameters):
+        return ExperimentDefinition(
+            experiment_id="EXP-x", title="t", owner="o", target_type=TargetType.MODEL,
+            target_ref=LIVE_MODEL_BENCHMARK_TARGET_REF, problem_statement="p",
+            hypothesis="h", baseline="b", candidate="c", parameters=parameters,
+            metrics=[MetricDefinition(
+                name="task_success_rate", direction=MetricDirection.INCREASE, required=True,
+                baseline_source="x", candidate_source="y", maximum_regression=0.0)],
+            budgets=BudgetDefinition(
+                max_iterations=1, max_wall_minutes=1, max_input_tokens=0, max_output_tokens=0,
+                max_cost_usd=0, max_gpu_hours=0, max_changed_files=0, max_diff_lines=0),
+            verification=VerificationDefinition(
+                reproduce_commands=["x"], required_evidence=["raw logs"]),
+            promotion=PromotionDefinition(),
+            post_watch=PostWatchDefinition(
+                monitored_metrics=["task_success_rate"],
+                rollback_triggers=["task_success_rate regresses"]),
+        )
+
+    with pytest.raises(ValueError, match="model_benchmark"):
+        _build({})
+    # a complete block validates
+    ok = _build({"model_benchmark": {
+        "role": "coder", "suite": "coder", "suite_path": "configs/model-benchmarks.yaml",
+        "baseline_model": "a", "candidate_model": "b", "base_url_env": "OLLAMA_API_BASE"}})
+    assert ok.parameters["model_benchmark"]["role"] == "coder"
+
+
 def test_dependency_scanner_critical_outranks_minor_under_wsjf():
     feed = [
         {"package": "lib-a", "current": "1.0", "latest": "1.1", "severity": "none"},
