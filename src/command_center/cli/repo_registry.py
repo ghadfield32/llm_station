@@ -146,15 +146,24 @@ def verify_repo(
                        repo.secret_policy))
 
     # bounded-loop evidence (proven once PER REPO, never faked). The self/control
-    # repo's evidence lives at RUN_ID_DIR/*.json; an external repo's loop must be
-    # proven under RUN_ID_DIR/<repo_id>/*.json — it does not inherit the control
-    # repo's proof.
+    # repo's evidence lives at RUN_ID_DIR/*.json; an external repo's loop is proven
+    # under RUN_ID_DIR/<repo_id>/*.json — it does not inherit the control repo's proof.
+    # The LIVE PR-check loop (pr_check_evidence_proven) is the binding proof for every
+    # repo. branch-mission is the SELF/control repo's local CI smoke; an external
+    # repo's CI needs its own env, so its bounded loop is proven by the live PR loop
+    # on its real CI, not by replaying its CI locally (which would be infeasible/fake).
     ev_dir = root / RUN_ID_DIR if ref == "self" else root / RUN_ID_DIR / repo.repo_id
-    bm = _evidence_status(ev_dir / "branch-mission.json")
     pc = _evidence_status(ev_dir / "pr-check-loop.json")
-    gates.append(_gate("branch_mission_proven", bm == "PASS", f"branch-mission.json={bm}", status=bm))
     gates.append(_gate("pr_check_evidence_proven", pc == "PASS",
                        f"pr-check-loop.json={pc}", status=pc))
+    if ref == "self":
+        bm = _evidence_status(ev_dir / "branch-mission.json")
+        gates.append(_gate("branch_mission_proven", bm == "PASS",
+                           f"branch-mission.json={bm}", status=bm))
+    else:
+        gates.append(_gate("branch_mission_proven", True,
+                           "not_applicable_external_repo; bounded loop proven by the "
+                           "live PR-check loop on the repo's own CI"))
 
     blockers = [g["check"] for g in gates if g["status"] != "PASS"]
     return {

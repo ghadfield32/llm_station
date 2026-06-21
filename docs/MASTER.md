@@ -1674,6 +1674,25 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Generic bounded-loop prover (works for any repo)
+
+- **Why:** the existing `pr-check-verify` is llm_station-specific (it replays the
+  "fix the fastapi `[dev]` extra" CI scenario against llm_station's exact pyproject
+  shape). It can't prove an arbitrary repo's loop.
+- **`cc repo-loop-proof`** (`cli/repo_loop_proof.py`): repo-agnostic. The App opens
+  a feature branch with a trivial, CI-safe marker file, opens a draft PR, the repo's
+  OWN required checks (`RepoManifest.required_status_check_contexts`) run, and it
+  verifies they succeed **and the App did not merge** (the wall holds) — then closes
+  the PR + deletes the branch and writes evidence. Never merges; writes redacted
+  evidence; 4 hermetic tests. repo-verify's loop gate is posture-aware (external
+  repos prove via this live PR loop; the local branch-mission smoke is self-only).
+- **betts proof run (honest result):** the prover worked end-to-end (opened betts
+  PR #7, polled, verified no-merge, cleaned up) but is **BLOCKED** — betts's own
+  `Unit Tests` check is **failing on main** (pre-existing; `Bayesian`/`GBDT`/
+  `Schemathesis`/`Autoswagger` pass). The prover correctly refuses to certify a loop
+  on a red required check (no fake pass). **To enable betts, betts's `Unit Tests`
+  must be fixed green.** (CODEOWNERS PR betts#6 also still pending.)
+
 ### 2026-06-20 — Merge-wall postures: local pre-push guard for private+free repos
 
 - **Why:** GitHub won't allow branch protection / rulesets on a **private repo on a

@@ -357,6 +357,8 @@ COMMANDS: dict[str, tuple] = {
                              "flip autonomous_edits_enabled only if every gate passes (--apply)"),
     "repo-merge-guard": (lambda a: pym("command_center.cli.merge_guard", *a),
                          "install/verify the local pre-push merge guard (local_pre_push_and_human_merge posture)"),
+    "repo-loop-proof": (lambda a: pym("command_center.cli.repo_loop_proof", *a),
+                        "generic bounded-loop proof for any repo (trivial PR -> required checks -> no merge)"),
     "memory-add": (lambda a: pym("command_center.cli.memory_ops", "add", *a),
                    "add a durable memory (pending until --approved-by; secrets rejected)"),
     "memory-review": (lambda a: pym("command_center.cli.memory_ops", "review", *a),

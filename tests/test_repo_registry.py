@@ -132,8 +132,10 @@ def test_external_repo_gates_check_target_not_control_repo(tmp_path):
     # the external repo's OWN files/evidence decide — not the control repo's
     assert g["devcontainer_present"] == "PASS"        # ext has one
     assert g["codeowners_present"] == "BLOCKED"       # ext has none (control does)
-    assert g["branch_mission_proven"] != "PASS"       # no per-repo evidence (control's ignored)
-    assert g["pr_check_evidence_proven"] != "PASS"
+    # external repos' bounded loop is proven by the LIVE PR-check loop (binding);
+    # branch-mission (local CI smoke) is not applicable to an external repo
+    assert g["pr_check_evidence_proven"] != "PASS"    # no per-repo evidence yet (binding)
+    assert g["branch_mission_proven"] == "PASS"       # not_applicable_external_repo
     assert g["local_path_ref_resolves"] == "PASS"
 
     # env unset -> target path unresolved -> file gates cannot verify -> blocked
