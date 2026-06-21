@@ -58,7 +58,8 @@ def test_setup_summary_reports_registry_and_activation(capsys, monkeypatch):
     setup._summary()
     out = capsys.readouterr().out
     assert "boards:" in out and "repos:" in out
-    assert "KANBAN_EMIT_EVENTS=off" in out
+    # emission is the standard path; setup reports its ACTIVE/inactive status
+    assert "live-sync emission" in out and ("ACTIVE" in out or "inactive" in out)
     assert "cc onboard repo" in out
 
 

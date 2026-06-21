@@ -27,7 +27,8 @@ ALLOWED_EVENT_TYPES = frozenset({
 # Event types that must never be emitted by a kanban agent action.
 FORBIDDEN_EVENT_TYPES = frozenset({
     "kanban.card.approved_by_agent", "kanban.card.deleted_by_agent",
-    "kanban.board.deleted_by_agent", "merge", "deploy", "publish",
+    "kanban.board.deleted_by_agent", "kanban.merge_by_agent",
+    "kanban.deploy_by_agent", "merge", "deploy", "publish",
 })
 # Granted agent action -> the card event it emits (the only legal write path).
 _ACTION_TO_EVENT = {

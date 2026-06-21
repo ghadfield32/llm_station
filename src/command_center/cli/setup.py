@@ -9,7 +9,6 @@ exact next commands. It reads state; it never fabricates readiness.
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -32,13 +31,16 @@ def _summary() -> None:
     print(f"  repos:  {[r.repo_id for r in cfg.repo_manifests]} "
           f"(autonomy enabled: {enabled or 'none'})")
 
-    emit = os.environ.get("KANBAN_EMIT_EVENTS") == "1"
-    print("\n--- live-sync emission ----------------------------------------")
-    print(f"  KANBAN_EMIT_EVENTS={'on' if emit else 'off'}  "
-          f"KANBAN_PRIMARY_BOARD_ID={os.environ.get('KANBAN_PRIMARY_BOARD_ID') or '(unset)'}")
-    if not emit:
-        print("  to make governed actions show up live on every surface, set "
-              "KANBAN_EMIT_EVENTS=1 + KANBAN_PRIMARY_BOARD_ID in .env")
+    from command_center.cli.github_app_verify import _merged_env, _read_dotenv
+    from command_center.channels.core import kanban_emission_status
+    st = kanban_emission_status(_merged_env(_read_dotenv(ROOT / ".env")))
+    print("\n--- live-sync emission (standard sync path; on by default) ----")
+    print(f"  status: {'ACTIVE' if st['active'] else 'inactive'} "
+          f"board={st['board_id'] or '(none)'}")
+    print(f"  {st['reason']}")
+    if not st["active"]:
+        print("  governed kanban writes from every surface emit one event once a "
+              "board is resolved; opt out with KANBAN_EMIT_EVENTS=0")
 
     print("\n--- next ------------------------------------------------------")
     print("  cc onboard repo --path <dir>         # register another local repo")
