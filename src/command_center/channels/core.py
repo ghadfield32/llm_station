@@ -88,22 +88,52 @@ def _resolve_primary_board(env_map: dict[str, str]) -> str | None:
     return cfg.boards[0].board_id if len(cfg.boards) == 1 else None
 
 
+def kanban_emission_status(env_map: dict[str, str]) -> dict[str, Any]:
+    """Whether governed kanban writes emit events (the STANDARD sync path), which
+    board they tag, and why. Emission is ON BY DEFAULT; it is suppressed only by an
+    explicit opt-out or when no single board can be resolved.
+
+    States:
+      - KANBAN_EMIT_EVENTS=0            -> off (explicit opt-out)
+      - board resolvable               -> on (KANBAN_PRIMARY_BOARD_ID or sole board)
+      - KANBAN_EMIT_EVENTS=1, no board  -> caller raises (explicit on, unsatisfiable)
+      - default, multiple boards        -> off + reason (set KANBAN_PRIMARY_BOARD_ID)
+    """
+    flag = env_map.get("KANBAN_EMIT_EVENTS")
+    if flag == "0":
+        return {"active": False, "board_id": None,
+                "reason": "disabled by KANBAN_EMIT_EVENTS=0"}
+    board_id = _resolve_primary_board(env_map)
+    if board_id:
+        return {"active": True, "board_id": board_id,
+                "reason": f"emitting governed kanban writes to board {board_id!r}"}
+    if flag == "1":
+        return {"active": False, "board_id": None, "explicit_unsatisfiable": True,
+                "reason": "KANBAN_EMIT_EVENTS=1 but no board resolved; set "
+                          "KANBAN_PRIMARY_BOARD_ID or register exactly one board"}
+    return {"active": False, "board_id": None,
+            "reason": "multiple boards registered; set KANBAN_PRIMARY_BOARD_ID to "
+                      "activate live-sync emission"}
+
+
 def _wire_kanban_events(dispatch: dict[str, Callable[..., Any]],
                         surface: str) -> dict[str, Callable[..., Any]]:
-    """Wrap governed verbs to emit kanban events. Off unless KANBAN_EMIT_EVENTS=1."""
+    """Wrap governed verbs so every governed kanban write emits one event — the
+    standard sync path. On by default; opt out with KANBAN_EMIT_EVENTS=0."""
     env_map = env()
-    if env_map.get("KANBAN_EMIT_EVENTS") != "1":
+    st = kanban_emission_status(env_map)
+    if not st["active"]:
+        # an EXPLICIT opt-in that can't be satisfied fails loudly; the default
+        # (no flag) just stays inactive with the reason surfaced via `cc setup`.
+        if st.get("explicit_unsatisfiable"):
+            raise RuntimeError(st["reason"])
         return dispatch
     from command_center.kanban_sync import EventLog, wrap_governed_dispatch
-    board_id = _resolve_primary_board(env_map)
-    if not board_id:
-        raise RuntimeError(
-            "KANBAN_EMIT_EVENTS=1 but no board resolved — set KANBAN_PRIMARY_BOARD_ID "
-            "or register exactly one board in configs/kanban_boards.yaml")
     raw = env_map.get("KANBAN_EVENT_LOG", "generated/kanban-events.jsonl")
     path = Path(raw)
     log = EventLog(path if path.is_absolute() else REPO_ROOT / path)
-    return wrap_governed_dispatch(dispatch, surface=surface, board_id=board_id, log=log)
+    return wrap_governed_dispatch(dispatch, surface=surface,
+                                  board_id=st["board_id"], log=log)
 
 
 def build_system(surface: str) -> str:

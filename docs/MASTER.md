@@ -1674,6 +1674,23 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-06-20 — Kanban event emission is now the DEFAULT sync path
+
+- The live-sync engine (PR #19) is the source of truth, but emission was **opt-in**
+  (`KANBAN_EMIT_EVENTS=1`). It is now the **standard path — ON BY DEFAULT**: every
+  governed kanban write on every surface emits one event unless explicitly disabled.
+- `GatewayCore._wire_kanban_events` states: default = active once a board resolves
+  (sole board or `KANBAN_PRIMARY_BOARD_ID`); multiple-boards-no-primary = inactive
+  with a surfaced reason (no guess, no crash); `KANBAN_EMIT_EVENTS=0` = opt-out;
+  `KANBAN_EMIT_EVENTS=1` with no resolvable board = loud failure (explicit request).
+- `cc setup` now reports emission **status** (ACTIVE/inactive + board + reason +
+  exactly what to set). Forbidden event taxonomy aligned (`kanban.merge_by_agent`,
+  `kanban.deploy_by_agent`). Tests: `tests/test_kanban_emission_default.py` (6).
+- NB: everything else in the "live kanban sync" north star was already merged —
+  Phase 4 engine (#19), simpler commands (#18/#20), 2nd repo betts (#21-#23),
+  daily DAG (#17), cross-conversation memory (#16), demo+docs (#18). This change
+  closes the one remaining gap (emission as the standard path).
+
 ### 2026-06-20 — Generic bounded-loop prover (works for any repo)
 
 - **Why:** the existing `pr-check-verify` is llm_station-specific (it replays the

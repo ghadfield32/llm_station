@@ -96,19 +96,25 @@ does not require it.
 
 The engine is wired into the **one governed action layer** that every channel
 shares (`GatewayCore`), so a granted card/todo verb on any surface emits an event.
-It is **opt-in** (matching how AppFlowy creds and chat are gated), so default
-deployments and the test suite are unchanged:
+Emission is **the standard path — ON BY DEFAULT** (no flag needed); it is the
+single sync mechanism for every governed kanban write. The states:
 
-- `KANBAN_EMIT_EVENTS=1` — turn on event emission from the action layer.
-- `KANBAN_PRIMARY_BOARD_ID=<board_id>` — the board events are tagged with. If
-  omitted and exactly one board is registered, that board is used; if it can't be
-  resolved while `KANBAN_EMIT_EVENTS=1`, construction **fails loudly** (no guess).
+- **default (no flag)** — emission is **active as soon as a board resolves**: a
+  single registered board is used automatically, or `KANBAN_PRIMARY_BOARD_ID`
+  selects one when several are registered. If multiple boards are registered and no
+  primary is set, emission is **inactive with a clear reason** (surfaced by
+  `cc setup`) — it does not guess and does not crash.
+- `KANBAN_EMIT_EVENTS=0` — explicit **opt-out** (turn emission off).
+- `KANBAN_EMIT_EVENTS=1` — explicit **opt-in**; if a board can't be resolved,
+  construction **fails loudly** (you asked for it, so the misconfig is surfaced).
 - `KANBAN_EVENT_LOG=<path>` — the event log path, shared with the UI service
   (defaults to `generated/kanban-events.jsonl`).
 
-With those set, `stage_card` on Discord/SMS/the in-app console all funnel through
+So by default `stage_card` on Discord/SMS/the in-app console/CLI all funnel through
 `emit_event` → the same log the UI SSE and AppFlowy projection read. Non-governed
 verbs (search/list/read) are untouched; model code never writes AppFlowy directly.
+Run `cc setup` to see whether emission is ACTIVE, which board it tags, and — if
+inactive — exactly what to set.
 
 ## Commands
 

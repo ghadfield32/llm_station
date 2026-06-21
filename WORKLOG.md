@@ -5,6 +5,18 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## Kanban emission = default sync path
+- WHY 06-20: live-sync engine merged (#19) but emission was opt-in (KANBAN_EMIT_EVENTS=1).
+  North-star wants it as the STANDARD path for every governed kanban write.
+- ADD 06-20: GatewayCore._wire_kanban_events now ON BY DEFAULT. States: default=active once a
+  board resolves (sole board or KANBAN_PRIMARY_BOARD_ID); multi-board-no-primary=inactive+reason
+  (no guess/crash); =0 opt-out; =1 w/o board = loud raise. kanban_emission_status() helper.
+- SURFACE 06-20: cc setup reports emission ACTIVE/inactive + board + reason + what to set.
+  Forbidden taxonomy aligned (kanban.merge_by_agent/deploy_by_agent). Tests:
+  test_kanban_emission_default.py (6).
+- RECONCILE 06-20: rest of the north star already merged (#16 memory, #17 daily DAG, #18 demo+docs,
+  #19 live-sync engine, #20 wrappers, #21-23 betts). This closed the one gap.
+
 ## Generic bounded-loop prover
 - WHY 06-20: pr-check-verify is llm_station-specific (replays the fastapi [dev]-extra fix
   against llm_station's pyproject). Can't prove an arbitrary repo's loop (blocked on betts:
