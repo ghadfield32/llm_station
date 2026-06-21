@@ -5,6 +5,19 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## Generic bounded-loop prover
+- WHY 06-20: pr-check-verify is llm_station-specific (replays the fastapi [dev]-extra fix
+  against llm_station's pyproject). Can't prove an arbitrary repo's loop (blocked on betts:
+  "pyproject dev extra does not contain pytest marker").
+- ADD 06-20: cc repo-loop-proof (cli/repo_loop_proof.py) — repo-agnostic. App opens a feature
+  branch + trivial CI-safe marker file -> draft PR -> repo's OWN required checks run -> verify
+  they succeed AND App did NOT merge -> close PR + delete branch -> redacted evidence. 4 tests.
+  repo-verify loop gate posture-aware (external = live PR loop; branch-mission self-only).
+- BETTS 06-20: prover worked end-to-end (PR #7 opened, polled, no-merge verified, cleaned up) but
+  BLOCKED — betts Unit Tests is RED on main (pre-existing; Bayesian/GBDT/Schemathesis/Autoswagger
+  pass). Prover correctly refuses to certify a red required check (no fake). To enable betts:
+  fix betts Unit Tests green. betts#6 (CODEOWNERS) also still pending.
+
 ## Merge-wall postures (local pre-push guard)
 - WHY 06-20: GitHub blocks branch protection/rulesets on PRIVATE repos on a FREE plan
   (betts 403 "Upgrade to Pro or make public"; llm_station works because it's PUBLIC). So
