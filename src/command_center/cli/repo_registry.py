@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -282,6 +283,53 @@ def run_repo_register(
             "next": f"set {env_name}={local_path} in .env, then cc repo-verify --repo-id {repo_id}"}
 
 
+def _enable_manifest_in_text(text: str, repo_id: str) -> str:
+    """Flip ``autonomous_edits_enabled`` to true and clear ``blockers`` for a single
+    repo manifest, editing the YAML text in place.
+
+    Comment- and format-preserving: only the two target lines (and any old blocker
+    list items) inside the matched manifest block are rewritten; everything else —
+    header comments, other manifests, key order — is left byte-for-byte intact.
+    """
+    lines = text.splitlines(keepends=True)
+    start = next(
+        (i for i, ln in enumerate(lines)
+         if re.match(rf"\s*-\s+repo_id:\s*{re.escape(repo_id)}\s*$", ln)),
+        None,
+    )
+    if start is None:
+        raise ValueError(f"manifest block for {repo_id!r} not found in autonomy.yaml")
+    item_indent = len(lines[start]) - len(lines[start].lstrip())
+    # Block ends at the next sibling list item (same indent, "- ") or any top-level key.
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        ln = lines[j]
+        if not ln.strip():
+            continue
+        indent = len(ln) - len(ln.lstrip())
+        if indent == 0 or (indent == item_indent and ln.lstrip().startswith("- ")):
+            end = j
+            break
+    out: list[str] = []
+    dropping_blockers = False
+    for ln in lines[start:end]:
+        stripped = ln.strip()
+        ind = ln[: len(ln) - len(ln.lstrip())]
+        if stripped == "autonomous_edits_enabled: false":
+            out.append(f"{ind}autonomous_edits_enabled: true\n")
+            continue
+        if re.match(r"blockers:\s*(\[\s*\])?$", stripped):
+            out.append(f"{ind}blockers: []\n")
+            dropping_blockers = True
+            continue
+        if dropping_blockers:
+            if stripped.startswith("- "):
+                continue  # drop the old blocker list items
+            dropping_blockers = False
+        out.append(ln)
+    return "".join(lines[:start] + out + lines[end:])
+
+
 def run_repo_enable_autonomy(
     *, repo_id: str, apply: bool = False, config_path: Path = ROOT / AUTONOMY,
     root: Path = ROOT, env: dict[str, str] | None = None,
@@ -299,14 +347,12 @@ def run_repo_enable_autonomy(
     repo = next(r for r in cfg.repo_manifests if r.repo_id == repo_id)
     if repo.autonomous_edits_enabled:
         return {"status": "already_enabled", "repo_id": repo_id}
-    # flip the specific manifest's flag + clear blockers, then re-validate.
-    raw = yaml.safe_load(text)
-    for r in raw["repo_manifests"]:
-        if r["repo_id"] == repo_id:
-            r["autonomous_edits_enabled"] = True
-            r["blockers"] = []
-    AutonomyConfig.model_validate(raw)  # enforce the enabled-manifest invariants
-    config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    # Surgically flip THIS manifest's flag + clear its blockers in place, preserving
+    # the file's header comments and per-manifest formatting. A whole-file safe_dump
+    # round-trip would strip every comment and reflow all manifests.
+    new_text = _enable_manifest_in_text(text, repo_id)
+    AutonomyConfig.model_validate(yaml.safe_load(new_text))  # enforce invariants
+    config_path.write_text(new_text, encoding="utf-8")
     return {"status": "enabled", "repo_id": repo_id}
 
 
