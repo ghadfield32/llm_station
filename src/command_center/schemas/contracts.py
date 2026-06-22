@@ -878,6 +878,62 @@ class ContentViewpoint(Strict):
     needs_web: bool = False                      # true -> escalate to the advanced (web) tier
 
 
+# Provider-agnostic content routing. The content engine is local-first: the
+# default policy runs on Ollama (via the local LiteLLM role) and is the ONLY path
+# enabled by default. Paid external policies (GLM/Kimi) are metadata here so the
+# dry-run estimator can price them - they never make a live call from config; a
+# live paid route is operator-gated (budget + redaction + explicit egress). Large
+# hosted models are escalation, not the default post formatter (docs/MASTER.md).
+class ContentModelPrice(Strict):
+    """USD per million tokens for a routable model. Used only by the dry-run cost
+    estimator - naming a model here does not enable or call it."""
+    model: str
+    input_usd_per_mtok: float = Field(ge=0)
+    output_usd_per_mtok: float = Field(ge=0)
+    context_window: int = Field(default=0, ge=0)
+
+
+class ContentLLMPolicy(Strict):
+    name: str
+    primary: str                                 # local role (e.g. "chat") or model id
+    fallback: str = ""
+    allow_paid: bool = False                     # paid egress off unless explicitly true
+    max_request_usd: float = Field(default=0.0, ge=0)
+    require_redaction: bool = False
+    human_approval: bool = False
+
+    @model_validator(mode="after")
+    def _checks(self):
+        # A paid policy MUST carry a budget and demand redaction - no open-ended
+        # paid route, ever. (The default local policy needs neither.)
+        if self.allow_paid:
+            if self.max_request_usd <= 0:
+                raise ValueError(f"policy '{self.name}': allow_paid requires max_request_usd > 0")
+            if not self.require_redaction:
+                raise ValueError(f"policy '{self.name}': allow_paid requires require_redaction")
+        return self
+
+
+class ContentLLMRouting(Strict):
+    default_policy: str = "local_first"
+    policies: list[ContentLLMPolicy] = []
+    prices: list[ContentModelPrice] = []
+
+    @model_validator(mode="after")
+    def _checks(self):
+        names = [p.name for p in self.policies]
+        if len(names) != len(set(names)):
+            raise ValueError("duplicate content_llm policy names")
+        if self.policies:                        # empty = no routing configured (ok)
+            if self.default_policy not in names:
+                raise ValueError(f"default_policy '{self.default_policy}' is not a policy")
+            default = next(p for p in self.policies if p.name == self.default_policy)
+            if default.allow_paid:
+                raise ValueError("default_policy must be local (allow_paid=false) - "
+                                 "the engine is local-first")
+        return self
+
+
 class ContentPipelineConfig(Strict):
     schema_version: str
     source: ContentSource = ContentSource()      # AppFlowy connection (reused)
@@ -893,6 +949,7 @@ class ContentPipelineConfig(Strict):
     claims_path: str = "generated/content-claims.json"   # the evidence ledger
     streams: list[ContentStream] = []
     judges: list[ContentViewpoint] = []
+    content_llm: ContentLLMRouting = ContentLLMRouting()  # provider-agnostic routing
 
     @model_validator(mode="after")
     def _checks(self):
@@ -902,6 +959,42 @@ class ContentPipelineConfig(Strict):
             raise ValueError("surface_top cannot exceed candidates_per_run")
         if not self.judges:
             raise ValueError("at least one judge viewpoint is required")
+        return self
+
+
+# ---- content_reference.yaml ------------------------------------------------
+# The reference index: the curated half of "find things by intent, not exact
+# names". Each item names a post/library/board/doc/etc. with aliases + tags so a
+# fuzzy/semantic query resolves to it. The resolver also indexes live sources
+# (the posts store, content streams) at build time; this file is the stable seed.
+# Invariant (docs/MASTER.md): no user-facing command relies on exact names only -
+# exact id is just the first fast path in a cascade, never the only path.
+class ReferenceItem(Strict):
+    id: str                                      # stable slug, first fast-path match
+    kind: Literal["doc", "post", "library", "kanban", "config", "repo",
+                  "model", "topic"]
+    title: str
+    aliases: list[str] = []                      # alternate names a human might say
+    tags: list[str] = []                         # keywords (BM25 / semantic signal)
+    source_path: str = ""                        # optional file/dir this points at
+    summary: str = ""                            # one line, indexed for retrieval
+
+
+class ContentReferenceConfig(Strict):
+    schema_version: str
+    items: list[ReferenceItem] = []
+    # Resolver knobs (externalized so no retrieval decision is a buried literal).
+    fuzzy_threshold: int = Field(default=72, ge=0, le=100)   # RapidFuzz score floor
+    ambiguous_margin: float = Field(default=0.06, ge=0, le=1)  # top1-top2 gap -> top-3
+    embed_enabled: bool = True                   # the semantic tier (local nomic-embed)
+    embed_model: str = "nomic-embed-text"
+    index_path: str = "data/reference/index.jsonl"
+
+    @model_validator(mode="after")
+    def _checks(self):
+        ids = [i.id for i in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate reference item ids")
         return self
 
 

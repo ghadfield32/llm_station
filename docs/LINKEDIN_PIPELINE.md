@@ -4,7 +4,7 @@ The single place to see **what's built, what's blocked, and how to improve** the
 operation. Operational setup steps live in [linkedin-setup.md](linkedin-setup.md); the architecture
 summary is [MASTER.md §6.6](MASTER.md). This doc is the working memory — update it as the system grows.
 
-Last updated: 2026-06-14.
+Last updated: 2026-06-22.
 
 ---
 
@@ -40,8 +40,60 @@ self-approves. The publisher is mechanical (no LLM in the publish path).
 | **Personal posting (member)** | **READY NOW** — token valid → 2026-08-12, member URN cached |
 | **WMS Page posting (organization)** | **BLOCKED** — needs Community Management API on a *separate* app (see §5) |
 | Content engine (gather→draft→judge→stage) | **In progress** — Phase 1 (gather) underway |
+| Content UX: preview + find-by-intent + routing seam | **Done** — `cc content-preview`, `cc content-find`, `cc reference`, `ContentLLMClient` (see §3.5) |
 
 `cc linkedin-publish --preflight` prints the live readiness at any time.
+
+---
+
+## 3.5 Content UX — preview, find-by-intent, routing (make it usable, not just bigger)
+
+The engine was too exact-name-dependent and shipped raw text. This makes a post
+**reviewable before publish**, makes lookup work **by intent**, and makes model
+routing **local-first with a clean seam**. None of it makes a live paid call.
+
+### Preview a post the way LinkedIn shows it
+
+```bash
+cc content-preview --post "that glm router post" --device desktop   # resolve by intent
+cc content-preview --post-id p_glm --device mobile                  # exact id
+cc content-preview --author "Geoff Hadfield" --hook "..." --body "..."  # ad-hoc text
+```
+
+Emits all three forms (the **preview contract**): a terminal **markdown** preview,
+a self-contained **LinkedIn-styled HTML** file (`generated/preview/<id>.html`,
+inline CSS, opens offline — shows the desktop *and* mobile "…see more" fold), and
+**copy-ready** export text. Every preview runs pre-publish **lints**: over the
+3,000-char cap (a hard fail, exit 1), a weak hook that spills past the fold, a
+missing question/CTA, and markdown LinkedIn renders literally. (`src/command_center/content/post_model.py`, `renderers/linkedin.py`.)
+
+### Find things by meaning, not exact names
+
+```bash
+cc reference index --rebuild          # build data/reference/index.jsonl (+ embeddings)
+cc content-find "the linkedin engine" # alias of: cc reference find "..."
+cc reference find "fronteer router"   # misspelling still resolves
+```
+
+A cascade resolves the query — **exact id → alias → normalized → RapidFuzz
+(misspellings) → BM25 keyword → local-embedding cosine** — and if the top two are
+too close it returns the **top 3** instead of guessing. Curated entries live in
+`configs/content_reference.yaml`; live posts are folded in at index time. The
+semantic tier uses local `nomic-embed-text` via Ollama and **degrades to lexical
+(with a note) if the model is down** — never a silent failure. **Invariant: no
+user-facing command relies on exact names only.** (`content/reference_*.py`.)
+
+### Routing seam — local-first, paid is gated
+
+`ContentLLMClient` is one Protocol with four adapters: `LiteLLMContentClient`
+(local default, free), `OllamaContentClient` (direct), `DryRunRouterClient`
+(prices a paid route and **refuses** the live call), `TestContentClient`. Policies
+live in `content_pipeline.yaml › content_llm`: `local_first` (Ollama, the only
+default-on path), `cheap_external` (GLM-4.7-Flash), `frontier_external` (GLM-5.2,
+escalation only). Paid policies are **metadata** — they carry a budget + require
+redaction, and there is intentionally **no live external client** in this layer
+(the cheap-external smoke test is operator-gated). GLM-5.2 is escalation, never
+the post formatter. (`content/llm_client.py`.)
 
 ---
 

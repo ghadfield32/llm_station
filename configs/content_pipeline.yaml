@@ -31,6 +31,37 @@ judges:
   - {key: brand_voice,      blocking: false}   # voice is advisory, not a hard block
   - {key: no_overreach,     blocking: true}    # claims must trace to evidence
 
+# Provider-agnostic routing. Local-first: the default policy runs on Ollama via
+# the local LiteLLM role and is the ONLY path enabled by default. The cheap/
+# frontier external policies are METADATA for the dry-run cost estimator - they
+# never make a live call from here; a live paid route is operator-gated (budget +
+# redaction + explicit egress). GLM-5.2 is escalation, not the post formatter.
+content_llm:
+  default_policy: local_first
+  policies:
+    - name: local_first
+      primary: chat              # local LiteLLM role (qwen3:30b)
+      fallback: local-judge      # devstral:24b failover role
+      allow_paid: false
+    - name: cheap_external       # first paid step IF ever enabled - not GLM-5.2
+      primary: openrouter/z-ai/glm-4.7-flash
+      allow_paid: true
+      max_request_usd: 0.05
+      require_redaction: true
+    - name: frontier_external    # explicit escalation only
+      primary: openrouter/z-ai/glm-5.2
+      allow_paid: true
+      max_request_usd: 0.25
+      require_redaction: true
+      human_approval: true
+  # Public list prices (USD / million tokens), for cost estimation only. Verify
+  # before any live use - provider prices drift.
+  prices:
+    - {model: openrouter/z-ai/glm-4.7-flash,        input_usd_per_mtok: 0.06,  output_usd_per_mtok: 0.40, context_window: 203000}
+    - {model: openrouter/z-ai/glm-5,                input_usd_per_mtok: 0.60,  output_usd_per_mtok: 1.92, context_window: 203000}
+    - {model: openrouter/z-ai/glm-5.2,              input_usd_per_mtok: 1.00,  output_usd_per_mtok: 4.00, context_window: 1000000}
+    - {model: openrouter/moonshotai/kimi-k2.7-code, input_usd_per_mtok: 0.612, output_usd_per_mtok: 3.069, context_window: 262000}
+
 streams:
   - name: personal
     board: geoffhadfield32_content
