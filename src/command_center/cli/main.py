@@ -367,6 +367,8 @@ COMMANDS: dict[str, tuple] = {
                      "detect/remove stale memories per each record's retention_policy (--apply)"),
     "memory-verify": (lambda a: pym("command_center.cli.memory_ops", "verify", *a),
                       "integrity: provenance present, confidential redacted, no duplicates"),
+    "dag": (lambda a: pym("command_center.cli.dag_ops", *a),
+            "airflow ops: dag up|down|doctor|report (wraps the airflow CLI in the container)"),
     "self-improvement-scan": (lambda a: pym("command_center.cli.self_improvement", "scan", *a),
                               "observer scan: rank findings, would-draft Proposed cards (zero writes)"),
     "self-improvement-daily": (lambda a: pym("command_center.cli.self_improvement", "daily", *a),
