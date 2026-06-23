@@ -38,6 +38,11 @@ SOURCE_REGISTRY: list[dict] = [
     {"name": "arxiv", "kind": "papers", "pillar": "full_idea", "config": {}},
     {"name": "litellm_registry", "kind": "model_registry",
      "pillar": "updated_metrics", "config": {}},
+    # Frontier-watch awareness: keyless CodeSOTA leaderboard picks (closed + open SOTA).
+    # Records are produced by `discovery.codesota.fetch_codesota_records()` and pre-ingested
+    # into the `improvement_feed_codesota` Variable, like every other feed source.
+    {"name": "codesota", "kind": "model_registry",
+     "pillar": "updated_metrics", "config": {}},
     {"name": "pip_audit", "kind": "dependencies", "pillar": "code_quality", "config": {}},
     {"name": "kanban_cycle_time", "kind": "kanban", "pillar": "automation", "config": {}},
 ]

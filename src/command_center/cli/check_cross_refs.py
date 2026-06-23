@@ -11,6 +11,9 @@ from pathlib import Path
 
 import yaml
 
+from command_center.schemas import CapabilityCatalogConfig
+from command_center.cli.capability_digest import verify_capability_digests
+
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -239,6 +242,15 @@ def main() -> int:
     pipeline = yaml.safe_load(open("configs/content_pipeline.yaml"))
     for msg in check_content_routing(pipeline, roles):
         print(f"  DANGLING: {msg}")
+        ok = False
+
+    # capability provenance digests must still match the artifacts on disk —
+    # recompute each pinned hash and fail on drift (verified, not just declared,
+    # provenance). The schema already requires the digests to be present.
+    capabilities = yaml.safe_load(open("configs/capabilities.yaml"))
+    catalog = CapabilityCatalogConfig.model_validate(capabilities)
+    for msg in verify_capability_digests(catalog, ROOT):
+        print(f"  DIGEST-DRIFT: {msg}")
         ok = False
 
     print("cross-refs: PASS" if ok else "cross-refs: FAIL")

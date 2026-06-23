@@ -171,3 +171,17 @@ def test_source_registry_spans_pillars_and_offline_subset():
     assert len(pillars) >= 4
     offline = {s["name"] for s in offline_specs()}
     assert offline == {"code_health", "ledger"}      # the two network-free sources
+
+
+def test_codesota_source_registered_and_runs_through_scan_one(tmp_path):
+    """The frontier-watch CodeSOTA source is a registered model_registry feed, and its
+    adapter-shaped records flow through the DAG's single-source path to findings."""
+    spec = next(s for s in SOURCE_REGISTRY if s["name"] == "codesota")
+    assert spec["kind"] == "model_registry" and spec["pillar"] == "updated_metrics"
+    # records in the shape discovery.codesota.fetch_codesota_records() produces
+    records = [{"model": "Claude Mythos Preview", "provider": "Anthropic",
+                "metric": "swe-bench-verified-agentic_resolve_rate",
+                "candidate": 93.9, "incumbent": 80.9, "direction": "increase",
+                "source_name": "codesota"}]
+    out = scan_one(spec, _reg(tmp_path), fetch=lambda _s: records)
+    assert out["error"] == "" and len(out["findings"]) == 1

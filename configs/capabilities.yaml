@@ -161,6 +161,7 @@ entries:
         source_ref: https://deepmind.google/models/gemma/
       - relation: gate
         source_ref: docs/model-update.md
+        digest: sha256:683ab84a12d7a49b797f73ff2f824e5110bea53f9936c9957cf9658c5cef1762
 
   - identifier: urn:air:command-center.local:skill:agent-idea-evaluation
     display_name: Agent idea evaluation prompt
@@ -185,3 +186,4 @@ entries:
     provenance:
       - relation: declaredIn
         source_ref: docs/agent-ideas-evaluation-prompt.md
+        digest: sha256:3b9d93e8db9a62cc053ea937bce2d111a2d36e613a9def3c7249cc97d56257af

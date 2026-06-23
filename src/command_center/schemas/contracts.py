@@ -1035,6 +1035,51 @@ class ToolsConfig(Strict):
 
 
 # ---- capabilities.yaml -----------------------------------------------------
+# Tamper-detection policy for capability provenance. The digest field turns
+# "declared provenance" into "verified provenance": a sha256 over the local
+# artifact a capability is backed by, recomputed by check_cross_refs (and so by
+# `make validate`) and failed on drift. We require it only where tampering is
+# both consequential and locally checkable — capability TYPES that execute or
+# get promoted (skill/mcp_server/model_candidate), at risk_tier >= L1, for
+# provenance refs that point at a repository-local file. Remote (URL) and opaque
+# (scheme:opaque) refs can't be hashed here, so they're exempt from the
+# requirement; lower-risk read-only types aren't worth the maintenance tax.
+# These are NAMED knobs, not magic literals — widen the type set or lower the
+# tier here and both the schema requirement and the verifier follow in lockstep.
+DIGEST_REQUIRED_TYPES = frozenset({"skill", "mcp_server", "model_candidate"})
+DIGEST_REQUIRED_MIN_TIER = RiskTier.L1
+
+_RISK_ORDER = {t: i for i, t in enumerate(
+    (RiskTier.L0, RiskTier.L1, RiskTier.L2, RiskTier.L3, RiskTier.L4))}
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_URL_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
+_WIN_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def source_ref_kind(source_ref: str) -> str:
+    """Classify a provenance source_ref so requirement and verification agree.
+
+    "remote"  — a URL (http://, https://, …); content lives off-repo, not hashable here.
+    "opaque"  — a non-path scheme like `operator-local:codex-rtk`; a pointer, not a file.
+    "local"   — a repository-relative path (optionally with a #fragment); hashable.
+    """
+    base = source_ref.split("#", 1)[0].strip()
+    if _URL_RE.match(base):
+        return "remote"
+    if _SCHEME_RE.match(base) and not _WIN_DRIVE_RE.match(base):
+        return "opaque"
+    return "local"
+
+
+def digest_required_for(entry_type: str, risk_tier: RiskTier) -> bool:
+    """A local provenance ref must pin a digest iff its capability is a
+    tamper-relevant type at or above the minimum tier. Single predicate shared by
+    the schema (which requires the field) and the verifier (which recomputes it)."""
+    return (entry_type in DIGEST_REQUIRED_TYPES
+            and _RISK_ORDER[risk_tier] >= _RISK_ORDER[DIGEST_REQUIRED_MIN_TIER])
+
+
 # ARD-style discovery metadata for internal tools, skills, workflows, and model
 # candidates. This is intentionally separate from tools.yaml: tools.yaml is the
 # permission policy judges cite, while this catalog is the routing/discovery
@@ -1051,6 +1096,8 @@ class CapabilityTrust(Strict):
 class CapabilityProvenance(Strict):
     relation: str
     source_ref: str
+    # sha256 over the artifact at source_ref. Optional here; CapabilityEntry makes
+    # it mandatory for tamper-relevant capabilities (see digest_required_for).
     digest: str | None = None
 
     @model_validator(mode="after")
@@ -1062,6 +1109,10 @@ class CapabilityProvenance(Strict):
             raise ValueError("capability provenance relation is required")
         if not self.source_ref:
             raise ValueError("capability provenance source_ref is required")
+        if self.digest is not None and not _DIGEST_RE.match(self.digest):
+            raise ValueError(
+                "capability provenance digest must be 'sha256:<64 lowercase hex>' "
+                "(run `make capabilities-digests` to compute it)")
         return self
 
 
@@ -1105,6 +1156,17 @@ class CapabilityEntry(Strict):
             )
         if not self.owner:
             raise ValueError(f"capability {self.identifier!r} must declare an owner")
+        # Verified-provenance gate: a tamper-relevant capability must pin a digest
+        # for every local artifact it claims to come from. The verifier
+        # (check_cross_refs) then recomputes that digest and fails on drift.
+        if digest_required_for(self.type, self.risk_tier):
+            for prov in self.provenance:
+                if source_ref_kind(prov.source_ref) == "local" and not prov.digest:
+                    raise ValueError(
+                        f"capability {self.identifier!r} is a {self.type} at "
+                        f"{self.risk_tier.value} and must pin a digest for local "
+                        f"provenance {prov.source_ref!r} "
+                        f"(run `make capabilities-digests` to compute it)")
         return self
 
 
