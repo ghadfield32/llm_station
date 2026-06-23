@@ -11,6 +11,9 @@ from pathlib import Path
 
 import yaml
 
+from command_center.schemas import CapabilityCatalogConfig
+from command_center.cli.capability_digest import verify_capability_digests
+
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -101,6 +104,52 @@ def check_autonomy_manifest_paths(autonomy: dict, root: Path = ROOT) -> list:
     return problems
 
 
+def check_content_reference_paths(ref: dict, root: Path = ROOT) -> list:
+    """Every reference item's source_path (when set) must point at a real file/dir
+    in the repo, so the resolver never hands back a dead pointer. `generated/`
+    paths are runtime build artifacts (the posts store), so they're exempt."""
+    problems = []
+    for item in ref.get("items", []):
+        sp = item.get("source_path")
+        if not sp or sp.startswith("generated/"):
+            continue
+        cand = (root / sp).resolve()
+        try:
+            cand.relative_to(root.resolve())
+        except ValueError:
+            problems.append(f"reference item '{item.get('id')}' source_path '{sp}' "
+                            f"escapes the repository")
+            continue
+        if not cand.exists():
+            problems.append(f"reference item '{item.get('id')}' source_path '{sp}' "
+                            f"does not exist")
+    return problems
+
+
+def check_content_routing(pipeline: dict, roles: set) -> list:
+    """Content routing must not dangle. A LOCAL policy's primary/fallback must be
+    a real models.yaml role (so local routing can't point at a missing model); a
+    PAID policy's primary must have a price entry (so the dry-run estimator can
+    actually cost it instead of silently returning $0)."""
+    problems = []
+    routing = pipeline.get("content_llm") or {}
+    priced = {p.get("model") for p in routing.get("prices", [])}
+    for pol in routing.get("policies", []):
+        name = pol.get("name")
+        if pol.get("allow_paid"):
+            if pol.get("primary") not in priced:
+                problems.append(f"content_llm policy '{name}' primary "
+                                f"'{pol.get('primary')}' has no price entry "
+                                f"(dry-run cannot estimate its cost)")
+        else:
+            for field in ("primary", "fallback"):
+                ref = pol.get(field)
+                if ref and ref not in roles:
+                    problems.append(f"content_llm policy '{name}' {field} '{ref}' "
+                                    f"is not a role in models.yaml")
+    return problems
+
+
 def main() -> int:
     targets = yaml.safe_load(open("configs/targets.yaml"))
     proactive = yaml.safe_load(open("configs/proactive.yaml"))
@@ -183,6 +232,25 @@ def main() -> int:
     autonomy = yaml.safe_load(open("configs/autonomy.yaml"))
     for msg in check_autonomy_manifest_paths(autonomy):
         print(f"  DANGLING: {msg}")
+        ok = False
+
+    # content reference index points at real files; content routing never dangles
+    reference = yaml.safe_load(open("configs/content_reference.yaml"))
+    for msg in check_content_reference_paths(reference):
+        print(f"  DANGLING: {msg}")
+        ok = False
+    pipeline = yaml.safe_load(open("configs/content_pipeline.yaml"))
+    for msg in check_content_routing(pipeline, roles):
+        print(f"  DANGLING: {msg}")
+        ok = False
+
+    # capability provenance digests must still match the artifacts on disk —
+    # recompute each pinned hash and fail on drift (verified, not just declared,
+    # provenance). The schema already requires the digests to be present.
+    capabilities = yaml.safe_load(open("configs/capabilities.yaml"))
+    catalog = CapabilityCatalogConfig.model_validate(capabilities)
+    for msg in verify_capability_digests(catalog, ROOT):
+        print(f"  DIGEST-DRIFT: {msg}")
         ok = False
 
     print("cross-refs: PASS" if ok else "cross-refs: FAIL")

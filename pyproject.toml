@@ -9,6 +9,9 @@ dependencies = [
   "httpx>=0.28",
   "pydantic-settings>=2.2",
   "tenacity>=8.2",
+  # Fuzzy tier of the content reference resolver (misspelling-tolerant lookup).
+  # Pure-wheel, cross-platform; the semantic tier uses local embeddings (no dep).
+  "rapidfuzz>=3.0",
 ]
 
 # Channel transports are optional: the control plane (validate/render/serve) needs none of

@@ -1102,6 +1102,37 @@ MCP — never add an independent publisher.
 real local state (config, boards, env-key presence, token validity — no secrets
 printed) and names the single next action, so the runbook is self-verifying.
 
+#### 6.6.1 Content usability lane (preview · find-by-intent · routing)
+
+Make the system **easier before making it bigger**. Three guarantees, all local
+and offline, none of which makes a live paid call (`cc content-preview`,
+`cc content-find` / `cc reference`, `content/llm_client.py`).
+
+**Content usability — find by intent, not exact names.** User-facing content
+commands resolve posts, libraries, kanban boards, references, and prior drafts
+through a reference resolver that combines aliases, normalized text, fuzzy
+matching (RapidFuzz), keyword search (BM25), and local embeddings
+(`nomic-embed-text`), returning the top 3 when a query is ambiguous. Exact-name
+matching is allowed only as the first fast path — **it is never the only path**.
+The semantic tier degrades to lexical (with a note) if the local embedder is
+down; it is never a silent failure. Seeded by `configs/content_reference.yaml`.
+
+**LinkedIn preview contract.** Generated LinkedIn content must be rendered before
+publishing in three forms: (1) copy-ready text, (2) a terminal markdown preview,
+(3) a self-contained LinkedIn-styled HTML preview (offline, inline CSS). The
+preview must show author context, body, line breaks, hashtags, media/link cards,
+desktop/mobile "…see more" cutoffs, and validation warnings — over-length (a hard
+fail), weak hook, missing CTA, and markdown LinkedIn won't preserve.
+
+**Content model routing.** The content engine is local-first. Ollama remains the
+default execution path; `ContentLLMClient` is the adapter seam (LiteLLM local,
+direct Ollama, dry-run router, test). Paid routes (OpenRouter/Z.ai — GLM-4.7-Flash,
+GLM-5, GLM-5.2, Kimi) are config **metadata** for the dry-run cost estimator only;
+a live paid call stays disabled unless the budget, redaction, and explicit-egress
+gates pass (operator-gated, like the model-eval frontier-router lane). Large
+hosted models such as GLM-5.2 are **escalation** models, not default post
+formatters.
+
 ---
 
 ## 7. Environments and isolation
