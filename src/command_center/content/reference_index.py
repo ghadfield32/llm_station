@@ -30,6 +30,7 @@ class IndexRecord:
     source_path: str = ""
     text: str = ""                       # the searchable blob (lexical tiers)
     vector: list[float] | None = None    # embedding (semantic tier), if built
+    board: str = ""                      # live source database/board (for write-back)
 
     def blob(self) -> str:
         parts = [self.title, *self.aliases, *self.tags, self.summary, self.text]

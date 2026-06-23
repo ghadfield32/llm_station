@@ -95,6 +95,32 @@ redaction, and there is intentionally **no live external client** in this layer
 (the cheap-external smoke test is operator-gated). GLM-5.2 is escalation, never
 the post formatter. (`content/llm_client.py`.)
 
+### Live boards — index, preview, and note REAL AppFlowy cards
+
+The above resolves a curated config + a JSON store; this points the same engine at
+the **live boards** so it fixes the day-to-day pain (find a library/book/note/post
+without the exact name, view a real draft, update a note):
+
+```bash
+cc reference index --rebuild --live          # index EVERY database in databases.json
+cc content-find "the basketball library"     # resolves a real `library` card
+cc content-preview --post "glm router post" --live   # previews a real In-Queue card
+cc content-note --card "standup note" --append "remember to push"        # dry-run
+cc content-note --card "standup note" --append "remember to push" --apply
+```
+
+`--live` indexes every database (`library`, `papers`, `repos`, `signals`, `notes`,
+`lessons`, the LinkedIn content boards, …) with `kind` derived from the database,
+so a fuzzy/semantic query lands on a real card (`content/reference_live.py`).
+
+**Updating a note is governed, never a raw board write.** `cc content-note`
+resolves the card by intent, then records the note as a **`progress_comment`
+kanban event** via `emit_event` — the single legal writer, which structurally
+rejects wall actions (approve/merge/delete) and never sets a status. Dry-run by
+default; `--apply` appends to `generated/kanban-events.jsonl`, and the existing
+`cc kanban-reconcile --apply` writes it through to the board. So the agent can
+annotate cards by intent without ever touching the human approval gate.
+
 ---
 
 ## 3. Architecture & components

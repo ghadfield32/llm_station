@@ -29,6 +29,16 @@ def cmd_index(args) -> int:
     cfg = load_ref_config(args.config)
     posts = load_posts(args.store)
     records = build_records(cfg, posts=posts)
+    if args.live:
+        import yaml
+        from command_center.schemas import ContentPipelineConfig
+        from command_center.content.reference_live import fetch_all, records_from_rows
+        pcfg = ContentPipelineConfig.model_validate(
+            yaml.safe_load(open(args.pipeline)))
+        live = records_from_rows(fetch_all(pcfg.source))
+        seen = {r.id for r in records}
+        records += [r for r in live if r.id not in seen]
+        print(f"  live: indexed {len(live)} board rows from AppFlowy")
     note = ""
     if cfg.embed_enabled:
         try:
@@ -68,7 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     pi = sub.add_parser("index", help="build/persist the reference index")
     pi.add_argument("--rebuild", action="store_true",
                     help="rebuild from configs + posts store (the only mode)")
+    pi.add_argument("--live", action="store_true",
+                    help="also index every live AppFlowy database (library, notes, "
+                         "posts, ...) so cards resolve by intent")
     pi.add_argument("--config", default=REF_CONFIG)
+    pi.add_argument("--pipeline", default="configs/content_pipeline.yaml",
+                    help="content_pipeline.yaml (AppFlowy source for --live)")
     pi.add_argument("--store", default=DEFAULT_STORE)
     pi.set_defaults(func=cmd_index)
 

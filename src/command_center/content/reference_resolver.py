@@ -92,16 +92,14 @@ def resolve(query: str, *, cfg: ContentReferenceConfig | None = None,
     return _decide(query, res, cfg.ambiguous_margin, notes)
 
 
-def resolve_post(query: str, store: str = "generated/content-posts.json", *,
-                 cfg: ContentReferenceConfig | None = None,
-                 embedder=_DEFAULT) -> LinkedInPost:
-    """Resolve a query specifically to a stored post (searches posts only, so it
-    never returns the doc *about* a post). Raises SystemExit with the top
-    candidates when the query is ambiguous or matches nothing."""
-    posts = load_posts(store)
+def resolve_post_in(query: str, posts: list[LinkedInPost], *,
+                    cfg: ContentReferenceConfig | None = None,
+                    embedder=_DEFAULT) -> LinkedInPost:
+    """Resolve a query to one of `posts` (searches posts only, so it never returns
+    the doc *about* a post). Works for both the stored JSON posts and live board
+    cards. Raises SystemExit with the top candidates when ambiguous / no match."""
     if not posts:
-        raise SystemExit(f"posts store {store!r} is empty or missing - "
-                         "nothing to preview by query")
+        raise SystemExit(f"no posts to search - nothing to preview for {query!r}")
     cfg = cfg or load_ref_config()
     if embedder is _DEFAULT:
         embedder = default_embedder(cfg)
@@ -115,5 +113,16 @@ def resolve_post(query: str, store: str = "generated/content-posts.json", *,
         if dec.choices:
             opts = "; ".join(f"{m.record.id} ({m.tier} {m.score})" for m in dec.choices)
             raise SystemExit(f"ambiguous post query {query!r} - did you mean: {opts}")
-        raise SystemExit(f"no stored post matches {query!r}")
+        raise SystemExit(f"no post matches {query!r}")
     return by_id[dec.match.record.id]
+
+
+def resolve_post(query: str, store: str = "generated/content-posts.json", *,
+                 cfg: ContentReferenceConfig | None = None,
+                 embedder=_DEFAULT) -> LinkedInPost:
+    """Resolve a query to a post in the JSON store (see resolve_post_in)."""
+    posts = load_posts(store)
+    if not posts:
+        raise SystemExit(f"posts store {store!r} is empty or missing - "
+                         "nothing to preview by query")
+    return resolve_post_in(query, posts, cfg=cfg, embedder=embedder)

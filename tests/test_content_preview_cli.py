@@ -42,7 +42,7 @@ def test_fuzzy_post_delegates_to_resolver(capsys, tmp_path, monkeypatch):
     sentinel = LinkedInPost(author_name="WMS", body="Resolved post.\n\nWhy?", id="r1")
     called = {}
 
-    def fake_resolve(query, store):
+    def fake_resolve(query, store, live, pipeline):
         called["args"] = (query, store)
         return sentinel
     monkeypatch.setattr(cp, "_resolve", fake_resolve)

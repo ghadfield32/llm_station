@@ -36,16 +36,23 @@ def _by_id(posts: list[LinkedInPost], post_id: str) -> LinkedInPost:
                      f"(have: {', '.join(p.id for p in posts) or '<empty>'})")
 
 
-def _resolve(query: str, store: str) -> LinkedInPost:
-    """Fuzzy/semantic lookup of a stored post (Step 3 wiring). Imported lazily so
-    the renderer path has no dependency on the reference index."""
-    from command_center.content.reference_resolver import resolve_post
+def _resolve(query: str, store: str, live: bool, pipeline: str) -> LinkedInPost:
+    """Fuzzy/semantic lookup of a post by intent. With --live, resolve against the
+    actual LinkedIn content-board cards; otherwise the JSON store. Imported lazily
+    so the renderer path has no dependency on the reference index."""
+    from command_center.content.reference_resolver import resolve_post, resolve_post_in
+    if live:
+        import yaml
+        from command_center.schemas import ContentPipelineConfig
+        from command_center.content.reference_live import fetch_posts
+        pcfg = ContentPipelineConfig.model_validate(yaml.safe_load(open(pipeline)))
+        return resolve_post_in(query, fetch_posts(pcfg.source))
     return resolve_post(query, store)
 
 
 def build_post(args) -> LinkedInPost:
     if args.post:
-        return _resolve(args.post, args.store)
+        return _resolve(args.post, args.store, args.live, args.pipeline)
     if args.post_id:
         return _by_id(load_posts(args.store), args.post_id)
     if args.body:
@@ -60,9 +67,13 @@ def build_post(args) -> LinkedInPost:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="cc content-preview",
                                  description="LinkedIn-accurate post preview (read-only)")
-    ap.add_argument("--post", help="fuzzy/semantic query to find a stored post")
+    ap.add_argument("--post", help="fuzzy/semantic query to find a post by intent")
     ap.add_argument("--post-id", help="exact post id in the store")
     ap.add_argument("--store", default=DEFAULT_STORE)
+    ap.add_argument("--live", action="store_true",
+                    help="resolve --post against the live LinkedIn content boards")
+    ap.add_argument("--pipeline", default="configs/content_pipeline.yaml",
+                    help="content_pipeline.yaml (AppFlowy source for --live)")
     ap.add_argument("--platform", default="linkedin", choices=["linkedin"])
     ap.add_argument("--device", default="desktop", choices=["desktop", "mobile"],
                     help="which see-more fold the markdown preview shows")
