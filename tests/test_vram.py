@@ -188,3 +188,71 @@ def test_resident_weight_gb_raises_when_not_installed(monkeypatch):
     monkeypatch.setattr(vram, "ollama_tags", lambda base_url=None: {})
     with pytest.raises(vram.VramError):
         vram.resident_weight_gb("absent-model")
+
+
+# ---- weights-only lower bound: honest fit for a model we have NOT pulled ----
+# (e.g. a frontier flagship like GLM-5.2 / Kimi K2 that we will never download).
+
+def test_weights_only_verdict_hard_no_for_frontier_flagship():
+    # A ~744B MoE flagship (GLM-5.2-class) at Q4 cannot fit a 24GB card — by ~18x.
+    lb = vram.weights_only_verdict(params_b=744.0, quant="Q4_K_M", budget_gb=24.0)
+    assert lb.definitely_no is True
+    assert lb.weights_gb > 24.0
+    assert "NO @ 24GB" in lb.verdict
+    # and it still does not fit a 256GB box's worth via this lower bound's own check
+    assert vram.weights_only_verdict(
+        params_b=744.0, quant="Q4_K_M", budget_gb=56.0).definitely_no is True
+
+
+def test_weights_only_verdict_unknown_when_weights_clear_the_floor():
+    # A ~14B Q4 model's weights clear the 24GB floor, but KV is not yet known, so the
+    # verdict is an honest 'unknown - pull to verify', never a fabricated FITS.
+    lb = vram.weights_only_verdict(params_b=14.0, quant="Q4_K_M", budget_gb=24.0)
+    assert lb.definitely_no is False
+    assert "unknown - pull to verify" in lb.verdict
+    assert "FITS" not in lb.verdict
+
+
+def test_weights_only_verdict_is_budget_sensitive():
+    # A 32B model's conservative weight floor (~18GB) clears 24GB but is a hard NO on a
+    # 16GB laptop. (Borderline sizes like 24B correctly abstain to 'unknown' instead of
+    # fabricating a NO, because the lower bound deliberately under-estimates real files.)
+    big = vram.weights_only_verdict(params_b=32.0, quant="Q4_K_M", budget_gb=16.0)
+    small = vram.weights_only_verdict(params_b=32.0, quant="Q4_K_M", budget_gb=24.0)
+    assert big.definitely_no is True
+    assert small.definitely_no is False
+
+
+def test_weights_only_verdict_rejects_nonpositive_params():
+    with pytest.raises(vram.VramError):
+        vram.weights_only_verdict(params_b=0.0, quant="Q4_K_M", budget_gb=24.0)
+
+
+# ---- MoE detection + native-context clamp -----------------------------------
+
+def test_metadata_for_detects_moe_experts():
+    show = _show()
+    show["model_info"]["testmoe.expert_count"] = 128
+    show["model_info"]["testmoe.expert_used_count"] = 8
+    meta = vram.metadata_for("foo", show=show, size_bytes=4 * GIB)
+    assert meta["is_moe"] is True
+    assert meta["n_experts"] == 128 and meta["n_experts_used"] == 8
+    est = vram.estimate_from_metadata(budget_gb=24.0, ctx=8192, **meta)
+    assert est.is_moe is True and est.n_experts == 128
+
+
+def test_metadata_for_dense_model_is_not_moe():
+    meta = vram.metadata_for("foo", show=_show(), size_bytes=4 * GIB)
+    assert meta["is_moe"] is False
+    assert meta["n_experts"] is None
+
+
+def test_max_ctx_fits_clamped_to_native_ctx():
+    # A tiny model on a big budget could "fit" far more KV than its native context;
+    # the Estimate must never report a context the model cannot actually serve.
+    common = dict(
+        weights_source="ollama_tags", n_layers=1, n_kv_heads=1,
+        key_length=1, value_length=1, native_ctx=8192, budget_gb=80.0,
+    )
+    est = vram.estimate_from_metadata(name="tiny", weights_gb=1.0, ctx=4096, **common)
+    assert est.max_ctx_fits == 8192   # clamped to native, not the much larger raw value

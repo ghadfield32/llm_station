@@ -89,6 +89,12 @@ class Estimate:
     reserved_gb: float = 0.0        # VRAM held for always-resident companions (e.g. the
                                     # memory embedder) — subtracted from the budget before
                                     # this model's fit is decided
+    is_moe: bool = False            # mixture-of-experts (GGUF expert_count present). Weights
+                                    # use the real on-disk size (all experts resident) and the
+                                    # KV formula is exact for MoE (attention stays dense), so the
+                                    # estimate is correct; this flag is recorded for transparency.
+    n_experts: int | None = None    # total experts (GGUF <arch>.expert_count)
+    n_experts_used: int | None = None  # experts routed per token (<arch>.expert_used_count)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -163,12 +169,19 @@ def estimate_from_metadata(
     baseline_gb: float = CUDA_BASELINE_GB,
     headroom_frac: float = SAFETY_HEADROOM_FRAC,
     reserved_gb: float = 0.0,
+    is_moe: bool = False,
+    n_experts: int | None = None,
+    n_experts_used: int | None = None,
 ) -> Estimate:
     """Build a full Estimate from already-resolved metadata (no network).
 
     `reserved_gb` is VRAM held by always-resident companions (e.g. the memory
     embedder); it is charged against the budget alongside this model's own footprint,
-    so a model is only `fits` when model + companions + headroom all fit at once."""
+    so a model is only `fits` when model + companions + headroom all fit at once.
+
+    `max_ctx_fits` is clamped to `native_ctx`: a model can never serve more context
+    than its GGUF declares, so a context-budget headroom number above the native limit
+    would be a fiction the scheduler must not act on."""
     kv = kv_cache_gb(
         n_layers=n_layers, n_kv_heads=n_kv_heads,
         key_length=key_length, value_length=value_length,
@@ -176,6 +189,12 @@ def estimate_from_metadata(
     )
     total = weights_gb + kv + baseline_gb
     budget = budget_gb
+    raw_max_ctx = max_ctx_fits(
+        weights_gb=weights_gb, n_layers=n_layers, n_kv_heads=n_kv_heads,
+        key_length=key_length, value_length=value_length, budget_gb=budget,
+        kv_bytes=kv_bytes, baseline_gb=baseline_gb, headroom_frac=headroom_frac,
+        reserved_gb=reserved_gb,
+    )
     return Estimate(
         name=name,
         quant=quant,
@@ -188,14 +207,12 @@ def estimate_from_metadata(
         budget_gb=round(budget, 3),
         fits=(total + reserved_gb) * (1.0 + headroom_frac) <= budget,
         headroom_gb=round(budget - total - reserved_gb, 3),
-        max_ctx_fits=max_ctx_fits(
-            weights_gb=weights_gb, n_layers=n_layers, n_kv_heads=n_kv_heads,
-            key_length=key_length, value_length=value_length, budget_gb=budget,
-            kv_bytes=kv_bytes, baseline_gb=baseline_gb, headroom_frac=headroom_frac,
-            reserved_gb=reserved_gb,
-        ),
+        max_ctx_fits=min(raw_max_ctx, native_ctx),
         weights_source=weights_source,
         reserved_gb=round(reserved_gb, 3),
+        is_moe=is_moe,
+        n_experts=n_experts,
+        n_experts_used=n_experts_used,
     )
 
 
@@ -208,6 +225,66 @@ def weights_gb_from_bpw(params_b: float, quant: str) -> float:
             "Pull the model so /api/tags gives the exact on-disk size instead."
         )
     return params_b * 1e9 * EFFECTIVE_BPW[key] / 8 / GIB
+
+
+@dataclass(frozen=True)
+class LowerBound:
+    """A weights-only fit verdict for a model we have NOT pulled.
+
+    Without the GGUF we cannot size the KV cache or the non-quantized tensors
+    (embeddings/output/norms), so this is a strict LOWER bound: the real footprint
+    is always larger. That makes one direction trustworthy — if the weights alone
+    already exceed the usable budget, the model definitively does NOT fit, and KV
+    only makes it worse. If the weights fit, the honest verdict is still 'unknown
+    until pulled', because the KV cache (and the heavier real file) may push it over."""
+    params_b: float
+    quant: str
+    weights_gb: float           # params_b x bpw (quantized blocks only; a lower bound)
+    usable_budget_gb: float     # budget after headroom + CUDA baseline
+    budget_gb: float
+    definitely_no: bool         # weights alone exceed the usable budget -> cannot fit
+    verdict: str                # human-readable, never a fabricated FITS
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def weights_only_verdict(
+    *,
+    params_b: float,
+    quant: str,
+    budget_gb: float,
+    baseline_gb: float = CUDA_BASELINE_GB,
+    headroom_frac: float = SAFETY_HEADROOM_FRAC,
+) -> LowerBound:
+    """Lower-bound fit check for a model that is NOT installed (no /api/show metadata).
+
+    Uses only params x quantized-bpw weights — deliberately an UNDER-estimate (real
+    GGUF files carry higher-precision embedding/output/norm tensors, so on-disk size
+    runs larger; the critic-noted ~0.62-0.66 GB/1B for real Q4_K_M vs the ~0.56 here).
+    Under-estimating is the safe direction for a 'does it fit at all' gate: if even the
+    floor exceeds the budget the answer is a hard NO. We never emit a positive FITS from
+    here — a model that clears the floor still needs a real pull-and-measure pass."""
+    if params_b <= 0:
+        raise VramError(f"params_b must be > 0 for a weights-only verdict, got {params_b}")
+    weights = weights_gb_from_bpw(params_b, quant)
+    usable = budget_gb / (1.0 + headroom_frac) - baseline_gb
+    definitely_no = weights >= usable
+    if definitely_no:
+        verdict = (
+            f"NO @ {budget_gb:g}GB ({params_b:g}B {quant} weights "
+            f"~{weights:.0f}GB > usable ~{usable:.1f}GB; lower bound, real file larger)"
+        )
+    else:
+        verdict = (
+            f"unknown - pull to verify ({params_b:g}B {quant} weights "
+            f"~{weights:.1f}GB fit the {budget_gb:g}GB floor; KV not yet sized)"
+        )
+    return LowerBound(
+        params_b=params_b, quant=quant, weights_gb=round(weights, 3),
+        usable_budget_gb=round(usable, 3), budget_gb=round(budget_gb, 3),
+        definitely_no=definitely_no, verdict=verdict,
+    )
 
 
 # ---- Ollama I/O ------------------------------------------------------------
@@ -334,6 +411,16 @@ def metadata_for(name: str, *, show: dict, size_bytes: int | None) -> dict:
             raise VramError(f"{name}: head_count is {n_heads}; cannot derive head dim")
         key_length = value_length = embed // n_heads
 
+    # Mixture-of-experts metadata (recorded for transparency; the weight size comes
+    # from the real on-disk file — all experts are resident — and the KV formula is
+    # exact because MoE only sparsifies the FFN, not attention).
+    n_experts = int(info[f"{arch}.expert_count"]) if f"{arch}.expert_count" in info else None
+    n_experts_used = (
+        int(info[f"{arch}.expert_used_count"])
+        if f"{arch}.expert_used_count" in info else None
+    )
+    is_moe = bool(n_experts and n_experts > 1)
+
     details = show.get("details") or {}
     quant = details.get("quantization_level") or info.get("general.file_type")
     params_count = info.get("general.parameter_count")
@@ -359,6 +446,9 @@ def metadata_for(name: str, *, show: dict, size_bytes: int | None) -> dict:
         "native_ctx": native_ctx,
         "quant": str(quant) if quant else None,
         "params_b": params_b,
+        "is_moe": is_moe,
+        "n_experts": n_experts,
+        "n_experts_used": n_experts_used,
     }
 
 

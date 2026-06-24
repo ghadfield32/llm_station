@@ -30,6 +30,18 @@ class ModelCandidate(Strict):
     api_base_env: str = "OLLAMA_API_BASE"
 
 
+# The sources the scout knows how to fetch. Kept here (next to ScoutSpec) so a typo'd
+# source in configs/models.yaml is rejected at `make validate` instead of only surfacing
+# as a per-source runtime error. model_scout.py imports this as the single source of truth.
+KNOWN_SCOUT_SOURCES = frozenset({
+    "aider-polyglot",       # public coding leaderboard (keyless discovery signal)
+    "local-ollama-tags",    # installed models (guaranteed-runnable provenance)
+    "curated-openweight",   # strict, installed-and-digest-joined promotion-grade source
+    "artificial-analysis",  # optional API tiebreaker (skipped without AA_API_KEY)
+    "model-watchlist",      # un-pulled frontier / pull-to-verify models (track-as-context)
+})
+
+
 class ScoutSpec(Strict):
     """The model scout: watches sources (leaderboards, model cards, provider
     docs) and PROPOSES updates as PRs against this file. It can never promote.
@@ -38,9 +50,21 @@ class ScoutSpec(Strict):
     leaderboards are gameable and a board-topping model can still be worse for
     THIS system's judges and diffs."""
     cadence: str = "monthly"                      # how often the scout mission runs
-    sources: list[str] = []                       # urls/names: lmarena, hf-leaderboards, provider blogs
+    sources: list[str] = []                       # names from KNOWN_SCOUT_SOURCES
     propose_only: bool = True                     # contract refuses False — no auto-promotion
     max_candidates_per_run: int = Field(default=3, ge=1, le=10)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        unknown = [s for s in self.sources if s not in KNOWN_SCOUT_SOURCES]
+        if unknown:
+            raise ValueError(
+                f"scout.sources has unknown source(s) {unknown}; "
+                f"known sources are {sorted(KNOWN_SCOUT_SOURCES)}"
+            )
+        if len(self.sources) != len(set(self.sources)):
+            raise ValueError("scout.sources contains duplicate sources")
+        return self
 
 
 class ExecutorSpec(Strict):
@@ -198,6 +222,283 @@ class CuratedModelScoutConfig(Strict):
         ids = [record.record_id for record in self.records]
         if len(ids) != len(set(ids)):
             raise ValueError("curated model scout config contains duplicate record_id values")
+        return self
+
+
+# ---- model-scout-watchlist.yaml --------------------------------------------
+# A LOWER-trust tier than curated-openweight: open-weight models we are TRACKING
+# but have NOT installed (and in the frontier case never will, because they do not
+# fit this hardware). It carries provenance + public-benchmark CONTEXT and an honest
+# weights-only fit verdict — never promotion-grade evidence, never a fabricated FITS.
+# This is what lets GLM-5.2 / Kimi K2 be "checked on" by name without a download.
+class WatchlistBenchmark(Strict):
+    """Public capability CONTEXT for a watchlist model. Explicitly NOT promotion
+    evidence — a high public score never substitutes for the repo's own local A/B."""
+    name: str
+    metric: str
+    score: float
+    score_definition: str
+    source_url: str
+    evaluation_date: str
+
+    @model_validator(mode="after")
+    def _checks(self):
+        for f in ("name", "metric", "score_definition", "source_url", "evaluation_date"):
+            if not getattr(self, f):
+                raise ValueError(f"watchlist benchmark missing {f}")
+        return self
+
+
+class WatchlistLocalArtifact(Strict):
+    """A concrete downloadable quantized artifact + its VERIFIED on-disk size, when one is
+    published (e.g. an Unsloth dynamic-GGUF). When present, the size is authoritative for the
+    fit verdict (more honest than a params×bpw estimate) — e.g. GLM-5.2's ~238 GB dynamic 2-bit
+    is a hard NO on a 24/16 GB box but plausible on a 256 GB-class unified-memory machine."""
+    type: str                                      # gguf | safetensors | ...
+    provider: str                                  # who published the quant (unsloth, vendor, ...)
+    smallest_verified_size_gb: float = Field(gt=0)  # smallest verified runnable artifact size
+    quant: str                                     # e.g. dynamic-2bit, Q2_K_XL
+
+    @model_validator(mode="after")
+    def _checks(self):
+        for f in ("type", "provider", "quant"):
+            if not getattr(self, f):
+                raise ValueError(f"watchlist local_artifact missing {f}")
+        return self
+
+
+class ModelWatchlistRecord(Strict):
+    record_id: str
+    # frontier_watch: too large to run here — track-as-context, NEVER drafts a local benchmark.
+    # pull_to_verify: plausibly fits — may draft a propose-only 'ollama pull' candidate.
+    tier: Literal["frontier_watch", "pull_to_verify"]
+    model_family: str
+    release_id: str
+    source_model_url: str                          # HF/vendor model card (provenance root)
+    parameter_count_b: float = Field(gt=0)         # TOTAL params — drives the memory footprint
+    reference_quant: str                           # quant used for the weights-only fit bound
+    license: str
+    open_weight_evidence: str
+    source_url: str
+    retrieval_timestamp: str
+    active_param_count_b: float | None = Field(default=None, gt=0)  # MoE active (speed, not size)
+    is_moe: bool = False
+    context_length: int | None = Field(default=None, ge=1)
+    ollama_tag: str | None = None                  # e.g. 'glm-4.7-flash:...' or cloud-only tag
+    ollama_local: bool = False                     # is the tag actually downloadable locally?
+    candidate_roles: list[str] = []                # required for pull_to_verify (which role to test)
+    local_artifact: WatchlistLocalArtifact | None = None   # verified quant size, when published
+    benchmark: WatchlistBenchmark | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _checks(self):
+        for f in ("record_id", "model_family", "release_id", "source_model_url",
+                  "reference_quant", "license", "open_weight_evidence", "source_url",
+                  "retrieval_timestamp"):
+            if not getattr(self, f):
+                raise ValueError(f"watchlist record missing {f}")
+        if self.candidate_roles and len(self.candidate_roles) != len(set(self.candidate_roles)):
+            raise ValueError(f"watchlist record {self.record_id!r} has duplicate candidate_roles")
+        if self.tier == "pull_to_verify" and not self.candidate_roles:
+            raise ValueError(
+                f"watchlist record {self.record_id!r} is pull_to_verify and must declare "
+                "candidate_roles (which role a pulled candidate would be benchmarked for)")
+        # a cloud-only / non-local tag must not claim to be locally downloadable
+        if self.ollama_local and not self.ollama_tag:
+            raise ValueError(
+                f"watchlist record {self.record_id!r} sets ollama_local but has no ollama_tag")
+        return self
+
+
+class ModelWatchlistConfig(Strict):
+    schema_version: str
+    records: list[ModelWatchlistRecord]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.model-scout-watchlist.v1":
+            raise ValueError(
+                "schema_version must be command-center.model-scout-watchlist.v1")
+        if not self.records:
+            raise ValueError("model watchlist config must define at least one record")
+        ids = [record.record_id for record in self.records]
+        if len(ids) != len(set(ids)):
+            raise ValueError("model watchlist config contains duplicate record_id values")
+        return self
+
+
+# ---- frontier-router-providers.yaml / frontier-router-budgets.yaml ----------
+# A SEPARATE lane from the local-only LiteLLM gateway: paid frontier APIs as a budgeted,
+# redacted, token-measured BACKUP/escalation path for open-weight models too large to run
+# locally (GLM-5.2, Kimi K2). It NEVER becomes a local incumbent and NEVER routes the local
+# lane. The local-only contract + check_forbidden_providers stay intact: these files are pure
+# metadata, off by default, and naming a provider key here (as the env var to read) is NOT the
+# same as putting the key in .env — actually enabling the lane is a deliberate, separate
+# operator decision (set the key AND reconcile the forbidden-providers gate). The safety
+# properties below are CONTRACT-enforced, not merely asserted.
+class FrontierRouterProvider(Strict):
+    base_url: str
+    api_style: Literal["openai_compatible", "anthropic_compatible"]
+    secret_env: str                                # env var NAME to read at runtime (not a key)
+    # Only legal value: the lane cannot self-enable. Turning it on is a budgeted operator step.
+    default_policy: Literal["disabled_until_budgeted"] = "disabled_until_budgeted"
+    data_policy_required: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        for f in ("base_url", "secret_env"):
+            if not getattr(self, f):
+                raise ValueError(f"frontier router provider missing {f}")
+        if not self.data_policy_required:
+            raise ValueError("frontier router provider must require a data policy")
+        return self
+
+
+class FrontierRouterCandidate(Strict):
+    provider: str
+    model: str
+    input_usd_per_mtok: float = Field(ge=0)
+    output_usd_per_mtok: float = Field(ge=0)
+    context_tokens: int = Field(ge=1)
+    cached_input_usd_per_mtok: float | None = Field(default=None, ge=0)
+    # Price provenance — public prices drift, so each is dated and the freshness audit flags
+    # staleness rather than trusting a frozen number (router_price_audit.py).
+    price_source: str | None = None
+    price_observed_at: str | None = None           # ISO date, e.g. "2026-06-20"
+    price_is_drift_prone: bool = True
+
+
+class FrontierRouterPriceFreshness(Strict):
+    """Policy for the price-freshness audit. auto_update is refused: prices are never silently
+    overwritten — a stale price is surfaced for a human, not patched in."""
+    max_age_days: int = Field(default=14, ge=1)
+    stale_action: Literal["warn_in_scan", "fail"] = "warn_in_scan"
+    auto_update: bool = False
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.auto_update:
+            raise ValueError("price_freshness.auto_update must be false — never silently "
+                             "overwrite provider prices")
+        return self
+
+
+class FrontierRouterModel(Strict):
+    # Router-backed models stay frontier-watch for fit purposes — never a local lane.
+    local_lane: Literal["frontier_watch"] = "frontier_watch"
+    router_candidates: list[FrontierRouterCandidate]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.router_candidates:
+            raise ValueError("frontier router model must list at least one router_candidate")
+        return self
+
+
+class FrontierRouterProvidersConfig(Strict):
+    schema_version: str
+    providers: dict[str, FrontierRouterProvider]
+    models: dict[str, FrontierRouterModel]
+    price_freshness: FrontierRouterPriceFreshness = Field(
+        default_factory=FrontierRouterPriceFreshness)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.frontier-router-providers.v1":
+            raise ValueError(
+                "schema_version must be command-center.frontier-router-providers.v1")
+        if not self.providers:
+            raise ValueError("frontier router config must define at least one provider")
+        for model_id, spec in self.models.items():
+            for cand in spec.router_candidates:
+                if cand.provider not in self.providers:
+                    raise ValueError(
+                        f"frontier router model {model_id!r} candidate references unknown "
+                        f"provider {cand.provider!r}")
+        return self
+
+
+class FrontierRouterBudgetPolicy(Strict):
+    enabled: bool = False                           # OFF by default — fail closed
+    monthly_cap_usd: float = Field(gt=0)
+    per_run_cap_usd: float = Field(gt=0)
+    per_request_cap_usd: float = Field(gt=0)
+    require_redaction: bool = True                  # contract refuses False
+    require_human_approval_for_live_repo_context: bool = True
+    log_token_usage: bool = True
+    log_cost_estimate: bool = True
+    fail_on_missing_usage: bool = True              # no fabricated usage/cost
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.require_redaction:
+            raise ValueError("frontier router budget must require_redaction (no raw egress)")
+        if self.per_request_cap_usd > self.per_run_cap_usd:
+            raise ValueError("per_request_cap_usd must be <= per_run_cap_usd")
+        if self.per_run_cap_usd > self.monthly_cap_usd:
+            raise ValueError("per_run_cap_usd must be <= monthly_cap_usd")
+        # Enabling the lane requires real usage accounting + human approval for repo context.
+        if self.enabled and not (self.fail_on_missing_usage
+                                 and self.require_human_approval_for_live_repo_context):
+            raise ValueError(
+                "an ENABLED frontier router budget must keep fail_on_missing_usage and "
+                "require_human_approval_for_live_repo_context true")
+        return self
+
+
+class FrontierRouterBudgetsConfig(Strict):
+    schema_version: str
+    default: FrontierRouterBudgetPolicy
+    allowed_task_classes: list[str]
+    blocked_payloads: list[str]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.frontier-router-budgets.v1":
+            raise ValueError(
+                "schema_version must be command-center.frontier-router-budgets.v1")
+        if not self.allowed_task_classes:
+            raise ValueError("frontier router budgets must list allowed_task_classes")
+        if "secrets" not in self.blocked_payloads:
+            raise ValueError(
+                "frontier router budgets must block the 'secrets' payload class at minimum")
+        return self
+
+
+# ---- framework-evals.yaml --------------------------------------------------
+# External code-eval frameworks (EvalPlus, BigCodeBench) as SUPPORTING evidence only — the
+# `trust` Literal makes "this can promote a model" unrepresentable. They run against the local
+# Ollama OpenAI-compatible endpoint, are off by default, and are bounded by a sample budget.
+class FrameworkEvalSpec(Strict):
+    enabled: bool = False
+    cli_command: str                               # binary/module checked for availability + run
+    backend: Literal["openai_compatible", "ollama"] = "openai_compatible"
+    base_url_env: str                              # env var naming the local endpoint
+    sample_budget: int = Field(ge=1)               # bounded subset (full runs are minutes-hours)
+    informs_role: str                              # which local role this is evidence FOR
+    trust: Literal["supporting_evidence_only"] = "supporting_evidence_only"
+    datasets: list[str] = []                       # e.g. EvalPlus: humaneval_plus, mbpp_plus
+    subset: str | None = None                      # e.g. BigCodeBench: full | hard
+
+    @model_validator(mode="after")
+    def _checks(self):
+        for f in ("cli_command", "base_url_env", "informs_role"):
+            if not getattr(self, f):
+                raise ValueError(f"framework eval spec missing {f}")
+        return self
+
+
+class FrameworkEvalsConfig(Strict):
+    schema_version: str
+    frameworks: dict[str, FrameworkEvalSpec]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.framework-evals.v1":
+            raise ValueError("schema_version must be command-center.framework-evals.v1")
+        if not self.frameworks:
+            raise ValueError("framework-evals config must define at least one framework")
         return self
 
 
@@ -796,6 +1097,18 @@ class ContentStatuses(Strict):
     done: str = "Completed"
 
 
+class LinkedInOrgApp(Strict):
+    """A SEPARATE LinkedIn app dedicated to the Community Management API. LinkedIn
+    requires that product to be the ONLY one on its app, so company-Page posting
+    (w_organization_social) cannot share the member app - it needs its own OAuth
+    identity and token store. Shares the member app's API endpoints/version."""
+    client_id_env: str = "LINKEDIN_ORG_CLIENT_ID"
+    client_secret_env: str = "LINKEDIN_ORG_CLIENT_SECRET"
+    redirect_uri_env: str = "LINKEDIN_ORG_REDIRECT_URI"
+    token_store: str = "generated/linkedin-org-token.json"
+    scopes: list[str] = ["r_organization_social", "w_organization_social"]
+
+
 class LinkedInApi(Strict):
     """Official LinkedIn API endpoints/scopes. `version` is the required
     LinkedIn-Version header (YYYYMM); it has no default so the live value is
@@ -815,11 +1128,30 @@ class LinkedInApi(Strict):
     # loudly (LinkedIn issues no refresh token to standard apps, so a human must
     # re-run --login). Externalized so the reminder lead time isn't a buried literal.
     token_warn_days: int = Field(default=14, ge=1)
+    # A LinkedIn API version (YYYYMM) is sunset ~this many months after release; the
+    # preflight/run warns when the configured version is within `version_warn_days`
+    # of that sunset, so the API can't silently break mid-cadence. The lifetime is
+    # LinkedIn policy (config, not a buried literal), the warn lead time is config.
+    version_lifetime_months: int = Field(default=12, ge=1)
+    version_warn_days: int = Field(default=45, ge=1)
     # Least-privilege: only what posting needs. userinfo (for the member URN)
     # needs openid+profile; member posting needs w_member_social; org posting
     # needs w_organization_social. No email, no r_*_social (read) scopes.
     member_scopes: list[str] = ["openid", "profile", "w_member_social"]
     organization_scopes: list[str] = ["w_organization_social"]
+    # The separate Community-Management app for company-Page posting (optional;
+    # member posting works without it). Present in content.yaml even before App B
+    # is approved, so the publisher is org-ready the moment its creds land.
+    org_app: LinkedInOrgApp | None = None
+
+    @model_validator(mode="after")
+    def _check_version(self):
+        # YYYYMM with a real month - a typo'd version fails loudly here, never at
+        # publish time (a bad header silently breaks the official API call).
+        if not re.match(r"^\d{4}(0[1-9]|1[0-2])$", self.version):
+            raise ValueError(
+                f"linkedin.version {self.version!r} must be YYYYMM (e.g. 202606)")
+        return self
 
 
 class LinkedInAccount(Strict):

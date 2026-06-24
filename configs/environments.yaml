@@ -14,7 +14,21 @@ environments:
     kind: worker
     host: desktop-4090
     gpu_required: true
-    gpu_vram_gb: 24            # RTX 4090; the budget `make model-fit` sizes against
+    gpu_vram_gb: 24            # RTX 4090; the PRIMARY budget `make model-fit` sizes against
+    persistent: true
+    allowed_egress: [tailscale, litellm, github, package_registries]
+    allowed_secrets: [GITHUB_TOKEN]
+
+  # The mobile workstation. A model that "fits the laptop" must clear THIS 16 GB
+  # ceiling, not the 24 GB card — qwen3-coder:30b (~19 GB) does not fit here, which
+  # is why the triage-5080 failover in models.yaml is whitelisted to devstral:24b
+  # (~14 GB). Disabled as a serving node until the tailnet endpoint is real, but the
+  # budget is declared so the scout/watchlist can size laptop-fit honestly at 16 GB.
+  - name: cc-dev-5080
+    kind: worker
+    host: laptop-5080
+    gpu_required: true
+    gpu_vram_gb: 16           # RTX 5080 laptop; the SECONDARY (mobile) fit budget
     persistent: true
     allowed_egress: [tailscale, litellm, github, package_registries]
     allowed_secrets: [GITHUB_TOKEN]

@@ -1,0 +1,170 @@
+schema_version: command-center.model-scout-watchlist.v1
+
+# Open-weight models we are TRACKING but have not promotion-joined. Two tiers:
+#
+#   frontier_watch  - real, strong, open-weight, but too large to run on this hardware.
+#                     Recorded for awareness with an honest weights-only fit verdict.
+#                     The scan turns these into a track-as-context note; it NEVER drafts
+#                     a local benchmark for them (the live harness is Ollama-only and they
+#                     do not fit). Frontier quality, when wanted, is a hosted-API decision
+#                     OUTSIDE this local-only pipeline.
+#   pull_to_verify  - plausibly fits the 24 GB worker (and maybe the 16 GB laptop); not yet
+#                     installed. The scan drafts a propose-only "ollama pull + benchmark"
+#                     candidate for the declared role(s). Promotion still requires the full
+#                     curated-openweight digest join + canary + evals + a human tap.
+#
+# Trust tier: this file is CONTEXT, not promotion evidence. No score here ever substitutes
+# for the repo's own local A/B (see docs/MASTER.md 6.5). parameter_count_b is TOTAL params
+# (what drives the memory footprint); reference_quant feeds the weights-only lower bound.
+
+records:
+  # ── frontier_watch: real flagships that do NOT fit 24 GB VRAM + 32 GB RAM ──────────────
+  - record_id: glm-5.2-frontier-2026-06
+    tier: frontier_watch
+    model_family: glm
+    release_id: GLM-5.2
+    source_model_url: https://huggingface.co/unsloth/GLM-5.2-GGUF
+    parameter_count_b: 754.0
+    active_param_count_b: 40.0
+    is_moe: true
+    reference_quant: Q4_K_M
+    context_length: 1048576
+    license: MIT
+    ollama_tag: glm-5.2:cloud
+    ollama_local: false
+    local_artifact:
+      type: gguf
+      provider: unsloth
+      smallest_verified_size_gb: 217
+      quant: UD-IQ1_S
+    open_weight_evidence: >-
+      Z.ai open-sourced GLM-5.2 (zai-org) under MIT; the current GLM flagship. The Unsloth
+      GLM-5.2-GGUF HF page (2026-06-20) lists 754B total params / ~40B active MoE, 1M context,
+      full weights ~1.51 TB, with the SMALLEST quantized files at 217 GB (1-bit UD-IQ1_S) and
+      238 GB (2-bit UD-IQ2_XXS). (The "~23 GB" figure seen elsewhere is a single BF16 shard,
+      not the whole model.)
+    source_url: https://z.ai/blog/glm-5.2
+    retrieval_timestamp: "2026-06-20"
+    notes: >-
+      Does NOT fit this hardware. Unsloth dynamic GGUF ladder: 1-bit UD-IQ1_S ~217 GB,
+      2-bit UD-IQ2_XXS ~238 GB, 4-bit UD-Q4_K_M ~466 GB — the SMALLEST is still ~4x the 56 GB
+      local budget; "runs locally" means a 256 GB unified-memory class machine. Track-as-context
+      here; for its quality use the budgeted frontier-router lane (configs/frontier-router-*.yaml),
+      never a local pull.
+
+  - record_id: kimi-k2-frontier
+    tier: frontier_watch
+    model_family: kimi
+    release_id: Kimi-K2-Instruct
+    source_model_url: https://huggingface.co/moonshotai/Kimi-K2-Instruct
+    parameter_count_b: 1000.0
+    active_param_count_b: 32.0
+    is_moe: true
+    reference_quant: Q4_K_M
+    context_length: 131072
+    license: Modified-MIT
+    ollama_tag: kimi-k2:cloud
+    ollama_local: false
+    open_weight_evidence: >-
+      Moonshot AI released Kimi K2 open weights on Hugging Face (moonshotai) under a
+      Modified MIT License; ~1T total / 32B active MoE.
+    source_url: https://huggingface.co/moonshotai/Kimi-K2-Instruct
+    retrieval_timestamp: "2026-06-20"
+    notes: >-
+      Flatly impossible locally — Q4 ~540-584 GB, ~10x even the full 56 GB VRAM+RAM budget;
+      smallest usable dynamic 2-bit still needs ~340 GB+. Cloud-only in practice.
+
+  - record_id: deepseek-v3-frontier
+    tier: frontier_watch
+    model_family: deepseek
+    release_id: DeepSeek-V3
+    source_model_url: https://huggingface.co/deepseek-ai/DeepSeek-V3
+    parameter_count_b: 671.0
+    active_param_count_b: 37.0
+    is_moe: true
+    reference_quant: Q4_K_M
+    context_length: 131072
+    license: MIT
+    ollama_tag: deepseek-v3:cloud
+    ollama_local: false
+    open_weight_evidence: >-
+      DeepSeek released DeepSeek-V3 open weights on Hugging Face (deepseek-ai) under MIT;
+      671B total / 37B active MoE.
+    source_url: https://huggingface.co/deepseek-ai/DeepSeek-V3
+    retrieval_timestamp: "2026-06-20"
+    notes: >-
+      Q4 ~404 GB — ~17x the 24 GB card. Representative of the DeepSeek V3/R1 frontier line;
+      track-as-context only.
+
+  - record_id: qwen3-235b-a22b-frontier
+    tier: frontier_watch
+    model_family: qwen3
+    release_id: Qwen3-235B-A22B
+    source_model_url: https://huggingface.co/Qwen/Qwen3-235B-A22B
+    parameter_count_b: 235.0
+    active_param_count_b: 22.0
+    is_moe: true
+    reference_quant: Q4_K_M
+    context_length: 131072
+    license: Apache-2.0
+    ollama_tag: qwen3:235b
+    ollama_local: false
+    open_weight_evidence: >-
+      Alibaba released Qwen3-235B-A22B open weights on Hugging Face (Qwen) under Apache-2.0;
+      235B total / 22B active MoE. Same family as the installed qwen3 incumbents.
+    source_url: https://huggingface.co/Qwen/Qwen3-235B-A22B
+    retrieval_timestamp: "2026-06-20"
+    notes: >-
+      Q4 ~132 GB — over 5x the 24 GB card and over 2x the 56 GB combined budget. The largest
+      Qwen3 tier; the runnable Qwen3 members are tracked as pull_to_verify / incumbents.
+
+  - record_id: glm-4.5-air-frontier
+    tier: frontier_watch
+    model_family: glm
+    release_id: GLM-4.5-Air
+    source_model_url: https://huggingface.co/zai-org/GLM-4.5-Air
+    parameter_count_b: 106.0
+    active_param_count_b: 12.0
+    is_moe: true
+    reference_quant: Q4_K_M
+    context_length: 131072
+    license: MIT
+    ollama_tag: glm-4.5-air
+    ollama_local: false
+    open_weight_evidence: >-
+      Z.ai released GLM-4.5-Air open weights on Hugging Face (zai-org) under MIT; 106B total
+      / 12B active MoE — the smallest of the GLM-4.5+ flagship line.
+    source_url: https://huggingface.co/zai-org/GLM-4.5-Air
+    retrieval_timestamp: "2026-06-20"
+    notes: >-
+      The boundary case: Q4 ~60-73 GB still exceeds even the combined 24 GB VRAM + 32 GB RAM
+      (56 GB). The closest flagship to fitting, but still NO. Re-tier to pull_to_verify only
+      if a genuinely smaller GLM-4.x-Air variant or a sub-Q4 dynamic quant clears the budget.
+
+  # ── pull_to_verify: plausibly fits; propose a pull + a local role A/B (never auto-pull) ──
+  - record_id: gpt-oss-20b-pull
+    tier: pull_to_verify
+    model_family: gpt-oss
+    release_id: gpt-oss-20b
+    source_model_url: https://huggingface.co/openai/gpt-oss-20b
+    parameter_count_b: 21.0
+    active_param_count_b: 3.6
+    is_moe: true
+    reference_quant: Q4_K_M
+    context_length: 131072
+    license: Apache-2.0
+    ollama_tag: gpt-oss:20b
+    ollama_local: true
+    candidate_roles: [planner, local-judge]
+    open_weight_evidence: >-
+      OpenAI released gpt-oss-20b open weights on Hugging Face (openai) under Apache-2.0;
+      ~21B total / ~3.6B active MoE, available as the Ollama tag gpt-oss:20b (native MXFP4,
+      ~14 GB on disk).
+    source_url: https://huggingface.co/openai/gpt-oss-20b
+    retrieval_timestamp: "2026-06-20"
+    notes: >-
+      Fits the 24 GB worker comfortably and is plausible on the 16 GB laptop at modest
+      context. A credible reasoning/planner + judge candidate. Pull, then run the planner and
+      local-judge suites against the qwen3:30b incumbents before any routing recommendation.
+      Verify the digest/license join and canary tool-call template behavior first (the repo's
+      qwen3-coder XML-leak history applies to any new tool-using model).
