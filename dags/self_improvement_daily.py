@@ -29,7 +29,6 @@ between the daily runs. (On Airflow 3.x: Dataset→Asset, DatasetOrTimeSchedule�
 """
 from __future__ import annotations
 
-import json
 import os
 from datetime import datetime, timedelta
 
@@ -68,11 +67,14 @@ def _registry():
 
 
 def _fetch(spec: dict) -> list[dict]:
-    """Live records for a feed source, pre-ingested into an Airflow Variable as a JSON list
-    (e.g. an upstream ingestion DAG writes `improvement_feed_arxiv`). A missing/!JSON value
-    raises — and the per-source isolate guard records it as a visible failed source."""
-    raw = Variable.get(f"improvement_feed_{spec['name']}", default_var="[]")
-    return json.loads(raw)
+    """Records for a feed source. Live-fetch sources (dag_support.LIVE_FETCHERS, e.g. the keyless
+    `codesota` leaderboard) pull fresh at scan time — no Variable needed. Every other source reads
+    its pre-ingested `improvement_feed_<name>` Variable (e.g. an upstream ingestion DAG writes
+    `improvement_feed_arxiv`). Routing lives in the Airflow-free `dag_support.fetch_records` so it
+    stays unit-tested; the Airflow-specific `Variable.get` is injected here. A missing/!JSON value
+    or a failed live fetch raises — the per-source isolate guard records it as a visible failure."""
+    return dag_support.fetch_records(
+        spec, lambda key: Variable.get(key, default_var="[]"))
 
 
 @dag(

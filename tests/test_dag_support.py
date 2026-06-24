@@ -12,6 +12,7 @@ from command_center.improvement.discovery import (
     ModelRegistryScanner, PapersScanner, Pillar, ScanOutcome, build_scanner, finish,
     offline_specs, scan_one,
 )
+from command_center.improvement.discovery import dag_support
 from command_center.improvement.discovery.dag_support import SOURCE_REGISTRY
 from command_center.improvement.registry import ExperimentRegistry
 
@@ -185,3 +186,40 @@ def test_codesota_source_registered_and_runs_through_scan_one(tmp_path):
                 "source_name": "codesota"}]
     out = scan_one(spec, _reg(tmp_path), fetch=lambda _s: records)
     assert out["error"] == "" and len(out["findings"]) == 1
+
+
+# ------------------------------------------------------------------- fetch_records routing
+
+def test_fetch_records_live_source_bypasses_the_variable(monkeypatch):
+    """A LIVE_FETCHERS source (codesota) pulls fresh at scan time and must NEVER read a
+    Variable — there is no `improvement_feed_codesota` to set."""
+    variable_calls: list[str] = []
+
+    def variable_get(key: str) -> str:
+        variable_calls.append(key)            # records every Variable lookup
+        return "[]"
+
+    monkeypatch.setitem(dag_support.LIVE_FETCHERS, "codesota",
+                        lambda: [{"model": "live", "metric": "m",
+                                  "candidate": 2, "incumbent": 1}])
+    records = dag_support.fetch_records({"name": "codesota"}, variable_get)
+    assert records == [{"model": "live", "metric": "m", "candidate": 2, "incumbent": 1}]
+    assert variable_calls == []               # the Variable path was never touched
+
+
+def test_fetch_records_non_live_source_reads_its_variable():
+    """Every non-live source still reads its pre-ingested `improvement_feed_<name>` Variable."""
+    seen: dict[str, str] = {"improvement_feed_arxiv": '[{"title": "x", "relevance": 0.9}]'}
+    records = dag_support.fetch_records({"name": "arxiv"}, lambda key: seen[key])
+    assert records == [{"title": "x", "relevance": 0.9}]
+
+
+def test_fetch_records_live_fetch_failure_is_not_swallowed(monkeypatch):
+    """A live fetcher that raises propagates — the isolate guard turns it into a visible
+    failed source, never a silent empty feed."""
+    def boom() -> list[dict]:
+        raise ConnectionError("codesota down")
+
+    monkeypatch.setitem(dag_support.LIVE_FETCHERS, "codesota", boom)
+    with pytest.raises(ConnectionError, match="codesota down"):
+        dag_support.fetch_records({"name": "codesota"}, lambda key: "[]")
