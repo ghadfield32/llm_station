@@ -42,6 +42,13 @@ boards:
       - delete_card
       - delete_board
     blockers: []
+    # Cline-style mission dependency chains. Optional per card: a mission with no
+    # dependencies is valid. blocked_by = ids that must finish first; unblocks = the
+    # inverse edge. Carries no approval authority — a resolved blocker only makes a card
+    # eligible to start; the human wall past L2 is unchanged.
+    dependency_fields:
+      - blocked_by
+      - unblocks
   - board_id: betts_basketball
     provider: command_center_ui
     workspace_ref: self

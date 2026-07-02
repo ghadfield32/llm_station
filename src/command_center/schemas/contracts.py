@@ -589,6 +589,11 @@ _KANBAN_GRANTABLE_VERBS = frozenset({
 _KANBAN_WALL_VERBS = frozenset({
     "approve_card", "merge", "deploy", "delete_card", "delete_board",
 })
+# The recognised per-card mission-dependency fields (Cline-style dependency chains).
+# `blocked_by`: mission ids that must finish before this card may start. `unblocks`:
+# the inverse edge, for surfacing. A board opts in via KanbanBoardSpec.dependency_fields;
+# they are OPTIONAL per card (never in required_fields) and carry no approval authority.
+_KANBAN_CARD_DEPENDENCY_FIELDS = frozenset({"blocked_by", "unblocks"})
 
 
 class KanbanBoardSpec(Strict):
@@ -602,6 +607,10 @@ class KanbanBoardSpec(Strict):
     allowed_agent_verbs: list[str]
     forbidden_agent_verbs: list[str]
     blockers: list[str] = Field(default_factory=list)
+    # Optional per-card mission-dependency fields this board supports (blocked_by / unblocks).
+    # Empty = the board has no dependency chains. These are optional per card and must NOT
+    # be listed in required_fields (a card without dependencies is valid).
+    dependency_fields: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _checks(self):
@@ -641,6 +650,24 @@ class KanbanBoardSpec(Strict):
             raise ValueError(f"kanban board {self.board_id!r} must declare required_fields")
         if len(self.required_fields) != len(set(self.required_fields)):
             raise ValueError(f"kanban board {self.board_id!r} has duplicate required_fields")
+        # dependency_fields: recognised, de-duplicated, and OPTIONAL (never required) —
+        # a mission with no dependencies is valid, so requiring the field would be wrong.
+        dep = set(self.dependency_fields)
+        if len(self.dependency_fields) != len(dep):
+            raise ValueError(f"kanban board {self.board_id!r} has duplicate dependency_fields")
+        unknown_dep = dep - _KANBAN_CARD_DEPENDENCY_FIELDS
+        if unknown_dep:
+            raise ValueError(
+                f"kanban board {self.board_id!r} dependency_fields may only be "
+                f"{sorted(_KANBAN_CARD_DEPENDENCY_FIELDS)}; got: {sorted(unknown_dep)}"
+            )
+        required_dep = dep & set(self.required_fields)
+        if required_dep:
+            raise ValueError(
+                f"kanban board {self.board_id!r} dependency_fields {sorted(required_dep)} "
+                "must stay optional; a card without dependencies is valid, so they cannot "
+                "be in required_fields"
+            )
         # verb contract: allowed/forbidden disjoint; wall verbs always forbidden;
         # allowed may only be grantable verbs (never the wall verbs).
         allowed = set(self.allowed_agent_verbs)

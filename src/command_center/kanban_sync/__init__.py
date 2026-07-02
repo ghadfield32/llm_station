@@ -23,6 +23,12 @@ from command_center.kanban_sync.projection import (
     verify_projection,
 )
 from command_center.kanban_sync.wiring import wrap_governed_dispatch
+from command_center.kanban_sync.dependencies import (
+    CardDependencies,
+    is_card_blocked,
+    parse_card_dependencies,
+    unmet_blockers,
+)
 
 __all__ = [
     "ALLOWED_EVENT_TYPES", "FORBIDDEN_EVENT_TYPES", "GovernanceViolation",
@@ -30,4 +36,5 @@ __all__ = [
     "normalize_status",
     "AppFlowyProjection", "project_cards", "reconcile", "verify_projection",
     "wrap_governed_dispatch",
+    "CardDependencies", "is_card_blocked", "parse_card_dependencies", "unmet_blockers",
 ]
