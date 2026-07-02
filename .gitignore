@@ -59,6 +59,9 @@ appflowy_kanban/growth-os/_export/
 generated/litellm-config.yaml
 generated/json-schema/
 generated/*.md
+# scan feeds (regenerate: `cc research-digest feed` / `make model-scout`)
+generated/research-digest-feed.json
+generated/model-scout-feed.json
 
 # ── LinkedIn content pipeline runtime state — NEVER commit ──────────────────
 # token store holds the OAuth access token (a secret); ledger/lock are runtime
@@ -77,8 +80,10 @@ generated/kanban-events.jsonl
 _staging/
 .codex_tmp/
 
-# ── Runtime logs (the gateway manager writes gateway.log; regenerated on run) ─
+# ── Runtime logs (the gateway writes a size-bounded, rotating gateway.log; the ─
+#    supervisor writes gateway-supervisor.log; both regenerate on run) ─────────
 *.log
+*.log.*
 
 # ── Capability-evaluation vendored binaries (pinned + re-downloadable; the ──
 #    version + sha256 live in each candidate's install-manifest.json, so the
