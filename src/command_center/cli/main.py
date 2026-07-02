@@ -373,6 +373,12 @@ COMMANDS: dict[str, tuple] = {
                                "daily observer/draft-only loop: --draft-kanban true drafts Proposed cards; never applies code"),
     "self-improvement-report": (lambda a: pym("command_center.cli.self_improvement", "report", *a),
                                 "write the decision-grade self-improvement report (no cards drafted)"),
+    "research-digest": (lambda a: pym("command_center.cli.research_digest", *a),
+                        "§5.2 intake: validate/report/feed the research source catalog "
+                        "(evaluate sources -> observer-only scan cards)"),
+    "skills-audit": (lambda a: pym("command_center.cli.skills_audit", *a),
+                     "read-only inventory of dependency-shipped Agent Library Skills "
+                     "(.agents/skills SKILL.md); installs nothing"),
     "improve": (lambda a: pym("command_center.cli.self_improvement", "daily", *a),
                 "friendly alias for self-improvement-daily (observer/draft-only)"),
     "demo": (lambda a: pym("command_center.cli.demo", *a),

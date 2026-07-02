@@ -20,14 +20,14 @@ from .pipeline import ScanPipeline
 from .config import load_discovery_config
 from .sources import (
     CodeHealthScanner, CodeHealthThresholds, DependencyScanner, KanbanScanner,
-    LedgerHealthScanner, ModelRegistryScanner, PapersScanner, ScanOutcome, Scanner,
-    run_scanners,
+    LedgerHealthScanner, ModelRegistryScanner, PapersScanner, ResearchSourceScanner,
+    ScanOutcome, Scanner, run_scanners,
 )
 
 DEFAULT_REPORT_PATH = "generated/self-improvement-report.md"
 
 _OFFLINE_KINDS = frozenset({"code_health", "ledger"})
-_FEED_KINDS = frozenset({"papers", "model_registry", "dependencies", "kanban"})
+_FEED_KINDS = frozenset({"papers", "model_registry", "dependencies", "kanban", "research"})
 
 # The standing set of sources the daily scan maps over. Each is XCom-safe (plain dict).
 # Offline sources need no fetch; feed sources read their records from the DAG's fetch.
@@ -40,6 +40,10 @@ SOURCE_REGISTRY: list[dict] = [
      "pillar": "updated_metrics", "config": {}},
     {"name": "pip_audit", "kind": "dependencies", "pillar": "code_quality", "config": {}},
     {"name": "kanban_cycle_time", "kind": "kanban", "pillar": "automation", "config": {}},
+    # External-idea intake (MASTER.md §5.2). Records come from the research catalog via
+    # `cc research-digest feed`; each `evaluate` source becomes one read-only (L1)
+    # evaluation card. Propose-only, exactly like model-scout — no adoption here.
+    {"name": "research_digest", "kind": "research", "pillar": "full_idea", "config": {}},
 ]
 
 # A fetch maps a source spec -> its already-parsed records (the DAG owns the live call).
@@ -73,6 +77,8 @@ def build_scanner(spec: dict, registry: ExperimentRegistry,
         return ModelRegistryScanner(feed, name=name)
     if kind == "dependencies":
         return DependencyScanner(feed, name=name)
+    if kind == "research":
+        return ResearchSourceScanner(feed, name=name)
     return KanbanScanner(feed, name=name)
 
 

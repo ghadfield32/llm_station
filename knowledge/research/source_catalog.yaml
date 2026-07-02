@@ -1,0 +1,252 @@
+schema_version: command-center.research-catalog.v1
+
+# Durable, typed record of external ideas/repos/links evaluated against this stack.
+# Hand-authored (NOT part of the generated OKF bundle) and validated on load by
+# command_center.research.catalog. Productizes the MASTER.md §5.2 intake: a link dump
+# becomes rows here; a row marked `verdict: evaluate` flows through `cc research-digest
+# feed` into the observer-only self-improvement scan as a read-only (L1) evaluation card.
+#
+# Verdicts: evaluate (open, drafts a scan card) | build (decided, tracked elsewhere) |
+#           already_have (in-stack) | watch (no measured gap yet) | reject (contract clash).
+# Only `evaluate` emits a feed record. This batch was fully adjudicated, so the feed is
+# empty by design — nothing auto-flows to a card without a genuine open evaluation.
+
+sources:
+  # ---- The four deltas we decided to build from this batch ----
+  - id: research-digest-intake
+    title: "Productized §5.2 intake (STORM-inspired)"
+    source_type: github
+    source: stanford-oval/storm
+    url: https://github.com/stanford-oval/storm
+    concept_cluster: research_workflow
+    claim: "Multi-perspective research synthesis; the reusable pattern is a repeatable intake, not the writer."
+    related_modules: [src/command_center/research, src/command_center/cli/research_digest.py, knowledge/research]
+    measured_gap: "The §5.2 intake existed only as manual prompt docs; no command made a link batch a durable, scan-feedable record."
+    verdict: build
+    priority: high
+    risk_level: low
+    notes:
+      - "Built as cc research-digest + this catalog. Feed reuses the model-scout propose-only wall."
+
+  - id: gateway-log-rotation
+    title: "Gateway observability / log hygiene (local-ai-server checklist)"
+    source_type: github
+    source: RamiKrispin/local-ai-server
+    url: https://github.com/RamiKrispin/local-ai-server
+    concept_cluster: serving
+    claim: "OpenAI-compatible local gateway with structured JSON logs, per-backend readyz, per-key accounting."
+    related_modules: [src/command_center/channels/__main__.py, scripts/start_gateway.cmd, scripts/gateway.ps1]
+    measured_gap: "gateway.log reached 391 MB unrotated at the repo root; the CMD supervisor appends both markers and the Python process's stdlib logging with no bound."
+    verdict: build
+    priority: high
+    risk_level: low
+    notes:
+      - "Fix: Python RotatingFileHandler owns gateway.log; supervisor markers split to gateway-supervisor.log."
+      - "Skip hot-reload — it fights edit-config -> validate -> render-generated. Route artifacts are Mission 2 (§5.2)."
+
+  - id: library-skills-audit
+    title: "Dependency-shipped Library Skills (read-only audit)"
+    source_type: github
+    source: tiangolo/library-skills
+    url: https://library-skills.io/
+    concept_cluster: agent_packaging
+    claim: "Libraries (FastAPI, Typer, SQLModel, Asyncer) ship version-matched .agents/skills/*/SKILL.md."
+    related_modules: [src/command_center/cli/skills_audit.py]
+    measured_gap: "FastAPI already ships a SKILL.md inside the venv that nothing in-repo surfaces or inventories."
+    verdict: build
+    priority: medium
+    risk_level: low
+    notes:
+      - "Scope is read-only inventory only. The discover->SkillSpector-scan->approval-card->install pipeline stays a pre-approved shape (see nvidia-skillspector)."
+
+  - id: cline-kanban-card-deps
+    title: "Cline Kanban dependency chains (blocked_by/unblocks)"
+    source_type: github
+    source: cline/cline
+    url: https://github.com/cline/cline
+    concept_cluster: agent_control_plane
+    claim: "Parallel-agent Kanban with per-card worktrees and dependency chains between cards."
+    related_modules: [configs/kanban_boards.yaml, src/command_center/schemas/contracts.py]
+    measured_gap: "Cards have a board-level blockers list but no per-card blocked_by/unblocks to express a dependency between two missions."
+    verdict: build
+    priority: medium
+    risk_level: low
+    notes:
+      - "Worktree isolation itself is already the core design (MASTER.md:1152); only per-card dep fields were missing."
+
+  # ---- Already in-stack: recorded so the same link is never re-litigated ----
+  - id: cline-worktree-executor
+    title: "Cline as a coding-agent executor"
+    source_type: github
+    source: cline/cline
+    url: https://github.com/cline/cline
+    concept_cluster: agent_control_plane
+    claim: "Autonomous coding agent (IDE/CLI/SDK/Kanban) with per-task worktrees and auto-commit."
+    related_modules: [src/command_center/cli/branch_mission.py]
+    verdict: already_have
+    priority: low
+    risk_level: medium
+    trigger: "A need Claude Code + Codex fallback cannot cover; even then it brings no gates/judges/ledger/leases."
+    notes:
+      - "one mission -> one branch -> one worktree -> one devcontainer -> one lease is already the system."
+      - "Evaluated 2026-06-13 -> DEFER; §13 lists a third executor on the What-NOT-to-build list."
+
+  - id: builderio-agent-native
+    title: "BuilderIO Agent-Native shared action layer"
+    source_type: github
+    source: BuilderIO/agent-native
+    url: https://github.com/BuilderIO/agent-native
+    concept_cluster: action_layer
+    claim: "Define an action once; expose it via UI, agent, HTTP, MCP, A2A, CLI."
+    related_modules: [src/command_center/schemas/contracts.py, src/command_center/channels]
+    verdict: already_have
+    priority: low
+    risk_level: low
+    trigger: "A concrete failure the typed contract layer does not already prevent."
+    notes:
+      - "§13 already states 'channels are thin transports onto the action layer' over ~108KB of Pydantic contracts."
+      - "§13 bans another abstraction layer unless it prevents a failure actually hit."
+
+  - id: hermes-openshell
+    title: "Hermes agents on RTX Spark + OpenShell"
+    source_type: linkedin
+    source: NousResearch/Hermes
+    url: ""
+    concept_cluster: serving
+    claim: "Hermes agents running natively on NVIDIA RTX Spark, integrated with OpenShell."
+    related_modules: []
+    verdict: already_have
+    priority: low
+    risk_level: medium
+    trigger: "Autonomous skill self-improvement materializes and the stack becomes open/stable."
+    notes:
+      - "Hermes spiked 2026-06-13 -> DEFER with evidence (cross-session memory was just a local MEMORY.md; skills did not self-fire)."
+
+  - id: eval-simulation-loop
+    title: "Claude simulation-loop + Google Agents CLI eval lifecycle"
+    source_type: github
+    source: google/agents-cli
+    url: https://github.com/google/agents-cli
+    concept_cluster: evaluation
+    claim: "Scaffold, synthesize scenarios, grade via LLM judge, cluster failures, optimize."
+    related_modules: [evaluation, src/command_center/improvement]
+    verdict: already_have
+    priority: low
+    risk_level: low
+    trigger: "A measured gap in the sealed-eval / judge-calibration / capability-register loop already merged."
+    notes:
+      - "Borrow the eval-generation vocabulary if useful; the loop itself runs. Google Cloud/Gemini foundation does not apply (local-first)."
+
+  # ---- Watch-list: real triggers, no measured gap yet ----
+  - id: rushdb-graph-memory
+    title: "RushDB graph + vector agent memory"
+    source_type: github
+    source: rush-db/rushdb
+    url: https://github.com/rush-db/rushdb
+    concept_cluster: memory
+    claim: "Push JSON, get typed/searchable/relationship-aware records + schema introspection; MCP-native; Neo4j-backed."
+    related_modules: [configs/memory.yaml, generated/memory]
+    verdict: watch
+    priority: low
+    risk_level: medium
+    trigger: "Gold recall cases show the JSONL memory store failing (recall miss / relationship query needed)."
+    notes:
+      - "Durable cross-conversation memory already works (Phase 5, validated 8/8). RushDB core is Elastic License 2.0."
+
+  - id: neo4j-agentic-memory
+    title: "Neo4j agentic memory system (tools + hooks)"
+    source_type: linkedin
+    source: tomasonjo/neo4j-agent-memory
+    url: ""
+    concept_cluster: memory
+    claim: "Self-learning memory graph on Neo4j with write hooks after mission/eval/failure/feedback."
+    related_modules: [configs/memory.yaml]
+    verdict: watch
+    priority: low
+    risk_level: medium
+    trigger: "Same as rushdb — a measured recall gap; portfolio-aligned alternative if graph memory is ever needed."
+
+  - id: turbovec-local-vectors
+    title: "TurboVec compressed local vector index"
+    source_type: github
+    source: RyanCodrai/turbovec
+    url: https://github.com/RyanCodrai/turbovec
+    concept_cluster: memory
+    claim: "Rust TurboQuant vector index (Python bindings): ~31 GB float32 corpus in ~4 GB, no training phase."
+    related_modules: [knowledge, generated/memory]
+    verdict: watch
+    priority: low
+    risk_level: low
+    trigger: "The knowledge/memory store grows large enough that recall measurably degrades (it is a small JSONL today)."
+
+  - id: slayer-semantic-sql
+    title: "SLayer semantic layer + row-level security"
+    source_type: github
+    source: MotleyAI/slayer
+    url: https://github.com/MotleyAI/slayer
+    concept_cluster: data_access
+    claim: "Compiles expressive queries to correct SQL with joins/aggregations + table-level RLS; MCP/REST/CLI."
+    related_modules: [configs/tools.yaml]
+    verdict: watch
+    priority: low
+    risk_level: medium
+    trigger: "An agent actually needs to query structured project/business/sports (betts_basketball) tables."
+
+  - id: glm-5-open-weight
+    title: "GLM-5.2 open-weight long-horizon model"
+    source_type: github
+    source: zai-org/GLM-5
+    url: https://github.com/zai-org/GLM-5
+    concept_cluster: models
+    claim: "Open-weight, 1M context, strong coding, flexible thinking effort; SGLang/vLLM/Transformers serving."
+    related_modules: [configs/models.yaml, configs/model-benchmarks.yaml]
+    verdict: watch
+    priority: low
+    risk_level: medium
+    trigger: "A deliberate decision to run GLM-5.2-class models; it does not fit the 24GB+32GB local budget."
+    notes:
+      - "Tracked as frontier-watch alongside Kimi in the model watchlist."
+
+  - id: career-ops-workflow
+    title: "Career-Ops job-search command center"
+    source_type: github
+    source: santifer/career-ops
+    url: https://github.com/santifer/career-ops
+    concept_cluster: applied_workflow
+    claim: "14 skill modes, offer scoring, ATS PDF generation, batch portal scans, single source of truth."
+    related_modules: [configs/content_pipeline.yaml, appflowy_kanban]
+    verdict: watch
+    priority: low
+    risk_level: low
+    trigger: "Wanting a job-search board — content packaged as a board (like the LinkedIn pipeline), not infra."
+
+  # ---- Rejected: conflicts with a standing contract/principle ----
+  - id: aiondemand-burst-gpu
+    title: "AIonDemandCluster rented burst GPU serving"
+    source_type: github
+    source: jhammant/AIonDemandCluster
+    url: https://github.com/jhammant/AIonDemandCluster
+    concept_cluster: serving
+    claim: "Paste a HF link; it sizes VRAM, rents the cheapest vast.ai/RunPod GPU, serves via vLLM, tears down idle."
+    related_modules: [configs/models.yaml, configs/gates.yaml]
+    verdict: reject
+    priority: low
+    risk_level: high
+    trigger: "A deliberate decision to run GLM-5.2-class models; then L4 + hard cost cap + approval as the map suggests."
+    notes:
+      - "Directly violates the no-cloud-bill, no-provider-keys, fail-closed contract — the same reason Cline's :cloud path was rejected. A principle change, not an upgrade."
+
+  - id: argithub-autorun
+    title: "alphaXiv argithub auto-run research code"
+    source_type: linkedin
+    source: alphaXiv/argithub
+    url: ""
+    concept_cluster: research_workflow
+    claim: "Swap github->argithub to spin an agent on a repo, fix setup, and run experiments automatically."
+    related_modules: []
+    verdict: reject
+    priority: low
+    risk_level: high
+    trigger: "None as auto-run. The valuable idea (a sandboxed reproducibility report) already exists as the manual capability-evaluation-loop."
+    notes:
+      - "Arbitrary untrusted-code execution. Recreate only as a sandboxed, approval-gated report, never auto-run."
