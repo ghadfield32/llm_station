@@ -86,10 +86,22 @@ def _group_rows(rows: list[dict], *, status_key: str, columns: list[str],
     return out
 
 
+def _dep_marker(r: dict) -> str:
+    """A deterministic '⛔blocked_by:X,Y' suffix when a row declares unresolved-looking
+    dependencies. Additive: rows without a blocked_by field render exactly as before, so
+    the harness surfaces mission dependency chains only when a board actually uses them."""
+    raw = r.get("blocked_by")
+    if not raw:
+        return ""
+    ids = raw.split(",") if isinstance(raw, str) else list(raw)
+    ids = [str(i).strip() for i in ids if str(i).strip()]
+    return f" ⛔blocked_by:{','.join(ids)}" if ids else ""
+
+
 def _cards_section(rows: list[dict], knobs: BoardStateKnobs) -> BoardSection:
     def fmt(r: dict) -> str:
         meta = " · ".join(p for p in (r.get("risk", ""), r.get("section", "")) if p)
-        return f"{r.get('title', '?')}" + (f" [{meta}]" if meta else "")
+        return f"{r.get('title', '?')}" + (f" [{meta}]" if meta else "") + _dep_marker(r)
     return BoardSection("mission_intake",
                         _group_rows(rows, status_key="status",
                                     columns=LIVE_COLUMNS["mission_intake"],
@@ -109,7 +121,7 @@ def _todos_section(rows: list[dict], knobs: BoardStateKnobs) -> BoardSection:
 def _missions_section(rows: list[dict], knobs: BoardStateKnobs) -> BoardSection:
     def fmt(r: dict) -> str:
         action = (r.get("action", "") or "").splitlines()[0][:48]
-        return f"{r.get('id', '?')}: {action} [{r.get('risk', '?')}]"
+        return f"{r.get('id', '?')}: {action} [{r.get('risk', '?')}]" + _dep_marker(r)
     return BoardSection("missions",
                         _group_rows(rows, status_key="status",
                                     columns=LIVE_COLUMNS["missions"],
