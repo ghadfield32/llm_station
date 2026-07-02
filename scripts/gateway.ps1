@@ -9,14 +9,19 @@
     .\scripts\gateway.ps1 start       # ensure exactly one running instance
     .\scripts\gateway.ps1 stop        # stop it (and the supervisor loop)
     .\scripts\gateway.ps1 restart     # stop then start
+    .\scripts\gateway.ps1 rotate      # archive+truncate an oversized gateway.log now
     .\scripts\gateway.ps1 autostart   # run on every login (Startup folder)
 
   Reusable for any service: copy this trio and change the module in
   start_gateway.cmd. `restart`/`status`/`autostart` are the repeatable verbs.
+
+  The running gateway now bounds gateway.log itself (a rotating handler, default
+  ~150 MB ceiling). `rotate` is the one-time remedy for a pre-existing giant log
+  and a manual lever; it only acts when the gateway is stopped (single writer).
 #>
 param(
   [Parameter(Position = 0)]
-  [ValidateSet("status", "start", "stop", "restart", "autostart")]
+  [ValidateSet("status", "start", "stop", "restart", "rotate", "autostart")]
   [string]$Action = "status"
 )
 $ErrorActionPreference = "Stop"
@@ -55,6 +60,23 @@ function Stop-Gateway {
   Write-Host "gateway: stopped $($p.Count) process(es)"
 }
 
+function Rotate-Log {
+  # One-time / manual remedy for an oversized gateway.log. The running gateway
+  # bounds the file itself; this only helps a PRE-existing giant log. Refuse while
+  # the gateway runs so we never fight the process holding the file open.
+  $running = @(Get-Procs | Where-Object { $_.Name -eq 'python.exe' })
+  if ($running.Count -ge 1) {
+    Write-Host "gateway: RUNNING — stop it first (the process owns gateway.log); use 'restart' to bounce"
+    return
+  }
+  if (-not (Test-Path $Log)) { Write-Host "rotate: no gateway.log to rotate"; return }
+  $sizeMb = [math]::Round((Get-Item $Log).Length / 1MB, 1)
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  $archive = "$Log.$stamp"
+  Move-Item -LiteralPath $Log -Destination $archive -Force
+  Write-Host "rotate: archived $sizeMb MB -> $(Split-Path $archive -Leaf) (gitignored; delete when you like)"
+}
+
 function Start-Gateway {
   $existing = @(Get-Procs | Where-Object { $_.Name -eq 'python.exe' })
   if ($existing.Count -ge 1) {
@@ -72,6 +94,7 @@ switch ($Action) {
   "stop"      { Stop-Gateway }
   "start"     { Start-Gateway }
   "restart"   { Stop-Gateway; Start-Sleep -Seconds 2; Start-Gateway }
+  "rotate"    { Rotate-Log }
   "autostart" {
     $startup = [Environment]::GetFolderPath('Startup')
     $lnk = Join-Path $startup "CC Gateway.lnk"
