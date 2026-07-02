@@ -1705,6 +1705,50 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
 
+### 2026-07-02 — Research intake productized + gateway/log hygiene + skills audit + card deps
+
+Adjudicated a 2026-07-02 external agent-infrastructure batch (Cline, Agent-Native,
+RushDB, TurboVec, SLayer, STORM, local-ai-server, Library Skills, GLM-5.2,
+AIonDemandCluster, argithub, career-ops, Hermes, Google Agents CLI). Most of it
+recommended things already built (worktree missions, the action layer, durable
+memory, the eval loop) or conflicted with §13; four small deltas were real and are
+implemented here. Nothing new was adopted as a dependency — the batch itself is now
+recorded as the first entry of the research catalog per §5.2.
+
+- **`cc research-digest` + `knowledge/research/source_catalog.yaml`.** Productizes the
+  §5.2 intake: a link batch becomes durable, typed rows validated on load
+  (`command_center.research.catalog`). `cc research-digest feed` emits only rows marked
+  `verdict: evaluate` into `generated/research-digest-feed.json`, which the existing
+  observer-only scan consumes exactly like model-scout — a new `research` feed source +
+  `ResearchSourceScanner` drafts a **read-only (L1) evaluation** card, never an adoption.
+  Confidence is the row's evidence-completeness, so a bare link with no measured gap is
+  correctly low-confidence (§13 as a number). The seed batch was fully adjudicated, so the
+  feed is empty by design.
+- **gateway.log rotation.** `gateway.log` had reached 391 MB, unrotated, at the repo root:
+  the CMD supervisor appended the Python process's stdlib logging with no bound. The
+  channels process now OWNS gateway.log via a `RotatingFileHandler`
+  (`configure_logging`, default 25 MB × 5 = ~150 MB ceiling, env-overridable); the stderr
+  handler is added only on a TTY so the supervised service does not duplicate the stream;
+  the supervisor's own markers moved to `gateway-supervisor.log`. `gateway.ps1 rotate` is
+  the one-time remedy for the existing giant file. (Route artifacts / per-key accounting
+  remain Mission 2 per §5.2; hot-reload was deliberately skipped — it fights the
+  edit-config → validate → render-generated contract.)
+- **`cc skills-audit`.** Read-only inventory of dependency-shipped Agent Library Skills
+  (`.agents/skills/<name>/SKILL.md`) — FastAPI already ships one in the venv that nothing
+  surfaced. Installs/symlinks nothing; the discover → SkillSpector-scan → approval-card →
+  install pipeline stays a pre-approved future shape (L3, scan-required, project-scope-only).
+- **Per-card mission dependencies.** `KanbanBoardSpec.dependency_fields` (opt-in,
+  `blocked_by`/`unblocks`, validated recognised + optional-never-required), a typed
+  `CardDependencies` primitive + `unmet_blockers()` in `kanban_sync/dependencies.py`, and a
+  deterministic `⛔blocked_by:` marker in the board-state render (additive — rows without the
+  field are unchanged). Carries no approval authority; the human wall past L2 is unchanged.
+
+Watch-list (recorded in the catalog with explicit triggers, not built): RushDB / Neo4j
+memory graph, TurboVec, SLayer, GLM-5.2, career-ops. Rejected as contract clashes:
+AIonDemandCluster burst GPU (no-cloud-bill / no-provider-keys / fail-closed) and argithub
+auto-run (untrusted-code execution). All green: `ruff check src tests`, `cc validate`,
+full pytest.
+
 ### 2026-06-20 — Kanban event emission is now the DEFAULT sync path
 
 - The live-sync engine (PR #19) is the source of truth, but emission was **opt-in**

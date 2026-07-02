@@ -461,6 +461,56 @@ class KanbanScanner(FeedScanner):
             detail={"age_days": age, "column": record.get("column")})
 
 
+class ResearchSourceScanner(FeedScanner):
+    """External-idea intake records (from the research catalog) -> FULL_IDEA findings.
+
+    Record: {record_type: "research_source", id, title, source, source_type, url,
+             concept_cluster, claim, related_modules, measured_gap, priority, risk_level,
+             evidence_completeness, notes}.
+
+    This is the productized MASTER.md §5.2 gate. Each finding is an *evaluation* task, not
+    an adoption: the drafted card is L1 (plan-only, the read-only intake), and its confidence
+    is the record's evidence_completeness — so a bare link with no measured gap is correctly
+    low-confidence and a well-scoped candidate with a measured gap ranks up. Adoption still
+    requires the full human wall (measured gap + threat model + pre-registered experiment)."""
+
+    def __init__(self, fetch: Fetch, *, name: str = "research_digest"):
+        super().__init__(name, Pillar.FULL_IDEA, fetch)
+
+    def _classify(self, record: dict) -> Finding | None:
+        if record.get("record_type") != "research_source":
+            return None
+        title = str(record.get("title") or record.get("id") or "research source")
+        completeness = float(record.get("evidence_completeness", 0.0))
+        gap = record.get("measured_gap")
+        priority = str(record.get("priority", "medium"))
+        impact = {"high": 0.8, "medium": 0.5, "low": 0.3}.get(priority, 0.5)
+        modules = record.get("related_modules") or []
+        cluster = record.get("concept_cluster", "?")
+        gap_line = f"measured gap: {gap}" if gap else "NO measured gap yet (§5.2 blocks adoption)"
+        return Finding(
+            pillar=Pillar.FULL_IDEA, source=self.name,
+            title=f"evaluate {record.get('source', title)} for {cluster}"[:80],
+            claim=(f"{record.get('claim', title)} — {gap_line}; read-only evaluation only, "
+                   "adoption needs threat model + pre-registered experiment (§5.2/§13)"),
+            evidence=(f"{self.name}: {record.get('source_type', '?')} {record.get('url', '')} "
+                      f"cluster={cluster} modules={','.join(modules) or 'none'}"),
+            confidence=min(0.9, completeness),
+            impact=impact,
+            ease=completeness,          # a decision-grade record is easier to evaluate
+            reach=float(len(modules) or 1),
+            effort=2.0,
+            voi_value=impact,
+            voi_prob=completeness,
+            suggested_target_type=TargetType.SKILL,
+            suggested_risk=RiskTier.L1,
+            unknowns=("whether a measured gap exists and the capability isn't already in-stack"
+                      if not gap else "whether the measured gain holds inside our contracts"),
+            detail={"record_type": "research_source", "id": record.get("id"),
+                    "concept_cluster": cluster, "related_modules": list(modules),
+                    "url": record.get("url", ""), "measured_gap": gap})
+
+
 # ===========================================================================
 # Offline: the Ledger's own negative-result / reliability signal
 # ===========================================================================

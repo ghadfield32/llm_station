@@ -23,7 +23,7 @@ from .charter import ObserverCharter, CharterViolation
 from .sources import (
     Scanner, ScanOutcome, run_scanners, CodeHealthScanner, CodeHealthThresholds,
     FeedScanner, PapersScanner, ModelRegistryScanner, DependencyScanner, KanbanScanner,
-    LedgerHealthScanner,
+    ResearchSourceScanner, LedgerHealthScanner,
 )
 from .triage import Triage, TriageDecision, TriageResult
 from .report import render_report
