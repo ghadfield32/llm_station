@@ -2,8 +2,8 @@
 
 Compact running log of what's done / in-progress / next, per topic. One–two
 liners. Newest notes at the top of each topic. Full design lives in
-`docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
-fast "has this been done?" index. Dates are when the line was written.
+`docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
+this is the fast "has this been done?" index. Dates are when the line was written.
 
 ## Kanban emission = default sync path
 - WHY 06-20: live-sync engine merged (#19) but emission was opt-in (KANBAN_EMIT_EVENTS=1).
@@ -85,7 +85,7 @@ fast "has this been done?" index. Dates are when the line was written.
   *-verify; infers repo-id/remote/board; writes nothing without --apply; appflowy
   demands env: refs; local path stored as env: ref.
 - FRIENDLY SET 06-20: doctor/setup/onboard/operate/improve/demo. Lower-level evidence
-  commands all kept. Docs: docs/OPERATOR_COMMANDS.md. Tests: test_operator_wrappers.py (7).
+  commands all kept. Docs: docs/operations/OPERATOR_COMMANDS.md. Tests: test_operator_wrappers.py (7).
 - FIX 06-20: setup output is ASCII (Windows cp1252 console can't encode box-drawing).
 - NEXT: onboard a 2nd real local repo in disabled mode (needs a real repo path).
 
@@ -110,7 +110,7 @@ fast "has this been done?" index. Dates are when the line was written.
 - REVIEW 06-20: 6-dimension adversarial workflow (36 agents) -> 2 critical wall holes
   (lowercase 'approved' unprotected; status_after bypass) + integration-island gap all
   FIXED before commit. Tests: test_kanban_sync (19) + test_kanban_wiring (4) +
-  test_kanban_ui_events (4). Docs: docs/LIVE_KANBAN_SYNC.md + MASTER §14.
+  test_kanban_ui_events (4). Docs: docs/kanban/LIVE_KANBAN_SYNC.md + MASTER §14.
 - NEXT: persistent push (WebSocket) if poll-stream insufficient; AppFlowy read-back
   needs sandbox creds (degraded w/o); Phase 6 desktop (gated on APPFLOWY_SANDBOX_*).
 
@@ -131,7 +131,7 @@ fast "has this been done?" index. Dates are when the line was written.
   of brief headline + active Ledger missions (active = board_state.LIVE_COLUMNS,
   no literal). Fail-loud on missing creds/Ledger. Verified: real 1237-char push.
 - DONE 06-13: `cc notify` schedule DOCUMENTED (run-yourself schtasks/cron one-liner
-  in docs/channels.md, mirrors kanban-bridge/snapshot) — agents don't self-install
+  in docs/architecture/channels.md, mirrors kanban-bridge/snapshot) — agents don't self-install
   host persistence (§13), so you run the one command. Only open item is running it.
 - DONE 06-13: `read_item` extended to `notes` (READABLE_DBS = STATUSES|{notes});
   verified live. kanban.yaml risk strings = NO change: RiskTier values ARE

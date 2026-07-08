@@ -17,7 +17,7 @@ This is a personal control plane built to be hard to misuse:
 - **No secrets in git.** Secrets live only in `.env` files, which are gitignored
   (`make doctor` / CI assert no provider keys are present). `.env.example` files carry
   names, never values. The AppFlowy stack ships dev-default secrets that must be
-  rotated before any non-local exposure (see [docs/SETUP-FROM-SCRATCH.md](docs/SETUP-FROM-SCRATCH.md)).
+  rotated before any non-local exposure (see [docs/setup/SETUP-FROM-SCRATCH.md](docs/setup/SETUP-FROM-SCRATCH.md)).
 - **LiteLLM pinned by immutable digest**, not a tag and never `pip install`ed — a
   guard against registry/supply-chain tampering. `make verify` checks the pin.
 - **Human-gated external writes.** Agents can push a feature branch and open a PR;

@@ -1076,7 +1076,7 @@ class EvalCase(Strict):
 # SUITE. Implementers can read this REF (id/category/description) but NOT the suite
 # CONTENT — the inputs and expected answers live under `source`, an access-controlled
 # path the verifier/eval-service reads and the implementer's harness does not. This is
-# filesystem SEPARATION, not cryptographic secrecy (see docs/independent-verification.md).
+# filesystem SEPARATION, not cryptographic secrecy (see docs/improvement/independent-verification.md).
 class EvalSuiteRef(Strict):
     id: str
     category: Literal["sealed", "adversarial", "historical", "rotating",
@@ -1166,7 +1166,7 @@ class UIConfig(Strict):
 # is an inline literal — and the cadence is data-derived (the Phase-3 learner in
 # command_center.kanban.tuning takes over from these defaults once it beats them
 # on logged outcomes, abstaining below `tuning.min_decisions`). See
-# docs/backend/projects/AGENT_KANBAN_SURFACE.md.
+# docs/kanban/AGENT_KANBAN_SURFACE.md.
 BoardName = Literal["mission_intake", "todos", "missions"]
 
 

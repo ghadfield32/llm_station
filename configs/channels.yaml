@@ -4,7 +4,7 @@ schema_version: command-center.channels.v1
 # more SURFACE, not a new authority: messages route through LiteLLM (local models
 # first) to the same growthos action layer every other surface uses, and none can
 # approve mission cards. Tokens and channel/chat allowlists live ONLY in .env — see
-# docs/channels.md for the env var each transport reads and its setup steps.
+# docs/architecture/channels.md for the env var each transport reads and its setup steps.
 #
 # `model` is a role alias from configs/models.yaml (cross-checked by `make validate`).
 # Turn a channel on by setting enabled: true AND adding its tokens to .env, then

@@ -215,8 +215,8 @@ repo-install:  ## Install hooks + devcontainer + standards into a repo. REPO=/pa
 	@$(PY) -m command_center.cli.render_standards $(or $(PROFILE),python_ml_pipeline) "$(REPO)"
 	@echo "installed into $(REPO) — run 'cd $(REPO) && pre-commit install'"
 
-backup:  ## restic snapshot (see docs/SETUP-FROM-SCRATCH.md, Backups)
-	@echo "wire to your restic repo (see docs/SETUP-FROM-SCRATCH.md, Backups section)"
+backup:  ## restic snapshot (see docs/setup/SETUP-FROM-SCRATCH.md, Backups)
+	@echo "wire to your restic repo (see docs/setup/SETUP-FROM-SCRATCH.md, Backups section)"
 
 restore-drill:  ## Restore latest backup to temp + diff (schedule monthly)
 	@echo "restore into /tmp/restore-drill and diff"

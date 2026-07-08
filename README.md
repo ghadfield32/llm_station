@@ -9,9 +9,9 @@ Kept **lean on purpose** — a command center, not an enterprise platform. The t
 it repeatable and hard to break is a **typed contract layer**: every editable config validates
 against a Pydantic model before it can do anything ([the idea, in five lines](#the-contract-model)).
 
-> **Deep docs:** [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md) is the annotated cold-start ·
+> **Deep docs:** [`docs/setup/SETUP-FROM-SCRATCH.md`](docs/setup/SETUP-FROM-SCRATCH.md) is the annotated cold-start ·
 > [`docs/MASTER.md`](docs/MASTER.md) is the full system guide (every pipeline, the module tree, the change log) ·
-> [`docs/STATUS.md`](docs/STATUS.md) tracks live progress. This README gets you **built and chatting**; those cover everything else.
+> [`docs/operations/STATUS.md`](docs/operations/STATUS.md) tracks live progress. This README gets you **built and chatting**; those cover everything else.
 
 ---
 
@@ -111,7 +111,7 @@ So: use **`cc start` for the first boot**, then **`docker compose up -d` / `cc u
 The portable `cc` command also adds conveniences the raw compose file can't: `cc open` (open the
 dashboards), `cc channel <name>` (guided channel setup), `cc start --appflowy`/`--hermes`. Run
 `uv run cc help` for the full list. The **Hermes** UI is opt-in (`cc start --hermes`) and currently a
-placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/STATUS.md)).
+placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/operations/STATUS.md)).
 
 ---
 
@@ -240,15 +240,15 @@ The full system — every pipeline stage, the module tree, model lanes, and the 
   out-of-scope rewrites) — not legitimate boundary validation.
 - **Standards everywhere.** `configs/standards.yaml` renders into `CLAUDE.md`/`AGENTS.md` for each
   onboarded repo and is mounted into Judge Gate — executors get the same rules your judges enforce.
-- **The GitHub wall** ([`docs/github-safety.md`](docs/github-safety.md)). branch protection, scoped
+- **The GitHub wall** ([`docs/github/github-safety.md`](docs/github/github-safety.md)). branch protection, scoped
   PAT → GitHub App, required CI, CODEOWNERS, human-gated deploy. The agent can push a feature branch
   and open a PR; it can **never** merge/deploy/publish.
 - **Security.** LiteLLM is pinned by **digest** (not pip — the March 2026 PyPI compromise); virtual
   keys are scoped + budgeted; `.env` never enters a sandbox.
 
-More surfaces: [`docs/ui-options.md`](docs/ui-options.md) (phone, CLI, VS Code Remote Tunnel,
-dashboards) · [`docs/channels.md`](docs/channels.md) (per-platform token steps) ·
-[`docs/kanban-integration.md`](docs/kanban-integration.md) (AppFlowy cards → Ledger missions).
+More surfaces: [`docs/architecture/ui-options.md`](docs/architecture/ui-options.md) (phone, CLI, VS Code Remote Tunnel,
+dashboards) · [`docs/architecture/channels.md`](docs/architecture/channels.md) (per-platform token steps) ·
+[`docs/kanban/kanban-integration.md`](docs/kanban/kanban-integration.md) (AppFlowy cards → Ledger missions).
 
 ---
 
@@ -262,7 +262,7 @@ dashboards) · [`docs/channels.md`](docs/channels.md) (per-platform token steps)
 - You pay only **your own electricity/hardware**.
 
 The only *optional* recurring cost is a **VPS (~$5–12/mo)** if you later want an always-on "brain"
-that stays up when your workstation/4090 sleep (Phase 1 in [SETUP-FROM-SCRATCH](docs/SETUP-FROM-SCRATCH.md)).
+that stays up when your workstation/4090 sleep (Phase 1 in [SETUP-FROM-SCRATCH](docs/setup/SETUP-FROM-SCRATCH.md)).
 Not required — skip it and run on one machine.
 
 ---

@@ -50,7 +50,7 @@ needs the extras: `uv pip install -e ".[gateways,dev]"`.
 ## 4. Multi-session git safety (single-writer rules)
 
 Multiple Claude Code / Codex sessions may touch this repo at once. The git half of
-`docs/backend/engineering/MULTI_SESSION_R2.md` applies verbatim (the R2/Railway/Airflow
+`docs/reference/betts-basketball-standards/MULTI_SESSION_R2.md` applies verbatim (the R2/Railway/Airflow
 half does **not** — this is a control plane, not the forecasting pipeline; see
 `docs/MASTER.md` §13.1):
 

@@ -134,7 +134,7 @@ agent can cross alone.
 ```
 
 Fourteen Mermaid diagrams covering every concern below live in
-[visuals.md](visuals.md).
+[architecture/visuals.md](architecture/visuals.md).
 
 ---
 
@@ -378,7 +378,7 @@ Ordered next work (do not skip ahead):
 
 ### 5.2 External AI-agent idea intake — broad prompt first
 
-Use [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md) when
+Use [evaluation/agent-ideas-evaluation-prompt.md](evaluation/agent-ideas-evaluation-prompt.md) when
 the candidate is broader than a single obvious dependency bump: ClawCodex,
 Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, dbt Wizard,
 BigQuery Graph / ADK / A2UI / BigSet, agentcookie, or a generic multi-agent
@@ -390,13 +390,13 @@ What is already done:
 
 1. The broad prompt exists and starts from the implemented stack, not stale
    brainstorming assumptions.
-2. The narrower [capability-evaluation-loop.md](capability-evaluation-loop.md)
+2. The narrower [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md)
    now points back to the broad prompt for wide candidate sweeps.
 3. The no-build list below now rejects candidate bundles that lack a measured
    gap, control-plane overlap matrix, threat model, and pre-registered
    experiment plan.
 4. The first read-only routing/performance pass is complete:
-   [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md).
+   [reviews/routing-performance-candidate-evaluation-2026-06-14.md](reviews/routing-performance-candidate-evaluation-2026-06-14.md).
    Verdict: improve routing natively first; pilot `codebase-memory-mcp` only as
    a manual read-only retrieval benchmark; keep Puppetmaster, MAPPA, Agno/GitWiki,
    A2UI, Docker Model Runner, and dbt skills as patterns/conditional pilots;
@@ -718,14 +718,14 @@ Remaining order:
 
 ### 5.5 Whole-system validation prompt
 
-Use [whole-system-validation-prompt.md](whole-system-validation-prompt.md) when
+Use [evaluation/whole-system-validation-prompt.md](evaluation/whole-system-validation-prompt.md) when
 the question is broader than one model, one UI feature, or one external tool:
 "can this entire pipeline keep improving itself, control AppFlowy safely, run
 registered desktop repo work autonomously, route local models cheaply, notify me,
 and prove it did not leak data?"
 
 The attachment-driven reconciliation is recorded in
-[autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md).
+[reviews/autonomous-pipeline-gap-review-2026-06-16.md](reviews/autonomous-pipeline-gap-review-2026-06-16.md).
 It keeps the current single-control-plane architecture and treats the proposal
 as a hardening checklist, not a replacement stack.
 
@@ -853,7 +853,7 @@ Full power inside the sandbox, narrow audited power outside it. L3/L4
 
 Every request flows through the same stages, each with a model tier and named
 judges (`configs/judges.yaml`; worked examples in
-[request-routing-examples.md](request-routing-examples.md)):
+[architecture/request-routing-examples.md](architecture/request-routing-examples.md)):
 
 | # | Stage | Tier | Judges (in order) | Escalates to |
 |---|-------|------|-------------------|--------------|
@@ -922,11 +922,11 @@ Stage by stage:
 2. **Approve** — a human drags the card to **Approved**. Agents structurally
    cannot do this: `actions.set_status` refuses Approved on every agent
    surface; the bridge applies `ready_statuses: [Approved]` only.
-3. **Dispatch** — `scripts/kanban_bridge.py --apply` (scheduled every 15 min
-   via a *user-run* schtasks one-liner; agent-created persistence is
-   deliberately blocked) opens a Ledger mission per approved card. Imported
-   hashes land in `generated/kanban-imported.json` so reruns never reopen a
-   card.
+3. **Dispatch** — `python -m command_center.cli.kanban_bridge --apply`
+   (scheduled every 15 min via a *user-run* schtasks one-liner; agent-created
+   persistence is deliberately blocked) opens a Ledger mission per approved
+   card. Imported hashes land in `generated/kanban-imported.json` so reruns
+   never reopen a card.
 4. **Writeback** — the bridge stamps `MissionID`, `Status=In Progress`, and
    `LastSync` back onto CardKey cards. Executors post events to the Ledger
    (`POST /mission/{id}/event`); `actions.mission_status(id)` returns status +
@@ -964,8 +964,8 @@ Three lanes:
   three ways: **AppFlowy Kanban** (where you act, per-pillar swimlanes), an **email digest** (SMTP,
   Start-Here top-3 + new-since-yesterday + failed sources), and a **chat ping**. Implemented as the
   Airflow DAG `dags/self_improvement_daily.py` + the `improvement scan` CLI; full design + as-built
-  reference in [daily-self-improvement-dag.md](daily-self-improvement-dag.md) and the project tracker
-  [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md).
+  reference in [daily-self-improvement-dag.md](improvement/daily-self-improvement-dag.md) and the project tracker
+  [SELF_IMPROVEMENT_PIPELINE.md](improvement/SELF_IMPROVEMENT_PIPELINE.md).
 
 Stage by stage:
 
@@ -1098,9 +1098,44 @@ CLI); if conversational control is wanted later, wrap *our own* publisher in a t
 MCP — never add an independent publisher.
 
 **Setup is a runbook + a self-check.** The ordered go-live steps are in
-[linkedin-setup.md](linkedin-setup.md); `cc linkedin-publish --preflight` reads the
+[linkedin/linkedin-setup.md](linkedin/linkedin-setup.md); `cc linkedin-publish --preflight` reads the
 real local state (config, boards, env-key presence, token validity — no secrets
 printed) and names the single next action, so the runbook is self-verifying.
+
+### 6.7 The job-search command center (draft/prepare/track → human applies)
+
+A domain workflow, not a separate tracker — a `job_search_pipeline` AppFlowy
+board (same "draft → human approve → execute" pattern as the LinkedIn boards
+above, distinct from `mission_intake`) that finds, scores, and prepares job
+applications while keeping submission itself manual. Validated by
+`JobSearchConfig` (`configs/job_search.yaml`); `auto_submit_enabled: true` is
+schema-rejected, and `AutomationPolicy` sets `mvp_submit_disabled=True` on
+every branch including `bot_possible` — nothing is ever auto-submitted.
+
+```
+Daily DAG / manual suggest -> Suggested Jobs (score >= 70)
+Geoff reviews on phone/AppFlowy, drags good ones -> Selected by Geoff
+process-selected --apply -> In Progress -> Needs Geoff (always, for now)
+Geoff applies manually using the generated materials + checklist
+Geoff runs mark-submitted -> Completed -> 30-day rich memory starts
+Recruiter/interview activity -> Interviewing -> retention extends
+```
+
+Board columns: `Suggested Jobs → Selected by Geoff → In Progress → Needs
+Geoff / Completed → Interviewing → Rejected / Skip → Closed / Archived`.
+Every application gets claim-checked materials (resume/cover letter/recruiter
+message/answer bank, each bullet traced to an `achievement_bank.yml` ID and
+evidence file — see `RESUME_CLAIM_POLICY.md`), a fit score with a full
+KPI-style breakdown, and a rich data folder retained 30 days past last
+activity before compacting to a minimal archive ledger row. Hard-coded manual
+blockers (LinkedIn/Indeed/Workday/Greenhouse/Lever/Ashby portals, EEO/self-ID/
+sponsorship/salary questions) route to `Needs Geoff` — see
+`MANUAL_APPLICATION_RULES.md`. Implemented as the Airflow DAG
+`dags/job_search_daily.py` + the `job-search` CLI namespace
+(`src/command_center/job_search/`); full architecture in
+[job_search/JOB_SEARCH_COMMAND_CENTER.md](job_search/JOB_SEARCH_COMMAND_CENTER.md)
+and the living operator FAQ in
+[job_search/READINESS_FAQ.md](job_search/READINESS_FAQ.md).
 
 ---
 
@@ -1122,6 +1157,19 @@ ID → one branch → one git worktree → one devcontainer → one lease. The L
 unique index on (repo, branch) means two agents *physically cannot* lease the
 same checkout. Any `repo_task` that is persistent or holds secrets fails
 validation — that's how per-task isolation stays real rather than aspirational.
+`.devcontainer/devcontainer.json` pins the runtime so every mission
+builds/tests identically and can't pollute the host or another task.
+
+**Mapping activity → environment:**
+- Orchestration / memory / channels → **cc-control-vps** (always-on brain)
+- Model routing + budgets (LiteLLM) → cc-control-vps
+- Mission audit / approvals / leases → Ledger on cc-control-vps
+- Judge execution → cc-judge
+- Heavy repo builds / DAGs / CV / local models → **cc-worker-4090**
+- Per-task edits → **cc-repo-task** devcontainer (one mission → one branch →
+  one worktree → one devcontainer → one lease)
+- CI validation → GitHub Actions (independent verification after push)
+- Wake-on-LAN / watchdog / backup mirror → cc-relay (optional)
 
 Human access: VS Code Remote Tunnel from the 5080 (or `vscode.dev`, or a
 borrowed machine) into the *same* worktree the agent edits. The agent drives
@@ -1141,7 +1189,7 @@ PR, comment, read CI status.
 The bot **may not**: push main, merge, force-push, delete branches, change
 settings/protections, administer secrets, deploy, publish, bypass checks.
 
-The enforcement stack (full commands in [github-safety.md](github-safety.md)):
+The enforcement stack (full commands in [github/github-safety.md](github/github-safety.md)):
 
 1. **Branch protection on main** — required status checks are the actual
    workflow jobs in this repo (`validate` and `lint-test` from
@@ -1194,9 +1242,22 @@ after any final audit rerun that needs it.
 
 ## 9. Build phases — stage-by-stage setup
 
+> **Deployment reality check (decided 2026-06-13, "Option C"):** the phases
+> below were originally written for a VPS-hosted control plane with a
+> separate 4090 worker. That plan was superseded — the control plane runs
+> entirely on the **4090 desktop** ("vengeance"), reached over Tailscale, no
+> VPS, $0 cost. See [operations/remote-access.md](operations/remote-access.md)
+> for the current design and trade-offs. Phases 1 and 2 below have
+> effectively merged onto one machine; read "VPS" as "the desktop /
+> control-plane host" throughout. Revisit an actual VPS only if 24/7 response
+> while the desktop is off, off-home-network hosting, or WhatsApp's public
+> webhook become real requirements. `docs/setup/INSTALL_WINDOWS.md` and
+> `docs/setup/SETUP-FROM-SCRATCH.md` already reflect this corrected reality;
+> use those for the actual setup path.
+
 ```
-Phase 1   VPS control plane     → the brain runs without the 4090
-Phase 2   4090 worker           → isolated worktrees, local models, VS Code tunnel
+Phase 1   control-plane host    → the brain (currently the 4090 desktop, not a VPS)
+Phase 2   isolation + judges    → worktrees, local models, VS Code tunnel (same host)
 Phase 3   GitHub hardening      → protected main, CI, CODEOWNERS, App over PAT
 Phase 3.5 proactive ops lane    → DAG/data checks, repo stewardship, RCA loop
 Phase 4   workspace expansion   → Coder / OpenHands / Codespaces / WebUI / Mirage (all optional)
@@ -1208,7 +1269,8 @@ need is actually hit.
 
 ### Phase 0 — what you need first
 
-- A VPS (Hetzner/DigitalOcean/Hostinger, 2 vCPU / 4 GB), Ubuntu 24.04.
+- A control-plane host: the 4090 desktop today (a VPS is optional, see the
+  reality check above), Windows or Ubuntu 24.04.
 - A Tailscale account (free Personal tier) on every machine.
 - A GitHub fine-grained PAT scoped as in §8 (App later).
 - **No provider API keys** — do not create or store OpenAI/Anthropic/OpenRouter
@@ -1221,7 +1283,8 @@ need is actually hit.
 ### Phase 1 — control plane (first-boot sequence)
 
 ```bash
-# on the VPS, after Docker + Tailscale are up (Windows: .\scripts\cc.ps1 <target>)
+# on the control-plane host (the 4090 desktop today), after Docker + Tailscale
+# are up (Windows: .\scripts\cc.ps1 <target>)
 git clone <this repo> && cd <repo>
 make setup          # deps, .env, validate, build images
 # edit .env: confirm OLLAMA_API_BASE; do NOT add provider API keys
@@ -1247,11 +1310,11 @@ passes. No skip-Ollama path exists — Ollama is required; calls fail closed.
 **Done when:** live smoke passes; a channel can open a Ledger mission and an
 L3 request shows `awaiting_approval`.
 
-### Phase 2 — 4090 worker + isolation + judges
+### Phase 2 — isolation + judges (same host as Phase 1 today)
 
-1. Tailscale on the 4090; set the VPS `.env`
-   `OLLAMA_API_BASE=http://<4090-tailscale-ip>:11434`; re-run `make models`
-   then `make live-smoke` from the VPS.
+1. Ollama runs on the same control-plane host; no cross-machine
+   `OLLAMA_API_BASE` split is needed under Option C (that step only applies
+   if you later split workers back onto a separate VPS).
 2. `code tunnel` on the 4090; attach from the 5080 / `vscode.dev` / phone.
 3. Executor CLIs: install + authenticate both — Claude Code (`claude`, then
    `/login` and `/status`) and Codex (`codex login status` → "Logged in using
@@ -1270,7 +1333,7 @@ skeptic reviews before a PR is allowed.
 
 ### Phase 3 — GitHub hardening
 
-Work through §8 / [github-safety.md](github-safety.md). **Done when:** the
+Work through §8 / [github/github-safety.md](github/github-safety.md). **Done when:** the
 repo itself blocks merges without passing checks + your review, even if the
 agent misbehaves.
 
@@ -1287,7 +1350,7 @@ gates) · Codespaces fallback · the AppFlowy/agent **WebUI** behind Tailscale +
 password, governed by `configs/ui.yaml` (single-container mode; its
 shell-approval card is a convenience, never the policy layer) · **Mirage VFS**
 only as a read-only data experiment on a throwaway branch (v0.0.1, ~59 stars —
-watch-list, not core; see [optional-mirage.md](optional-mirage.md)) · skip
+watch-list, not core; see [watch-list/optional-mirage.md](watch-list/optional-mirage.md)) · skip
 `local-ai-server` (Mac/MLX-only; LiteLLM already does the job).
 
 ### Phase 5 — home relay (optional)
@@ -1295,17 +1358,19 @@ watch-list, not core; see [optional-mirage.md](optional-mirage.md)) · skip
 Mini-PC preferred over a Pi: Wake-on-LAN for the 4090, watchdog, Tailscale
 subnet router, local backup mirror. Only after Phases 1–2 are stable.
 
-### Current status vs the phases (2026-06-12)
+### Current status vs the phases (2026-06-12, superseded by the 2026-06-13 Option-C decision above)
 
 Done locally: validation green · digest pinned · keys minted · health passing ·
 live smoke passing · models installed · bridge live and scheduled q15min ·
 Discord gateway built (needs token for Phase-2-of-autonomy push
 notifications) · Growth OS selftest 22/22.
-Remaining: rent + provision the VPS · Tailscale split (4090 `OLLAMA_API_BASE`
-from the VPS) · GitHub PAT + branch protection + bot-can't-merge verification ·
+Remaining at the time: rent + provision the VPS · Tailscale split (4090
+`OLLAMA_API_BASE` from the VPS) — **both superseded the next day by Option C
+(no VPS, everything on the 4090 desktop)**, kept here as history. Still
+remaining: GitHub PAT + branch protection + bot-can't-merge verification ·
 Claude Code interactive `/login` · the one-time AppFlowy UI clicks REST can't
 do (per-view filters/sorts, delete blank starter rows) · Linux migration when
-the prod box revives. Full checklist: [STATUS.md](STATUS.md) + [SETUP-FROM-SCRATCH.md](SETUP-FROM-SCRATCH.md) §12.
+the prod box revives. Full checklist: [operations/STATUS.md](operations/STATUS.md) + [setup/SETUP-FROM-SCRATCH.md](setup/SETUP-FROM-SCRATCH.md) §12.
 
 **LinkedIn content pipeline (2026-06-13) — see §6.6.**
 Done by Claude Code (built + verified live against AppFlowy): both content boards
@@ -1317,7 +1382,7 @@ created with the 3-column kanban (`geoffhadfield32_content`,
 as **In Queue** · publisher gate proven (0 due while nothing is approved) ·
 `.mcp.json` keeps a single publish path (no external posting MCP).
 Remaining is all yours (I cannot fake credentials). Full ordered runbook:
-[linkedin-setup.md](linkedin-setup.md); `cc linkedin-publish --preflight` tells you
+[linkedin/linkedin-setup.md](linkedin/linkedin-setup.md); `cc linkedin-publish --preflight` tells you
 the next step at any time. Summary, in order — **personal and the WMS Page are
 separate permission + live-smoke gates; install the scheduler LAST**:
 
@@ -1383,9 +1448,11 @@ make repo-install REPO=… PROFILE=python_ml_pipeline
 make backup / restore-drill
 ```
 
-The breakage map ([breakage-map.md](breakage-map.md), `configs/breakage.yaml`)
-answers "what breaks when I change X" — `make impact` reads your git diff and
-prints the blast radius plus the checks to run before trusting the change.
+The breakage map (`configs/breakage.yaml`) answers "what breaks when I change
+X" — `make impact` reads your git diff and prints the blast radius plus the
+checks to run before trusting the change. (The old static `breakage-map.md`
+summary was removed 2026-07-08 — it had drifted to 6 of the config's 14
+entries; the YAML is the only source of truth now.)
 The full maintenance surface is: **edit a `configs/*.yaml`, run
 `make validate`, then the relevant target.**
 
@@ -1420,7 +1487,8 @@ llm_station/
 │   ├── channels.yaml           chat transports → transport + model alias (tokens stay in .env)
 │   ├── improvement.yaml        experiment definitions (worked set) + improvement-targets.yaml (per-target refs)
 │   ├── discovery.yaml          daily-scan knobs: ranking/triage/code-health/acceptance (DiscoveryConfig)
-│   └── agent_surface.yaml      agent-kanban knobs: re-injection cadence/size, fuzzy addressing, tuning (AgentSurfaceConfig)
+│   ├── agent_surface.yaml      agent-kanban knobs: re-injection cadence/size, fuzzy addressing, tuning (AgentSurfaceConfig)
+│   └── job_search.yaml         job-search pipeline: ranking, automation classes, manual blockers (JobSearchConfig; auto_submit_enabled is schema-rejected)
 │
 ├── src/command_center/         INSTALLABLE PACKAGE (uv pip install -e .; run via `make`/`python -m`)
 │   ├── schemas/                PYDANTIC CONTRACTS that validate the YAML
@@ -1468,12 +1536,18 @@ llm_station/
 │           ├── charter · sources · triage · report · manifest   observer wall · scanners · dedup · report+sidecar
 │           ├── pipeline · dag_support · validate   orchestrator · Airflow glue · blocking N/N gate
 │           └── delivery/        email digest (stdlib SMTP) + chat ping (board.py drives the Kanban)
-│   └── knowledge/              OKF KNOWLEDGE PRODUCER (observer-only; source → derived bundle)
-│       ├── profile.py          OkfConcept — the strict growth-os-0.1 frontmatter contract
-│       ├── document.py         concept read/write (frontmatter + generated block + human notes)
-│       ├── producers.py        deterministic source→concept extractors (no source → no concept)
-│       ├── bundle.py           assemble concepts + per-section index.md (progressive disclosure)
-│       └── validate.py         the blocking N/N PASS gate
+│   ├── knowledge/               OKF KNOWLEDGE PRODUCER (observer-only; source → derived bundle)
+│   │   ├── profile.py          OkfConcept — the strict growth-os-0.1 frontmatter contract
+│   │   ├── document.py         concept read/write (frontmatter + generated block + human notes)
+│   │   ├── producers.py        deterministic source→concept extractors (no source → no concept)
+│   │   ├── bundle.py           assemble concepts + per-section index.md (progressive disclosure)
+│   │   └── validate.py         the blocking N/N PASS gate
+│   └── job_search/              JOB-SEARCH COMMAND CENTER (draft/prepare/track; submission stays manual — §6.7)
+│       ├── scoring.py · automation_policy.py   fit score + KPI breakdown · automation-class + manual-blocker routing
+│       ├── board.py             job_search_pipeline board fields (apply_url, claude_review_url, score_explanation)
+│       ├── resume_selection.py · achievement_bank.py   claim-checked resume/cover-letter/answer-bank generation · tagged bullet bank + evidence traceability
+│       ├── application_memory.py · retention.py   active-application folder writer · 30-day memory → minimal archive ledger row
+│       └── profile_ingest.py · followups.py · interview_prep.py   inbox → achievement bank · follow-up packs · interview prep
 │
 ├── generated/                  DISPOSABLE rendered output — never hand-edited
 │   ├── litellm-config.yaml     rendered gateway config (only ollama_chat/... models)
@@ -1494,8 +1568,10 @@ llm_station/
 │                               board + observability), built + served single-container
 │
 ├── scripts/                    non-Python wrappers: cc.ps1 (Windows), live_smoke.{ps1,sh}
-├── dags/                       Airflow DAGs: self_improvement_daily.py (observer-only daily scan)
+├── dags/                       Airflow DAGs: self_improvement_daily.py (observer-only daily scan),
+│                               job_search_daily.py (suggest/prepare only — no submit authority)
 ├── knowledge/                  OKF knowledge bundle (Git-backed, derived; `make knowledge-generate`)
+├── data/job_search/             gitignored personal data: profile/, applications_active/, applications_archive/
 ├── tests/                      contract regression tests (pytest; run by CI)
 │
 ├── repo-template/              installed into each onboarded repo by `make repo-install`
@@ -1508,7 +1584,7 @@ llm_station/
 ├── .github/workflows/contracts.yml   CI: this repo's own validate gate
 ├── data/book-checklist.md      275-book curriculum source for the library board
 ├── appflowy_kanban/            Growth OS (see 11.2)
-└── docs/                       the docs set + this one (see §12); backend/ = borrowed standards (§13)
+└── docs/                       the docs set + this one (see §12); reference/betts-basketball-standards/ = borrowed standards (§13)
 ```
 
 ### 11.2 Growth OS (`appflowy_kanban/growth-os/`)
@@ -1570,49 +1646,117 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 
 ## 12. Doc index — where the detail lives
 
+`docs/` is organized as this hub (`MASTER.md`) plus one subject folder per
+area. Within a folder, docs are living references unless marked *(archived)*
+— archived docs sit in `docs/reviews/` with a banner explaining what
+superseded them; kept for history, not as current behavior.
+
 | Doc | What it holds |
 |---|---|
 | [MASTER.md](MASTER.md) | **this doc** — the consolidated system guide |
-| [SETUP-FROM-SCRATCH.md](SETUP-FROM-SCRATCH.md) | **cold-start** — every prerequisite, first boot, and per-channel enablement, in order |
-| [channels.md](channels.md) | chat transports (Discord/Slack/Telegram/WhatsApp): architecture + per-platform setup + how to add a new one |
-| [LINKEDIN_PIPELINE.md](LINKEDIN_PIPELINE.md) | **Living doc** for the LinkedIn/content pipeline — status, architecture, invariants, the content engine, and the improvement roadmap |
-| [linkedin-setup.md](linkedin-setup.md) | **LinkedIn content pipeline runbook** — ordered go-live steps (app → OAuth → live smoke → schedule) + daily operation; `--preflight` self-check |
-| [STATUS.md](STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | multi-session git safety, engineering standards, the uv dependency workflow |
-| [backend/](backend/) | reference standards copied from the betts pipeline (data-engineering, R2/fleet, modeling, serving) — see the N/A note in §13 |
-| [visuals.md](visuals.md) | 14 Mermaid diagrams, one per concern |
-| [model-routing.md](model-routing.md) | lanes, local roles, fail-closed behavior |
-| [model-update.md](model-update.md) | safe model rollout + current local picks |
-| [request-routing-examples.md](request-routing-examples.md) | 8 worked examples: request → route → expected response |
-| [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
-| [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
-| [whole-system-validation-prompt.md](whole-system-validation-prompt.md) | reusable end-to-end validation prompt for self-improvement, AppFlowy kanban control, registered repo autonomy, notifications, local model routing, forecast-before-action checks, and privacy |
-| [autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md) | attachment reconciliation for the autonomous pipeline proposal: what this repo already covers, what remains, and the ordered hardening path for events, repo manifests, desktop rights, completion verification, and canaries |
-| [github-app-production-auth-review-2026-06-16.md](github-app-production-auth-review-2026-06-16.md) | GitHub App production-auth review: local evidence, current GitHub-doc basis, blockers, and remaining steps before repo autonomy can use GitHub App auth |
-| [github-token-storage-rotation.md](github-token-storage-rotation.md) | GitHub App private-key, installation-token, and owner/admin observer-token storage and rotation policy |
-| [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
-| [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
-| [knowledge-format.md](knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
-| [breakage-map.md](breakage-map.md) | what breaks when you change something |
-| [environment-map.md](environment-map.md) | environment table + activity mapping |
-| [github-safety.md](github-safety.md) | branch protection commands, PAT/App scopes, deploy gating |
-| [ui-options.md](ui-options.md) | dashboards/ports and per-device access matrix |
-| [ecosystem.md](ecosystem.md) | what's load-bearing vs convenience vs skip (WebUI, Ollama gotchas, local-ai-server) |
-| [optional-mirage.md](optional-mirage.md) | Mirage VFS watch-list verdict + safe Phase-4 experiment shape |
-| [kanban-integration.md](kanban-integration.md) | the bridge contract, sections, writeback, AppFlowy quirks |
-| [autonomy-idea-map.md](autonomy-idea-map.md) | channels/brain/knowledge/wall picture + autonomy phases |
-| [growth-os-engineering.md](growth-os-engineering.md) | Growth OS living engineering reference (module tree, standards, cross-session rules) |
-| [capability-evaluation-loop.md](capability-evaluation-loop.md) | reusable mission brief for evaluating external tools/repos/skills — staged, evidence-first, L2-capped, with command-center mapping |
-| [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md) | broad copy-paste prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, multi-agent frameworks, and similar ideas before any install/adoption |
-| [agentic-process-improvements-2026-06-20.md](agentic-process-improvements-2026-06-20.md) | decision note for Headroom, Airflow RCA, ARD-style metadata, and Gemma 4 12B candidate handling |
-| [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md) | read-only one-by-one verdicts for the broad candidate batch, focused on routing/performance impact and ordered next work |
-| [improvement-loop.md](improvement-loop.md) | **the coded improvement loop** — lifecycle, runner, promotion/canary/rollback, operator CLI (the system improves itself, human-gated) |
-| [experiment-registry.md](experiment-registry.md) | the experiment tables added to the one `ledger.db` — schema, events, negative-result memory, migration |
-| [independent-verification.md](independent-verification.md) | the verifier that checks the work: separation, reproduction, sealed evals, self-verification prevention |
-| [judge-calibration.md](judge-calibration.md) | judges as measured components — precision/recall, safety-first gate, anti-self-certification |
-| [human-attention-governance.md](human-attention-governance.md) | human attention as a constrained resource — queue metrics, morning brief, bottleneck warnings |
-| [improvement-loop-audit.md](improvement-loop-audit.md) | the pre-work discrepancy report (documented vs implemented vs tested) |
-| [improvement-roadmap-phases.md](improvement-roadmap-phases.md) | **measurement-science layers (Phases 1–6)** — mSPRT/CUPED, judge/jury κ-α, anti-Goodhart, bandit scheduling, drift/canary stats, AI-control + observability spec |
+
+**`setup/` — install and cold-start**
+
+| Doc | What it holds |
+|---|---|
+| [setup/GETTING_STARTED.md](setup/GETTING_STARTED.md) | 10-minute quickstart from fresh clone to "the loop is wired" |
+| [setup/SETUP-FROM-SCRATCH.md](setup/SETUP-FROM-SCRATCH.md) | **cold-start** — every prerequisite, first boot, and per-channel enablement, in order |
+| [setup/INSTALL_WINDOWS.md](setup/INSTALL_WINDOWS.md) | native-Windows (PowerShell) install path |
+| [setup/INSTALL_WSL.md](setup/INSTALL_WSL.md) | WSL2/Ubuntu install path + Airflow scheduling |
+| [setup/ADDING_A_REPO.md](setup/ADDING_A_REPO.md) | onboard a second local repo under the autonomy contract |
+| [setup/ADDING_A_KANBAN.md](setup/ADDING_A_KANBAN.md) | register/verify a kanban board against the 7-status/6-verb contract |
+| [setup/TROUBLESHOOTING.md](setup/TROUBLESHOOTING.md) | known gotchas + a symptom → cause → fix table |
+
+**`operations/` — day-to-day running**
+
+| Doc | What it holds |
+|---|---|
+| [operations/OPERATIONS_RUNBOOK.md](operations/OPERATIONS_RUNBOOK.md) | day-to-day operator loop — daily commands, per-mission work, emergency stop |
+| [operations/OPERATOR_COMMANDS.md](operations/OPERATOR_COMMANDS.md) | the 7-command friendly wrapper cheat sheet (`cc setup`/`onboard`/`operate`/`improve`/`demo`) |
+| [operations/RUNNING_DAILY_SELF_IMPROVEMENT.md](operations/RUNNING_DAILY_SELF_IMPROVEMENT.md) | how to run/schedule the observer-only daily self-improvement scan |
+| [operations/remote-access.md](operations/remote-access.md) | the Option-C (desktop + Tailscale, no VPS) remote-access design |
+| [operations/STATUS.md](operations/STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
+
+**`architecture/` — how the system is built**
+
+| Doc | What it holds |
+|---|---|
+| [architecture/visuals.md](architecture/visuals.md) | 14 Mermaid diagrams, one per concern |
+| [architecture/channels.md](architecture/channels.md) | chat transports (Discord/Slack/Telegram/WhatsApp): architecture + per-platform setup + how to add a new one |
+| [architecture/request-routing-examples.md](architecture/request-routing-examples.md) | 8 worked examples: request → route → expected response |
+| [architecture/knowledge-format.md](architecture/knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
+| [architecture/ui-options.md](architecture/ui-options.md) | dashboards/ports and per-device access matrix |
+| [architecture/SECURITY_MODEL.md](architecture/SECURITY_MODEL.md) | the two structural walls (kanban approval, GitHub merge), agent can/cannot table, secrets policy |
+
+**`improvement/` — the self-improvement loop**
+
+| Doc | What it holds |
+|---|---|
+| [improvement/improvement-loop.md](improvement/improvement-loop.md) | **the coded improvement loop** — lifecycle, runner, promotion/canary/rollback, operator CLI (the system improves itself, human-gated) |
+| [improvement/improvement-roadmap-phases.md](improvement/improvement-roadmap-phases.md) | **measurement-science layers (Phases 1–6)** — mSPRT/CUPED, judge/jury κ-α, anti-Goodhart, bandit scheduling, drift/canary stats, AI-control + observability spec |
+| [improvement/experiment-registry.md](improvement/experiment-registry.md) | the experiment tables added to the one `ledger.db` — schema, events, negative-result memory, migration |
+| [improvement/independent-verification.md](improvement/independent-verification.md) | the verifier that checks the work: separation, reproduction, sealed evals, self-verification prevention |
+| [improvement/judge-calibration.md](improvement/judge-calibration.md) | judges as measured components — precision/recall, safety-first gate, anti-self-certification |
+| [improvement/human-attention-governance.md](improvement/human-attention-governance.md) | human attention as a constrained resource — queue metrics, morning brief, bottleneck warnings |
+| [improvement/proactive-ops.md](improvement/proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
+| [improvement/daily-self-improvement-dag.md](improvement/daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
+| [improvement/SELF_IMPROVEMENT_PIPELINE.md](improvement/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
+
+**`evaluation/` — reusable mission prompts for evaluating external tools**
+
+| Doc | What it holds |
+|---|---|
+| [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md) | reusable mission brief for evaluating external tools/repos/skills — staged, evidence-first, L2-capped, with command-center mapping |
+| [evaluation/agent-ideas-evaluation-prompt.md](evaluation/agent-ideas-evaluation-prompt.md) | broad copy-paste prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, multi-agent frameworks, and similar ideas before any install/adoption |
+| [evaluation/whole-system-validation-prompt.md](evaluation/whole-system-validation-prompt.md) | reusable end-to-end validation prompt for self-improvement, AppFlowy kanban control, registered repo autonomy, notifications, local model routing, forecast-before-action checks, and privacy |
+
+**`github/` · `kanban/` · `linkedin/` · `desktop/` · `watch-list/` · `growth-os/` — integrations**
+
+| Doc | What it holds |
+|---|---|
+| [github/github-safety.md](github/github-safety.md) | branch protection commands, PAT/App scopes, deploy gating |
+| [github/github-token-storage-rotation.md](github/github-token-storage-rotation.md) | GitHub App private-key, installation-token, and owner/admin observer-token storage and rotation policy |
+| [kanban/LIVE_KANBAN_SYNC.md](kanban/LIVE_KANBAN_SYNC.md) | the current event-driven kanban sync design (default since 2026-06-20) — event log, 3 sync levels, conflict policy |
+| [kanban/kanban-integration.md](kanban/kanban-integration.md) | AppFlowy REST quirks, bridge commands, one-time board setup (see §6.3 above for the pipeline itself) |
+| [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
+| [linkedin/LINKEDIN_PIPELINE.md](linkedin/LINKEDIN_PIPELINE.md) | **Living doc** for the LinkedIn/content pipeline — status, architecture, invariants, the content engine, and the improvement roadmap |
+| [linkedin/linkedin-setup.md](linkedin/linkedin-setup.md) | **LinkedIn content pipeline runbook** — ordered go-live steps (app → OAuth → live smoke → schedule) + daily operation; `--preflight` self-check |
+| [desktop/desktop-timeout-takeover-policy.md](desktop/desktop-timeout-takeover-policy.md) | the safety envelope (TTL, per-action timeout, takeover hotkey) for the disabled desktop target |
+| [watch-list/optional-mirage.md](watch-list/optional-mirage.md) | Mirage VFS watch-list verdict + safe Phase-4 experiment shape |
+| [growth-os/growth-os-engineering.md](growth-os/growth-os-engineering.md) | Growth OS living engineering reference (module tree, AppFlowy REST-API gotchas, standards, cross-session rules) |
+
+**`job_search/` — the job-search command center** (see §6.7 above)
+
+| Doc | What it holds |
+|---|---|
+| [job_search/JOB_SEARCH_COMMAND_CENTER.md](job_search/JOB_SEARCH_COMMAND_CENTER.md) | architecture — safe local CLI path, board columns, safety boundary |
+| [job_search/READINESS_FAQ.md](job_search/READINESS_FAQ.md) | **Living doc** — the operator FAQ/runbook: board setup, data retention, executor fallback, filtering, answer bank |
+| [job_search/MANUAL_APPLICATION_RULES.md](job_search/MANUAL_APPLICATION_RULES.md) | canonical list of triggers that route a card to `Needs Geoff` |
+| [job_search/RESUME_CLAIM_POLICY.md](job_search/RESUME_CLAIM_POLICY.md) | every resume bullet must trace to an achievement-bank ID + evidence file |
+| [job_search/JOB_SEARCH_IMPLEMENTATION_PROMPT.md](job_search/JOB_SEARCH_IMPLEMENTATION_PROMPT.md) | copy-paste implementation contract for an agent picking up job-search work |
+| [job_search/PLAN.md](job_search/PLAN.md) | original design doc + phase-by-phase implementation tracker |
+
+**`reference/betts-basketball-standards/`** — external reference standards
+copied from the betts_basketball forecasting pipeline (data-engineering,
+R2/fleet, modeling, serving); see the N/A note in §13.1. Not a spec this repo
+implements.
+
+**`reviews/` — archived, point-in-time (superseded; kept for history)**
+
+Autonomy/decision reviews (`autonomous-pipeline-gap-review-2026-06-16.md`,
+`agentic-process-improvements-2026-06-20.md`, `github-app-production-auth-review-2026-06-16.md`,
+`routing-performance-candidate-evaluation-2026-06-14.md`), pre-work audits
+(`improvement-loop-audit.md`), superseded assessments
+(`agent-multiturn-and-memory.md`, `ecosystem.md`, `system-roadmap.md`),
+one-time patch records (`memory-integration-patch.md`), restated status
+snapshots (`desktop-noop-canary-telemetry.md`), folded-into-MASTER originals
+(`environment-map.md`, `autonomy-idea-map.md`), an orphaned borrowed doc
+(`INGESTION_REGISTRY.md`), and job_search docs fully subsumed by
+`READINESS_FAQ.md` (`job_search-APPLICATION_MEMORY.md`,
+`job_search-EXECUTOR_FALLBACK.md`). Each file has a banner explaining what
+superseded it and where the current truth lives — read the banner before the
+body.
 
 ---
 
@@ -1641,23 +1785,28 @@ agents. That's the whole design.
 
 ### 13.1 What does NOT apply here (the forecasting-pipeline standards)
 
-`docs/backend/` holds reference standards copied from the betts_basketball
-**forecasting** pipeline — medallion bronze/silver/gold, Cloudflare R2 transport,
-Airflow DAGs, GPU training, dbt, and Bayesian/GBDT/clustering modeling. **None of
-that runs in this repo.** Command Center is a control plane; its "pipeline" is
-`edit config → validate contract → render generated → serve via LiteLLM / services /
-channels`. The **transferable** standards are applied here — the module tree at the
-top of this doc, a staged + linear flow, no defensive coding / no hardcoded
+`docs/reference/betts-basketball-standards/` holds reference standards copied
+from the betts_basketball **forecasting** pipeline — medallion bronze/silver/
+gold, Cloudflare R2 transport, Airflow DAGs, GPU training, dbt, and
+Bayesian/GBDT/clustering modeling. **None of that runs in this repo.** Command
+Center is a control plane; its "pipeline" is `edit config → validate contract
+→ render generated → serve via LiteLLM / services / channels`. The
+**transferable** standards are applied here — the module tree at the top of
+this doc, a staged + linear flow, no defensive coding / no hardcoded
 fallbacks (the defensive-coding judge enforces it), strict uv/pyproject dependency
 discipline, and the multi-session git rules below. The forecasting-specific pieces
 (R2 advisory locks, DAG run-location, medallion layers, champion promotion) have no
-analog here and must **not** be cargo-culted in. Treat `docs/backend/` as a library
-of principles to borrow, not a spec this repo implements.
+analog here and must **not** be cargo-culted in. Treat
+`docs/reference/betts-basketball-standards/` as a library of principles to
+borrow, not a spec this repo implements — it's actively cited (see
+`configs/standards.yaml`'s `python_ml_pipeline` profile, used to render
+CLAUDE.md/AGENTS.md for other repos this Command Center manages, e.g.
+betts_basketball) but describes a different system than this one.
 
 ### 13.2 Multi-session git safety (the single-writer rules that DO apply)
 
-From `docs/backend/engineering/MULTI_SESSION_R2.md`, the git half applies verbatim
-even though R2 / Railway / Airflow do not:
+From `docs/reference/betts-basketball-standards/MULTI_SESSION_R2.md`, the git
+half applies verbatim even though R2 / Railway / Airflow do not:
 
 - Stage **explicit paths** you own (`git add path/a path/b`); never `git add -A` / `.`.
 - Never force-push to a shared branch, never `--amend` a pushed commit, never `--no-verify`.
@@ -1666,6 +1815,25 @@ even though R2 / Railway / Airflow do not:
 - The `appflowy_kanban/AppFlowy-Cloud` submodule is pinned; don't bump it as a side effect.
 
 The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUTING.md`.
+
+### 13.3 Settled decisions and non-goals (salvaged from the retired system roadmap)
+
+- **One control plane.** Command Center orchestrates; it does not become a
+  second forecasting pipeline, a second model gateway, or a second channel
+  service. Managed repos (like betts_basketball) govern themselves by their
+  own standards — Command Center renders their CLAUDE.md/AGENTS.md but does
+  not run their pipelines.
+- **Desktop-rights-first ordering.** Desktop/browser automation
+  (`appflowy_browser_staging`) stays disabled until measured evidence
+  (no-op canary telemetry, timeout/takeover policy) exists — see
+  `docs/desktop/desktop-timeout-takeover-policy.md`.
+- **Don't import example KPIs as gates.** Metrics borrowed from evaluated
+  external tools/proposals are reference points, not adopted acceptance
+  gates, unless pre-registered through the improvement loop.
+- **No public exposure by default.** Tailnet-only; Claude-mobile remote
+  connectors can't reach it and that trade is accepted (see §7, §10).
+- **Hermes Agent stays optional/deferred**, not the active coordinator —
+  LiteLLM + Ollama already serve its role (§4).
 
 ---
 
@@ -2125,7 +2293,7 @@ full pytest.
   and per-action timeout controls unset until no-op canary telemetry derives
   them. The target remains `enabled: false`; this is a safety policy
   declaration, not live GUI approval.
-- **Evidence boundary explicit.** [desktop-timeout-takeover-policy.md](desktop-timeout-takeover-policy.md)
+- **Evidence boundary explicit.** [desktop/desktop-timeout-takeover-policy.md](desktop/desktop-timeout-takeover-policy.md)
   records that the current policy is declaration evidence only. No live-GUI
   timing percentile is claimed, no raw screenshots are retained, and the target
   must still pass no-op canary evidence before live actions can be enabled.
@@ -2240,7 +2408,7 @@ full pytest.
   ruleset evidence, so the blocker is now configuration of the branch wall, not
   credential visibility.
 - **Token policy drafted.** Added
-  [github-token-storage-rotation.md](github-token-storage-rotation.md), which
+  [github/github-token-storage-rotation.md](github/github-token-storage-rotation.md), which
   records env-ref-only storage, out-of-repo PEM handling, in-memory installation
   tokens, one-run owner/admin observer token use, and rotation steps. It is not
   a repo-autonomy approval until branch protection verifies.
@@ -2266,7 +2434,7 @@ full pytest.
 ### 2026-06-16 — Autonomous pipeline attachment reconciled
 
 - **What changed.** Added
-  [autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md)
+  [reviews/autonomous-pipeline-gap-review-2026-06-16.md](reviews/autonomous-pipeline-gap-review-2026-06-16.md)
   to reconcile the attached autonomous pipeline proposal against the current
   Command Center + Growth OS implementation. The decision is to keep the
   existing single-control-plane architecture and use the proposal as a
@@ -2305,7 +2473,7 @@ full pytest.
   .devcontainer/devcontainer.json`. Cross-reference validation now proves the
   declared devcontainer and CODEOWNERS files exist inside the repository.
 - **GitHub App auth review.** Added
-  [github-app-production-auth-review-2026-06-16.md](github-app-production-auth-review-2026-06-16.md).
+  [reviews/github-app-production-auth-review-2026-06-16.md](reviews/github-app-production-auth-review-2026-06-16.md).
   Local evidence verified the GitHub remote, default branch, branch heads,
   CODEOWNERS, and CI workflow. The app identity is now recorded in
   `configs/autonomy.yaml` as env-var references only:
@@ -2349,7 +2517,7 @@ full pytest.
 ### 2026-06-16 — Whole-system validation prompt added
 
 - **What changed.** Added
-  [whole-system-validation-prompt.md](whole-system-validation-prompt.md), a
+  [evaluation/whole-system-validation-prompt.md](evaluation/whole-system-validation-prompt.md), a
   reusable mission prompt for proving the whole pipeline rather than one
   subsystem: self-improvement, AppFlowy kanban control, registered desktop repo
   autonomy, progress notification, local-only model routing, memory/knowledge
@@ -2559,7 +2727,7 @@ full pytest.
 ### 2026-06-14 — Routing/performance candidate batch evaluated
 
 - **What changed.** Added
-  [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md),
+  [reviews/routing-performance-candidate-evaluation-2026-06-14.md](reviews/routing-performance-candidate-evaluation-2026-06-14.md),
   a read-only, one-by-one evaluation of Puppetmaster, codebase-memory-mcp,
   Semble, abtop, asm, ClawCodex, Agno/GitWiki, SIA, MAPPA, generic multi-agent
   frameworks, dbt Wizard / dbt Agent Skills, OpenClaw / Docker Model Runner,
@@ -2587,7 +2755,7 @@ full pytest.
 ### 2026-06-14 — Broad AI-agent idea evaluation prompt added
 
 - **What changed.** Added
-  [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md), a
+  [evaluation/agent-ideas-evaluation-prompt.md](evaluation/agent-ideas-evaluation-prompt.md), a
   copy-paste mission prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA,
   codebase-memory-mcp, dbt Wizard, RamiKrispin/local-ai-server, BigQuery Graph /
   ADK / A2UI / BigSet, agentcookie, and generic multi-agent frameworks against
@@ -2606,7 +2774,7 @@ full pytest.
 - **Order of work.** Phase 0 inventory/baseline; Phase 1 read-only experiment
   plans; Phase 2 isolated pilots; Phase 3 feature-flag integration; Phase 4
   monitored canary; Phase 5 human promotion; Phase 6 cleanup/negative-result
-  memory. Use [capability-evaluation-loop.md](capability-evaluation-loop.md) for
+  memory. Use [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md) for
   the detailed staged execution once a broad idea is selected.
 
 ### 2026-06-14 — Kanban row powers extended + validated across agent surfaces
@@ -2653,7 +2821,7 @@ full pytest.
   fresh conversation abstained with zero tools; no board or memory writes.
 - **Tracker synced.** The detailed agent-kanban tracker now carries the same
   row-power contract and honest AppFlowy REST boundary:
-  [AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+  [AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md).
 - **Scratch hygiene.** The sandbox-created `.codex_tmp/` pytest directory was
   ACL-owned by the sandbox identity and could not be deleted by the normal user;
   it is now ignored as local scratch so it cannot pollute git status or
@@ -2703,7 +2871,7 @@ is closed in production.
   `collect_memory_state(query, cfg)` takes the config (loaded once, not per call). No defensive code:
   fail-loud-render mirrors `board_state`, the cadence guard mirrors the board's, the embedder fails
   loud, the store is per-owner + curated-only. Patch doc marked applied:
-  [memory-integration-patch.md](memory-integration-patch.md).
+  [reviews/memory-integration-patch.md](reviews/memory-integration-patch.md).
 - **Live-validated 8/8** (real `qwen3:30b` + `nomic-embed-text` + AppFlowy board). **S1**: remembered
   in conversation A → recalled "black, no sugar" in a **fresh** conversation B → `forget` propagated to
   D. **S2**: a 7-turn conversation recalled focus + deadline at turn 7. **S3**: facts saved in **three
@@ -2753,7 +2921,7 @@ is closed in production.
 ### 2026-06-13 — durable cross-conversation memory (built + proven), embedder VRAM budget, router decision
 
 Executes the `memory_state` design the multi-turn analysis pre-specced (see the entry below
-and [agent-multiturn-and-memory.md](agent-multiturn-and-memory.md)). The board already carried
+and [reviews/agent-multiturn-and-memory.md](reviews/agent-multiturn-and-memory.md)). The board already carried
 durable *work state* across conversations (board_state); this adds durable *conversational*
 memory the same way.
 
@@ -2775,7 +2943,7 @@ memory the same way.
 - **Wiring staged, not applied.** The two touchpoints (`core.py` memory_state injection,
   `assistant.py` verb registration) are the agent-surface session's hot files (core.py was being
   edited minute-by-minute), so the ~10-line, pattern-anchored patch is staged in
-  [memory-integration-patch.md](memory-integration-patch.md) to apply once that session lands.
+  [reviews/memory-integration-patch.md](reviews/memory-integration-patch.md) to apply once that session lands.
   Coordination rule held — none of their files were touched.
 - **Embedder charged against the GPU budget (applied).**
   [vram.py](../src/command_center/registry/vram.py) gained `resident_weight_gb` (data-derived
@@ -3031,7 +3199,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
 
 - **Parity review.** Measured the surface against the two yardsticks (AppFlowy availability+databases,
   Cline look&feel for agent use) and closed the gaps. Full review + per-use-case verdicts in
-  [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) §6.
+  [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md) §6.
 - **5.1 — regression fixed.** Dropping `set_status` (Phase 2) had removed the agent's ability to triage
   papers/repos/signals and update library/lessons status. New title-addressed `move_item(database, title,
   status)` restores action on **every** board with statuses — loud validation, harness owns the key, Approved
@@ -3098,7 +3266,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
 - **Standards.** All knobs in `configs/agent_surface.yaml` (no literals); decisions data-derived or honestly
   abstaining (no fabricated cadence); fail-loud (no silent fallbacks); no leakage (pre-decision features only);
   AppFlowy/Ledger keep write-authority. `make validate` green · full suite green · ruff clean · mypy
-  baseline-consistent. Tracker: [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+  baseline-consistent. Tracker: [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md).
   **Phase 4 (the first-party Cline-styled web UI in the repurposed WebUI slot) is the remaining, separable lift.**
 
 ### 2026-06-13 — agent kanban surface: Phase 0 (decision + tracker + doc reconcile)
@@ -3109,9 +3277,9 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   the **already-budgeted** Phase-4 WebUI slot (`configs/ui.yaml` / `WebUIConfig`) — repurposed from the
   now-deferred Hermes WebUI/Kanban. Not a §13 "another abstraction layer": it fixes a failure actually hit and
   adds no competing authority boundary. Ordered plan + standards-conformance matrix:
-  [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+  [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md).
 - **Doc reconcile.** Stale Hermes-WebUI references corrected to the first-party repurpose:
-  `configs/ui.yaml` comment, [ui-options.md](ui-options.md) dashboard table, [ecosystem.md](ecosystem.md)
+  `configs/ui.yaml` comment, [architecture/ui-options.md](architecture/ui-options.md) dashboard table, [reviews/ecosystem.md](reviews/ecosystem.md)
   banner. The `WebUIConfig` contract (loopback/password/`governed_by_ledger`/single-container) is unchanged;
   the block key renames to `agent_kanban_ui` in Phase 4. Docs-only; no code/config-value change yet.
 
@@ -3154,7 +3322,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   no fallback); the daily DAG drafts them each morning behind `SELF_IMPROVEMENT_KANBAN` (off by
   default). Observer-only — a human drags to Approved → the bridge opens a gated mission → applied.
   Proven live (a "remove swallowed exceptions" card on the board). Tests: `test_discovery_kanban.py`
-  + `test_dag_support.py`; tracker [SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md).
+  + `test_dag_support.py`; tracker [SELF_IMPROVEMENT_PIPELINE.md](improvement/SELF_IMPROVEMENT_PIPELINE.md).
 - **Multi-turn + cross-conversation memory — proven & assessed.** A live 6-message conversation
   through the shared `GatewayCore` (`model: chat` → `qwen3:30b`): read 13 cards → drafted a card →
   **recalled it with no tool call** (within-conversation memory) → "stage *that* card" → "reject it"
@@ -3166,7 +3334,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   proof covers every channel; only Discord is live. Assessment + tiered, data-derived recommendation
   (instrument first via the agent-call log; `memory_state` re-injection if cross-chat reference shows
   up; persisted histories for restart-durability — no leakage, no hardcoded thresholds):
-  [agent-multiturn-and-memory.md](agent-multiturn-and-memory.md).
+  [reviews/agent-multiturn-and-memory.md](reviews/agent-multiturn-and-memory.md).
 
 ### 2026-06-13 — OKF knowledge bundle + dashboards on the tailnet
 
@@ -3177,9 +3345,9 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   `authority: derived` and points at its source). Clobber-safe generated/human split; data-derived
   freshness (no timestamp churn on unchanged source); a blocking N/N validation gate (frontmatter,
   source-path existence, link resolution, secret scan). First generation: 14 concepts, 7/7 PASS.
-  Design: [knowledge-format.md](knowledge-format.md).
+  Design: [architecture/knowledge-format.md](architecture/knowledge-format.md).
 - **Dashboards on the tailnet.** Airflow / Ledger / LiteLLM / Uptime-Kuma now served over Tailscale
-  (8443 / 10000 / 11000 / 12000) — tailnet-only, verified reachable. [remote-access.md](remote-access.md) updated.
+  (8443 / 10000 / 11000 / 12000) — tailnet-only, verified reachable. [operations/remote-access.md](operations/remote-access.md) updated.
 
 ### 2026-06-13 — self-improvement scan: data-derived ranking + delivery + standards pass
 
@@ -3193,9 +3361,9 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   for per-pillar swimlanes. CLI flags `--email/--board/--ping` + a new-since-yesterday diff.
 - **Standards (principles-only).** Module-tree + 5-stage header on `pipeline.py`; a blocking
   `improvement scan-validate` gate (10/10 — asserts the observer wall + no-leakage); a report
-  manifest sidecar (sha256 + provenance). Verified the `docs/backend/` R2/fleet/Railway/medallion
-  standards are the betts pipeline's and **don't apply here** (no such infra) — applied only the
-  transferable principles. Tracker: `docs/backend/projects/SELF_IMPROVEMENT_PIPELINE.md`.
+  manifest sidecar (sha256 + provenance). Verified the `docs/reference/betts-basketball-standards/`
+  R2/fleet/Railway/medallion standards are the betts pipeline's and **don't apply here** (no such
+  infra) — applied only the transferable principles. Tracker: `docs/improvement/SELF_IMPROVEMENT_PIPELINE.md`.
 - **Zero new deps**; full suite + ladder (validate · scan-validate · evals) green; ruff + mypy clean.
 
 ### 2026-06-13 — model-selection track + routing check + Hermes spike
@@ -3313,7 +3481,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   Sources: betts `PIPELINE_STANDARDS_TEMPLATE.md`,
   `DATA_ENGINEERING_PIPELINE.md` §0.x, `LOCAL_FLEET_R2_WORKFLOW.md`,
   `UNIFIED_SERVING_GUIDE.md`. Validated (`validate: PASS`) and test-rendered.
-- **Added [capability-evaluation-loop.md](capability-evaluation-loop.md)**:
+- **Added [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md)**:
   the staged, evidence-first external-tool evaluation prompt (Stage 0–11,
   three separated roles, knockout gates, A/B benchmarks, chaos testing,
   independent verification, five dispositions), with a Part-A mapping onto

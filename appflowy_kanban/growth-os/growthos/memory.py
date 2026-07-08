@@ -1,6 +1,6 @@
 """Durable, cross-conversation memory for the agent — the companion to board_state.
 
-The proven gap (see docs/agent-multiturn-and-memory.md): within a conversation the
+The proven gap (see docs/reviews/agent-multiturn-and-memory.md): within a conversation the
 gateway keeps a `deque(12)`, but **across** conversations (and across a restart) the
 agent remembers nothing the user *said*. The board already carries durable *work
 state* (board_state re-injects it every turn); this module adds durable *conversational

@@ -28,7 +28,7 @@ DEFAULT_OUTPUT = ROOT / "generated" / "usage-digest.md"
 # on PATH. Resolution order: --abtop-bin arg > ABTOP_BIN env > this default.
 # We only ever invoke it with `--json` (a read-only snapshot); `--setup` (which
 # writes ~/.claude/settings.json) is never used. See
-# docs/capability-evaluation-loop.md Part C and evaluation/.../abtop/.
+# docs/evaluation/capability-evaluation-loop.md Part C and evaluation/.../abtop/.
 ABTOP_DEFAULT_BIN = ROOT / "evaluation" / "capability-assessment" / "abtop" / "bin" / "abtop.exe"
 
 

@@ -14,7 +14,7 @@ Env:
   TWILIO_ALLOWED_NUMBERS (optional, comma-separated E.164 senders; empty = all)
   SMS_WEBHOOK_HOST       (default 0.0.0.0)
   SMS_WEBHOOK_PORT       (default 8081)
-See docs/channels.md for the Twilio number + webhook + tunnel steps.
+See docs/architecture/channels.md for the Twilio number + webhook + tunnel steps.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ async def run(spec) -> None:
     if missing:
         raise SystemExit(
             f"sms: missing {', '.join(missing)} - create a Twilio number and copy "
-            "its credentials into .env. See docs/channels.md")
+            "its credentials into .env. See docs/architecture/channels.md")
     raw = e.get("TWILIO_ALLOWED_NUMBERS", "")
     allowed = {n.strip() for n in raw.split(",") if n.strip()}
     host = e.get("SMS_WEBHOOK_HOST", "0.0.0.0")
