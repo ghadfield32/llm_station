@@ -1,11 +1,17 @@
 # UI options — from any device
 
-All web UIs bind to 127.0.0.1 on the VPS; reach them over **Tailscale** (`http://<vps-tailscale-ip>:PORT`). Nothing public unless you deliberately add Caddy+Cloudflare Access.
+All web UIs bind to 127.0.0.1; reach them over **Tailscale** (`http://<host-tailscale-ip>:PORT`). Nothing public unless you deliberately add Caddy+Cloudflare Access.
+
+> **2026-07-08:** the **Agent Kanban UI is the recommended primary cockpit**
+> (decision record: `docs/reviews/2026-07-08-cockpit-decision.md`; quickstart:
+> `docs/setup/COCKPIT_QUICKSTART.md`). AppFlowy stays an optional
+> mobile/knowledge projection — its native apps remain the phone-native
+> fallback for board approvals.
 
 ## Web dashboards (Tailscale)
 | Service | Port | What you do |
 |---|---|---|
-| Agent Kanban UI | 8787 | first-party Cline-styled board + observability over AppFlowy/Ledger; optional Phase 4, governed by `configs/ui.yaml`. **Read-mostly** — writes flow through the Ledger/action-layer gates; the UI cannot set Approved |
+| **Cockpit (Agent Kanban UI)** | 8787 | **primary operator surface**: Missions kanban, Boards, Router, Observability, Activity, SSE Chat; governed by `configs/ui.yaml` (now `enabled: true`). **Read-mostly** — writes flow through the Ledger/action-layer gates; the UI cannot set Approved |
 | Ledger UI | 8091 | missions: status, risk, diffs, leases, approvals, **kill** |
 | LiteLLM Admin | 4000/ui | spend, budgets, rotate virtual keys |
 | Uptime Kuma | 3001 | health of all nodes/services |

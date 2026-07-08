@@ -158,6 +158,7 @@ def _ledger_port() -> str:
 
 def _ui_urls() -> dict[str, str]:
     return {
+        "cockpit": f"http://localhost:{os.environ.get('KANBAN_UI_PORT', '8787')}/",
         "litellm": "http://localhost:4000/ui",
         "ledger": f"http://localhost:{_ledger_port()}/",
         "kuma": "http://localhost:3001",
@@ -219,7 +220,7 @@ def _enable_channel(transport: str) -> bool:
 def c_open(a):
     import webbrowser
     urls = _ui_urls()
-    targets = a if a else ["litellm", "ledger", "kuma"]
+    targets = a if a else ["cockpit", "litellm", "ledger", "kuma"]
     print("opening UIs (also reachable at these URLs over Tailscale):")
     for t in targets:
         url = urls.get(t)
@@ -288,7 +289,7 @@ def c_start(a):
         c_appflowy_up([])
     if channel:
         rc = c_channel([channel])  # guided: sets up + launches, or prints the token steps
-    c_open(["litellm", "ledger", "kuma"] + (["hermes"] if want_hermes else []))
+    c_open(["cockpit", "litellm", "ledger", "kuma"] + (["hermes"] if want_hermes else []))
     print("\nstart complete. Run a channel anytime with: cc channel <name>  (or: cc gateway)")
     return 0
 

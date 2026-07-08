@@ -12,8 +12,13 @@ schema_version: command-center.ui.v1
 # (loopback/password/governed-by-ledger guarantees) is unchanged — the board is
 # read-mostly and every write still flows through the action layer / Ledger gates.
 
+# 2026-07-08: the cockpit is the PRIMARY operator surface (decision record:
+# docs/reviews/2026-07-08-cockpit-decision.md). AppFlowy stays an optional
+# mobile/knowledge projection. Start: docker compose --profile ui up -d
+# agent-kanban-ui (or `uv run cc start`); quickstart:
+# docs/setup/COCKPIT_QUICKSTART.md.
 agent_kanban_ui:
-  enabled: false                       # turn on in Phase 4, after the core works
+  enabled: true                        # primary cockpit (read-mostly; writes governed)
   host: 127.0.0.1                      # loopback only; reach over Tailscale
   port: 8787
   password_required: true             # mandatory once host != loopback
