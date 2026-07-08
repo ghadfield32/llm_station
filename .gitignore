@@ -64,6 +64,16 @@ generated/*.md
 # scan feeds (regenerate: `cc research-digest feed` / `make model-scout`)
 generated/research-digest-feed.json
 generated/model-scout-feed.json
+# content-pipeline outputs (briefs/claims/verifications/reference clusters/style
+# patterns embed personal repo + author summaries; regenerated each run)
+generated/content-brief.json
+generated/content-claims.json
+generated/content-verifications.json
+generated/reference-clusters.json
+generated/reference-people.json
+generated/style-patterns.json
+# post-performance metrics cache; regenerated from platform APIs
+data/performance/
 
 # ── LinkedIn content pipeline runtime state — NEVER commit ──────────────────
 # token store holds the OAuth access token (a secret); ledger/lock are runtime
