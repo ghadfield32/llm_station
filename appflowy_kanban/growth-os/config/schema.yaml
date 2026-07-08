@@ -112,6 +112,36 @@ databases:
       CardKey: text
       LastSync: date
       Created: date
+  job_search_pipeline:
+    icon: "briefcase"
+    fields:
+      role_title: text
+      Status: {type: select, options: [Suggested Jobs, Selected by Geoff, In Progress, Needs Geoff, Completed, Interviewing, Rejected / Skip, Closed / Archived]}
+      job_key: text
+      company: text
+      location: text
+      remote_type: {type: select, options: [remote, hybrid, onsite, unknown]}
+      source: text
+      portal: text
+      apply_url: url
+      salary_text: text
+      salary_min: number
+      salary_max: number
+      category: text
+      fit_score: number
+      automation_class: {type: select, options: [bot_possible, prepare_only, manual_required, skip]}
+      manual_reason: longtext
+      resume_variant: text
+      why_apply: longtext
+      risks: longtext
+      deadline: date
+      last_seen_at: date
+      application_id: text
+      next_action: longtext
+      materials_path: text
+      company_tier: {type: select, options: [none, sports_team, sports_tech, faang, major_other]}
+      score_explanation: longtext
+      claude_review_url: url
   todos:
     icon: "todo"
     fields:

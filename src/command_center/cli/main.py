@@ -384,6 +384,8 @@ COMMANDS: dict[str, tuple] = {
     "demo": (lambda a: pym("command_center.cli.demo", *a),
              "full-loop demo: verify board+repo and document the 14-step loop (no writes, no merge)"),
     "linkedin-publish": (lambda a: pym("command_center.cli.linkedin_publish", *a), "publish approved+due LinkedIn content rows (--login | --apply)"),
+    "job-search": (lambda a: pym("command_center.job_search.cli", *a),
+                   "prepare/manual-first job search workflow: ingest, suggest, materials, followups, retention"),
     "system-validation": (lambda a: pym("command_center.cli.system_validation", *a),
                           "write whole-system validation evidence from real config state"),
     "github-app-verify": (lambda a: pym("command_center.cli.github_app_verify", *a),

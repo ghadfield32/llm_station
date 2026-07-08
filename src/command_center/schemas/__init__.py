@@ -27,6 +27,7 @@ from .contracts import (
     ChannelSpec, ChannelsConfig,
     MissionOpen, JudgeVerdict,
 )
+from ..job_search.schemas import JobSearchConfig
 
 # Map each config file to its top-level contract — used by validate + impact tools.
 CONFIG_CONTRACTS = {
@@ -50,6 +51,7 @@ CONFIG_CONTRACTS = {
     "configs/channels.yaml": ChannelsConfig,
     "configs/agent_surface.yaml": AgentSurfaceConfig,
     "configs/autonomy.yaml": AutonomyConfig,
+    "configs/job_search.yaml": JobSearchConfig,
 }
 
 # The improvement loop's contracts. Registered here so the same `make validate` /

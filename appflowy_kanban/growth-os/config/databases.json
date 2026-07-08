@@ -315,5 +315,43 @@
       "ScheduledFor": "dyq1Fx",
       "Hook": "L4eMO3"
     }
+  },
+  "job_search_pipeline": {
+    "view_id": "e3415cfe-d651-4e90-974a-179163043ca2",
+    "database_id": "c900c1b2-05be-4333-a64d-fbe17851f35e",
+    "primary_field_id": "bw6Crg",
+    "title_column": "role_title",
+    "fields": {
+      "Name": "bw6Crg",
+      "portal": "jXK_TB",
+      "risks": "UKH_FH",
+      "company": "YvybyB",
+      "salary_text": "45madK",
+      "salary_max": "QQ1vrG",
+      "last_seen_at": "-AB7BZ",
+      "Done": "ZmDCET",
+      "application_id": "wq2hgq",
+      "Status": "70wLkx",
+      "category": "ONp1v0",
+      "apply_url": "C_mpKc",
+      "claude_review_url": "5dRRvs",
+      "Type": "CCCGRe",
+      "source": "2Ifpji",
+      "remote_type": "aZJFhb",
+      "location": "TaFibM",
+      "job_key": "knNgH_",
+      "company_tier": "ubNFgP",
+      "materials_path": "I0bQMl",
+      "score_explanation": "a9aYt-",
+      "fit_score": "tLNO1E",
+      "salary_min": "2FC9zB",
+      "automation_class": "1h86XW",
+      "resume_variant": "dp8Ywg",
+      "deadline": "pewJpE",
+      "why_apply": "etkHbv",
+      "manual_reason": "-CbUj9",
+      "next_action": "fMdg1g",
+      "role_title": "bw6Crg"
+    }
   }
 }

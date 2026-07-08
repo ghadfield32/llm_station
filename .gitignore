@@ -43,6 +43,8 @@ data/improvement/
 data/discovery/
 # runtime ledger state
 data/ledger.db
+# job-search profile, generated resumes, job descriptions, and recruiter notes
+data/job_search/
 generated/improvements-board.json
 *.zip
 "updated files"

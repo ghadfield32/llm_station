@@ -117,3 +117,59 @@ boards:
     - deploy
     - merge
     blockers: []
+  - board_id: job_search_pipeline
+    provider: appflowy
+    workspace_ref: env:APPFLOWY_WORKSPACE_ID
+    board_ref: job_search_pipeline
+    repo_ids:
+    - llm_station
+    status_mapping:
+      awaiting_approval: Interviewing
+      backlog: Suggested Jobs
+      blocked: Needs Geoff
+      done: Completed
+      in_progress: In Progress
+      ready: Selected by Geoff
+      rejected: Rejected / Skip
+    required_fields:
+    - job_key
+    - company
+    - role_title
+    - location
+    - remote_type
+    - source
+    - portal
+    - apply_url
+    - salary_text
+    - salary_min
+    - salary_max
+    - category
+    - fit_score
+    - automation_class
+    - manual_reason
+    - resume_variant
+    - why_apply
+    - risks
+    - deadline
+    - last_seen_at
+    - application_id
+    - next_action
+    - materials_path
+    - company_tier
+    - score_explanation
+    - claude_review_url
+    allowed_agent_verbs:
+    - add_mission_card
+    - block_card
+    - finish_todo
+    - reject_card
+    - stage_card
+    - start_todo
+    forbidden_agent_verbs:
+    - approve_card
+    - delete_board
+    - delete_card
+    - deploy
+    - merge
+    blockers:
+    - "Job-search board has an extra domain column, Closed / Archived, enforced by command_center.job_search.board."
