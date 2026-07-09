@@ -9,9 +9,22 @@ For the high-level, whole-system map (control plane + knowledge base + managed
 projects + fleet, with the module tree and the strategic order) see
 [system-roadmap.md](../reviews/system-roadmap.md). This file stays the tactical tracker.
 
-_Last updated: 2026-06-20._
+_Last updated: 2026-07-09._
 
 ## Done
+
+- **Cockpit full sweep (2026-07-09).** The first-party cockpit is the shipped
+  primary surface: 9 typed domains (`configs/domain_surfaces.yaml`), internal
+  job board with live discovery (62 real cards), LLM agent-writer + packet
+  review/finalize gate, PWA over Tailscale Serve. 930 tests green (serial),
+  authority/secrets/chat/setup sweeps adversarially verified, all confirmed
+  findings fixed (`f8924d3`: true one-button `cc start`, stricter profile
+  gate, fixture/timestamp hygiene, doc fixes). Evidence:
+  `evaluation/system-validation/cockpit-full-sweep-20260709/`. Operator items
+  left: AppFlowy Group-by-Status (optional projection), kill 2 stale June
+  test missions, `DISCORD_ALLOWED_CHANNEL_IDS`, LinkedIn draft approval +
+  schtasks. Next build slices (ranked): Papers→research-digest binding,
+  Repos→registry binding, UX density polish, DAGs→Airflow binding.
 
 - **GitHub-ready hygiene.** Comprehensive `.gitignore`; all secrets/caches/dumps confirmed
   ignored via `git check-ignore`; stray tarball + egg-info removed; `AppFlowy-Cloud`

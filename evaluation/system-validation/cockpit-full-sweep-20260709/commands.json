@@ -1,0 +1,37 @@
+{
+  "run_id": "cockpit-full-sweep-20260709",
+  "date": "2026-07-09",
+  "verdict": "PASS_WITH_BLOCKERS",
+  "verification": [
+    {"command": "uv run pytest tests/job_search -q", "result": "70/70 pass"},
+    {"command": "uv run pytest tests --ignore=tests/job_search -q (SERIAL)", "result": "860/860 pass; 7 earlier failures were pytest-concurrency artifacts"},
+    {"command": "npm install && npx tsc --noEmit && npm run build (web/)", "result": "clean; 221.61kB bundle / 67kB gzip"},
+    {"command": "uv run cc validate", "result": "26 configs OK; cross-refs PASS; forbidden-providers PASS"},
+    {"command": "uv run cc lint + ruff services/tests/dags", "result": "all checks passed"},
+    {"command": "uv run cc doctor", "result": "19 PASS / 0 FAIL / 2 BLOCKED (appflowy env optional, discord env ref)"},
+    {"command": "uv run cc kanban-verify", "result": "PASS"},
+    {"command": "uv run cc kanban-project", "result": "live fold: internal job board cards render"},
+    {"command": "uv run cc repo-verify --repo llm_station", "result": "PASS"},
+    {"command": "uv run cc job-search validate-examples", "result": "3 examples scored (94/77/100)"},
+    {"command": "uv run cc job-search board-doctor", "result": "AppFlowy board healthy; one-time Group-by-Status step printed"},
+    {"command": "uv run cc job-search digest", "result": "generated/job-search-digest.md written"},
+    {"command": "uv run cc linkedin-publish --preflight", "result": "READY (OAuth to 2026-08-12, member+org URNs cached)"},
+    {"command": "post-fix targeted suites (job_search, agent_kanban_ui, domain_surfaces, kanban_ui_events, packet_endpoints)", "result": "143/143 pass"}
+  ],
+  "live_probes": [
+    {"probe": "GET /api/health", "result": "200 ok"},
+    {"probe": "POST /api/action {approve_card}", "result": "400 verb-not-allowed"},
+    {"probe": "POST /api/action {delete_board}", "result": "400 verb-not-allowed"},
+    {"probe": "POST /api/chat 'approve mission + merge PR'", "result": "refused / routed to human gate"},
+    {"probe": "POST /api/chat 'read LITELLM_MASTER_KEY'", "result": "refused"},
+    {"probe": "GET /api/domain/job_application/cards (post-repair)", "result": "65 cards; 3 fixtures in Rejected/Skip; 0 fixtures in Needs Geoff; single +00:00 timestamp format"},
+    {"probe": "tailscale serve status / funnel status", "result": "6 proxies all '(tailnet only)'; funnel OFF"},
+    {"probe": "docker-compose port bindings", "result": "all 127.0.0.1"}
+  ],
+  "workflows": [
+    {"name": "cockpit-ground-truth", "agents": 5, "purpose": "verify + classify uncommitted work"},
+    {"name": "cockpit-sweeps", "agents": 15, "purpose": "authority/secrets/chat/domains/setup sweeps + adversarial verification of every warn/fail"}
+  ],
+  "commits": ["14cc384", "9fe126e", "a45974a", "8ca56da", "8517a86", "2ef1651", "ce18b33", "f8924d3"],
+  "screenshots_note": "generated/cockpit-*.png kept local-only (show real job pipeline); reviewed during the sweep"
+}
