@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
+from command_center.job_search.cache_io import read_json_file
 from command_center.job_search.config import data_root, ensure_data_dirs, load_config
 from command_center.job_search.retention import plan_retention
 
@@ -13,7 +13,7 @@ def write_digest(*, root: Path | None = None) -> Path:
     ensure_data_dirs(base)
     suggestions = []
     for path in (base / "source_cache" / "suggestions").glob("*.json"):
-        suggestions.append(json.loads(path.read_text(encoding="utf-8")))
+        suggestions.append(read_json_file(path))
     retention = plan_retention(root=base)
     lines = [
         "# Job Search Digest",
@@ -44,4 +44,3 @@ def write_digest(*, root: Path | None = None) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
-

@@ -7,8 +7,10 @@ job_search:
   require_geoff_selection: true
   submit_without_geoff_selection: false
   auto_submit_enabled: false
-  max_suggested_jobs_per_day: 25
-  max_selected_jobs_per_day: 5
+  max_suggested_jobs_per_day: 50
+  max_bot_possible_suggestions_per_day: 25
+  max_manual_required_suggestions_per_day: 25
+  max_selected_jobs_per_day: 25
   board_name: job_search_pipeline
   data_root: data/job_search
   digest_path: generated/job-search-digest.md

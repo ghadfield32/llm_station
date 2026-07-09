@@ -74,6 +74,14 @@ def _slug(value: str) -> str:
     return cleaned or "unknown"
 
 
+def _contains_config_phrase(text: str, phrase: str) -> bool:
+    normalized = phrase.strip().lower()
+    if not normalized:
+        return False
+    pattern = rf"(?<![a-z0-9]){re.escape(normalized)}(?![a-z0-9])"
+    return re.search(pattern, text.lower()) is not None
+
+
 def _frontmatter(text: str) -> tuple[dict[str, Any], str]:
     if not text.startswith("---"):
         return {}, text
@@ -178,7 +186,7 @@ def classify_company_tier(job: CanonicalJob, config: JobSearchConfig) -> str:
         if _norm(name) and _norm(name) in company_norm:
             return "sports_tech"
     for keyword in targets.sports_teams_keywords:
-        if keyword.lower() in text:
+        if _contains_config_phrase(text, keyword):
             return "sports_team"
     return "none"
 
@@ -317,4 +325,4 @@ def score_job(job: CanonicalJob, bank: AchievementBank, config: JobSearchConfig)
 
 
 def application_id_for(job: CanonicalJob, date: str) -> str:
-    return f"{date}_{_slug(job.company)}_{_slug(job.role_title)}"
+    return f"{date}_{_slug(job.company)}_{_slug(job.role_title)}_{job.job_key[:8]}"

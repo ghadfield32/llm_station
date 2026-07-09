@@ -53,6 +53,8 @@ class JobSearchRuntime(Strict):
     submit_without_geoff_selection: bool = False
     auto_submit_enabled: bool = False
     max_suggested_jobs_per_day: int = Field(default=25, ge=1, le=100)
+    max_bot_possible_suggestions_per_day: int = Field(default=25, ge=0, le=100)
+    max_manual_required_suggestions_per_day: int = Field(default=25, ge=0, le=100)
     max_selected_jobs_per_day: int = Field(default=5, ge=1, le=25)
     board_name: str = "job_search_pipeline"
     data_root: str = "data/job_search"
@@ -344,6 +346,14 @@ class ApplicationRecord(Strict):
     bullet_ids_used: list[str] = []
     archived_at: str | None = None
     rich_compacted: bool = False
+    # Agent-writer provenance: mode is "agent" (LLM-generated, trace on disk) or
+    # "template_fallback" (deterministic templates; error records why). Never
+    # silently absent for new packets — validation surfaces the mode to Geoff.
+    generation: dict[str, object] = {}
+    # Bumped every time materials are regenerated from reviewer notes.
+    revision: int = 1
+    # "ready_for_review" | "changes_requested" — the packet-review gate state.
+    review_state: str = "ready_for_review"
 
 
 def repo_root() -> Path:
