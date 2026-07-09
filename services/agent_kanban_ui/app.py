@@ -1,4 +1,4 @@
-"""First-party agent kanban + observability UI — read-only backend.
+"""First-party agent kanban + observability UI backend.
 
 A convenience surface, NOT the policy layer (configs/ui.yaml / WebUIConfig). It
 reads two sources that are reachable across the container boundary without coupling
@@ -10,10 +10,10 @@ to growthos/AppFlowy:
     command_center.kanban.metrics used by `make kanban-digest`, so the UI and the
     CLI digest can never disagree.
 
-It performs NO writes. Approving/killing a mission stays in the signed Ledger
-endpoints (the HMAC secret is never given to this service); the UI links out to
-them. AppFlowy remains the human staging surface. This keeps `external_write_policy:
-governed_by_ledger` true by construction — there is simply no write path here.
+Full-console deployments can write through governed action verbs and validated
+profile/domain config editors. Approving/killing a mission stays in the signed
+Ledger endpoints; AppFlowy/provider writes still go through the action layer.
+This keeps `external_write_policy: governed_by_ledger` true by construction.
 
 The built SPA (static assets) is mounted at / when present (single-container mode).
 """
@@ -21,17 +21,23 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import socket
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from command_center.kanban.metrics import (
     compute_metrics, load_calls, log_path, recent_calls)
 from command_center.kanban_sync import EventLog, project_cards
+from command_center.kanban_sync.events import emit_event, is_human_owned_status
 
 # Chat + governed writes turn the UI into a first-class CHANNEL (it embeds the same
 # GatewayCore Discord uses). OFF by default so the read-only board deployment holds
@@ -39,6 +45,7 @@ from command_center.kanban_sync import EventLog, project_cards
 # growth-os + .env. L3/L4 approve/kill never reach here — only the action layer's
 # governed verbs (which already refuse Approved).
 CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
+DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "1"
 # Governed write verbs the console may call directly (the action layer enforces the
 # wall; Approved is structurally refused inside them). No Ledger approve/kill here.
 ACTION_VERBS = frozenset({"stage_card", "block_card", "reject_card",
@@ -46,22 +53,74 @@ ACTION_VERBS = frozenset({"stage_card", "block_card", "reject_card",
                           "annotate_item", "set_item_field",
                           "remove_item_field_value"})
 
+STARTUP_CWD = Path.cwd().resolve()
+
+
+def _env_path(name: str, default: str) -> Path:
+    raw = os.environ.get(name, default)
+    path = Path(raw).expanduser()
+    if path.is_absolute() or path.anchor:
+        return path.resolve()
+    return (STARTUP_CWD / path).resolve()
+
+
 LEDGER_BASE_URL = os.environ.get("LEDGER_BASE_URL", "http://ledger:8090").rstrip("/")
-STATIC_DIR = Path(os.environ.get("KANBAN_UI_STATIC", "/app/static"))
+STATIC_DIR = _env_path("KANBAN_UI_STATIC", "/app/static")
 # The AppFlowy board snapshot, produced on the worker (`make kanban-board-snapshot`)
 # and mounted read-only here. The UI never holds AppFlowy creds — it reads this file.
-BOARD_SNAPSHOT = Path(os.environ.get("KANBAN_BOARD_SNAPSHOT",
-                                     "/app/snapshot/board-snapshot.json"))
+BOARD_SNAPSHOT = _env_path("KANBAN_BOARD_SNAPSHOT",
+                           "/app/snapshot/board-snapshot.json")
 # Read-only config mount — the model lanes + judge stages come from the real
 # configs (no hardcoded model names), for the Router view.
-CONFIGS_DIR = Path(os.environ.get("KANBAN_UI_CONFIGS", "/app/configs"))
+CONFIGS_DIR = _env_path("KANBAN_UI_CONFIGS", "/app/configs")
 # The kanban event log (source of truth for live board projection). Read-only here.
-KANBAN_EVENT_LOG = Path(os.environ.get("KANBAN_EVENT_LOG", "/app/generated/kanban-events.jsonl"))
+KANBAN_EVENT_LOG = _env_path("KANBAN_EVENT_LOG", "/app/generated/kanban-events.jsonl")
+CHAT_THREADS_FILE = _env_path(
+    "KANBAN_CHAT_THREADS",
+    str(KANBAN_EVENT_LOG.with_name("chat-threads.json")),
+)
 
 # Cline-style columns: live work first, terminal last. Any status the Ledger returns
 # that isn't listed still shows under its own name (nothing is hidden).
 MISSION_COLUMNS = ["awaiting_approval", "open", "approved", "running",
                    "blocked", "done", "killed", "failed"]
+
+
+def _external_chat_status(
+    name: str,
+    env_names: tuple[str, ...],
+    *,
+    kind: str,
+    best_for: str,
+    recommendation: str,
+    source_url: str,
+) -> dict:
+    metadata = {
+        "kind": kind,
+        "best_for": best_for,
+        "recommendation": recommendation,
+        "source_url": source_url,
+        "handoff_mode": "external_link",
+    }
+    for env_name in env_names:
+        url = os.environ.get(env_name, "").strip()
+        if url:
+            return {
+                "name": name,
+                "active": True,
+                "url": url,
+                "env_var": env_name,
+                "reason": f"configured by {env_name}",
+                **metadata,
+            }
+    return {
+        "name": name,
+        "active": False,
+        "url": None,
+        "env_var": " or ".join(env_names),
+        "reason": "not configured; cockpit chat will use GatewayCore/LiteLLM",
+        **metadata,
+    }
 
 app = FastAPI(title="Agent Kanban UI", version="1.0.0")
 
@@ -71,18 +130,58 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+def _http_probe(url: str, *, timeout: float = 4.0) -> dict:
+    try:
+        r = httpx.get(url, timeout=timeout)
+        return {"ok": True, "status_code": r.status_code, "url": url}
+    except httpx.HTTPError as exc:
+        return {
+            "ok": False,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "url": url,
+        }
+
+
+def _dns_probe(url: str) -> dict:
+    host = urlsplit(url).hostname
+    if not host:
+        return {"ok": False, "host": "", "error": "URL has no hostname"}
+    try:
+        infos = socket.getaddrinfo(host, None)
+        addresses = sorted({item[4][0] for item in infos})
+        return {"ok": True, "host": host, "addresses": addresses}
+    except socket.gaierror as exc:
+        return {"ok": False, "host": host, "error": str(exc)}
+
+
+def _path_info(path: Path) -> dict:
+    parent = path if path.is_dir() else path.parent
+    return {"path": str(path), "exists": path.exists(), "is_file": path.is_file(),
+            "is_dir": path.is_dir(), "writable": os.access(path, os.W_OK),
+            "parent_writable": os.access(parent, os.W_OK)}
+
+
+def _job_search_data_info() -> dict:
+    try:
+        from command_center.job_search.config import data_root, load_config
+
+        return _path_info(data_root(load_config()))
+    except Exception as exc:
+        return {"error_type": type(exc).__name__, "error": str(exc)}
+
+
 @app.get("/api/status")
 def status() -> dict:
     """Real liveness of each hop the console depends on (ok/error each) — for the
     topbar. No fabrication: a hop is 'ok' only if it actually answered."""
     hops: dict[str, str] = {}
+    targets: dict[str, str] = {}
 
     def probe(name: str, url: str) -> None:
-        try:
-            httpx.get(url, timeout=4)        # any HTTP response = reachable
-            hops[name] = "ok"
-        except httpx.HTTPError as exc:
-            hops[name] = f"error: {type(exc).__name__}"
+        targets[name] = url
+        result = _http_probe(url)
+        hops[name] = "ok" if result["ok"] else f"error: {result['error_type']}"
 
     probe("ledger", f"{LEDGER_BASE_URL}/health")
     if CHAT_ENABLED:
@@ -92,19 +191,60 @@ def status() -> dict:
         appflowy = os.environ.get("APPFLOWY_BASE_URL", "").rstrip("/")
         if appflowy:
             probe("appflowy", appflowy)
-    return {"hops": hops}
+    return {"hops": hops, "targets": targets}
+
+
+@app.get("/api/debug/runtime")
+def runtime_debug() -> dict:
+    """Non-secret runtime diagnostics for local setup issues.
+
+    This is intentionally explicit rather than forgiving: it reports the exact
+    URLs and mounted paths the service is using so operator mistakes show up as
+    data, not as blank boards.
+    """
+    ledger_health_url = f"{LEDGER_BASE_URL}/health"
+    return {
+        "mode": {
+            "chat_enabled": CHAT_ENABLED,
+            "cwd": str(Path.cwd()),
+            "startup_cwd": str(STARTUP_CWD),
+        },
+        "ledger": {
+            "base_url": LEDGER_BASE_URL,
+            "health_url": ledger_health_url,
+            "dns": _dns_probe(LEDGER_BASE_URL),
+            "health": _http_probe(ledger_health_url),
+            "host_run_hint": (
+                "When running uvicorn on the Windows host, use "
+                "LEDGER_BASE_URL=http://127.0.0.1:8091. "
+                "http://ledger:8090 is the Docker Compose service URL."
+            ),
+        },
+        "paths": {
+            "static_dir": _path_info(STATIC_DIR),
+            "board_snapshot": _path_info(BOARD_SNAPSHOT),
+            "configs_dir": _path_info(CONFIGS_DIR),
+            "kanban_event_log": _path_info(KANBAN_EVENT_LOG),
+            "chat_threads": _path_info(CHAT_THREADS_FILE),
+            "board_store_dir": _path_info(BOARD_STORE_DIR),
+            "fixtures_file": _path_info(FIXTURES_FILE),
+            "job_search_data": _job_search_data_info(),
+        },
+    }
 
 
 @app.get("/api/missions")
 def missions() -> dict:
     """The execution kanban: Ledger missions grouped into columns. Ledger
     unreachable is surfaced as a 502 — never an empty board passed off as 'no work'."""
+    url = f"{LEDGER_BASE_URL}/missions"
     try:
-        r = httpx.get(f"{LEDGER_BASE_URL}/missions", timeout=15)
+        r = httpx.get(url, timeout=15)
         r.raise_for_status()
         rows = r.json()
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"ledger unreachable: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"ledger unreachable at {url}: {exc}") from exc
     columns: dict[str, list] = {c: [] for c in MISSION_COLUMNS}
     for m in rows:
         columns.setdefault(m.get("status", "unknown"), []).append({
@@ -119,11 +259,12 @@ def missions() -> dict:
 
 @app.get("/api/mission/{mid}")
 def mission(mid: str) -> dict:
+    url = f"{LEDGER_BASE_URL}/mission/{mid}"
     try:
-        r = httpx.get(f"{LEDGER_BASE_URL}/mission/{mid}", timeout=15)
+        r = httpx.get(url, timeout=15)
         r.raise_for_status()
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"ledger error: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"ledger error at {url}: {exc}") from exc
     return r.json()
 
 
@@ -225,6 +366,599 @@ def config() -> dict:
             "chat_enabled": CHAT_ENABLED, "model_roles": roles}
 
 
+# ── Typed domain surfaces (configs/domain_surfaces.yaml) ────────────────────
+# Each domain binds a card grammar to a data source: a command_center_ui board's
+# card store (event-log fold = status truth), the Ledger's missions, or the
+# committed demo fixtures. Origin always travels in the payload — fixture data
+# can never masquerade as live data.
+FIXTURES_FILE = _env_path(
+    "KANBAN_UI_FIXTURES", str(Path(__file__).parent / "domain_fixtures.json"))
+BOARD_STORE_DIR = _env_path("KANBAN_BOARD_STORE", "/app/generated/boards")
+
+
+def _domain_config() -> dict:
+    dp = _domain_config_path()
+    if not dp.is_file():
+        raise HTTPException(status_code=503, detail=f"domain_surfaces.yaml not at {dp}")
+    data = _read_yaml_file(dp)
+    _validate_domain_config(data, status_code=503)
+    return data
+
+
+def _domain_config_path() -> Path:
+    return CONFIGS_DIR / "domain_surfaces.yaml"
+
+
+def _validate_domain_config(data: dict[str, Any], *, status_code: int = 400) -> None:
+    from command_center.schemas.contracts import DomainSurfacesConfig
+
+    try:
+        DomainSurfacesConfig.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"invalid domain_surfaces.yaml: {exc}",
+        ) from exc
+
+
+def _domain_config_write_blocker() -> str | None:
+    path = _domain_config_path()
+    if not CHAT_ENABLED:
+        return "chat/writes not enabled in this deployment"
+    if not DOMAIN_CONFIG_WRITES:
+        return "domain config writes disabled; set KANBAN_UI_DOMAIN_CONFIG_WRITES=1"
+    if path.exists():
+        if not os.access(path, os.W_OK):
+            return f"domain config is not writable: {path}"
+    elif not os.access(path.parent, os.W_OK):
+        return f"domain config parent is not writable: {path.parent}"
+    return None
+
+
+def _require_domain_config_writable() -> None:
+    blocker = _domain_config_write_blocker()
+    if blocker:
+        raise HTTPException(status_code=503, detail=blocker)
+
+
+def _domain_schema_response(data: dict[str, Any] | None = None) -> dict:
+    data = data if data is not None else _domain_config()
+    path = _domain_config_path()
+    blocker = _domain_config_write_blocker()
+    return {
+        "schema_version": data.get("schema_version"),
+        "config_path": str(path),
+        "config_writable": os.access(path, os.W_OK),
+        "writable": blocker is None,
+        "write_gate": "enabled" if blocker is None else blocker,
+        "domains": data.get("domains", []),
+    }
+
+
+def _clean_domain_surface(domain: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(domain)
+    cleaned["domain_id"] = str(cleaned.get("domain_id", "")).strip()
+    cleaned["title"] = str(cleaned.get("title", "")).strip()
+    cleaned["card_component"] = str(cleaned.get("card_component", "generic_task")).strip()
+    cleaned["source"] = str(cleaned.get("source", "fixtures")).strip()
+    if cleaned["source"] != "board_store":
+        cleaned.pop("board_id", None)
+    elif cleaned.get("board_id") is not None:
+        cleaned["board_id"] = str(cleaned.get("board_id", "")).strip()
+    cleaned["columns"] = [
+        str(column).strip() for column in cleaned.get("columns", []) if str(column).strip()
+    ]
+    cleaned["allowed_actions"] = [
+        str(action).strip() for action in cleaned.get("allowed_actions", [])
+        if str(action).strip()
+    ]
+    cleaned["column_actions"] = {
+        str(column).strip(): str(action).strip()
+        for column, action in (cleaned.get("column_actions") or {}).items()
+        if str(column).strip() and str(action).strip()
+    }
+    cleaned["summary_fields"] = [
+        {k: v for k, v in field.items() if v not in (None, "")}
+        for field in cleaned.get("summary_fields", [])
+        if isinstance(field, dict)
+    ]
+    cleaned["drawer_fields"] = [
+        {k: v for k, v in field.items() if v not in (None, "")}
+        for field in cleaned.get("drawer_fields", [])
+        if isinstance(field, dict)
+    ]
+    cleaned["empty_state"] = dict(cleaned.get("empty_state") or {})
+    return cleaned
+
+
+def _write_domain_config(data: dict[str, Any]) -> dict:
+    _require_domain_config_writable()
+    _validate_domain_config(data)
+    _write_yaml_file(_domain_config_path(), data)
+    return _domain_schema_response(data)
+
+
+def _domain_spec(domain_id: str) -> dict:
+    for d in _domain_config().get("domains", []):
+        if d.get("domain_id") == domain_id:
+            return d
+    raise HTTPException(status_code=404, detail=f"unknown domain {domain_id!r}")
+
+
+def _domain_cards(spec: dict) -> dict:
+    source = spec.get("source")
+    if source == "fixtures":
+        fixtures = {}
+        if FIXTURES_FILE.is_file():
+            fixtures = json.loads(FIXTURES_FILE.read_text(encoding="utf-8"))
+        return {"origin": "fixtures",
+                "cards": fixtures.get(spec["domain_id"], [])}
+    if source == "board_store":
+        from command_center.boards.command_center_provider import (
+            CommandCenterBoardProvider)
+        provider = CommandCenterBoardProvider(
+            board_id=spec["board_id"], event_log=EventLog(KANBAN_EVENT_LOG),
+            store_dir=BOARD_STORE_DIR)
+        return {"origin": "board_store", "board_id": spec["board_id"],
+                "cards": provider.list_cards()}
+    if source == "ledger_missions":
+        data = missions()   # 502s loudly if the Ledger is down — never fabricated
+        cards = [dict(c, status=col["name"], card_id=c.get("id"))
+                 for col in data["columns"] for c in col["cards"]]
+        return {"origin": "ledger", "cards": cards}
+    raise HTTPException(status_code=500, detail=f"unknown domain source {source!r}")
+
+
+def _board_store_provider(spec: dict):
+    if spec.get("source") != "board_store":
+        raise HTTPException(
+            status_code=400,
+            detail=f"domain {spec.get('domain_id')!r} is not a board_store domain")
+    from command_center.boards.command_center_provider import (
+        CommandCenterBoardProvider)
+    return CommandCenterBoardProvider(
+        board_id=spec["board_id"], event_log=EventLog(KANBAN_EVENT_LOG),
+        store_dir=BOARD_STORE_DIR)
+
+
+def _find_domain_card(provider, card_id: str) -> dict:
+    for card in provider.list_cards():
+        if str(card.get("card_id")) == card_id:
+            return card
+    raise HTTPException(status_code=404, detail=f"card {card_id!r} not found")
+
+
+_CARD_FOLD_KEYS = frozenset({
+    "card_id", "board_id", "repo_id", "status", "last_event_id", "last_actor",
+})
+
+
+def _card_store_fields(card: dict) -> dict[str, Any]:
+    return {k: v for k, v in card.items() if k not in _CARD_FOLD_KEYS}
+
+
+def _required_job_application_id(card: dict, action: str) -> str:
+    app_id = str(card.get("application_id") or "").strip()
+    if not app_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"job card {card.get('card_id')!r} cannot {action}: "
+                "no application_id is attached yet. Move it through selection/material "
+                "preparation first so the application memory exists."
+            ),
+        )
+    return app_id
+
+
+def _column_action(spec: dict, status: str) -> str:
+    if spec.get("columns") and status not in spec["columns"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"status {status!r} is not a configured column for "
+                   f"domain {spec.get('domain_id')!r}")
+    if is_human_owned_status(status):
+        raise HTTPException(
+            status_code=400,
+            detail=f"status {status!r} is human-owned and cannot be set here")
+    action = (spec.get("column_actions") or {}).get(status)
+    if not action:
+        raise HTTPException(
+            status_code=400,
+            detail=f"domain {spec.get('domain_id')!r} has no governed move "
+                   f"action for status {status!r}")
+    return action
+
+
+def _domain_write_blockers(spec: dict) -> list[str]:
+    if spec.get("source") != "board_store":
+        return []
+    blockers: list[str] = []
+    log_parent = KANBAN_EVENT_LOG.parent
+    if KANBAN_EVENT_LOG.exists():
+        if not os.access(KANBAN_EVENT_LOG, os.W_OK):
+            blockers.append(f"kanban event log is not writable: {KANBAN_EVENT_LOG}")
+    elif not os.access(log_parent, os.W_OK):
+        blockers.append(
+            f"kanban event log parent is not writable: {log_parent}")
+    if BOARD_STORE_DIR.exists():
+        if not os.access(BOARD_STORE_DIR, os.W_OK):
+            blockers.append(f"board store is not writable: {BOARD_STORE_DIR}")
+    elif not os.access(BOARD_STORE_DIR.parent, os.W_OK):
+        blockers.append(
+            f"board store parent is not writable: {BOARD_STORE_DIR.parent}")
+    return blockers
+
+
+def _require_domain_writable(spec: dict) -> None:
+    blockers = _domain_write_blockers(spec)
+    if blockers:
+        raise HTTPException(
+            status_code=503,
+            detail="domain writes are not available: " + "; ".join(blockers))
+
+
+def _event_headline(event) -> str:
+    action = (event.action or "").replace("_", " ")
+    if event.status_after:
+        return f"{action} -> {event.status_after}"
+    return action or event.event_type
+
+
+def _application_summary(card: dict) -> dict[str, Any]:
+    application_id = card.get("application_id")
+    if not application_id:
+        return {"exists": False, "application_id": None}
+
+    _, root = _job_search_config_and_root()
+    app_dir = root / "applications_active" / str(application_id)
+    record_path = app_dir / "application.yml"
+    comms_path = app_dir / "communications.jsonl"
+    followups_path = app_dir / "followups.md"
+    record: dict[str, Any] = {}
+    if record_path.is_file():
+        import yaml
+        record = yaml.safe_load(record_path.read_text(encoding="utf-8")) or {}
+    communications = []
+    if comms_path.is_file():
+        for line in comms_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                communications.append(json.loads(line))
+    generation = record.get("generation") or {}
+    return {
+        "exists": app_dir.is_dir(),
+        "application_id": application_id,
+        "path": str(app_dir),
+        "record_path": str(record_path),
+        "followups_path": str(followups_path),
+        "followups_exists": followups_path.is_file(),
+        "communications_count": len(communications),
+        "latest_communication": communications[-1] if communications else None,
+        "status": record.get("status"),
+        "stage": record.get("stage"),
+        "last_activity_at": record.get("last_activity_at"),
+        "retention_until": record.get("retention_until"),
+        "generation_mode": str(generation.get("mode") or "unknown"),
+        "revision": record.get("revision", 1),
+        "review_state": record.get("review_state", "ready_for_review"),
+    }
+
+
+def _job_progress_steps(card: dict, events: list[dict], application: dict) -> list[dict]:
+    status = str(card.get("status") or "")
+    selected = status not in {"", "Suggested Jobs"}
+    has_materials = bool(card.get("materials_path") or card.get("application_id"))
+    terminal_or_active = status in {"Completed", "Interviewing"}
+    manual_now = status == "Needs Geoff"
+    return [
+        {
+            "id": "ranked",
+            "label": "Ranked suggestion",
+            "state": "done" if card.get("fit_score") is not None else "waiting",
+            "detail": (
+                f"Fit {card.get('fit_score', '-')}; resume "
+                f"{card.get('resume_variant') or '-'}; automation "
+                f"{card.get('automation_class') or '-'}."
+            ),
+        },
+        {
+            "id": "selected",
+            "label": "Geoff selected",
+            "state": "done" if selected else "current",
+            "detail": (
+                "Move this card to Selected by Geoff when it is worth pursuing."
+                if not selected else f"Current lane: {status}."
+            ),
+        },
+        {
+            "id": "materials",
+            "label": "Materials prepared",
+            "state": "done" if has_materials else "current" if status == "In Progress" else "waiting",
+            "detail": (
+                f"Application {card.get('application_id')} at {card.get('materials_path')}"
+                if has_materials else "Materials are created only after Geoff selection."
+            ),
+        },
+        {
+            "id": "packet_review",
+            "label": "Packet reviewed by Geoff",
+            "state": (
+                "done" if terminal_or_active
+                else "current" if manual_now and application.get("review_state") != "changes_requested"
+                else "current" if application.get("review_state") == "changes_requested"
+                else "waiting"
+            ),
+            "detail": (
+                f"generation={application.get('generation_mode', 'unknown')}, "
+                f"revision={application.get('revision', 1)}, "
+                f"review_state={application.get('review_state', '-')}. "
+                "Open Review Packet to read the resume/cover letter, leave notes, "
+                "or approve & submit."
+                if application.get("exists")
+                else "Packet review starts once materials exist."
+            ),
+        },
+        {
+            "id": "manual_action",
+            "label": "Manual/application action",
+            "state": "done" if terminal_or_active else "current" if manual_now else "waiting",
+            "detail": card.get("manual_reason") or card.get("next_action") or "No manual note recorded.",
+        },
+        {
+            "id": "followup_memory",
+            "label": "Follow-up memory",
+            "state": "done" if application.get("followups_exists") else "waiting",
+            "detail": (
+                f"{application.get('communications_count', 0)} communication(s); "
+                f"retention until {application.get('retention_until') or '-'}."
+                if application.get("exists") else "Starts once an application record exists."
+            ),
+        },
+        {
+            "id": "event_log",
+            "label": "Kanban event log",
+            "state": "done" if events else "waiting",
+            "detail": f"{len(events)} governed event(s) recorded for this card.",
+        },
+    ]
+
+
+def _chat_prompt_for_card(
+    domain_id: str,
+    card: dict,
+    steps: list[dict],
+    events: list[dict],
+    application: dict,
+) -> str:
+    title = (
+        card.get("company")
+        or card.get("title")
+        or card.get("task")
+        or card.get("card_id")
+    )
+    role = card.get("role_title") or ""
+    lines = [
+        "Use the DOMAIN CARD CONTEXT below as the authoritative context for this turn.",
+        "Do not look for this card in mission_intake or todos unless I explicitly ask; "
+        "domain cards may not exist on those generic boards.",
+        "Help Geoff understand what happened so far, where this card is now, and the "
+        "next safe action. Do not claim an application was submitted unless the "
+        "application status is applied or the board lane is Completed.",
+        "",
+        "DOMAIN CARD CONTEXT",
+        f"- domain_id: {domain_id}",
+        f"- card_id: {card.get('card_id')}",
+        f"- title: {title} {role}".strip(),
+        f"- status: {card.get('status')}",
+        f"- fit_score: {card.get('fit_score')}",
+        f"- automation_class: {card.get('automation_class')}",
+        f"- manual_reason: {card.get('manual_reason')}",
+        f"- next_action: {card.get('next_action')}",
+        f"- apply_url: {card.get('apply_url')}",
+        f"- materials_path: {card.get('materials_path')}",
+    ]
+    if application:
+        lines.extend([
+            "",
+            "APPLICATION MEMORY",
+            f"- exists: {application.get('exists')}",
+            f"- application_id: {application.get('application_id')}",
+            f"- status: {application.get('status')}",
+            f"- stage: {application.get('stage')}",
+            f"- followups_exists: {application.get('followups_exists')}",
+            f"- communications_count: {application.get('communications_count')}",
+            f"- retention_until: {application.get('retention_until')}",
+            f"- generation_mode: {application.get('generation_mode')}",
+            f"- revision: {application.get('revision')}",
+            f"- review_state: {application.get('review_state')}",
+        ])
+    if steps:
+        lines.append("")
+        lines.append("PROGRESS CHECKLIST")
+        for step in steps:
+            lines.append(
+                f"- [{step.get('state')}] {step.get('label')}: "
+                f"{step.get('detail') or 'No detail recorded.'}"
+            )
+    if events:
+        lines.append("")
+        lines.append("RECENT GOVERNED EVENTS")
+        for event in events[-6:]:
+            lines.append(
+                f"- {event.get('created_at')}: {event.get('headline')} "
+                f"({event.get('actor_type')} via {event.get('source_surface')})"
+            )
+    lines.extend([
+        "",
+        "Answer with:",
+        "1. What happened so far.",
+        "2. What is blocking or current.",
+        "3. The next safe action Geoff or Codex should take.",
+    ])
+    return "\n".join(lines)
+
+
+def _domain_progress(spec: dict, card_id: str) -> dict:
+    provider = _board_store_provider(spec) if spec.get("source") == "board_store" else None
+    card = _find_domain_card(provider, card_id) if provider else next(
+        (c for c in _domain_cards(spec)["cards"] if str(c.get("card_id")) == card_id),
+        None)
+    if card is None:
+        raise HTTPException(status_code=404, detail=f"card {card_id!r} not found")
+    raw_events = [
+        e for e in EventLog(KANBAN_EVENT_LOG).read()
+        if e.board_id == spec.get("board_id") and e.card_id == card_id
+    ]
+    events = [
+        {
+            "event_id": e.event_id,
+            "created_at": e.created_at,
+            "headline": _event_headline(e),
+            "action": e.action,
+            "status_before": e.status_before,
+            "status_after": e.status_after,
+            "actor_type": e.actor_type,
+            "source_surface": e.source_surface,
+        }
+        for e in raw_events
+    ]
+    application = _application_summary(card) if spec.get("domain_id") == "job_application" else {}
+    steps = _job_progress_steps(card, events, application) if spec.get("domain_id") == "job_application" else [
+        {
+            "id": "events",
+            "label": "Kanban events",
+            "state": "done" if events else "waiting",
+            "detail": f"{len(events)} governed event(s) recorded.",
+        }
+    ]
+    return {
+        "domain_id": spec.get("domain_id"),
+        "card_id": card_id,
+        "status": card.get("status"),
+        "steps": steps,
+        "events": events,
+        "application": application,
+        "chat_prompt": _chat_prompt_for_card(
+            spec.get("domain_id", "domain"), card, steps, events, application),
+    }
+
+
+class DomainSurfaceIn(BaseModel):
+    domain_id: str
+    title: str
+    card_component: str = "generic_task"
+    source: str = "fixtures"
+    board_id: str | None = None
+    columns: list[str] = Field(default_factory=list)
+    column_actions: dict[str, str] = Field(default_factory=dict)
+    summary_fields: list[dict[str, Any]] = Field(default_factory=list)
+    drawer_fields: list[dict[str, Any]] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
+    empty_state: dict[str, Any] = Field(default_factory=dict)
+
+
+@app.get("/api/domains")
+def domains() -> dict:
+    """The typed-surface registry: card grammar + source binding + empty states,
+    straight from the validated config (no hardcoded domain list in the SPA)."""
+    return {"domains": _domain_config().get("domains", [])}
+
+
+@app.get("/api/domain-schema")
+def domain_schema() -> dict:
+    """Editable view of configs/domain_surfaces.yaml for the full cockpit console."""
+    return _domain_schema_response()
+
+
+@app.post("/api/domain-schema")
+def create_domain_schema(body: DomainSurfaceIn) -> dict:
+    data = _domain_config()
+    domain = _clean_domain_surface(body.model_dump(mode="json"))
+    if any(row.get("domain_id") == domain["domain_id"] for row in data.get("domains", [])):
+        raise HTTPException(
+            status_code=409,
+            detail=f"domain {domain['domain_id']!r} already exists",
+        )
+    next_data = dict(data)
+    next_data["domains"] = [*data.get("domains", []), domain]
+    return _write_domain_config(next_data)
+
+
+@app.put("/api/domain-schema/{domain_id}")
+def update_domain_schema(domain_id: str, body: DomainSurfaceIn) -> dict:
+    data = _domain_config()
+    domain = _clean_domain_surface(body.model_dump(mode="json"))
+    domains = list(data.get("domains", []))
+    idx = next((i for i, row in enumerate(domains)
+                if row.get("domain_id") == domain_id), None)
+    if idx is None:
+        raise HTTPException(status_code=404, detail=f"unknown domain {domain_id!r}")
+    if domain["domain_id"] != domain_id and any(
+        row.get("domain_id") == domain["domain_id"] for row in domains
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"domain {domain['domain_id']!r} already exists",
+        )
+    domains[idx] = domain
+    next_data = dict(data)
+    next_data["domains"] = domains
+    return _write_domain_config(next_data)
+
+
+@app.delete("/api/domain-schema/{domain_id}")
+def delete_domain_schema(domain_id: str) -> dict:
+    data = _domain_config()
+    domains = list(data.get("domains", []))
+    next_domains = [row for row in domains if row.get("domain_id") != domain_id]
+    if len(next_domains) == len(domains):
+        raise HTTPException(status_code=404, detail=f"unknown domain {domain_id!r}")
+    next_data = dict(data)
+    next_data["domains"] = next_domains
+    return _write_domain_config(next_data)
+
+
+@app.get("/api/domain/{domain_id}/cards")
+def domain_cards(domain_id: str) -> dict:
+    spec = _domain_spec(domain_id)
+    out = _domain_cards(spec)
+    out["domain_id"] = domain_id
+    out["columns"] = spec.get("columns", [])
+    out["empty_state"] = spec.get("empty_state", {})
+    return out
+
+
+@app.get("/api/domain/{domain_id}/card/{card_id}")
+def domain_card(domain_id: str, card_id: str) -> dict:
+    spec = _domain_spec(domain_id)
+    for card in _domain_cards(spec)["cards"]:
+        if str(card.get("card_id")) == card_id:
+            return {"domain_id": domain_id, "card": card,
+                    "drawer_fields": spec.get("drawer_fields", [])}
+    raise HTTPException(status_code=404,
+                        detail=f"card {card_id!r} not in domain {domain_id!r}")
+
+
+@app.get("/api/domain/{domain_id}/card/{card_id}/progress")
+def domain_card_progress(domain_id: str, card_id: str) -> dict:
+    spec = _domain_spec(domain_id)
+    return _domain_progress(spec, card_id)
+
+
+@app.get("/api/domain/{domain_id}/actions")
+def domain_actions(domain_id: str) -> dict:
+    """Governed verbs this domain's cards may offer. Wall verbs can never appear
+    (the config contract rejects them); dispatch goes through /api/action, which
+    requires the console deployment (chat enabled)."""
+    spec = _domain_spec(domain_id)
+    blockers = _domain_write_blockers(spec)
+    return {"domain_id": domain_id,
+            "allowed_actions": spec.get("allowed_actions", []),
+            "dispatch_enabled": CHAT_ENABLED and not blockers,
+            "write_ready": not blockers,
+            "write_blockers": blockers}
+
+
 # ---- chat + governed writes (the console as a channel) --------------------
 _cores: dict[str, object] = {}
 
@@ -256,9 +990,834 @@ class ChatIn(BaseModel):
     model: str = "chat"
 
 
+class ChatThreadIn(BaseModel):
+    conversation_id: str = Field(min_length=1, max_length=200)
+    title: str | None = Field(default=None, max_length=80)
+    target: str = Field(default="GatewayCore", max_length=80)
+    last_prompt: str | None = Field(default=None, max_length=2000)
+    model: str | None = Field(default=None, max_length=80)
+
+
+def _thread_title(text: str | None) -> str:
+    compact = " ".join((text or "").split())
+    if not compact:
+        return "Cockpit chat"
+    return compact[:51] + "..." if len(compact) > 54 else compact
+
+
+def _read_chat_threads() -> list[dict]:
+    if not CHAT_THREADS_FILE.is_file():
+        return []
+    try:
+        data = json.loads(CHAT_THREADS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = data.get("threads", data if isinstance(data, list) else [])
+    if not isinstance(rows, list):
+        return []
+    clean: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        conversation_id = str(row.get("conversation_id") or row.get("id") or "").strip()
+        title = str(row.get("title") or "").strip()
+        if not conversation_id or not title:
+            continue
+        clean.append({
+            "conversation_id": conversation_id[:200],
+            "id": conversation_id[:200],
+            "title": title[:80],
+            "updated_at": str(row.get("updated_at") or row.get("updatedAt") or ""),
+            "target": str(row.get("target") or "GatewayCore")[:80],
+            "last_prompt": str(row.get("last_prompt") or row.get("lastPrompt") or "")[:2000],
+            "model": str(row.get("model") or "")[:80],
+        })
+    return clean[:50]
+
+
+def _write_chat_threads(threads: list[dict]) -> None:
+    CHAT_THREADS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CHAT_THREADS_FILE.with_suffix(f"{CHAT_THREADS_FILE.suffix}.tmp")
+    payload = {"threads": threads[:50]}
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(CHAT_THREADS_FILE)
+
+
+def _upsert_chat_thread(body: ChatThreadIn) -> dict:
+    now = datetime.now(UTC).isoformat()
+    last_prompt = (body.last_prompt or "").strip()
+    title = (body.title or "").strip() or _thread_title(last_prompt)
+    conversation_id = body.conversation_id.strip()
+    next_thread = {
+        "conversation_id": conversation_id,
+        "id": conversation_id,
+        "title": title[:80],
+        "updated_at": now,
+        "target": (body.target or "GatewayCore").strip()[:80],
+        "last_prompt": last_prompt[:2000],
+        "model": (body.model or "").strip()[:80],
+    }
+    threads = [
+        next_thread,
+        *[row for row in _read_chat_threads()
+          if row.get("conversation_id") != conversation_id],
+    ][:50]
+    _write_chat_threads(threads)
+    return next_thread
+
+
 class ActionIn(BaseModel):
     action: str
     params: dict = {}
+
+
+class DomainMoveIn(BaseModel):
+    card_id: str
+    status: str
+
+
+class DomainNoteIn(BaseModel):
+    type: str = "manual_note"
+    text: str
+    source: str = "cockpit"
+
+
+class DraftDefaultIn(BaseModel):
+    key: str
+    value: str
+
+
+class JobSearchRuntimeSettingsIn(BaseModel):
+    daily_run_time: str | None = None
+    max_suggested_jobs_per_day: int | None = None
+    max_bot_possible_suggestions_per_day: int | None = None
+    max_manual_required_suggestions_per_day: int | None = None
+    max_selected_jobs_per_day: int | None = None
+
+
+class JobSearchCategorySettingsIn(BaseModel):
+    role_focus: str | None = None
+    keywords: list[str] | None = None
+
+
+def _job_packet_validation(card: dict) -> dict:
+    """Read-only packet validation for a job card — the single submit gate."""
+    app_id = _required_job_application_id(card, "validate the packet")
+    from command_center.job_search.achievement_bank import ensure_bank
+    from command_center.job_search.application_memory import load_application
+    from command_center.job_search.packet_validation import validate_packet
+
+    _, root = _job_search_config_and_root()
+    app_dir, record = load_application(app_id, root=root)
+    bank = ensure_bank(root / "profile" / "achievement_bank.yml")
+    return validate_packet(app_dir, record, bank)
+
+
+def _validation_blockers_detail(validation: dict) -> str:
+    failed = [
+        f"{c['label']} ({c['detail']})"
+        for c in validation.get("checks", [])
+        if not c["ok"] and c["level"] == "error"
+    ]
+    return (
+        "packet validation failed — open Review Packet for details: "
+        + "; ".join(failed))
+
+
+def _sync_completed_job_card(provider, card: dict) -> dict[str, Any]:
+    """Finalize on completion: validate → mark submitted → email record →
+    submission evidence. Both the Completed drag and the Approve & Submit
+    button land here, so there is exactly one finalize path."""
+    app_id = _required_job_application_id(card, "move to Completed")
+    from command_center.job_search.finalize import (
+        FinalizeBlocked,
+        finalize_application,
+    )
+
+    _, root = _job_search_config_and_root()
+    try:
+        result = finalize_application(app_id, root=root)
+    except FinalizeBlocked as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=_validation_blockers_detail(exc.validation)) from exc
+    record = result["record"]
+    email = result["email"]
+    fields = _card_store_fields(card)
+    fields.update({
+        "application_status": record["status"],
+        "application_stage": record["stage"],
+        "applied_at": record["applied_at"],
+        "last_seen_at": record["last_activity_at"],
+        "retention_until": record["retention_until"],
+        "next_action": (record.get("followup") or {}).get("next_action"),
+        "completion_source": "cockpit_completed_lane",
+        "review_state": record.get("review_state"),
+        "revision": record.get("revision"),
+        "generation_mode": str((record.get("generation") or {}).get("mode") or "unknown"),
+        "email_record_status": email.get("status"),
+    })
+    provider.upsert_card(str(card["card_id"]), fields)
+    return {
+        "application_id": app_id,
+        "application_status": record["status"],
+        "application_stage": record["stage"],
+        "applied_at": record["applied_at"],
+        "next_action": (record.get("followup") or {}).get("next_action"),
+        "validation": result["validation"],
+        "email": email,
+        "submission_record_path": result["submission_record_path"],
+    }
+
+
+def _job_card_needs_packet(card: dict) -> bool:
+    fields = _card_store_fields(card)
+    return bool(fields.get("job_key")) and not (
+        fields.get("application_id") or fields.get("materials_path"))
+
+
+def _process_selected_job_cards() -> dict[str, Any]:
+    from command_center.job_search.board import process_selected
+
+    cfg, root = _job_search_config_and_root()
+    result = process_selected(
+        backend="internal",
+        apply=True,
+        root=root,
+        cfg=cfg,
+        env={
+            "KANBAN_EVENT_LOG": str(KANBAN_EVENT_LOG),
+            "KANBAN_BOARD_STORE": str(BOARD_STORE_DIR),
+        },
+        executor=os.environ.get("JOB_SEARCH_EXECUTOR", "codex"),
+    )
+    plans = [
+        {
+            "card_id": plan.get("card_id"),
+            "job_key": plan.get("job_key"),
+            "company": plan.get("company"),
+            "role_title": plan.get("role_title"),
+            "automation_class": plan.get("automation_class"),
+            "source_column": plan.get("source_column"),
+            "target_column": plan.get("target_column"),
+            "application_id": plan.get("application_id"),
+            "materials_path": plan.get("materials_path"),
+            "would_submit": plan.get("would_submit"),
+        }
+        for plan in result.get("plans", [])
+    ]
+    return {
+        "operation": "process_selected",
+        "status": result.get("status"),
+        "selected_count": result.get("selected_count", 0),
+        "selected_limit": result.get("selected_limit"),
+        "deferred_selected_count": result.get("deferred_selected_count", 0),
+        "writes_performed": result.get("writes_performed", False),
+        "plans": plans,
+    }
+
+
+def _note_type_moves_to_interviewing(note_type: str) -> bool:
+    lowered = note_type.lower()
+    return any(token in lowered for token in (
+        "recruiter", "interview", "phone_screen", "onsite", "offer",
+        "manager", "hiring",
+    ))
+
+
+@app.post("/api/domain/{domain_id}/move")
+def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
+    """Move a typed domain card by emitting a governed kanban event.
+
+    This is intentionally limited to `board_store` domains. Fixture and Ledger
+    domains are read models here; a drag must never fabricate state or bypass
+    the existing event log.
+    """
+    _require_chat()
+    spec = _domain_spec(domain_id)
+    _require_domain_writable(spec)
+    provider = _board_store_provider(spec)
+    card = _find_domain_card(provider, body.card_id)
+    previous = card.get("status")
+    if previous == body.status:
+        return {"status": "unchanged", "domain_id": domain_id, "card": card}
+    action = _column_action(spec, body.status)
+    if domain_id == "job_application" and body.status == "Completed":
+        _required_job_application_id(card, "move to Completed")
+        # Validate BEFORE the governed event so a blocked completion never
+        # logs a Completed move it did not make.
+        validation = _job_packet_validation(card)
+        if not validation["ok"]:
+            raise HTTPException(
+                status_code=409,
+                detail=_validation_blockers_detail(validation))
+    event = emit_event(
+        provider.log, action=action, board_id=provider.board_id,
+        card_id=body.card_id, source_surface="internal_ui",
+        actor_type="human", status_before=previous, status_after=body.status)
+    side_effect: dict[str, Any] | None = None
+    if domain_id == "job_application" and body.status == "Completed":
+        side_effect = _sync_completed_job_card(provider, card)
+    elif (
+        domain_id == "job_application"
+        and body.status in {"Selected by Geoff", "In Progress"}
+        and _job_card_needs_packet(card)
+    ):
+        side_effect = _process_selected_job_cards()
+    moved = _find_domain_card(provider, body.card_id)
+    return {
+        "status": "moved",
+        "domain_id": domain_id,
+        "card_id": body.card_id,
+        "from_status": previous,
+        "to_status": body.status,
+        "event": event.model_dump(mode="json"),
+        "side_effect": side_effect,
+        "card": moved,
+    }
+
+
+@app.post("/api/domain/{domain_id}/card/{card_id}/note")
+def domain_card_note(domain_id: str, card_id: str, body: DomainNoteIn) -> dict:
+    """Append a job-card note into the application memory and refresh follow-ups."""
+    _require_chat()
+    spec = _domain_spec(domain_id)
+    if domain_id != "job_application":
+        raise HTTPException(
+            status_code=400,
+            detail="card notes are currently implemented only for job_application cards")
+    _require_domain_writable(spec)
+    provider = _board_store_provider(spec)
+    card = _find_domain_card(provider, card_id)
+    app_id = _required_job_application_id(card, "record an application note")
+    note_type = body.type.strip() or "manual_note"
+    if not re.fullmatch(r"[A-Za-z0-9_:-]+", note_type):
+        raise HTTPException(
+            status_code=400,
+            detail="note type must be a stable token ([A-Za-z0-9_:-]+)")
+    content = body.text.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="note text is required")
+
+    from command_center.job_search.application_memory import append_note_text
+
+    _, root = _job_search_config_and_root()
+    event = append_note_text(
+        app_id, note_type, content, root=root, source=body.source.strip() or "cockpit")
+    fields = _card_store_fields(card)
+    fields.update({
+        "next_action": event.get("action_needed"),
+        "last_seen_at": str(event.get("ts") or "")[:10],
+        "latest_communication": event.get("summary"),
+        "latest_communication_type": note_type,
+    })
+    provider.upsert_card(card_id, fields)
+
+    kanban_event = None
+    if _note_type_moves_to_interviewing(note_type) and card.get("status") != "Interviewing":
+        kanban_event = emit_event(
+            provider.log, action="stage_card", board_id=provider.board_id,
+            card_id=card_id, source_surface="internal_ui",
+            actor_type="human", status_before=card.get("status"),
+            status_after="Interviewing")
+
+    return {
+        "status": "noted",
+        "domain_id": domain_id,
+        "card_id": card_id,
+        "application_id": app_id,
+        "note": event,
+        "event": kanban_event.model_dump(mode="json") if kanban_event else None,
+        "card": _find_domain_card(provider, card_id),
+        "progress": _domain_progress(spec, card_id),
+    }
+
+
+# ── Packet review loop: view materials → notes/regenerate → approve & submit ──
+_PACKET_FILES = (
+    ("resume", "generated_resume.md"),
+    ("cover_letter", "cover_letter.md"),
+    ("recruiter_message", "recruiter_message.md"),
+    ("answer_bank", "answer_bank.md"),
+    ("followups", "followups.md"),
+    ("manual_checklist", "manual_checklist.md"),
+    ("resume_selection_report", "resume_selection_report.md"),
+    ("recruiter_notes", "recruiter_notes.md"),
+    ("review_notes", "review_notes.md"),
+)
+
+
+class PacketNotesIn(BaseModel):
+    notes: str
+    regenerate: bool = True
+
+
+class PacketSubmitIn(BaseModel):
+    confirm: bool = False
+
+
+def _require_job_domain(domain_id: str) -> dict:
+    spec = _domain_spec(domain_id)
+    if domain_id != "job_application":
+        raise HTTPException(
+            status_code=400,
+            detail="packet review is implemented only for job_application cards")
+    return spec
+
+
+def _job_packet_response(spec: dict, card: dict) -> dict:
+    app_id = _required_job_application_id(card, "open the packet")
+    from command_center.job_search.achievement_bank import ensure_bank
+    from command_center.job_search.agent_writer import read_trace
+    from command_center.job_search.application_memory import (
+        load_application,
+        read_job_description,
+    )
+    from command_center.job_search.packet_validation import validate_packet
+    from command_center.job_search.record_email import email_config_status
+
+    _, root = _job_search_config_and_root()
+    app_dir, record = load_application(app_id, root=root)
+    files: dict[str, str | None] = {}
+    for key, filename in _PACKET_FILES:
+        path = app_dir / filename
+        files[key] = path.read_text(encoding="utf-8") if path.is_file() else None
+    files["job_description"] = read_job_description(app_dir) or None
+    bank = ensure_bank(root / "profile" / "achievement_bank.yml")
+    submission_path = app_dir / "submission_record.json"
+    return {
+        "domain_id": spec.get("domain_id"),
+        "card_id": str(card.get("card_id")),
+        "application_id": app_id,
+        "path": str(app_dir),
+        "record": record.model_dump(mode="json"),
+        "files": files,
+        "agent_trace": read_trace(app_dir),
+        "validation": validate_packet(app_dir, record, bank),
+        "email": email_config_status(),
+        "submission_record": (
+            json.loads(submission_path.read_text(encoding="utf-8"))
+            if submission_path.is_file() else None),
+    }
+
+
+@app.get("/api/domain/{domain_id}/card/{card_id}/packet")
+def domain_card_packet(domain_id: str, card_id: str) -> dict:
+    """The complete application packet: record, every material file, the agent
+    trace (full prompts + model outputs), validation, and email-record status."""
+    spec = _require_job_domain(domain_id)
+    provider = _board_store_provider(spec)
+    card = _find_domain_card(provider, card_id)
+    return _job_packet_response(spec, card)
+
+
+@app.post("/api/domain/{domain_id}/card/{card_id}/packet/request-changes")
+def domain_card_packet_request_changes(
+    domain_id: str, card_id: str, body: PacketNotesIn,
+) -> dict:
+    """Geoff's 'not ready' action: record the notes, then regenerate the
+    materials with the agent writer against ALL accumulated notes. If the
+    writer fails, the notes stay recorded and the error is returned verbatim
+    (review_state stays changes_requested — nothing is papered over)."""
+    _require_chat()
+    spec = _require_job_domain(domain_id)
+    _require_domain_writable(spec)
+    provider = _board_store_provider(spec)
+    card = _find_domain_card(provider, card_id)
+    app_id = _required_job_application_id(card, "request packet changes")
+    notes = body.notes.strip()
+    if not notes:
+        raise HTTPException(status_code=400, detail="notes text is required")
+
+    from command_center.job_search.agent_writer import AgentWriterError
+    from command_center.job_search.application_memory import (
+        load_application,
+        regenerate_materials,
+        request_changes,
+    )
+
+    _, root = _job_search_config_and_root()
+    request_changes(app_id, notes, root=root, source="cockpit_packet_review")
+    regenerate_error: str | None = None
+    if body.regenerate:
+        try:
+            regenerate_materials(app_id, root=root)
+        except (AgentWriterError, ValueError) as exc:
+            regenerate_error = str(exc)
+    _, record = load_application(app_id, root=root)
+    fields = _card_store_fields(card)
+    fields.update({
+        "review_state": record.review_state,
+        "revision": record.revision,
+        "generation_mode": str(record.generation.get("mode") or "unknown"),
+        "next_action": (
+            f"Review regenerated materials (revision {record.revision})."
+            if record.review_state == "ready_for_review"
+            else "Notes recorded; regeneration pending — run request-changes "
+                 "again or check the writer error."),
+        "last_seen_at": record.last_activity_at,
+    })
+    provider.upsert_card(card_id, fields)
+    return {
+        "status": ("regenerated" if body.regenerate and not regenerate_error
+                   else "changes_requested"),
+        "regenerate_error": regenerate_error,
+        "domain_id": domain_id,
+        "card_id": card_id,
+        "application_id": app_id,
+        "packet": _job_packet_response(spec, _find_domain_card(provider, card_id)),
+        "progress": _domain_progress(spec, card_id),
+    }
+
+
+@app.post("/api/domain/{domain_id}/card/{card_id}/packet/submit")
+def domain_card_packet_submit(
+    domain_id: str, card_id: str, body: PacketSubmitIn,
+) -> dict:
+    """Approve & Submit: the same governed Completed move as the drag, gated on
+    packet validation, then finalize (mark submitted + email record + evidence).
+    Geoff pressing this button IS the human approval — no bot self-approval
+    path exists (WALL verbs still never reach the drawer)."""
+    _require_chat()
+    spec = _require_job_domain(domain_id)
+    _require_domain_writable(spec)
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="submission requires confirm=true — review the packet first")
+    provider = _board_store_provider(spec)
+    card = _find_domain_card(provider, card_id)
+    previous = card.get("status")
+    if previous == "Completed":
+        raise HTTPException(
+            status_code=409, detail="card is already in Completed")
+    _required_job_application_id(card, "submit the application")
+    validation = _job_packet_validation(card)
+    if not validation["ok"]:
+        raise HTTPException(
+            status_code=409, detail=_validation_blockers_detail(validation))
+    action = _column_action(spec, "Completed")
+    event = emit_event(
+        provider.log, action=action, board_id=provider.board_id,
+        card_id=card_id, source_surface="internal_ui",
+        actor_type="human", status_before=previous, status_after="Completed")
+    side_effect = _sync_completed_job_card(provider, card)
+    return {
+        "status": "submitted",
+        "domain_id": domain_id,
+        "card_id": card_id,
+        "from_status": previous,
+        "to_status": "Completed",
+        "event": event.model_dump(mode="json"),
+        "side_effect": side_effect,
+        "card": _find_domain_card(provider, card_id),
+        "progress": _domain_progress(spec, card_id),
+    }
+
+
+def _job_search_config_and_root():
+    from command_center.job_search.config import data_root, load_config
+
+    cfg = load_config()
+    return cfg, data_root(cfg)
+
+
+def _read_yaml_file(path: Path) -> dict[str, Any]:
+    import yaml
+
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _write_yaml_file(path: Path, data: dict[str, Any]) -> None:
+    import yaml
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def _job_search_profile_settings_path() -> Path:
+    _, root = _job_search_config_and_root()
+    return root / "profile" / "search_settings.yml"
+
+
+def _read_job_search_profile_settings() -> dict[str, Any]:
+    path = _job_search_profile_settings_path()
+    if not path.is_file():
+        return {}
+    return _read_yaml_file(path)
+
+
+def _validate_job_search_profile_settings(
+    override: dict[str, Any],
+):
+    from command_center.job_search.config import merge_profile_settings
+    from command_center.job_search.schemas import JobSearchConfig
+
+    base_path = CONFIGS_DIR / "job_search.yaml"
+    if not base_path.is_file():
+        raise HTTPException(status_code=503, detail=f"job_search.yaml not at {base_path}")
+    base = _read_yaml_file(base_path)
+    return JobSearchConfig.model_validate(merge_profile_settings(base, override))
+
+
+def _write_job_search_profile_settings(override: dict[str, Any]) -> dict:
+    cfg = _validate_job_search_profile_settings(override)
+    target = _job_search_profile_settings_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not os.access(target.parent, os.W_OK):
+        raise HTTPException(
+            status_code=503,
+            detail=f"profile settings directory is not writable: {target.parent}")
+    _write_yaml_file(target, override)
+    return {
+        "status": "updated",
+        "source": str(target),
+        "job_search": cfg.job_search.model_dump(mode="json"),
+        "ranking": cfg.ranking.model_dump(mode="json"),
+        "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
+    }
+
+
+def _application_question_policy() -> tuple[dict[str, Any], Path]:
+    cfg, root = _job_search_config_and_root()
+    policy_path = root / "profile" / "application_question_policy.yml"
+    if policy_path.is_file():
+        return _read_yaml_file(policy_path), policy_path
+    return cfg.application_questions.model_dump(mode="json"), CONFIGS_DIR / "job_search.yaml"
+
+
+@app.get("/api/job-search/profile-controls")
+def job_search_profile_controls() -> dict:
+    """Profile/job-search controls surfaced for review before applications.
+
+    Personal defaults live under data/job_search/profile. The endpoint reports
+    the exact source files so a blank UI can never masquerade as missing policy.
+    """
+    cfg, root = _job_search_config_and_root()
+    policy, policy_source = _application_question_policy()
+    profile_dir = root / "profile"
+    source_paths = {
+        "application_question_policy": str(profile_dir / "application_question_policy.yml"),
+        "search_settings": str(profile_dir / "search_settings.yml"),
+        "job_targets": str(profile_dir / "job_targets.yml"),
+        "resume_variants": str(profile_dir / "resume_variants.yml"),
+        "writing_style": str(profile_dir / "writing_style.yml"),
+        "claim_policy": str(profile_dir / "claim_policy.yml"),
+        "manual_only_rules": str(profile_dir / "manual_only_rules.yml"),
+        "fallback_config": str(CONFIGS_DIR / "job_search.yaml"),
+    }
+    return {
+        "writable": CHAT_ENABLED,
+        "write_gate": (
+            "enabled" if CHAT_ENABLED else
+            "read-only deployment; set KANBAN_UI_CHAT_ENABLED=1 for in-app edits"
+        ),
+        "application_questions": policy,
+        "application_questions_source": str(policy_source),
+        "source_paths": source_paths,
+        "job_search": cfg.job_search.model_dump(mode="json"),
+        "ranking": cfg.ranking.model_dump(mode="json"),
+        "job_search_config_source": str(CONFIGS_DIR / "job_search.yaml"),
+        "job_search_settings_source": str(profile_dir / "search_settings.yml"),
+        "job_search_settings_writable": os.access(profile_dir, os.W_OK),
+        "resume_variants": cfg.resume_variants,
+        "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
+        "company_targets": cfg.company_targets.model_dump(mode="json"),
+        "executor_fallback": cfg.executor_fallback.model_dump(mode="json"),
+    }
+
+
+@app.put("/api/job-search/profile-controls/runtime")
+def update_job_search_runtime(body: JobSearchRuntimeSettingsIn) -> dict:
+    _require_chat()
+    override = _read_job_search_profile_settings()
+    runtime = override.setdefault("job_search", {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        runtime[key] = value
+    return _write_job_search_profile_settings(override)
+
+
+@app.put("/api/job-search/profile-controls/category/{category_id}")
+def update_job_search_category(category_id: str,
+                               body: JobSearchCategorySettingsIn) -> dict:
+    _require_chat()
+    category_id = category_id.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_:-]+", category_id):
+        raise HTTPException(status_code=400, detail="invalid category id")
+    override = _read_job_search_profile_settings()
+    cfg = _validate_job_search_profile_settings(override)
+    if category_id not in {category.id for category in cfg.job_categories}:
+        raise HTTPException(status_code=404, detail=f"unknown job category {category_id!r}")
+    patches = override.setdefault("job_categories", [])
+    patch = next((row for row in patches if row.get("id") == category_id), None)
+    if patch is None:
+        patch = {"id": category_id}
+        patches.append(patch)
+    if body.role_focus is not None:
+        patch["role_focus"] = body.role_focus
+    if body.keywords is not None:
+        patch["keywords"] = [kw.strip() for kw in body.keywords if kw.strip()]
+    return _write_job_search_profile_settings(override)
+
+
+@app.put("/api/job-search/profile-controls/draft-default")
+def update_draft_default(body: DraftDefaultIn) -> dict:
+    _require_chat()
+    key = body.key.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_:-]+", key):
+        raise HTTPException(
+            status_code=400,
+            detail="draft default key must be a stable token "
+                   "([A-Za-z0-9_:-]+)")
+    policy, source = _application_question_policy()
+    policy.setdefault("draft_defaults", {})
+    policy["draft_defaults"][key] = body.value
+    from command_center.job_search.schemas import ApplicationQuestions
+    ApplicationQuestions.model_validate(policy)
+    _, root = _job_search_config_and_root()
+    target = root / "profile" / "application_question_policy.yml"
+    _write_yaml_file(target, policy)
+    return {
+        "status": "updated",
+        "key": key,
+        "source_before": str(source),
+        "source": str(target),
+        "application_questions": policy,
+    }
+
+
+@app.get("/api/board-registry")
+def board_registry() -> dict:
+    path = CONFIGS_DIR / "kanban_boards.yaml"
+    if not path.is_file():
+        raise HTTPException(status_code=503, detail=f"kanban_boards.yaml not at {path}")
+    data = _read_yaml_file(path)
+    boards = []
+    for board in data.get("boards", []):
+        boards.append({
+            "board_id": board.get("board_id"),
+            "provider": board.get("provider"),
+            "workspace_ref": board.get("workspace_ref"),
+            "board_ref": board.get("board_ref"),
+            "repo_ids": board.get("repo_ids", []),
+            "status_mapping": board.get("status_mapping", {}),
+            "required_fields": board.get("required_fields", []),
+            "allowed_agent_verbs": board.get("allowed_agent_verbs", []),
+            "forbidden_agent_verbs": board.get("forbidden_agent_verbs", []),
+            "blockers": board.get("blockers", []),
+        })
+    return {
+        "schema_version": data.get("schema_version"),
+        "config_path": str(path),
+        "config_writable": os.access(path, os.W_OK),
+        "boards": boards,
+    }
+
+
+@app.get("/api/chat/runtime")
+def chat_runtime() -> dict:
+    """What the cockpit chat actually uses. No inference from marketing names."""
+    lanes = models()
+    chat_role = next((r for r in lanes["roles"] if r["role"] == "chat"), None)
+    external_chats = [
+        _external_chat_status(
+            "ORCA",
+            ("ORCA_CHAT_URL",),
+            kind="document visual QA specialist",
+            best_for=(
+                "PDFs, resumes, application packets, screenshots, tables, forms, "
+                "and document questions that benefit from specialist routing plus "
+                "debate/stress-checking."
+            ),
+            recommendation=(
+                "Best first pilot for this cockpit when the task is document-heavy. "
+                "Use as a read/advice handoff; keep governed writes in GatewayCore."
+            ),
+            source_url="https://arxiv.org/abs/2603.02438",
+        ),
+        _external_chat_status(
+            "OmniAgent / Omnigent",
+            ("OMNIGENT_CHAT_URL", "OMNIAGENT_CHAT_URL"),
+            kind="omni-modal active perception specialist",
+            best_for=(
+                "Long video, audio/video evidence, screen recordings, and cases "
+                "where the agent should inspect only the relevant moments."
+            ),
+            recommendation=(
+                "Useful later for video/audio evidence. Not the first replacement "
+                "for cockpit chat or board control."
+            ),
+            source_url="https://arxiv.org/abs/2606.19341",
+        ),
+        _external_chat_status(
+            "OxyGent",
+            ("OXYGENT_CHAT_URL",),
+            kind="modular multi-agent framework candidate",
+            best_for=(
+                "Planning graphs, observable agent/tool/model components, visual "
+                "debugging, auditability, and future framework experiments."
+            ),
+            recommendation=(
+                "Worth watching as a framework spike, but do not add as a cockpit "
+                "dependency until a scoped pilot beats GatewayCore + LiteLLM."
+            ),
+            source_url="https://arxiv.org/abs/2604.25602",
+        ),
+    ]
+    return {
+        "enabled": CHAT_ENABLED,
+        "harness": "GatewayCore",
+        "transport_surface": "app",
+        "model_gateway": "LiteLLM",
+        "chat_role": chat_role,
+        "executors": lanes["executors"],
+        "stream_endpoint": "/api/chat/stream",
+        "action_endpoint": "/api/action",
+        "activity_endpoint": "/api/activity",
+        "external_chats": external_chats,
+        "uses_orca": external_chats[0]["active"],
+        "uses_omnigent": external_chats[1]["active"],
+        "uses_oxygent": external_chats[2]["active"],
+        "specialist_recommendation": (
+            "GatewayCore + LiteLLM remains the cockpit runtime and write authority. "
+            "ORCA is the best first optional specialist for document-heavy job "
+            "materials; OmniAgent/Omnigent is a later video/audio specialist; "
+            "OxyGent is a framework watch-list item."
+        ),
+        "chat_memory_note": (
+            "The web app can reopen shared cockpit chat shortcuts by "
+            "conversation id. The server stores compact thread metadata, not "
+            "full transcripts."
+        ),
+        "external_harness_note": (
+            "External chat links are optional handoffs. The cockpit chat itself "
+            "uses GatewayCore through the configured LiteLLM role and the "
+            "existing governed action layer."
+        ),
+    }
+
+
+@app.get("/api/chat/threads")
+def chat_threads() -> dict:
+    _require_chat()
+    return {
+        "threads": _read_chat_threads(),
+        "source": str(CHAT_THREADS_FILE),
+        "writable": os.access(CHAT_THREADS_FILE.parent, os.W_OK),
+        "storage": "server_metadata_only",
+    }
+
+
+@app.post("/api/chat/threads")
+def save_chat_thread(body: ChatThreadIn) -> dict:
+    _require_chat()
+    thread = _upsert_chat_thread(body)
+    return {
+        "thread": thread,
+        "threads": _read_chat_threads(),
+        "source": str(CHAT_THREADS_FILE),
+        "storage": "server_metadata_only",
+    }
 
 
 def _validated_model(model: str) -> str:
@@ -276,6 +1835,11 @@ async def chat(body: ChatIn) -> dict:
     _require_chat()
     core = _get_core(_validated_model(body.model))
     reply = await core.run_turn(body.conversation_id, body.text)
+    _upsert_chat_thread(ChatThreadIn(
+        conversation_id=body.conversation_id,
+        last_prompt=body.text,
+        model=body.model,
+    ))
     return {"reply": reply, "model": body.model}
 
 
@@ -285,6 +1849,11 @@ async def chat_stream(body: ChatIn) -> StreamingResponse:
     answer as it happens — 'watch what the LLM is doing now'."""
     _require_chat()
     core = _get_core(_validated_model(body.model))
+    _upsert_chat_thread(ChatThreadIn(
+        conversation_id=body.conversation_id,
+        last_prompt=body.text,
+        model=body.model,
+    ))
 
     async def gen():
         async for ev in core.run_turn_events(body.conversation_id, body.text):

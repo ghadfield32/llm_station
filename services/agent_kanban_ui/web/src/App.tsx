@@ -1,19 +1,46 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  addDomainCardNote,
   Activity, AppFlowyBoard, BoardCard, BoardData, BoardSnapshot, ChatEvent,
+  BoardRegistry,
+  ChatRuntime, DomainActions, DomainCard, DomainCardDetail, DomainCardProgress,
+  DomainCards, DomainSchema, DomainSpec,
+  FieldSpec, JobProfileControls,
+  createDomainSchema, deleteDomainSchema,
+  fetchBoardRegistry,
   MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
-  fetchBoards, fetchBoardsLive, fetchConfig, fetchMetrics, fetchMission,
-  fetchMissions, fetchModels, fetchStatus, postAction, streamChat,
+  fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
+  fetchChatThreads, fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
+  fetchJobPacket, JobPacket, PacketValidation, AgentTraceEntry,
+  requestPacketChanges, submitJobApplication,
+  fetchDomainSchema, fetchJobProfileControls, fetchMetrics, fetchMission, fetchMissions, fetchModels,
+  fetchRuntimeDebug, fetchStatus, moveDomainCard, postAction, RuntimeDebug, streamChat,
+  saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
 } from "./api";
 
-type View = "missions" | "boards" | "router" | "observability" | "activity" | "chat";
+type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "chat";
 const NAV: { id: View; label: string }[] = [
-  { id: "missions", label: "Missions" },
-  { id: "boards", label: "Boards" },
+  { id: "domains", label: "All Boards" },
+  { id: "settings", label: "Controls" },
   { id: "router", label: "Router" },
-  { id: "observability", label: "Observability" },
+  { id: "diagnostics", label: "Status" },
+  { id: "observability", label: "Metrics" },
   { id: "activity", label: "Activity" },
 ];
+const VIEW_IDS: ReadonlySet<string> = new Set([
+  ...NAV.map((n) => n.id),
+  "missions",
+  "boards",
+  "chat",
+]);
+type DomainNavItem = {
+  id: string;
+  title: string;
+  count: number;
+  origin?: string;
+  error?: string;
+};
+type JobBoardMode = "bot" | "manual" | "all";
 const RISK_CLASS: Record<string, string> = {
   L0: "risk-l0", L1: "risk-l1", L2: "risk-l2", L3: "risk-l3", L4: "risk-l4",
 };
@@ -22,6 +49,16 @@ const POLL_MS = 5000;
 const pct = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(0)}%`);
 const matches = (q: string, ...parts: (string | undefined)[]) =>
   !q || parts.filter(Boolean).join(" ").toLowerCase().includes(q.toLowerCase());
+const WALL_VERBS = new Set(["approve", "approve_card", "merge", "deploy", "delete", "delete_card", "delete_board"]);
+
+function initialViewFromUrl(): View {
+  const value = new URLSearchParams(window.location.search).get("view");
+  return value && VIEW_IDS.has(value) ? value as View : "domains";
+}
+
+function initialDomainFromUrl(): string {
+  return new URLSearchParams(window.location.search).get("domain") || "job_application";
+}
 
 // ---- filter bar (shared) --------------------------------------------------
 function FilterBar({
@@ -45,6 +82,58 @@ function FilterBar({
   );
 }
 
+function HorizontalScroller({ className, children, ariaLabel }: {
+  className: string; children: ReactNode; ariaLabel?: string;
+}) {
+  const topRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollWidth, setScrollWidth] = useState(0);
+  const syncing = useRef(false);
+  const syncWidth = useCallback(() => {
+    const next = Math.max(
+      contentRef.current?.scrollWidth ?? 0,
+      innerRef.current?.scrollWidth ?? 0,
+    );
+    setScrollWidth((prev) => (prev === next ? prev : next));
+  }, []);
+  useEffect(() => { syncWidth(); });
+  useEffect(() => {
+    syncWidth();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(syncWidth) : null;
+    if (ro && contentRef.current) ro.observe(contentRef.current);
+    if (ro && innerRef.current) ro.observe(innerRef.current);
+    window.addEventListener("resize", syncWidth);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", syncWidth);
+    };
+  }, [syncWidth]);
+  function syncFromTop() {
+    if (syncing.current || !topRef.current || !contentRef.current) return;
+    syncing.current = true;
+    contentRef.current.scrollLeft = topRef.current.scrollLeft;
+    syncing.current = false;
+  }
+  function syncFromContent() {
+    if (syncing.current || !topRef.current || !contentRef.current) return;
+    syncing.current = true;
+    topRef.current.scrollLeft = contentRef.current.scrollLeft;
+    syncing.current = false;
+  }
+  return (
+    <div className="scrollframe">
+      <div className="top-scrollbar" ref={topRef} onScroll={syncFromTop} aria-hidden="true">
+        <div style={{ width: scrollWidth, height: 1 }} />
+      </div>
+      <div className={`${className} scrollframe-content`} ref={contentRef}
+        onScroll={syncFromContent} aria-label={ariaLabel}>
+        <div className="scrollframe-inner" ref={innerRef}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
 // ---- missions view --------------------------------------------------------
 function MissionsView({ data, onOpen }: { data: BoardData; onOpen: (id: string) => void }) {
   const [q, setQ] = useState("");
@@ -60,7 +149,7 @@ function MissionsView({ data, onOpen }: { data: BoardData; onOpen: (id: string) 
       <FilterBar q={q} setQ={setQ} risk={risk} setRisk={setRisk} risks />
       <div className="muted small">{shown} of {data.total} missions · gated execution lane —
         open one to approve / kill in the Ledger (to move work freely, use the Boards → mission_intake cards)</div>
-      <div className="board">
+      <HorizontalScroller className="board">
         {columns.filter((c) => c.cards.length).map((col) => (
           <div className="column" key={col.name}>
             <div className="column-head">
@@ -81,7 +170,7 @@ function MissionsView({ data, onOpen }: { data: BoardData; onOpen: (id: string) 
             </div>
           </div>
         ))}
-      </div>
+      </HorizontalScroller>
     </>
   );
 }
@@ -106,10 +195,8 @@ function BoardsView({ snap, canAct, onOpenCard, onMoved }: {
       .filter((c) => matches(q, c.title, c.meta)),
   }));
 
-  async function drop(status: string) {
-    const title = dragged;
-    setOverCol(null); setDragged(null);
-    if (!title || !board) return;
+  async function moveBoardCard(title: string, status: string) {
+    if (!board || !title || !status) return;
     setToast(null);
     try {
       const r = await postAction("move_item",
@@ -119,9 +206,16 @@ function BoardsView({ snap, canAct, onOpenCard, onMoved }: {
     } catch (e) { setToast("⚠ " + (e as Error).message); }
   }
 
+  async function drop(status: string) {
+    const title = dragged;
+    setOverCol(null); setDragged(null);
+    if (!title) return;
+    await moveBoardCard(title, status);
+  }
+
   return (
     <>
-      <div className="tabs">
+      <HorizontalScroller className="tabs tabs-strip" ariaLabel="AppFlowy boards">
         {snap.boards.map((b) => (
           <button key={b.board} className={`tab ${b.board === active ? "tab-on" : ""}`}
             onClick={() => setActive(b.board)}>{b.board}{b.error ? " ⚠" : ""}</button>
@@ -129,14 +223,14 @@ function BoardsView({ snap, canAct, onOpenCard, onMoved }: {
         <span className="snap-time">
           {snap.generated_at.slice(0, 19)}{snap.live ? " · live" : " · snapshot"}
         </span>
-      </div>
+      </HorizontalScroller>
       <FilterBar q={q} setQ={setQ} risk="" setRisk={() => {}} risks={false} />
-      {canAct && <div className="muted small">drag a card between columns, or open one to use the Move dropdown</div>}
+      {canAct && <div className="muted small">drag a card between columns, or use the Move to menu on touch screens</div>}
       {toast && <div className="actmsg">{toast}</div>}
       {!board ? <div className="empty">No boards.</div>
         : board.error ? <div className="error">⚠ {board.board}: {board.error}</div>
         : (
-          <div className="board">
+          <HorizontalScroller className="board">
             {columns.map((col) => (
               <div className={`column ${overCol === col.name ? "col-over" : ""}`} key={col.name}
                 onDragOver={(e) => { if (canAct && dragged) { e.preventDefault(); setOverCol(col.name); } }}
@@ -155,12 +249,27 @@ function BoardsView({ snap, canAct, onOpenCard, onMoved }: {
                       onClick={() => onOpenCard(board.board, c, board.statuses ?? [])}>
                       <div className="card-action">{c.title || "(untitled)"}</div>
                       {c.meta && <div className="card-repo">{c.meta}</div>}
+                      {canAct && (board.statuses ?? []).length > 0 && (
+                        <select className="touch-move" aria-label={`Move ${c.title} to column`}
+                          value=""
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => e.stopPropagation()}
+                          onChange={(e) => {
+                            const target = e.target.value;
+                            if (target) void moveBoardCard(c.title, target);
+                          }}>
+                          <option value="">Move to...</option>
+                          {(board.statuses ?? []).filter((s) => s !== col.name)
+                            .map((s) => <option key={s}>{s}</option>)}
+                        </select>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
             ))}
-          </div>
+          </HorizontalScroller>
         )}
     </>
   );
@@ -271,6 +380,1807 @@ function ActivityView({ a }: { a: Activity }) {
           </div>
         ))}
       </div>
+    </>
+  );
+}
+
+// ---- diagnostics view -----------------------------------------------------
+function ProbePill({ ok }: { ok: boolean }) {
+  return <span className={`status-pill ${ok ? "pill-ok" : "pill-bad"}`}>{ok ? "ok" : "error"}</span>;
+}
+
+function DiagnosticsView({ debug, surfaceErrors, boardsNote, lanesNote }: {
+  debug: RuntimeDebug | null;
+  surfaceErrors: Record<string, string>;
+  boardsNote: string | null;
+  lanesNote: string | null;
+}) {
+  if (!debug) return <div className="loading">...</div>;
+  const failures = [
+    ...Object.entries(surfaceErrors).map(([name, msg]) => ({ name, msg })),
+    ...(boardsNote ? [{ name: "boards", msg: boardsNote }] : []),
+    ...(lanesNote ? [{ name: "router", msg: lanesNote }] : []),
+  ];
+  return (
+    <div className="diagnostics">
+      <div className="diag-grid">
+        <div className="metric diag-card">
+          <div className="diag-head">Ledger</div>
+          <div className="diag-row"><span>base URL</span><code>{debug.ledger.base_url}</code></div>
+          <div className="diag-row"><span>DNS</span><ProbePill ok={debug.ledger.dns.ok} /></div>
+          {!debug.ledger.dns.ok && <div className="diag-error">{debug.ledger.dns.error}</div>}
+          <div className="diag-row"><span>health</span><ProbePill ok={debug.ledger.health.ok} /></div>
+          {!debug.ledger.health.ok && <div className="diag-error">{debug.ledger.health.error}</div>}
+          <div className="muted small">{debug.ledger.host_run_hint}</div>
+        </div>
+        <div className="metric diag-card">
+          <div className="diag-head">Mode</div>
+          <div className="diag-row"><span>chat/writes</span>
+            <span className={`status-pill ${debug.mode.chat_enabled ? "pill-run" : ""}`}>
+              {debug.mode.chat_enabled ? "enabled" : "read-only"}
+            </span>
+          </div>
+          <div className="diag-row"><span>cwd</span><code>{debug.mode.cwd}</code></div>
+        </div>
+      </div>
+      <h3>Mounted paths</h3>
+      <div className="diag-table">
+        {Object.entries(debug.paths).map(([name, info]) => (
+          <div className="diag-row" key={name}>
+            <span>{name}</span>
+            <ProbePill ok={info.exists} />
+            <code>{info.path}</code>
+          </div>
+        ))}
+      </div>
+      <h3>Surface failures</h3>
+      {failures.length === 0 ? <div className="empty">No surface failures in the last refresh.</div>
+        : failures.map((f) => <div className="error" key={f.name}>{f.name}: {f.msg}</div>)}
+    </div>
+  );
+}
+
+// ---- typed domain surfaces ------------------------------------------------
+function valText(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return v.map(valText).filter(Boolean).join(", ");
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+function valList(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(valText).filter(Boolean);
+  const s = valText(v);
+  return s ? [s] : [];
+}
+function valNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function cardId(card: DomainCard): string {
+  return valText(card.card_id ?? card.id ?? card.title ?? card.role_title ?? card.dag_id ?? card.repo_id);
+}
+function dateText(v: unknown): string {
+  const s = valText(v);
+  if (!s) return "";
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString([], {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
+}
+function scoreTone(n: number | null): string {
+  if (n === null) return "score-gray";
+  if (n >= 85) return "score-green";
+  if (n >= 70) return "score-amber";
+  return "score-gray";
+}
+function statusClass(status: string): string {
+  const s = status.toLowerCase();
+  if (["done", "completed", "healthy", "success", "active", "green"].some((x) => s.includes(x))) return "pill-ok";
+  if (["blocked", "failed", "rejected", "skip", "broken", "overdue"].some((x) => s.includes(x))) return "pill-bad";
+  if (["running", "progress", "queue", "selected", "interview"].some((x) => s.includes(x))) return "pill-run";
+  if (["manual", "needs", "draft", "backlog"].some((x) => s.includes(x))) return "pill-warn";
+  return "";
+}
+function statusToken(status: string): string {
+  return status.replace(/[^A-Za-z0-9_-]+/g, "-");
+}
+function titleToken(value: string): string {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+function domainTitle(card: DomainCard, spec: DomainSpec): string {
+  switch (spec.card_component) {
+    case "job_application":
+      return [card.company, card.role_title].map(valText).filter(Boolean).join(" - ") || cardId(card);
+    case "linkedin_post": return valText(card.hook || card.account || cardId(card));
+    case "book": return valText(card.title || cardId(card));
+    case "paper": return valText(card.title || cardId(card));
+    case "repo": return valText(card.repo_id || cardId(card));
+    case "dag": return valText(card.dag_id || cardId(card));
+    case "machine_upkeep": return valText(card.task || cardId(card));
+    case "mission": return valText(card.action || cardId(card));
+    default: return valText(card.title || card.task || cardId(card));
+  }
+}
+function cardMatchesDomain(card: DomainCard, q: string, status: string): boolean {
+  const cardStatus = valText(card.status);
+  if (status && cardStatus !== status) return false;
+  if (!q) return true;
+  const hay = Object.values(card).map(valText).join(" ").toLowerCase();
+  return hay.includes(q.toLowerCase());
+}
+function domainActionParams(action: string, title: string): Record<string, unknown> {
+  if (["start_todo", "finish_todo", "block_todo"].includes(action)) return { task: title };
+  return { title };
+}
+function StatusPill({ value }: { value: unknown }) {
+  const s = valText(value);
+  if (!s) return null;
+  return <span className={`status-pill ${statusClass(s)}`}>{s}</span>;
+}
+function Badge({ value, tone = "" }: { value: unknown; tone?: string }) {
+  const s = valText(value);
+  if (!s) return null;
+  return <span className={`domain-badge ${tone}`}>{s}</span>;
+}
+function ScoreChip({ value }: { value: unknown }) {
+  const n = valNumber(value);
+  return <span className={`score-chip ${scoreTone(n)}`}>{n === null ? "-" : n}</span>;
+}
+function ProgressBar({ value }: { value: unknown }) {
+  const n = Math.max(0, Math.min(100, valNumber(value) ?? 0));
+  return <div className="progress-wrap"><span style={{ width: `${n}%` }} /><em>{n}%</em></div>;
+}
+function ChipList({ values }: { values: unknown }) {
+  const list = valList(values);
+  if (!list.length) return null;
+  return <div className="chip-list">{list.map((x, i) => <span className="chip" key={`${x}-${i}`}>{x}</span>)}</div>;
+}
+function FieldValue({ field, value }: { field: FieldSpec; value: unknown }) {
+  const kind = field.kind ?? "text";
+  if (kind === "badge") return <Badge value={value} />;
+  if (kind === "score") return <ScoreChip value={value} />;
+  if (kind === "progress") return <ProgressBar value={value} />;
+  if (kind === "list") return <ChipList values={value} />;
+  if (kind === "datetime") return <span>{dateText(value) || "-"}</span>;
+  if (kind === "url") {
+    const href = valText(value);
+    return href ? <a href={href} target="_blank" rel="noreferrer">{href}</a> : <span>-</span>;
+  }
+  if (kind === "markdown") return <MarkdownText value={value} />;
+  return <span>{valText(value) || "-"}</span>;
+}
+function MarkdownText({ value }: { value: unknown }) {
+  const text = valText(value);
+  if (!text) return <span className="muted">-</span>;
+  return (
+    <div className="md-lite">
+      {text.split(/\n\s*\n/).map((block, i) => {
+        const lines = block.split(/\n/).map((x) => x.trim()).filter(Boolean);
+        if (lines.length && lines.every((x) => x.startsWith("- "))) {
+          return <ul key={i}>{lines.map((x, j) => <li key={j}>{x.slice(2)}</li>)}</ul>;
+        }
+        return <p key={i}>{block}</p>;
+      })}
+    </div>
+  );
+}
+
+function LinkedInBody({ text }: { text: string }) {
+  const blocks = text.split(/\n\s*\n/).filter(Boolean);
+  return (
+    <div className="li-body">
+      {blocks.map((block, i) => {
+        const lines = block.split(/\n/).map((x) => x.trim()).filter(Boolean);
+        if (lines.length && lines.every((x) => x.startsWith("- "))) {
+          return <ul key={i}>{lines.map((x, j) => <li key={j}>{x.slice(2)}</li>)}</ul>;
+        }
+        return <p key={i}>{i === 0 ? <b>{block}</b> : block}</p>;
+      })}
+    </div>
+  );
+}
+function LinkedInPreview({ card, mobile = false }: { card: DomainCard; mobile?: boolean }) {
+  const name = valText(card.author_name || card.account || "Geoff Hadfield");
+  const initials = name.split(/\s+/).slice(0, 2).map((x) => x[0]).join("").toUpperCase();
+  return (
+    <div className={`li-card ${mobile ? "li-mobile" : ""}`}>
+      <div className="li-head">
+        <div className="li-avatar">{initials || "GH"}</div>
+        <div>
+          <div className="li-name">{name}</div>
+          <div className="li-line">{valText(card.author_headline || card.account)}</div>
+          <div className="li-meta">1h · Public</div>
+        </div>
+      </div>
+      <LinkedInBody text={valText(card.body || card.hook)} />
+      <div className="li-tags">{valList(card.tags).map((t) => <span key={t}>{t}</span>)}</div>
+      <div className="li-foot"><span>Like</span><span>Comment</span><span>Repost</span><span>Send</span></div>
+    </div>
+  );
+}
+
+function JobApplicationCard({ card }: { card: DomainCard }) {
+  const manualReason = valText(card.manual_reason);
+  const automationClass = valText(card.automation_class);
+  const handoffReason = automationClass === "bot_possible" && manualReason.includes("MVP submit path is disabled")
+    ? "Bot-prepared handoff: the packet is ready, but automatic submit is disabled. Geoff can take over, submit, then move this to Completed."
+    : manualReason;
+  const nextAction = valText(card.next_action);
+  return (
+    <div className="job-card domain-card-body">
+      <div className="domain-card-top">
+        <div>
+          <div className="domain-title">{valText(card.company) || "Unknown company"}</div>
+          <div className="domain-subtitle">{valText(card.role_title) || "Untitled role"}</div>
+        </div>
+        <ScoreChip value={card.fit_score} />
+      </div>
+      <div className="domain-meta-row">
+        <span>{valText(card.salary_text) || "salary not listed"}</span>
+        <StatusPill value={card.status} />
+      </div>
+      <div className="domain-badges">
+        <Badge value={card.automation_class} />
+        <Badge value={card.resume_variant} />
+      </div>
+      {handoffReason && <div className="job-card-note">{handoffReason}</div>}
+      {nextAction && <div className="job-card-next">{nextAction}</div>}
+    </div>
+  );
+}
+function BookCard({ card }: { card: DomainCard }) {
+  return (
+    <div className="domain-card-body">
+      <div className="domain-title">{valText(card.title)}</div>
+      <div className="domain-subtitle">{valText(card.author)}</div>
+      <ProgressBar value={card.progress} />
+      <ChipList values={card.tags} />
+      <StatusPill value={card.status} />
+    </div>
+  );
+}
+function PaperCard({ card }: { card: DomainCard }) {
+  return (
+    <div className="domain-card-body">
+      <div className="domain-title">{valText(card.title)}</div>
+      <div className="domain-badges"><Badge value={card.venue} /><Badge value={card.year} /><Badge value={card.useful_for} /></div>
+      <div className="domain-clamp">{valText(card.abstract)}</div>
+      <StatusPill value={card.status} />
+    </div>
+  );
+}
+function RepoCard({ card }: { card: DomainCard }) {
+  const blockers = valList(card.blockers);
+  return (
+    <div className="domain-card-body">
+      <div className="domain-title">{valText(card.repo_id)}</div>
+      <div className="domain-badges">
+        <Badge value={card.branch} />
+        <Badge value={card.autonomy} tone={valText(card.autonomy) === "enabled" ? "good" : ""} />
+        <Badge value={card.checks} tone={valText(card.checks) === "green" ? "good" : ""} />
+        <Badge value={`${valText(card.open_prs) || 0} PRs`} />
+      </div>
+      {blockers.length > 0 && <ul className="blockers">{blockers.map((b) => <li key={b}>{b}</li>)}</ul>}
+      <StatusPill value={card.status} />
+    </div>
+  );
+}
+function DagCard({ card }: { card: DomainCard }) {
+  const state = valText(card.state);
+  const tone = state === "success" ? "good" : state === "failed" ? "bad" : state === "running" ? "run" : "";
+  return (
+    <div className="domain-card-body">
+      <div className="domain-title">{valText(card.dag_id)}</div>
+      <div className="domain-badges"><Badge value={state} tone={tone} /><Badge value={card.owner} /></div>
+      <div className="domain-kv">last <b>{dateText(card.last_run) || "-"}</b></div>
+      <div className="domain-kv">next <b>{dateText(card.next_run) || "-"}</b></div>
+      <StatusPill value={card.status} />
+    </div>
+  );
+}
+function MachineUpkeepCard({ card }: { card: DomainCard }) {
+  const n = valList(card.checklist).length;
+  return (
+    <div className="domain-card-body">
+      <div className="domain-title">{valText(card.task)}</div>
+      <div className="domain-badges"><Badge value={card.cadence} /><Badge value={card.health} tone={valText(card.health) === "ok" ? "good" : "bad"} /></div>
+      <div className="domain-kv">{n} checks · last {dateText(card.last_done) || "-"}</div>
+      <StatusPill value={card.status} />
+    </div>
+  );
+}
+function MissionDomainCard({ card }: { card: DomainCard }) {
+  const risk = valText(card.risk);
+  return (
+    <div className="domain-card-body">
+      <div className="domain-title clamp-2">{valText(card.action)}</div>
+      <div className="domain-badges"><Badge value={card.repo} /><Badge value={risk} tone={risk === "L4" ? "bad" : risk === "L3" ? "warn" : ""} /></div>
+      <div className="domain-kv">{dateText(card.created_at)}</div>
+      <StatusPill value={card.status} />
+    </div>
+  );
+}
+function GenericTaskCard({ card }: { card: DomainCard }) {
+  const due = valText(card.due);
+  const overdue = due && new Date(due).getTime() < Date.now();
+  return (
+    <div className="domain-card-body">
+      <div className="domain-title">{valText(card.title || card.task)}</div>
+      <div className="domain-badges">
+        <Badge value={card.priority} />
+        <Badge value={dateText(card.due)} tone={overdue ? "bad" : ""} />
+      </div>
+      <StatusPill value={card.status} />
+    </div>
+  );
+}
+function DomainCardTile({
+  spec, card, onOpen, canDrag = false, onDragStart, moveTargets = [], onMove,
+}: {
+  spec: DomainSpec; card: DomainCard; onOpen: () => void;
+  canDrag?: boolean; onDragStart?: () => void;
+  moveTargets?: string[]; onMove?: (status: string) => void;
+}) {
+  let body: ReactNode;
+  switch (spec.card_component) {
+    case "job_application": body = <JobApplicationCard card={card} />; break;
+    case "linkedin_post": body = <LinkedInPreview card={card} />; break;
+    case "book": body = <BookCard card={card} />; break;
+    case "paper": body = <PaperCard card={card} />; break;
+    case "repo": body = <RepoCard card={card} />; break;
+    case "dag": body = <DagCard card={card} />; break;
+    case "machine_upkeep": body = <MachineUpkeepCard card={card} />; break;
+    case "mission": body = <MissionDomainCard card={card} />; break;
+    default: body = <GenericTaskCard card={card} />; break;
+  }
+  return (
+    <div className={`domain-card ${canDrag ? "draggable" : ""}`} role="button"
+      tabIndex={0} draggable={canDrag}
+      onDragStart={(e) => { if (canDrag) { e.dataTransfer.effectAllowed = "move"; onDragStart?.(); } }}
+      onClick={onOpen}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(); }}>
+      {body}
+      {moveTargets.length > 0 && (
+        <select className="touch-move domain-touch-move"
+          aria-label={`Move ${domainTitle(card, spec)} to lane`}
+          value=""
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onChange={(e) => {
+            const target = e.target.value;
+            if (target) onMove?.(target);
+          }}>
+          <option value="">Move to...</option>
+          {moveTargets.map((s) => <option key={s}>{s}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+function DomainEmpty({ spec }: { spec: DomainSpec }) {
+  return (
+    <div className="domain-empty">
+      <div className="domain-empty-mark" />
+      <h3>{spec.empty_state.title}</h3>
+      <p>{spec.empty_state.hint}</p>
+      {spec.empty_state.command && <code>{spec.empty_state.command}</code>}
+    </div>
+  );
+}
+
+function DraftDefaultRow({ name, value, writable, onSaved }: {
+  name: string; value: string; writable: boolean; onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateDraftDefault(name, draft);
+      setEditing(false);
+      onSaved();
+      setMsg("updated");
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="preset-row">
+      <div className="preset-row-head">
+        <code>{name}</code>
+        {writable && !editing && <button className="editbtn" onClick={() => setEditing(true)}>edit</button>}
+      </div>
+      {editing ? (
+        <>
+          <textarea value={draft} disabled={busy}
+            onChange={(e) => setDraft(e.target.value)} />
+          <div className="preset-actions">
+            <button className="actbtn" disabled={busy} onClick={save}>save</button>
+            <button className="clear" disabled={busy} onClick={() => { setDraft(value); setEditing(false); }}>cancel</button>
+          </div>
+        </>
+      ) : <p>{value}</p>}
+      {msg && <div className={msg === "updated" ? "actmsg" : "error"}>{msg}</div>}
+    </div>
+  );
+}
+
+function JobPresetDrawer({ onClose }: { onClose: () => void }) {
+  const [controls, setControls] = useState<JobProfileControls | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    setErr(null);
+    fetchJobProfileControls().then(setControls)
+      .catch((e) => setErr((e as Error).message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const questions = controls?.application_questions;
+  return (
+    <DrawerShell title="Job Presets" onClose={onClose}>
+      {err && <div className="error">ERR {err}</div>}
+      {!controls && !err && <div className="loading">...</div>}
+      {controls && questions && (
+        <div className="presets">
+          <div className="preset-source">
+            <span className={`status-pill ${controls.writable ? "pill-run" : "pill-warn"}`}>
+              {controls.writable ? "editable" : "read-only"}
+            </span>
+            <span>{controls.write_gate}</span>
+          </div>
+          <h3>Question Policy</h3>
+          <div className="diag-table">
+            <div className="diag-row"><span>default</span><code>{questions.default_policy}</code></div>
+            <div className="diag-row"><span>source</span><code>{controls.application_questions_source}</code></div>
+          </div>
+          <h3>Draft Defaults</h3>
+          {Object.entries(questions.draft_defaults).map(([name, value]) => (
+            <DraftDefaultRow key={name} name={name} value={value}
+              writable={controls.writable} onSaved={load} />
+          ))}
+          <h3>Review Required</h3>
+          <ChipList values={questions.review_required} />
+          <h3>Never Auto-answer</h3>
+          <ChipList values={questions.never_auto_answer} />
+          <h3>Resume Variants</h3>
+          <ChipList values={controls.resume_variants} />
+          <h3>Job Categories</h3>
+          <div className="preset-category-list">
+            {controls.job_categories.map((cat) => (
+              <div className="preset-category" key={cat.id}>
+                <b>{cat.id}</b>
+                <span>{cat.role_focus} · {cat.resume_variant}</span>
+                <ChipList values={cat.keywords} />
+              </div>
+            ))}
+          </div>
+          <h3>Control Files</h3>
+          <div className="diag-table">
+            {Object.entries(controls.source_paths).map(([name, path]) => (
+              <div className="diag-row" key={name}><span>{name}</span><code>{path}</code></div>
+            ))}
+          </div>
+        </div>
+      )}
+    </DrawerShell>
+  );
+}
+
+function RuntimeControlsPanel({ status, runtime }: {
+  status: Status | null; runtime: ChatRuntime | null;
+}) {
+  return (
+    <section className="settings-card">
+      <div className="settings-card-head">
+        <h3>Runtime APIs</h3>
+        <span className={`status-pill ${runtime?.enabled ? "pill-run" : "pill-warn"}`}>
+          {runtime?.enabled ? "enabled" : "read-only"}
+        </span>
+      </div>
+      <div className="settings-list">
+        {Object.entries(status?.hops ?? {}).map(([name, state]) => (
+          <div className="settings-row" key={name}>
+            <span><span className={`hopdot ${state === "ok" ? "ok" : "bad"}`} />{name}</span>
+            <code>{status?.targets?.[name] ?? state}</code>
+          </div>
+        ))}
+        <div className="settings-row">
+          <span>chat runtime</span>
+          <code>{runtime?.harness ?? "unavailable"} / {runtime?.model_gateway ?? "unknown"}</code>
+        </div>
+        <div className="settings-row">
+          <span>action endpoint</span>
+          <code>{runtime?.action_endpoint ?? "/api/action"}</code>
+        </div>
+      </div>
+      <h3>External Runtimes</h3>
+      <div className="settings-list">
+        <div className="settings-row">
+          <span>GatewayCore</span>
+          <span className="status-pill pill-run">active</span>
+        </div>
+        <div className="settings-row">
+          <span>OxyGent / ORCA / Omnigent</span>
+          <span className="status-pill pill-warn">watch-list</span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const CARD_COMPONENTS = [
+  "job_application", "linkedin_post", "book", "paper", "repo", "dag",
+  "machine_upkeep", "mission", "generic_task",
+];
+const DOMAIN_SOURCES = ["fixtures", "board_store", "ledger_missions"];
+const GRANTABLE_ACTIONS = ["add_mission_card", "stage_card", "start_todo", "finish_todo", "block_card", "reject_card"];
+const FIELD_KINDS: NonNullable<FieldSpec["kind"]>[] = [
+  "text", "badge", "score", "money", "url", "datetime", "markdown", "list", "progress",
+];
+
+function linesToList(text: string): string[] {
+  return text.split(/\r?\n|,/).map((s) => s.trim()).filter(Boolean);
+}
+function listToLines(values: string[] = []): string {
+  return values.join("\n");
+}
+function fieldsToText(fields: FieldSpec[] = []): string {
+  return fields.map((field) =>
+    [field.name, field.label, field.kind ?? "text"].join(" | ")).join("\n");
+}
+function fieldsFromText(text: string): FieldSpec[] {
+  return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [rawName, rawLabel, rawKind] = line.split("|").map((part) => part.trim());
+    const name = rawName || "field";
+    const label = rawLabel || titleToken(name);
+    const kind = FIELD_KINDS.includes(rawKind as NonNullable<FieldSpec["kind"]>)
+      ? rawKind as NonNullable<FieldSpec["kind"]>
+      : "text";
+    return { name, label, kind };
+  });
+}
+function columnActionsToText(actions: Record<string, string> = {}): string {
+  return Object.entries(actions).map(([column, action]) => `${column} | ${action}`).join("\n");
+}
+function columnActionsFromText(text: string): Record<string, string> {
+  return Object.fromEntries(text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    .map((line) => line.split("|").map((part) => part.trim()))
+    .filter(([column, action]) => column && action)
+    .map(([column, action]) => [column, action]));
+}
+function nextDomainId(domains: DomainSpec[]): string {
+  const ids = new Set(domains.map((domain) => domain.domain_id));
+  if (!ids.has("new_board")) return "new_board";
+  for (let i = 2; i < 100; i += 1) {
+    const id = `new_board_${i}`;
+    if (!ids.has(id)) return id;
+  }
+  return `new_board_${Date.now()}`;
+}
+function newDomainSpec(domains: DomainSpec[]): DomainSpec {
+  return {
+    domain_id: nextDomainId(domains),
+    title: "New Board",
+    card_component: "generic_task",
+    source: "fixtures",
+    columns: ["Backlog", "Ready", "In Progress", "Done", "Blocked"],
+    column_actions: {
+      Ready: "stage_card",
+      "In Progress": "start_todo",
+      Done: "finish_todo",
+      Blocked: "block_card",
+    },
+    summary_fields: [
+      { name: "title", label: "Title", kind: "text" },
+      { name: "priority", label: "Priority", kind: "badge" },
+    ],
+    drawer_fields: [{ name: "notes", label: "Notes", kind: "markdown" }],
+    allowed_actions: ["stage_card", "start_todo", "finish_todo", "block_card", "reject_card"],
+    empty_state: {
+      title: "No cards yet",
+      hint: "Cards appear when this board is connected to a source.",
+    },
+  };
+}
+
+function DomainSchemaEditor({ initial, mode, editable, onClose, onSaved }: {
+  initial: DomainSpec;
+  mode: "create" | "update";
+  editable: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    domain_id: initial.domain_id,
+    title: initial.title,
+    card_component: initial.card_component,
+    source: initial.source,
+    board_id: initial.board_id ?? "",
+    columns: listToLines(initial.columns ?? []),
+    column_actions: columnActionsToText(initial.column_actions ?? {}),
+    summary_fields: fieldsToText(initial.summary_fields ?? []),
+    drawer_fields: fieldsToText(initial.drawer_fields ?? []),
+    allowed_actions: (initial.allowed_actions ?? []).join(", "),
+    empty_title: initial.empty_state?.title ?? "",
+    empty_hint: initial.empty_state?.hint ?? "",
+    empty_command: initial.empty_state?.command ?? "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    setDraft({
+      domain_id: initial.domain_id,
+      title: initial.title,
+      card_component: initial.card_component,
+      source: initial.source,
+      board_id: initial.board_id ?? "",
+      columns: listToLines(initial.columns ?? []),
+      column_actions: columnActionsToText(initial.column_actions ?? {}),
+      summary_fields: fieldsToText(initial.summary_fields ?? []),
+      drawer_fields: fieldsToText(initial.drawer_fields ?? []),
+      allowed_actions: (initial.allowed_actions ?? []).join(", "),
+      empty_title: initial.empty_state?.title ?? "",
+      empty_hint: initial.empty_state?.hint ?? "",
+      empty_command: initial.empty_state?.command ?? "",
+    });
+  }, [initial]);
+  const payload = (): DomainSpec => ({
+    domain_id: draft.domain_id.trim(),
+    title: draft.title.trim(),
+    card_component: draft.card_component,
+    source: draft.source,
+    board_id: draft.source === "board_store" ? draft.board_id.trim() : undefined,
+    columns: linesToList(draft.columns),
+    column_actions: columnActionsFromText(draft.column_actions),
+    summary_fields: fieldsFromText(draft.summary_fields),
+    drawer_fields: fieldsFromText(draft.drawer_fields),
+    allowed_actions: linesToList(draft.allowed_actions),
+    empty_state: {
+      title: draft.empty_title.trim(),
+      hint: draft.empty_hint.trim(),
+      command: draft.empty_command.trim() || undefined,
+    },
+  });
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      const domain = payload();
+      if (mode === "create") await createDomainSchema(domain);
+      else await updateDomainSchema(initial.domain_id, domain);
+      setMsg("updated");
+      onSaved();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  async function remove() {
+    if (mode !== "update") return;
+    if (!window.confirm(`Remove ${initial.title} from All Boards?`)) return;
+    setBusy(true); setMsg(null);
+    try {
+      await deleteDomainSchema(initial.domain_id);
+      setMsg("removed");
+      onSaved();
+      onClose();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="schema-editor">
+      <div className="settings-card-head">
+        <h3>{mode === "create" ? "Add Board" : `Edit ${initial.title}`}</h3>
+        <button className="editbtn" onClick={onClose}>close</button>
+      </div>
+      <div className="schema-form-grid">
+        <label>Board ID<input value={draft.domain_id} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, domain_id: e.target.value }))} /></label>
+        <label>Title<input value={draft.title} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, title: e.target.value }))} /></label>
+        <label>Card type<select className="select" value={draft.card_component} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, card_component: e.target.value }))}>
+          {CARD_COMPONENTS.map((value) => <option key={value}>{value}</option>)}
+        </select></label>
+        <label>Source<select className="select" value={draft.source} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, source: e.target.value }))}>
+          {DOMAIN_SOURCES.map((value) => <option key={value}>{value}</option>)}
+        </select></label>
+        <label>Board store ID<input value={draft.board_id}
+          disabled={!editable || busy || draft.source !== "board_store"}
+          onChange={(e) => setDraft((m) => ({ ...m, board_id: e.target.value }))} /></label>
+      </div>
+      <div className="schema-form-grid schema-form-grid-wide">
+        <label>Columns<textarea value={draft.columns} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, columns: e.target.value }))} /></label>
+        <label>Column Actions<textarea value={draft.column_actions} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, column_actions: e.target.value }))} /></label>
+        <label>Summary Fields<textarea value={draft.summary_fields} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, summary_fields: e.target.value }))} /></label>
+        <label>Drawer Fields<textarea value={draft.drawer_fields} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, drawer_fields: e.target.value }))} /></label>
+      </div>
+      <div className="schema-form-grid schema-form-grid-wide">
+        <label>Allowed Actions<textarea value={draft.allowed_actions} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, allowed_actions: e.target.value }))} /></label>
+        <label>Empty Title<input value={draft.empty_title} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, empty_title: e.target.value }))} /></label>
+        <label>Empty Hint<textarea value={draft.empty_hint} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, empty_hint: e.target.value }))} /></label>
+        <label>Empty Command<input value={draft.empty_command} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, empty_command: e.target.value }))} /></label>
+      </div>
+      <div className="schema-action-picks">
+        {GRANTABLE_ACTIONS.map((action) => <span className="chip" key={action}>{action}</span>)}
+      </div>
+      <div className="preset-actions">
+        <button className="actbtn" disabled={!editable || busy} onClick={save}>save board</button>
+        {mode === "update" && <button className="editbtn danger" disabled={!editable || busy} onClick={remove}>remove</button>}
+        {msg && <span className={msg === "updated" || msg === "removed" ? "actmsg" : "error-inline"}>{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
+function BoardControlsPanel({ schema, registry, err, onSaved }: {
+  schema: DomainSchema | null; registry: BoardRegistry | null; err: string | null;
+  onSaved: () => void;
+}) {
+  const domains = schema?.domains ?? [];
+  const editable = !!schema?.writable;
+  const [editing, setEditing] = useState<{ mode: "create" | "update"; domain: DomainSpec } | null>(null);
+  return (
+    <section className="settings-card settings-card-wide">
+      <div className="settings-card-head">
+        <h3>All Boards</h3>
+        <div className="settings-head-actions">
+          <span className={`status-pill ${editable ? "pill-run" : "pill-warn"}`}>
+            {editable ? "editable" : "read-only"}
+          </span>
+          <span className="status-pill">{domains.length} boards</span>
+          <button className="actbtn" disabled={!editable}
+            onClick={() => setEditing({ mode: "create", domain: newDomainSpec(domains) })}>
+            add board
+          </button>
+        </div>
+      </div>
+      {err && <div className="error">ERR {err}</div>}
+      {schema && (
+        <div className="diag-table">
+          <div className="diag-row"><span>schema</span><code>{schema.config_path}</code></div>
+          <div className="diag-row"><span>write gate</span><code>{schema.write_gate}</code></div>
+        </div>
+      )}
+      {editing && (
+        <DomainSchemaEditor initial={editing.domain} mode={editing.mode} editable={editable}
+          onClose={() => setEditing(null)} onSaved={onSaved} />
+      )}
+      <div className="settings-board-grid">
+        {domains.map((domain) => (
+          <div className="settings-board" key={domain.domain_id}>
+            <div className="settings-board-title">
+              <b>{domain.title}</b>
+              <span className="status-pill">{domain.source}</span>
+            </div>
+            <div className="muted small">{domain.card_component}</div>
+            <div className="chip-list">
+              {(domain.columns ?? []).slice(0, 5).map((col) => <Badge key={col} value={col} />)}
+              {(domain.columns?.length ?? 0) > 5 && <Badge value={`+${(domain.columns?.length ?? 0) - 5}`} />}
+            </div>
+            <div className="muted small">{domain.summary_fields.length} summary fields · {domain.drawer_fields.length} drawer fields</div>
+            <div className="preset-actions">
+              <button className="editbtn" disabled={!editable}
+                onClick={() => setEditing({ mode: "update", domain })}>edit</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {registry && (
+        <>
+          <h3>Provider Registry</h3>
+          <div className="diag-table">
+            <div className="diag-row"><span>source</span><code>{registry.config_path}</code></div>
+            <div className="diag-row"><span>editable</span><code>{String(registry.config_writable)}</code></div>
+          </div>
+          <div className="settings-list">
+            {registry.boards.map((board) => (
+              <div className="settings-row settings-row-tall" key={board.board_id}>
+                <span>
+                  <b>{board.board_id}</b>
+                  <small>{board.provider} · {board.board_ref}</small>
+                </span>
+                <code>{Object.values(board.status_mapping).join(" / ")}</code>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function JobRuntimeControls({ controls, onSaved }: {
+  controls: JobProfileControls; onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    daily_run_time: controls.job_search.daily_run_time,
+    max_suggested_jobs_per_day: String(controls.job_search.max_suggested_jobs_per_day),
+    max_bot_possible_suggestions_per_day: String(controls.job_search.max_bot_possible_suggestions_per_day),
+    max_manual_required_suggestions_per_day: String(controls.job_search.max_manual_required_suggestions_per_day),
+    max_selected_jobs_per_day: String(controls.job_search.max_selected_jobs_per_day),
+  });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    setDraft({
+      daily_run_time: controls.job_search.daily_run_time,
+      max_suggested_jobs_per_day: String(controls.job_search.max_suggested_jobs_per_day),
+      max_bot_possible_suggestions_per_day: String(controls.job_search.max_bot_possible_suggestions_per_day),
+      max_manual_required_suggestions_per_day: String(controls.job_search.max_manual_required_suggestions_per_day),
+      max_selected_jobs_per_day: String(controls.job_search.max_selected_jobs_per_day),
+    });
+  }, [controls]);
+  const editable = controls.writable && controls.job_search_settings_writable;
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchRuntime({
+        daily_run_time: draft.daily_run_time,
+        max_suggested_jobs_per_day: Number(draft.max_suggested_jobs_per_day),
+        max_bot_possible_suggestions_per_day: Number(draft.max_bot_possible_suggestions_per_day),
+        max_manual_required_suggestions_per_day: Number(draft.max_manual_required_suggestions_per_day),
+        max_selected_jobs_per_day: Number(draft.max_selected_jobs_per_day),
+      });
+      setMsg("updated");
+      onSaved();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="settings-form">
+      <div className="settings-form-grid">
+        <label>Daily time<input value={draft.daily_run_time} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, daily_run_time: e.target.value }))} /></label>
+        <label>Total/day<input type="number" min="1" max="100"
+          value={draft.max_suggested_jobs_per_day} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, max_suggested_jobs_per_day: e.target.value }))} /></label>
+        <label>Bot/day<input type="number" min="0" max="100"
+          value={draft.max_bot_possible_suggestions_per_day} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, max_bot_possible_suggestions_per_day: e.target.value }))} /></label>
+        <label>Manual/day<input type="number" min="0" max="100"
+          value={draft.max_manual_required_suggestions_per_day} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, max_manual_required_suggestions_per_day: e.target.value }))} /></label>
+        <label>Selected/day<input type="number" min="1" max="25"
+          value={draft.max_selected_jobs_per_day} disabled={!editable || busy}
+          onChange={(e) => setDraft((m) => ({ ...m, max_selected_jobs_per_day: e.target.value }))} /></label>
+      </div>
+      <div className="preset-actions">
+        <button className="actbtn" disabled={!editable || busy} onClick={save}>save search limits</button>
+        {msg && <span className={msg === "updated" ? "actmsg" : "error-inline"}>{msg}</span>}
+      </div>
+      <div className="diag-row"><span>override</span><code>{controls.job_search_settings_source}</code></div>
+    </div>
+  );
+}
+
+function CategorySettingRow({ category, editable, onSaved }: {
+  category: JobProfileControls["job_categories"][number];
+  editable: boolean;
+  onSaved: () => void;
+}) {
+  const [focus, setFocus] = useState(category.role_focus);
+  const [keywords, setKeywords] = useState(category.keywords.join(", "));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => {
+    setFocus(category.role_focus);
+    setKeywords(category.keywords.join(", "));
+  }, [category]);
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchCategory(category.id, {
+        role_focus: focus,
+        keywords: keywords.split(",").map((s) => s.trim()).filter(Boolean),
+      });
+      setMsg("updated");
+      onSaved();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="preset-category">
+      <div className="category-edit-head">
+        <b>{category.id}</b>
+        <select className="select" value={focus} disabled={!editable || busy}
+          onChange={(e) => setFocus(e.target.value)}>
+          <option value="primary">primary</option>
+          <option value="secondary">secondary</option>
+        </select>
+      </div>
+      <div className="muted small">{category.resume_variant}</div>
+      <textarea className="settings-textarea" value={keywords} disabled={!editable || busy}
+        onChange={(e) => setKeywords(e.target.value)} />
+      <div className="preset-actions">
+        <button className="actbtn" disabled={!editable || busy} onClick={save}>save category</button>
+        {msg && <span className={msg === "updated" ? "actmsg" : "error-inline"}>{msg}</span>}
+      </div>
+    </div>
+  );
+}
+
+function JobSearchControlsPanel({ controls, onSaved }: {
+  controls: JobProfileControls; onSaved: () => void;
+}) {
+  const editable = controls.writable && controls.job_search_settings_writable;
+  return (
+    <section className="settings-card settings-card-wide">
+      <div className="settings-card-head">
+        <h3>Job Search</h3>
+        <span className={`status-pill ${editable ? "pill-run" : "pill-warn"}`}>
+          {editable ? "editable" : "read-only"}
+        </span>
+      </div>
+      <JobRuntimeControls controls={controls} onSaved={onSaved} />
+      <h3>Role Focus</h3>
+      <div className="preset-category-list">
+        {controls.job_categories.map((category) => (
+          <CategorySettingRow key={category.id} category={category}
+            editable={editable} onSaved={onSaved} />
+        ))}
+      </div>
+      <h3>Own Info</h3>
+      <div className="diag-table">
+        {Object.entries(controls.source_paths).map(([name, path]) => (
+          <div className="diag-row" key={name}><span>{name}</span><code>{path}</code></div>
+        ))}
+      </div>
+      <h3>Draft Defaults</h3>
+      {Object.entries(controls.application_questions.draft_defaults).map(([name, value]) => (
+        <DraftDefaultRow key={name} name={name} value={value}
+          writable={controls.writable} onSaved={onSaved} />
+      ))}
+    </section>
+  );
+}
+
+function SettingsView({ status, runtime }: {
+  status: Status | null; runtime: ChatRuntime | null;
+}) {
+  const [domainSchema, setDomainSchema] = useState<DomainSchema | null>(null);
+  const [registry, setRegistry] = useState<BoardRegistry | null>(null);
+  const [controls, setControls] = useState<JobProfileControls | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    setErr(null);
+    try {
+      const [schemaBody, boardBody, jobControls] = await Promise.all([
+        fetchDomainSchema(),
+        fetchBoardRegistry(),
+        fetchJobProfileControls(),
+      ]);
+      setDomainSchema(schemaBody);
+      setRegistry(boardBody);
+      setControls(jobControls);
+    } catch (e) { setErr((e as Error).message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  return (
+    <div className="settings">
+      <div className="domain-head settings-head">
+        <div>
+          <h2>Controls</h2>
+          <div className="muted small">All Boards, job search, profile defaults, and runtime APIs</div>
+        </div>
+      </div>
+      {err && <div className="error">ERR {err}</div>}
+      {!controls && !err && <div className="loading">...</div>}
+      <div className="settings-grid">
+        <RuntimeControlsPanel status={status} runtime={runtime} />
+        <BoardControlsPanel schema={domainSchema} registry={registry} err={null} onSaved={load} />
+        {controls && <JobSearchControlsPanel controls={controls} onSaved={load} />}
+      </div>
+    </div>
+  );
+}
+
+function ProgressCheck({ state }: { state: string }) {
+  const symbol = state === "done" ? "✓" : state === "current" ? "!" : "·";
+  return <span className={`progress-check progress-${state}`}>{symbol}</span>;
+}
+
+function DomainProgressPanel({ progress, onOpenChat, onProgressChanged, onOpenPacket }: {
+  progress: DomainCardProgress;
+  onOpenChat?: (prompt: string, conversationId?: string) => void;
+  onProgressChanged?: (progress: DomainCardProgress) => void;
+  onOpenPacket?: () => void;
+}) {
+  const conversationId = `${progress.domain_id}:${progress.card_id}`;
+  const canAddJobNote = progress.domain_id === "job_application" && !!progress.application?.exists;
+  const [noteType, setNoteType] = useState("recruiter_email");
+  const [noteText, setNoteText] = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
+  const [noteMsg, setNoteMsg] = useState<string | null>(null);
+  async function saveNote() {
+    const text = noteText.trim();
+    if (!text || !canAddJobNote) return;
+    setNoteBusy(true); setNoteMsg(null);
+    try {
+      const result = await addDomainCardNote(
+        progress.domain_id, progress.card_id, noteType, text,
+        noteType.includes("email") ? "email" : "cockpit",
+      );
+      setNoteText("");
+      setNoteMsg(result.event ? "note saved · moved to Interviewing" : "note saved");
+      onProgressChanged?.(result.progress);
+    } catch (e) { setNoteMsg("ERR " + (e as Error).message); }
+    finally { setNoteBusy(false); }
+  }
+  return (
+    <div className="domain-progress-panel">
+      <div className="domain-section-head">
+        <h3>Progress</h3>
+        {progress.domain_id === "job_application" && (
+          <button className="actbtn"
+            onClick={() => onOpenPacket?.()}
+            disabled={!onOpenPacket || !progress.application?.exists}
+            title={progress.application?.exists
+              ? "read the resume/cover letter/answers, leave notes, approve & submit"
+              : "materials are generated after you move the card to In Progress"}>
+            review packet
+          </button>
+        )}
+        <button className="actbtn"
+          onClick={() => onOpenChat?.(progress.chat_prompt, conversationId)}
+          disabled={!onOpenChat || !progress.chat_prompt}>
+          open in chat
+        </button>
+      </div>
+      <div className="progress-steps">
+        {progress.steps.map((step) => (
+          <details className={`progress-step progress-step-${step.state}`} key={step.id}
+            open={step.state !== "waiting"}>
+            <summary>
+              <ProgressCheck state={step.state} />
+              <span>{step.label}</span>
+              <Badge value={step.state} />
+            </summary>
+            <div className="progress-detail">{step.detail || "No detail recorded."}</div>
+          </details>
+        ))}
+      </div>
+      {progress.events.length > 0 && (
+        <details className="progress-events">
+          <summary>{progress.events.length} governed event(s)</summary>
+          {progress.events.map((ev) => (
+            <div className="progress-event" key={ev.event_id}>
+              <div><b>{ev.headline}</b></div>
+              <div className="muted small">
+                {dateText(ev.created_at)} · {ev.actor_type || "actor"} · {ev.source_surface || "surface"}
+              </div>
+            </div>
+          ))}
+        </details>
+      )}
+      {progress.domain_id === "job_application" && (
+        <div className="job-note-panel">
+          <div className="domain-section-head">
+            <h3>Next-Step Notes</h3>
+          </div>
+          <div className="note-controls">
+            <select className="select" value={noteType}
+              disabled={!canAddJobNote || noteBusy}
+              onChange={(e) => setNoteType(e.target.value)}>
+              <option value="recruiter_email">recruiter email</option>
+              <option value="recruiter_call">recruiter call</option>
+              <option value="interview_note">interview note</option>
+              <option value="portal_question">portal question</option>
+              <option value="salary_note">salary note</option>
+              <option value="manual_note">manual note</option>
+            </select>
+            <textarea value={noteText}
+              disabled={!canAddJobNote || noteBusy}
+              placeholder={canAddJobNote ? "paste email, recruiter notes, portal questions, or next steps" : "materials must exist before notes can attach"}
+              onChange={(e) => setNoteText(e.target.value)} />
+            <div className="note-actions">
+              <button className="actbtn" disabled={!canAddJobNote || noteBusy || !noteText.trim()}
+                onClick={saveNote}>{noteBusy ? "saving..." : "save note"}</button>
+              {noteMsg && <span className={noteMsg.startsWith("ERR") ? "error-inline" : "muted small"}>{noteMsg}</span>}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- application packet review (resume/cover letter/answers + agent trace) --
+const PACKET_TABS: { key: string; label: string; file?: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "resume", label: "Resume", file: "resume" },
+  { key: "cover_letter", label: "Cover Letter", file: "cover_letter" },
+  { key: "answer_bank", label: "Answers", file: "answer_bank" },
+  { key: "recruiter_message", label: "Recruiter Msg", file: "recruiter_message" },
+  { key: "followups", label: "Follow-ups", file: "followups" },
+  { key: "manual_checklist", label: "Checklist", file: "manual_checklist" },
+  { key: "job_description", label: "Job Description", file: "job_description" },
+  { key: "agent_trace", label: "Agent Trace" },
+];
+
+function PacketChecklist({ validation }: { validation: PacketValidation }) {
+  return (
+    <div className="packet-checks">
+      {validation.checks.map((c) => (
+        <div key={c.id}
+          className={`packet-check ${c.ok ? "packet-check-ok" : c.level === "error" ? "packet-check-fail" : "packet-check-warn"}`}>
+          <span className="packet-check-mark">{c.ok ? "✓" : c.level === "error" ? "✗" : "!"}</span>
+          <div>
+            <div>{c.label}</div>
+            <div className="muted small">{c.detail}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AgentTraceView({ entries }: { entries: AgentTraceEntry[] }) {
+  if (!entries.length) {
+    return (
+      <div className="muted">
+        No agent trace yet — this packet was rendered from templates. Use
+        “request changes” to regenerate it with the agent writer; every prompt
+        and model output will be recorded here.
+      </div>
+    );
+  }
+  return (
+    <div className="packet-trace">
+      {entries.map((t, i) => (
+        <details key={i} className="packet-trace-entry" open={i === entries.length - 1}>
+          <summary>
+            <Badge value={t.ok === false ? "failed" : "ok"} />
+            <b>{t.step}</b> · attempt {t.attempt} · {t.model}
+            {typeof t.duration_ms === "number" && ` · ${(t.duration_ms / 1000).toFixed(1)}s`}
+            <span className="muted small"> {dateText(t.ts)}</span>
+          </summary>
+          {t.error && <div className="error-inline">ERR {t.error}</div>}
+          {!!t.problems?.length && (
+            <div className="error-inline">problems: {t.problems.join("; ")}</div>
+          )}
+          {!!t.claim_ids?.length && (
+            <div className="muted small">claims used: {t.claim_ids.join(", ")}</div>
+          )}
+          {(t.messages ?? []).map((m, j) => (
+            <details key={j} className="packet-trace-msg">
+              <summary>context sent → {m.role} ({m.content.length.toLocaleString()} chars)</summary>
+              <pre className="packet-doc">{m.content}</pre>
+            </details>
+          ))}
+          {t.response && (
+            <details className="packet-trace-msg" open>
+              <summary>model output ({t.response.length.toLocaleString()} chars)</summary>
+              <pre className="packet-doc">{t.response}</pre>
+            </details>
+          )}
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function PacketReviewModal({ spec, card, onClose, onChanged }: {
+  spec: DomainSpec; card: DomainCard; onClose: () => void; onChanged: () => void;
+}) {
+  const id = cardId(card);
+  const [packet, setPacket] = useState<JobPacket | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [tab, setTab] = useState("overview");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState<"changes" | "submit" | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchJobPacket(spec.domain_id, id)
+      .then((p) => { if (live) setPacket(p); })
+      .catch((e) => { if (live) setErr((e as Error).message); });
+    return () => { live = false; };
+  }, [spec.domain_id, id]);
+
+  async function sendChanges() {
+    const text = notes.trim();
+    if (!text) return;
+    setBusy("changes");
+    setMsg("notes recorded — regenerating with the agent writer (this can take a minute)...");
+    try {
+      const result = await requestPacketChanges(spec.domain_id, id, text);
+      setPacket(result.packet);
+      setNotes("");
+      setMsg(result.regenerate_error
+        ? `ERR notes recorded, but regeneration failed: ${result.regenerate_error}`
+        : `regenerated — revision ${String(result.packet.record.revision)} is ready for review`);
+      onChanged();
+    } catch (e) { setMsg("ERR " + (e as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function approveAndSubmit() {
+    const company = valText(packet?.record.company);
+    if (!window.confirm(
+      `Submit the ${company} application? This marks it applied, moves the card to `
+      + "Completed, and emails/stores the full record.")) return;
+    setBusy("submit"); setMsg(null);
+    try {
+      const result = await submitJobApplication(spec.domain_id, id);
+      setSubmitted(result.side_effect ?? {});
+      const email = (result.side_effect as { email?: { status?: string; detail?: string; to?: string } } | null)?.email;
+      setMsg(`submitted — card moved to Completed; email record: ${email?.status ?? "unknown"}`
+        + (email?.status === "sent" ? ` to ${email?.to}` : email?.detail ? ` (${email.detail})` : ""));
+      const refreshed = await fetchJobPacket(spec.domain_id, id);
+      setPacket(refreshed);
+      onChanged();
+    } catch (e) { setMsg("ERR " + (e as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  const record = packet?.record ?? {};
+  const validation = packet?.validation;
+  const alreadyApplied = valText(record.status) === "applied";
+  const canSubmit = !!validation?.ok && !alreadyApplied && !busy;
+  const title = `${valText(record.company) || valText(card.company)} — ${valText(record.role_title) || valText(card.role_title)}`;
+
+  return (
+    <div className="drawer-bg packet-bg" onClick={onClose}>
+      <div className="packet-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-head">
+          <h2>Application packet · {title}</h2>
+          <button className="x" onClick={onClose} aria-label="Close packet review">✕</button>
+        </div>
+        {err && <div className="error">ERR {err}</div>}
+        {!packet && !err && <div className="loading">loading packet...</div>}
+        {packet && (
+          <>
+            <HorizontalScroller className="packet-tabs">
+              {PACKET_TABS.map((t) => (
+                <button key={t.key} className={`tab ${tab === t.key ? "tab-on" : ""}`}
+                  onClick={() => setTab(t.key)}>{t.label}</button>
+              ))}
+            </HorizontalScroller>
+            {msg && <div className={msg.startsWith("ERR") ? "error" : "packet-msg"}>{msg}</div>}
+            {tab === "overview" && (
+              <div className="packet-overview">
+                <div className="packet-facts">
+                  <div><b>Fit</b> {valText(record.fit && (record.fit as { score?: number }).score)}/100 · {valText(record.resume_variant)}</div>
+                  <div><b>Status</b> {valText(record.status)} / {valText(record.stage)} · revision {valText(record.revision) || "1"}</div>
+                  <div><b>Generation</b> {valText((record.generation as { mode?: string } | undefined)?.mode) || "unknown"}
+                    {(record.generation as { model?: string } | undefined)?.model
+                      ? ` (${(record.generation as { model?: string }).model})` : ""}</div>
+                  <div><b>Review</b> {valText(record.review_state) || "ready_for_review"}</div>
+                  <div><b>Apply URL</b> <a href={valText(record.apply_url)} target="_blank" rel="noreferrer">{valText(record.apply_url)}</a></div>
+                  <div><b>Email record</b> {packet.email.configured
+                    ? `configured → ${packet.email.to}`
+                    : `not configured — set ${packet.email.missing.join(", ")}; the record is still saved to disk on submit`}</div>
+                </div>
+                <h3>Validation</h3>
+                {validation && <PacketChecklist validation={validation} />}
+                {packet.submission_record && (
+                  <details className="packet-submission">
+                    <summary>submission record (evidence)</summary>
+                    <pre className="packet-doc">{JSON.stringify(packet.submission_record, null, 2)}</pre>
+                  </details>
+                )}
+                {!!packet.files.review_notes && (
+                  <details className="packet-submission">
+                    <summary>review notes so far</summary>
+                    <pre className="packet-doc">{packet.files.review_notes}</pre>
+                  </details>
+                )}
+                <h3>Not ready? Request changes</h3>
+                <div className="note-controls">
+                  <textarea value={notes} disabled={!!busy || alreadyApplied}
+                    placeholder="what should the agent fix? e.g. 'lead with the NBA platform work, tighten the summary to 2 sentences'"
+                    onChange={(e) => setNotes(e.target.value)} />
+                  <div className="note-actions">
+                    <button className="actbtn" disabled={!!busy || !notes.trim() || alreadyApplied}
+                      onClick={() => void sendChanges()}>
+                      {busy === "changes" ? "regenerating..." : "request changes & regenerate"}
+                    </button>
+                  </div>
+                </div>
+                <h3>Ready? Approve &amp; submit</h3>
+                <div className="note-actions">
+                  <button className="actbtn packet-submit" disabled={!canSubmit}
+                    onClick={() => void approveAndSubmit()}
+                    title={alreadyApplied ? "already submitted"
+                      : validation?.ok ? "validate, mark applied, move to Completed, email the record"
+                      : "fix the failed validation checks first"}>
+                    {busy === "submit" ? "submitting..."
+                      : alreadyApplied || submitted ? "submitted ✓"
+                      : "approve & submit"}
+                  </button>
+                  <span className="muted small">
+                    {alreadyApplied
+                      ? "this application is already marked applied"
+                      : validation?.ok
+                        ? "runs validation, marks applied, moves the card to Completed, and emails/stores the full record"
+                        : "blocked: " + (validation?.errors ?? []).join(", ")}
+                  </span>
+                </div>
+              </div>
+            )}
+            {PACKET_TABS.filter((t) => t.file).map((t) => tab === t.key && (
+              <div key={t.key} className="packet-body">
+                {packet.files[t.file as string]
+                  ? <pre className="packet-doc">{packet.files[t.file as string]}</pre>
+                  : <div className="muted">not generated for this packet</div>}
+              </div>
+            ))}
+            {tab === "agent_trace" && <AgentTraceView entries={packet.agent_trace} />}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DomainDrawer({
+  spec, card, actions, moveTargets = [], onMove, onChanged, onClose, onOpenChat, onOpenPacket,
+}: {
+  spec: DomainSpec; card: DomainCard; actions?: DomainActions;
+  moveTargets?: string[]; onMove?: (status: string) => void;
+  onChanged: () => void; onClose: () => void;
+  onOpenChat?: (prompt: string, conversationId?: string) => void;
+  onOpenPacket?: () => void;
+}) {
+  const [detail, setDetail] = useState<DomainCardDetail | null>(null);
+  const [progress, setProgress] = useState<DomainCardProgress | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [progressErr, setProgressErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [mobile, setMobile] = useState(false);
+  const id = cardId(card);
+
+  useEffect(() => {
+    let live = true;
+    setDetail(null); setProgress(null); setErr(null); setProgressErr(null);
+    if (!id) return () => { live = false; };
+    fetchDomainCard(spec.domain_id, id)
+      .then((d) => { if (live) setDetail(d); })
+      .catch((e) => { if (live) setErr((e as Error).message); });
+    fetchDomainCardProgress(spec.domain_id, id)
+      .then((d) => { if (live) setProgress(d); })
+      .catch((e) => { if (live) setProgressErr((e as Error).message); });
+    return () => { live = false; };
+  }, [spec.domain_id, id]);
+
+  const activeCard = detail?.card ?? card;
+  const fields = detail?.drawer_fields ?? spec.drawer_fields;
+  const verbs = (actions?.allowed_actions ?? []).filter((v) => !WALL_VERBS.has(v));
+  const title = domainTitle(activeCard, spec);
+  async function run(action: string) {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await postAction(action, domainActionParams(action, title));
+      setMsg(r.result);
+      onChanged();
+    } catch (e) { setMsg("ERR " + (e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <DrawerShell title={title || id || spec.title} onClose={onClose}>
+      {err && <div className="error">ERR {err}</div>}
+      {spec.card_component === "linkedin_post" && (
+        <>
+          <div className="drawer-toggle">
+            <button className={`tab ${!mobile ? "tab-on" : ""}`} onClick={() => setMobile(false)}>desktop</button>
+            <button className={`tab ${mobile ? "tab-on" : ""}`} onClick={() => setMobile(true)}>mobile</button>
+          </div>
+          <LinkedInPreview card={activeCard} mobile={mobile} />
+        </>
+      )}
+      {moveTargets.length > 0 && (
+        <div className="actions drawer-move">
+          <select className="select" value="" disabled={busy}
+            aria-label={`Move ${title} to lane`}
+            onChange={(e) => {
+              const target = e.target.value;
+              if (target) onMove?.(target);
+            }}>
+            <option value="">Move to...</option>
+            {moveTargets.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+      )}
+      <div className="domain-drawer-fields">
+        {fields.map((f) => (
+          <div className="domain-field" key={f.name}>
+            <div className="domain-field-label">{f.label}</div>
+            <div className="domain-field-value"><FieldValue field={f} value={activeCard[f.name]} /></div>
+          </div>
+        ))}
+      </div>
+      {progress && <DomainProgressPanel progress={progress} onOpenChat={onOpenChat}
+        onOpenPacket={onOpenPacket}
+        onProgressChanged={(p) => { setProgress(p); onChanged(); }} />}
+      {progressErr && <div className="error">progress: {progressErr}</div>}
+      {verbs.length > 0 && (
+        <>
+          <h3>Actions</h3>
+          <div className="actions">
+            {verbs.map((verb) => actions?.dispatch_enabled ? (
+              <button className="actbtn" key={verb} disabled={busy}
+                onClick={() => run(verb)}>{verb.replace(/_/g, " ")}</button>
+            ) : (
+              <button className="actbtn" key={verb} disabled title="read-only deployment">
+                {verb.replace(/_/g, " ")}
+              </button>
+            ))}
+            {msg && <div className="actmsg">{msg}</div>}
+          </div>
+        </>
+      )}
+    </DrawerShell>
+  );
+}
+function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenChat }: {
+  refreshKey: string;
+  activeDomain: string;
+  onActiveDomainChange: (domainId: string) => void;
+  onOpenChat?: (prompt: string, conversationId?: string) => void;
+}) {
+  const [domains, setDomains] = useState<DomainSpec[]>([]);
+  const [cards, setCards] = useState<Record<string, DomainCards>>({});
+  const [actions, setActions] = useState<Record<string, DomainActions>>({});
+  const [domainErrs, setDomainErrs] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [qByDomain, setQByDomain] = useState<Record<string, string>>({});
+  const [statusByDomain, setStatusByDomain] = useState<Record<string, string>>({});
+  const [automationByDomain, setAutomationByDomain] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<{ spec: DomainSpec; card: DomainCard } | null>(null);
+  const [dragged, setDragged] = useState<{ spec: DomainSpec; card: DomainCard } | null>(null);
+  const [overCol, setOverCol] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [showJobPresets, setShowJobPresets] = useState(false);
+  const [jobBoardMode, setJobBoardMode] = useState<JobBoardMode>("manual");
+  const [packetFor, setPacketFor] = useState<{ spec: DomainSpec; card: DomainCard } | null>(null);
+  const topScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const boardScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const body = await fetchDomains();
+      setDomains(body.domains);
+      const cardPairs = await Promise.all(body.domains.map(async (d) => {
+        try { return [d.domain_id, await fetchDomainCards(d.domain_id), ""] as const; }
+        catch (e) { return [d.domain_id, null, (e as Error).message] as const; }
+      }));
+      const actionPairs = await Promise.all(body.domains.map(async (d) => {
+        try { return [d.domain_id, await fetchDomainActions(d.domain_id)] as const; }
+        catch { return [d.domain_id, { domain_id: d.domain_id, allowed_actions: [], dispatch_enabled: false }] as const; }
+      }));
+      setCards(Object.fromEntries(cardPairs.filter(([, pack]) => pack).map(([id, pack]) => [id, pack as DomainCards])));
+      setActions(Object.fromEntries(actionPairs));
+      setDomainErrs(Object.fromEntries(cardPairs.filter(([, , err]) => err).map(([id, , err]) => [id, err])));
+    } catch (e) {
+      setDomainErrs({ _registry: (e as Error).message });
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  if (loading && domains.length === 0) return <div className="loading">...</div>;
+  if (domainErrs._registry) return <div className="error">ERR {domainErrs._registry}</div>;
+  const spec = domains.find((d) => d.domain_id === activeDomain) ?? domains[0];
+  if (!spec) return <div className="empty">No domain registry entries.</div>;
+  const pack = cards[spec.domain_id];
+  const q = qByDomain[spec.domain_id] ?? "";
+  const status = statusByDomain[spec.domain_id] ?? "";
+  const automationClass = automationByDomain[spec.domain_id] ?? "";
+  const allCards = pack?.cards ?? [];
+  const isJobDomain = spec.domain_id === "job_application";
+  const statuses = Array.from(new Set(allCards.map((c) => valText(c.status)).filter(Boolean))).sort();
+  const automationValues = isJobDomain
+    ? Array.from(new Set(allCards.map((c) => valText(c.automation_class)).filter(Boolean))).sort()
+    : [];
+  const baseShown = allCards.filter((c) => cardMatchesDomain(c, q, status));
+  const shown = baseShown.filter((c) =>
+    !automationClass || valText(c.automation_class) === automationClass);
+  const jobQueueSummary = isJobDomain
+    ? ["bot_possible", "manual_required", "prepare_only"].map((value) => {
+      const matching = allCards.filter((c) => valText(c.automation_class) === value);
+      return {
+        value,
+        total: matching.length,
+        suggested: matching.filter((c) => valText(c.status) === "Suggested Jobs").length,
+        needsGeoff: matching.filter((c) => valText(c.status) === "Needs Geoff").length,
+      };
+    }).filter((row) => row.total > 0)
+    : [];
+  const configuredColumns = pack?.columns?.length ? pack.columns : spec.columns ?? [];
+  const columnNames = [
+    ...configuredColumns,
+    ...statuses.filter((s) => !configuredColumns.includes(s)),
+  ];
+  const sectionCards = (classes: string[]) =>
+    baseShown.filter((c) => classes.includes(valText(c.automation_class)));
+  const jobSections = isJobDomain
+    ? jobBoardMode === "bot"
+      ? [{
+        key: "bot",
+        title: "Bot Board",
+        hint: "Use this for jobs that can be prepared automatically. Take over in Needs Geoff to review, submit, and move to Completed.",
+        cards: sectionCards(["bot_possible"]),
+      }]
+      : jobBoardMode === "manual"
+      ? [{
+        key: "manual",
+        title: "Manual Board",
+        hint: "Use this for jobs where the system found manual questions, portal blockers, or unclear workflows.",
+        cards: sectionCards(["manual_required", "prepare_only"]),
+      }]
+      : [{
+        key: "all",
+        title: "All Jobs",
+        hint: "Full pipeline view across every automation class.",
+        cards: shown,
+      }]
+    : [{
+      key: spec.domain_id,
+      title: spec.title,
+      hint: "",
+      cards: shown,
+    }];
+  const activeSections = jobSections.filter((section) => section.cards.length > 0);
+  const visibleCards = jobSections.reduce((n, section) => n + section.cards.length, 0);
+  const hasUnstaged = jobSections.some((section) => section.cards.some((c) => !valText(c.status)));
+  const boardColumns = hasUnstaged ? [...columnNames, "Unstaged"] : columnNames;
+  const cardsForColumn = (cardsInSection: DomainCard[], name: string) => cardsInSection.filter((card) => {
+    const cardStatus = valText(card.status);
+    return name === "Unstaged" ? !cardStatus : cardStatus === name;
+  });
+  const domainActions = actions[spec.domain_id];
+  const canMove = pack?.origin === "board_store" && !!domainActions?.dispatch_enabled;
+  const writeBlockers = domainActions?.write_blockers ?? [];
+  const moveHint = pack?.origin !== "board_store"
+    ? "fixture and ledger domains are read-only"
+    : writeBlockers.length
+      ? `write blocked: ${writeBlockers[0]}`
+      : domainActions?.dispatch_enabled
+      ? "drag cards between configured lanes, or use Move to on mobile"
+      : "dragging needs console mode: set KANBAN_UI_CHAT_ENABLED=1";
+  const moveTargetsFor = (card: DomainCard) =>
+    canMove
+      ? boardColumns.filter((name) => name !== "Unstaged" && name !== valText(card.status))
+      : [];
+  function syncKanbanScroll(key: string, source: "top" | "board", left: number) {
+    const target = source === "top" ? boardScrollRefs.current[key] : topScrollRefs.current[key];
+    if (target && Math.abs(target.scrollLeft - left) > 1) target.scrollLeft = left;
+  }
+  function kanbanScrollWidth(columns: string[]) {
+    return Math.max(320, columns.length * 322);
+  }
+  async function moveDomainCardTo(card: DomainCard, statusName: string) {
+    if (!card || !canMove || statusName === "Unstaged") return;
+    const id = cardId(card);
+    setToast(null);
+    try {
+      const result = await moveDomainCard(spec.domain_id, id, statusName);
+      const sideEffect = result.side_effect;
+      const actualStatus = valText(result.card?.status) || statusName;
+      const processed = sideEffect?.operation === "process_selected"
+        ? Number(sideEffect.selected_count ?? 0)
+        : 0;
+      setToast(processed > 0
+        ? `${result.card_id} -> ${actualStatus}; prepared ${processed} application packet${processed === 1 ? "" : "s"}`
+        : `${result.card_id} -> ${actualStatus}`);
+      await load();
+    } catch (e) { setToast("ERR " + (e as Error).message); }
+  }
+  async function drop(statusName: string) {
+    const card = dragged?.card;
+    setOverCol(null); setDragged(null);
+    if (!card) return;
+    await moveDomainCardTo(card, statusName);
+  }
+
+  return (
+    <>
+      <HorizontalScroller className="domain-tabs">
+        {domains.map((d) => (
+          <button key={d.domain_id} className={`tab ${d.domain_id === spec.domain_id ? "tab-on" : ""}`}
+            onClick={() => onActiveDomainChange(d.domain_id)}>
+            {d.title}<span className="tab-count">{cards[d.domain_id]?.cards.length ?? 0}</span>
+          </button>
+        ))}
+      </HorizontalScroller>
+      <div className="domain-head">
+        <div>
+          <h2>{spec.title}</h2>
+          <div className="muted small">{visibleCards} of {allCards.length} cards · {spec.card_component}</div>
+          <div className="muted small">{moveHint}</div>
+        </div>
+        {isJobDomain && (
+          <button className="actbtn" onClick={() => setShowJobPresets(true)}>
+            Job presets
+          </button>
+        )}
+        {pack?.origin === "fixtures" && <span className="demo-badge">demo data</span>}
+        {pack?.origin === "board_store" && <span className="live-badge">board store</span>}
+        {pack?.origin === "ledger" && <span className="live-badge">ledger</span>}
+      </div>
+      {isJobDomain && (
+        <HorizontalScroller className="job-board-controls" ariaLabel="Job board mode">
+          {([
+            ["manual", "Manual Board"],
+            ["bot", "Bot Board"],
+            ["all", "All Jobs"],
+          ] as [JobBoardMode, string][]).map(([mode, label]) => (
+            <button key={mode}
+              className={`tab ${jobBoardMode === mode ? "tab-on" : ""}`}
+              onClick={() => {
+                setJobBoardMode(mode);
+                if (mode !== "all") {
+                  setAutomationByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
+                }
+              }}>
+              {label}
+            </button>
+          ))}
+        </HorizontalScroller>
+      )}
+      {jobQueueSummary.length > 0 && (
+        <div className="job-queue-summary" aria-label="Job automation queues">
+          {jobQueueSummary.map((row) => (
+            <button key={row.value}
+              className={`queue-chip ${
+                (row.value === "bot_possible" && jobBoardMode === "bot")
+                || (row.value !== "bot_possible" && jobBoardMode === "manual")
+                  ? "queue-chip-on" : ""}`}
+              onClick={() => {
+                setJobBoardMode(row.value === "bot_possible" ? "bot" : "manual");
+                setAutomationByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
+              }}>
+              <b>{titleToken(row.value)}</b>
+              <span>{row.total} total</span>
+              <span>{row.suggested} suggested</span>
+              <span>{row.needsGeoff} needs Geoff</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {isJobDomain && (
+        <div className="job-workflow-help">
+          <div>
+            <b>Needs Geoff</b>
+            <span>Prepared packet is ready. Take over here, review materials, submit if right, then move to Completed.</span>
+          </div>
+          <div>
+            <b>Bot Board</b>
+            <span>Bot handles ranking and packet prep. Geoff handles final submit until a governed submit path is built.</span>
+          </div>
+          <div>
+            <b>Manual Board</b>
+            <span>Use this when self-ID, authorization, portal, salary, or unclear workflow questions require manual answers.</span>
+          </div>
+        </div>
+      )}
+      {toast && <div className={toast.startsWith("ERR") ? "error" : "actmsg"}>{toast}</div>}
+      <div className="filterbar">
+        <input className="search" placeholder="filter domain..." value={q}
+          onChange={(e) => setQByDomain((m) => ({ ...m, [spec.domain_id]: e.target.value }))} />
+        <select className="select" value={status}
+          onChange={(e) => setStatusByDomain((m) => ({ ...m, [spec.domain_id]: e.target.value }))}>
+          <option value="">any status</option>
+          {statuses.map((s) => <option key={s}>{s}</option>)}
+        </select>
+        {automationValues.length > 0 && jobBoardMode === "all" && (
+          <select className="select" value={automationClass}
+            aria-label="Filter jobs by automation class"
+            onChange={(e) => setAutomationByDomain((m) => ({ ...m, [spec.domain_id]: e.target.value }))}>
+            <option value="">any automation</option>
+            {automationValues.map((value) => <option key={value} value={value}>{titleToken(value)}</option>)}
+          </select>
+        )}
+        {(q || status || automationClass || (isJobDomain && jobBoardMode !== "manual")) && (
+          <button className="clear" onClick={() => {
+            setQByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
+            setStatusByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
+            setAutomationByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
+            setJobBoardMode("manual");
+          }}>clear</button>
+        )}
+      </div>
+      {domainErrs[spec.domain_id] ? <div className="error">ERR {domainErrs[spec.domain_id]}</div>
+        : visibleCards === 0 ? <DomainEmpty spec={spec} />
+        : boardColumns.length > 0 ? (
+          <div className="domain-board-stack">
+            {activeSections.map((section) => {
+              const boardKey = `${spec.domain_id}-${section.key}`;
+              return (
+                <section className="domain-board-section" key={section.key}>
+                  {isJobDomain && (
+                    <div className="domain-board-section-head">
+                      <div>
+                        <h3>{section.title}</h3>
+                        <p>{section.hint}</p>
+                      </div>
+                      <span>{section.cards.length} cards</span>
+                    </div>
+                  )}
+                  <div className="domain-top-scroll"
+                    aria-label={`${section.title} lane scroll`}
+                    ref={(el) => { topScrollRefs.current[boardKey] = el; }}
+                    onScroll={(e) => syncKanbanScroll(boardKey, "top", e.currentTarget.scrollLeft)}>
+                    <div style={{ width: `${kanbanScrollWidth(boardColumns)}px` }} />
+                  </div>
+                  <div className="domain-kanban"
+                    ref={(el) => { boardScrollRefs.current[boardKey] = el; }}
+                    onScroll={(e) => syncKanbanScroll(boardKey, "board", e.currentTarget.scrollLeft)}>
+                    {boardColumns.map((name) => {
+                      const colCards = cardsForColumn(section.cards, name);
+                      return (
+                        <div className={`domain-column ${overCol === name ? "col-over" : ""}`} key={name}
+                          onDragOver={(e) => {
+                            if (canMove && dragged && name !== "Unstaged") {
+                              e.preventDefault(); setOverCol(name);
+                            }
+                          }}
+                          onDragLeave={() => setOverCol((cur) => (cur === name ? null : cur))}
+                          onDrop={() => drop(name)}>
+                          <div className="domain-column-head">
+                            <span className={`dot status-${statusToken(name)}`} />{name}
+                            <span className="count">{colCards.length}</span>
+                          </div>
+                          <div className="domain-column-body">
+                            {colCards.map((card) => (
+                              <DomainCardTile key={cardId(card)} spec={spec} card={card}
+                                canDrag={canMove} onDragStart={() => setDragged({ spec, card })}
+                                moveTargets={moveTargetsFor(card)}
+                                onMove={(target) => void moveDomainCardTo(card, target)}
+                                onOpen={() => setSelected({ spec, card })} />
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )
+        : (
+          <div className="domain-grid">
+            {shown.map((card) => (
+              <DomainCardTile key={cardId(card)} spec={spec} card={card}
+                canDrag={canMove} onDragStart={() => setDragged({ spec, card })}
+                moveTargets={moveTargetsFor(card)}
+                onMove={(target) => void moveDomainCardTo(card, target)}
+                onOpen={() => setSelected({ spec, card })} />
+            ))}
+          </div>
+        )}
+      {selected && (
+        <DomainDrawer spec={selected.spec} card={selected.card}
+          actions={actions[selected.spec.domain_id]}
+          moveTargets={selected.spec.domain_id === spec.domain_id ? moveTargetsFor(selected.card) : []}
+          onMove={(target) => void moveDomainCardTo(selected.card, target)}
+          onChanged={load}
+          onClose={() => setSelected(null)} onOpenChat={onOpenChat}
+          onOpenPacket={selected.spec.domain_id === "job_application"
+            ? () => setPacketFor(selected)
+            : undefined} />
+      )}
+      {packetFor && (
+        <PacketReviewModal spec={packetFor.spec} card={packetFor.card}
+          onChanged={load} onClose={() => setPacketFor(null)} />
+      )}
+      {showJobPresets && <JobPresetDrawer onClose={() => setShowJobPresets(false)} />}
     </>
   );
 }
@@ -496,6 +2406,94 @@ function DrawerShell({ title, onClose, children }: {
 }
 
 // ---- chat (the console as a channel) --------------------------------------
+type ExternalChat = NonNullable<ChatRuntime["external_chats"]>[number];
+type ChatThread = {
+  id: string;
+  title: string;
+  updatedAt: string;
+  target?: string;
+  lastPrompt?: string;
+};
+const CHAT_THREADS_KEY = "agent-kanban-cockpit.chatThreads.v1";
+
+function loadChatThreads(): ChatThread[] {
+  try {
+    const raw = window.localStorage.getItem(CHAT_THREADS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((t) => t && typeof t.id === "string" && typeof t.title === "string")
+      .slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+function saveChatThreads(threads: ChatThread[]) {
+  try { window.localStorage.setItem(CHAT_THREADS_KEY, JSON.stringify(threads.slice(0, 12))); }
+  catch { /* browser storage can be unavailable in private modes */ }
+}
+
+function chatTitle(text: string) {
+  const trimmed = text.replace(/\s+/g, " ").trim();
+  if (!trimmed) return "Cockpit chat";
+  return trimmed.length > 54 ? `${trimmed.slice(0, 51)}...` : trimmed;
+}
+
+function upsertChatThread(threads: ChatThread[], next: ChatThread) {
+  return [next, ...threads.filter((t) => t.id !== next.id)].slice(0, 12);
+}
+
+function mergeChatThreads(...groups: ChatThread[][]) {
+  const merged = new Map<string, ChatThread>();
+  groups.flat().forEach((thread) => {
+    if (!thread.id) return;
+    const prev = merged.get(thread.id);
+    if (!prev || thread.updatedAt > prev.updatedAt) merged.set(thread.id, thread);
+  });
+  return [...merged.values()]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 12);
+}
+
+function serverThreadToLocal(thread: {
+  conversation_id?: string; id?: string; title: string; updated_at: string;
+  target?: string; last_prompt?: string; model?: string;
+}): ChatThread {
+  return {
+    id: thread.conversation_id || thread.id || "app",
+    title: thread.title,
+    updatedAt: thread.updated_at,
+    target: thread.target || "GatewayCore",
+    lastPrompt: thread.last_prompt,
+  };
+}
+
+function newConversationId() {
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+  return `cockpit-${stamp}`;
+}
+
+function fmtThreadTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function externalChatHref(chat: ExternalChat, handoffText: string) {
+  if (!chat.active || !chat.url) return null;
+  const prompt = handoffText.trim();
+  if (!prompt) return chat.url;
+  try {
+    const url = new URL(chat.url, window.location.href);
+    url.searchParams.set("q", prompt);
+    return url.toString();
+  } catch {
+    const sep = chat.url.includes("?") ? "&" : "?";
+    return `${chat.url}${sep}q=${encodeURIComponent(prompt)}`;
+  }
+}
+
 function ChatLine({ ev }: { ev: ChatEvent }) {
   switch (ev.type) {
     case "you": return <div className="cl you">{String(ev.content)}</div>;
@@ -514,22 +2512,194 @@ function ChatLine({ ev }: { ev: ChatEvent }) {
   }
 }
 
-function ChatView({ roles }: { roles: string[] }) {
+function ChatRuntimePanel({ runtime, handoffText = "" }: { runtime: ChatRuntime | null; handoffText?: string }) {
+  if (!runtime) return <div className="loading">loading chat runtime...</div>;
+  const candidates = runtime.chat_role?.candidates ?? [];
+  const externalChats = runtime.external_chats ?? [
+    {
+      name: "ORCA", active: runtime.uses_orca, url: null, env_var: "ORCA_CHAT_URL",
+      reason: "not configured", kind: "document visual QA specialist",
+      best_for: "PDFs, resumes, application packets, screenshots, tables, and forms.",
+      recommendation: "Best first pilot for document-heavy job materials.",
+    },
+    {
+      name: "OmniAgent / Omnigent", active: runtime.uses_omnigent, url: null,
+      env_var: "OMNIGENT_CHAT_URL or OMNIAGENT_CHAT_URL", reason: "not configured",
+      kind: "omni-modal active perception specialist",
+      best_for: "Video, audio/video evidence, screen recordings, and long multimodal review.",
+      recommendation: "Useful later; not the first cockpit runtime replacement.",
+    },
+  ];
+  return (
+    <div className="chat-runtime">
+      <div className="metric diag-card">
+        <div className="diag-head">Chat Runtime</div>
+        <div className="diag-row"><span>harness</span><code>{runtime.harness}</code></div>
+        <div className="diag-row"><span>gateway</span><code>{runtime.model_gateway}</code></div>
+        <div className="diag-row"><span>surface</span><code>{runtime.transport_surface}</code></div>
+        <div className="diag-row"><span>stream</span><code>{runtime.stream_endpoint}</code></div>
+        <p className="muted small">{runtime.specialist_recommendation ?? runtime.external_harness_note}</p>
+      </div>
+      <div className="metric diag-card">
+        <div className="diag-head">Models + Executors</div>
+        <div className="domain-badges">
+          {candidates.map((c) => <Badge key={c.alias} value={`${c.alias}: ${c.model}`} />)}
+        </div>
+        <div className="domain-badges">
+          {runtime.executors.map((e) => <Badge key={e.name} value={`${e.name} #${e.priority}`} />)}
+        </div>
+        <p className="muted small">{runtime.external_harness_note}</p>
+      </div>
+      <div className="metric diag-card chat-specialists">
+        <div className="diag-head">Chat Specialists</div>
+        <div className="specialist-list">
+          {externalChats.map((chat) => {
+            const href = externalChatHref(chat, handoffText);
+            return (
+              <div className="specialist-card" key={chat.name}>
+                <div className="specialist-head">
+                  <div>
+                    <b>{chat.name}</b>
+                    <span>{chat.kind ?? "external specialist"}</span>
+                  </div>
+                  <span className={`status-pill ${chat.active ? "pill-run" : "pill-warn"}`}>
+                    {chat.active ? "linked" : "not linked"}
+                  </span>
+                </div>
+                <p>{chat.best_for}</p>
+                <div className="muted small">{chat.recommendation}</div>
+                <div className="specialist-actions">
+                  {href ? (
+                    <a className="actbtn specialist-open" href={href} target="_blank" rel="noreferrer">
+                      open
+                    </a>
+                  ) : (
+                    <span className="status-pill pill-warn" title={chat.env_var}>{chat.env_var}</span>
+                  )}
+                  {chat.source_url && (
+                    <a className="clear specialist-source" href={chat.source_url} target="_blank" rel="noreferrer">
+                      source
+                    </a>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatView({ roles, runtime, draft }: {
+  roles: string[];
+  runtime: ChatRuntime | null;
+  draft?: { text: string; nonce: number; conversationId?: string } | null;
+}) {
   const [model, setModel] = useState(roles.includes("chat") ? "chat" : roles[0] ?? "");
+  const [conversationId, setConversationId] = useState("app");
   const [input, setInput] = useState("");
   const [events, setEvents] = useState<ChatEvent[]>([]);
+  const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads());
   const [busy, setBusy] = useState(false);
   const endRef = useRef<HTMLDivElement | null>(null);
+  const activeThread = threads.find((t) => t.id === conversationId);
+  const handoffText = input.trim() || activeThread?.lastPrompt || `Open cockpit conversation ${conversationId}`;
   useEffect(() => { endRef.current?.scrollIntoView(); }, [events]);
+  useEffect(() => {
+    if (!roles.length) return;
+    setModel((current) => (
+      roles.includes(current) ? current : roles.includes("chat") ? "chat" : roles[0]
+    ));
+  }, [roles]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchChatThreads()
+      .then((body) => {
+        if (cancelled) return;
+        const serverThreads = body.threads.map(serverThreadToLocal);
+        setThreads((current) => {
+          const next = mergeChatThreads(serverThreads, current);
+          saveChatThreads(next);
+          return next;
+        });
+      })
+      .catch(() => { /* localStorage remains the fallback cache */ });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (draft?.text) setInput(draft.text);
+    if (draft?.conversationId) setConversationId(draft.conversationId);
+  }, [draft?.conversationId, draft?.nonce, draft?.text]);
+
+  function persistThread(thread: ChatThread, modelRole = model) {
+    void saveChatThread({
+      conversation_id: thread.id,
+      title: thread.title,
+      target: thread.target,
+      last_prompt: thread.lastPrompt,
+      model: modelRole,
+    })
+      .then((body) => {
+        const serverThreads = body.threads.map(serverThreadToLocal);
+        setThreads((current) => {
+          const next = mergeChatThreads(serverThreads, current);
+          saveChatThreads(next);
+          return next;
+        });
+      })
+      .catch(() => { /* server thread sync is best-effort; chat still works */ });
+  }
+
+  function rememberThread(id: string, text: string, target = "GatewayCore") {
+    const thread = {
+      id,
+      title: chatTitle(text),
+      updatedAt: new Date().toISOString(),
+      target,
+      lastPrompt: text,
+    };
+    setThreads((current) => {
+      const next = upsertChatThread(current, thread);
+      saveChatThreads(next);
+      return next;
+    });
+    persistThread(thread);
+  }
+
+  function startNewChat() {
+    const id = newConversationId();
+    setConversationId(id);
+    setInput("");
+    setEvents([]);
+    const thread = {
+      id,
+      title: "New cockpit chat",
+      updatedAt: new Date().toISOString(),
+      target: "GatewayCore",
+    };
+    setThreads((current) => {
+      const next = upsertChatThread(current, thread);
+      saveChatThreads(next);
+      return next;
+    });
+    persistThread(thread);
+  }
+
+  function openThread(thread: ChatThread) {
+    setConversationId(thread.id);
+    if (thread.lastPrompt) setInput(thread.lastPrompt);
+  }
 
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
     setEvents((e) => [...e, { type: "you", content: text }]);
+    rememberThread(conversationId, text);
     setBusy(true);
     try {
-      await streamChat({ text, model, conversation_id: "app" },
+      await streamChat({ text, model, conversation_id: conversationId },
         (ev) => setEvents((e) => [...e, ev]));
     } catch (e) {
       setEvents((ev) => [...ev, { type: "error", message: (e as Error).message }]);
@@ -538,26 +2708,52 @@ function ChatView({ roles }: { roles: string[] }) {
 
   return (
     <div className="chat">
-      <div className="chat-bar">
-        <span className="muted small">model</span>
-        <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
-          {roles.map((r) => <option key={r}>{r}</option>)}
-        </select>
-        <span className="muted small">the agent moves/assigns via governed verbs — Approved stays human-only</span>
-        {events.length > 0 && (
-          <button className="clear" onClick={() => setEvents([])}>clear</button>
-        )}
-      </div>
-      <div className="chat-log">
-        {events.length === 0 && <div className="muted">Ask the agent to do something — e.g. "stage the odds_promote card", "what's blocked?", "archive the oldest paper".</div>}
-        {events.map((ev, i) => <ChatLine key={i} ev={ev} />)}
-        <div ref={endRef} />
-      </div>
-      <div className="chat-input">
-        <input value={input} placeholder="ask the agent…" autoFocus
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
-        <button onClick={send} disabled={busy}>{busy ? "…" : "send"}</button>
+      <div className="chat-layout">
+        <section className="chat-workspace">
+          <div className="chat-bar">
+            <span className="muted small">model</span>
+            <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
+              {roles.map((r) => <option key={r}>{r}</option>)}
+            </select>
+            <span className="muted small">thread <code>{conversationId}</code></span>
+            <span className="muted small">the agent moves/assigns via governed verbs — Approved stays human-only</span>
+            <button className="clear" onClick={startNewChat}>new chat</button>
+            {events.length > 0 && (
+              <button className="clear" onClick={() => setEvents([])}>clear</button>
+            )}
+          </div>
+          <div className="chat-threads">
+            <div className="muted small">recent chats</div>
+            <HorizontalScroller className="thread-strip" ariaLabel="Recent cockpit chats">
+              {threads.length === 0 && (
+                <button className="thread-chip thread-empty" disabled>No recent cockpit chats</button>
+              )}
+              {threads.map((thread) => (
+                <button
+                  className={`thread-chip ${thread.id === conversationId ? "thread-on" : ""}`}
+                  key={thread.id}
+                  onClick={() => openThread(thread)}>
+                  <span>{thread.title}</span>
+                  <small>{thread.target ?? "GatewayCore"} {fmtThreadTime(thread.updatedAt)}</small>
+                </button>
+              ))}
+            </HorizontalScroller>
+          </div>
+          <div className="chat-log">
+            {events.length === 0 && <div className="muted">Ask the agent to do something — e.g. "stage the odds_promote card", "what's blocked?", "archive the oldest paper".</div>}
+            {events.map((ev, i) => <ChatLine key={i} ev={ev} />)}
+            <div ref={endRef} />
+          </div>
+          <div className="chat-input">
+            <input value={input} placeholder="ask the agent…"
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+            <button onClick={send} disabled={busy}>{busy ? "…" : "send"}</button>
+          </div>
+        </section>
+        <aside className="chat-runtime-wrap">
+          <ChatRuntimePanel runtime={runtime} handoffText={handoffText} />
+        </aside>
       </div>
     </div>
   );
@@ -565,7 +2761,7 @@ function ChatView({ roles }: { roles: string[] }) {
 
 // ---- app ------------------------------------------------------------------
 export function App() {
-  const [view, setView] = useState<View>("missions");
+  const [view, setView] = useState<View>(() => initialViewFromUrl());
   const [board, setBoard] = useState<BoardData | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [boards, setBoards] = useState<BoardSnapshot | null>(null);
@@ -575,11 +2771,17 @@ export function App() {
   const [lanesNote, setLanesNote] = useState<string | null>(null);
   const [cfg, setCfg] = useState<UIConfig | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
+  const [runtimeDebug, setRuntimeDebug] = useState<RuntimeDebug | null>(null);
+  const [chatRuntime, setChatRuntime] = useState<ChatRuntime | null>(null);
+  const [chatDraft, setChatDraft] =
+    useState<{ text: string; nonce: number; conversationId?: string } | null>(null);
+  const [domainNav, setDomainNav] = useState<DomainNavItem[]>([]);
+  const [activeDomain, setActiveDomain] = useState(() => initialDomainFromUrl());
   const [updated, setUpdated] = useState<string>("");
   const [selMission, setSelMission] = useState<string | null>(null);
   const [selCard, setSelCard] =
     useState<{ board: string; card: BoardCard; statuses: string[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [surfaceErrors, setSurfaceErrors] = useState<Record<string, string>>({});
   const chatRef = useRef(false);   // so reloadBoards can pick live vs snapshot
 
   // Console: read boards LIVE from AppFlowy (a write reflects at once); read-only:
@@ -591,19 +2793,56 @@ export function App() {
     } catch (e) { setBoards(null); setBoardsNote((e as Error).message); }
   }, []);
 
-  const refresh = useCallback(async () => {
+  const reloadDomainNav = useCallback(async () => {
     try {
-      const [b, m, act] = await Promise.all([fetchMissions(), fetchMetrics(), fetchActivity()]);
-      setBoard(b); setMetrics(m); setActivity(act); setError(null);
-    } catch (e) { setError((e as Error).message); }
+      const body = await fetchDomains();
+      const items = await Promise.all(body.domains.map(async (domain) => {
+        try {
+          const pack = await fetchDomainCards(domain.domain_id);
+          return {
+            id: domain.domain_id,
+            title: domain.title,
+            count: pack.cards.length,
+            origin: pack.origin,
+          } satisfies DomainNavItem;
+        } catch (e) {
+          return {
+            id: domain.domain_id,
+            title: domain.title,
+            count: 0,
+            error: (e as Error).message,
+          } satisfies DomainNavItem;
+        }
+      }));
+      setDomainNav(items);
+      if (items.length && !items.some((item) => item.id === activeDomain)) {
+        setActiveDomain(items[0].id);
+      }
+    } catch {
+      setDomainNav([]);
+    }
+  }, [activeDomain]);
+
+  const refresh = useCallback(async () => {
+    const errs: Record<string, string> = {};
+    try { setBoard(await fetchMissions()); }
+    catch (e) { setBoard(null); errs.missions = (e as Error).message; }
+    try { setMetrics(await fetchMetrics()); }
+    catch (e) { setMetrics(null); errs.observability = (e as Error).message; }
+    try { setActivity(await fetchActivity()); }
+    catch (e) { setActivity(null); errs.activity = (e as Error).message; }
+    setSurfaceErrors(errs);
     await reloadBoards();
+    await reloadDomainNav();
     try { setLanes(await fetchModels()); setLanesNote(null); }
     catch (e) { setLanes(null); setLanesNote((e as Error).message); }
     // status drives the topbar dots; if the probe endpoint itself is unreachable,
     // clear the dots (their absence is the signal) rather than show stale health.
     try { setStatus(await fetchStatus()); } catch { setStatus(null); }
+    try { setRuntimeDebug(await fetchRuntimeDebug()); } catch { setRuntimeDebug(null); }
+    try { setChatRuntime(await fetchChatRuntime()); } catch { setChatRuntime(null); }
     setUpdated(new Date().toLocaleTimeString());
-  }, [reloadBoards]);
+  }, [reloadBoards, reloadDomainNav]);
 
   useEffect(() => {
     fetchConfig().then((c) => { setCfg(c); chatRef.current = !!c.chat_enabled; })
@@ -622,11 +2861,18 @@ export function App() {
   }, []);
 
   const chatOn = !!cfg?.chat_enabled;
-  const nav = chatOn ? [...NAV, { id: "chat" as View, label: "Chat" }] : NAV;
+  const openChatWithPrompt = useCallback((prompt: string, conversationId?: string) => {
+    setChatDraft({ text: prompt, conversationId, nonce: Date.now() });
+    setView("chat");
+  }, []);
+  const nav = [...NAV, { id: "chat" as View, label: "Chat" }];
+  const domainNavCount = domainNav.reduce((total, item) => total + item.count, 0);
   const counts: Partial<Record<View, number>> = {
-    missions: board?.total, boards: boards?.boards.length,
     router: lanes?.roles.length, activity: activity?.calls.length,
   };
+  if (domainNavCount > 0) counts.domains = domainNavCount;
+  const surfaceFailureCount = Object.keys(surfaceErrors).length +
+    (boardsNote ? 1 : 0) + (lanesNote ? 1 : 0);
 
   return (
     <div className="shell">
@@ -641,13 +2887,27 @@ export function App() {
             </button>
           ))}
         </nav>
+        {domainNav.length > 0 && (
+          <div className="domain-nav-section">
+            <div className="nav-section-label">Boards</div>
+            {domainNav.filter((item) => item.id !== "mission").map((item) => (
+              <button key={item.id}
+                className={`navitem nav-subitem ${view === "domains" && activeDomain === item.id ? "nav-on" : ""}`}
+                title={item.error ?? `${item.origin ?? "domain"} source`}
+                onClick={() => { setActiveDomain(item.id); setView("domains"); }}>
+                {item.title}
+                <span className="navcount">{item.error ? "ERR" : item.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="badge">{chatOn ? "console · chat + governed writes" : "read-only · Ledger + log + snapshot"}</div>
       </aside>
       <main className="main">
         <div className="topbar">
           <div className="hops">
             {Object.entries(status?.hops ?? {}).map(([name, state]) => (
-              <span className="hop" key={name} title={state}>
+              <span className="hop" key={name} title={`${state} ${status?.targets?.[name] ?? ""}`.trim()}>
                 <span className={`hopdot ${state === "ok" ? "ok" : "bad"}`} />{name}
               </span>
             ))}
@@ -657,17 +2917,33 @@ export function App() {
             <button className="refresh" onClick={refresh} title="refresh now">↻</button>
           </div>
         </div>
-        {error && <div className="error">⚠ {error}</div>}
+        {surfaceFailureCount > 0 && (
+          <div className="surface-errors">
+            {Object.entries(surfaceErrors).map(([name, msg]) => (
+              <div className="error" key={name}>{name}: {msg}</div>
+            ))}
+            {boardsNote && <div className="error">boards: {boardsNote}</div>}
+            {lanesNote && <div className="error">router: {lanesNote}</div>}
+          </div>
+        )}
         {view === "missions" && (board
           ? <MissionsView data={board} onOpen={setSelMission} />
-          : <div className="loading">…</div>)}
+          : <div className="empty">{surfaceErrors.missions ?? "..."}</div>)}
         {view === "boards" && (boards
           ? <BoardsView snap={boards} canAct={chatOn} onMoved={reloadBoards}
               onOpenCard={(b, c, st) => setSelCard({ board: b, card: c, statuses: st })} />
           : <div className="empty">{boardsNote ?? "…"}</div>)}
+        {view === "domains" && (
+          <DomainsView refreshKey={updated} activeDomain={activeDomain}
+            onActiveDomainChange={setActiveDomain} onOpenChat={openChatWithPrompt} />
+        )}
+        {view === "settings" && <SettingsView status={status} runtime={chatRuntime} />}
         {view === "router" && (lanes
           ? <RouterView lanes={lanes} />
           : <div className="empty">{lanesNote ?? "…"}</div>)}
+        {view === "diagnostics" &&
+          <DiagnosticsView debug={runtimeDebug} surfaceErrors={surfaceErrors}
+            boardsNote={boardsNote} lanesNote={lanesNote} />}
         {view === "observability" && (metrics
           ? <ObservabilityView m={metrics} /> : <div className="loading">…</div>)}
         {view === "activity" && (activity
@@ -675,11 +2951,14 @@ export function App() {
         {/* chat stays MOUNTED so the conversation persists across view switches */}
         {chatOn && (
           <div style={{ display: view === "chat" ? "block" : "none" }}>
-            <ChatView roles={cfg?.model_roles ?? []} />
+            <ChatView roles={cfg?.model_roles ?? []} runtime={chatRuntime} draft={chatDraft} />
           </div>
         )}
         {view === "chat" && !chatOn &&
-          <div className="empty">chat is not enabled in this deployment</div>}
+          <div className="chat">
+            <ChatRuntimePanel runtime={chatRuntime} />
+            <div className="empty">chat is not enabled in this deployment. Set `KANBAN_UI_CHAT_ENABLED=1` to use the streaming GatewayCore chat and governed actions.</div>
+          </div>}
       </main>
       {selMission && (
         <MissionDrawer id={selMission} ledgerUi={cfg?.ledger_ui ?? ""}

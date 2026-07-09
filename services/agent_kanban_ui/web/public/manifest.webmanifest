@@ -1,0 +1,59 @@
+{
+  "name": "Agent Kanban Cockpit",
+  "short_name": "Kanban",
+  "description": "First-party Command Center cockpit for missions, domain boards, jobs, activity, and governed chat.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "orientation": "portrait-primary",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/cockpit-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/cockpit-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/cockpit-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/cockpit-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/cockpit-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Jobs",
+      "short_name": "Jobs",
+      "url": "/?view=domains&domain=job_application",
+      "description": "Open the Jobs domain board"
+    },
+    {
+      "name": "Chat",
+      "short_name": "Chat",
+      "url": "/?view=chat",
+      "description": "Open the governed cockpit chat"
+    }
+  ]
+}

@@ -110,14 +110,376 @@ export interface UIConfig {
 }
 export const fetchConfig = () => getJSON<UIConfig>("/api/config");
 
-export interface Status { hops: Record<string, string>; }
+export interface Status { hops: Record<string, string>; targets?: Record<string, string>; }
 export const fetchStatus = () => getJSON<Status>("/api/status");
 
-export interface ChatEvent { type: string; [k: string]: unknown; }
+export interface RuntimeProbe {
+  ok: boolean;
+  url?: string;
+  status_code?: number;
+  error_type?: string;
+  error?: string;
+}
+export interface RuntimeDns {
+  ok: boolean;
+  host: string;
+  addresses?: string[];
+  error?: string;
+}
+export interface RuntimePath {
+  path: string;
+  exists: boolean;
+  is_file: boolean;
+  is_dir: boolean;
+}
+export interface RuntimeDebug {
+  mode: { chat_enabled: boolean; cwd: string };
+  ledger: {
+    base_url: string;
+    health_url: string;
+    dns: RuntimeDns;
+    health: RuntimeProbe;
+    host_run_hint: string;
+  };
+  paths: Record<string, RuntimePath>;
+}
+export const fetchRuntimeDebug = () => getJSON<RuntimeDebug>("/api/debug/runtime");
 
-async function postJSON<T>(path: string, body: unknown): Promise<T> {
+// Typed domain surfaces (config-driven card grammars — /api/domains et al).
+// `kind` is omitted in the config for plain text fields, so it is optional here
+// and every renderer defaults it to "text".
+export type FieldKind =
+  | "text" | "badge" | "score" | "money" | "url"
+  | "datetime" | "markdown" | "list" | "progress";
+export interface FieldSpec { name: string; label: string; kind?: FieldKind; }
+export interface EmptyState { title?: string; hint?: string; command?: string; }
+export interface DomainSpec {
+  domain_id: string;
+  title: string;
+  card_component: string;   // job_application | linkedin_post | … — open so a
+  source: string;           // new config entry falls back to the generic card
+  board_id?: string;
+  columns?: string[];
+  column_actions?: Record<string, string>;
+  summary_fields: FieldSpec[];
+  drawer_fields: FieldSpec[];
+  allowed_actions: string[];
+  empty_state: EmptyState;
+}
+// Cards are plain objects whose keys match the spec's field names; values are
+// whatever the source stored (string/number/list/null) — coerce, never assume.
+export interface DomainCard {
+  card_id?: string | number | null;
+  status?: string | null;
+  [k: string]: unknown;
+}
+export type DomainOrigin = "fixtures" | "board_store" | "ledger";
+export interface DomainCards {
+  domain_id: string;
+  origin: DomainOrigin;
+  board_id?: string;
+  columns?: string[];
+  cards: DomainCard[];
+  empty_state: EmptyState;
+}
+export interface DomainCardDetail {
+  domain_id: string; card: DomainCard; drawer_fields: FieldSpec[];
+}
+export interface DomainActions {
+  domain_id: string; allowed_actions: string[]; dispatch_enabled: boolean;
+  write_ready?: boolean; write_blockers?: string[];
+}
+export interface DomainMoveResult {
+  status: string;
+  domain_id: string;
+  card_id: string;
+  from_status?: string | null;
+  to_status?: string;
+  card?: DomainCard;
+  event?: Record<string, unknown>;
+  side_effect?: Record<string, unknown> | null;
+}
+export interface DomainProgressStep {
+  id: string;
+  label: string;
+  state: "done" | "current" | "waiting" | string;
+  detail?: string;
+}
+export interface DomainProgressEvent {
+  event_id: string;
+  created_at: string;
+  headline: string;
+  action?: string;
+  status_before?: string | null;
+  status_after?: string | null;
+  actor_type?: string;
+  source_surface?: string;
+}
+export interface DomainCardProgress {
+  domain_id: string;
+  card_id: string;
+  status?: string | null;
+  steps: DomainProgressStep[];
+  events: DomainProgressEvent[];
+  application: Record<string, unknown>;
+  chat_prompt: string;
+}
+export const fetchDomains = () =>
+  getJSON<{ domains: DomainSpec[] }>("/api/domains");
+export interface DomainSchema {
+  schema_version: string;
+  config_path: string;
+  config_writable: boolean;
+  writable: boolean;
+  write_gate: string;
+  domains: DomainSpec[];
+}
+export const fetchDomainSchema = () => getJSON<DomainSchema>("/api/domain-schema");
+export const createDomainSchema = (domain: DomainSpec) =>
+  postJSON<DomainSchema>("/api/domain-schema", domain, "POST");
+export const updateDomainSchema = (domainId: string, domain: DomainSpec) =>
+  postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, domain, "PUT");
+export const deleteDomainSchema = (domainId: string) =>
+  postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, {}, "DELETE");
+export const fetchDomainCards = (id: string) =>
+  getJSON<DomainCards>(`/api/domain/${encodeURIComponent(id)}/cards`);
+export const fetchDomainCard = (id: string, cardId: string) =>
+  getJSON<DomainCardDetail>(
+    `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}`);
+export const fetchDomainCardProgress = (id: string, cardId: string) =>
+  getJSON<DomainCardProgress>(
+    `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/progress`);
+export const fetchDomainActions = (id: string) =>
+  getJSON<DomainActions>(`/api/domain/${encodeURIComponent(id)}/actions`);
+export const moveDomainCard = (id: string, cardId: string, status: string) =>
+  postJSON<DomainMoveResult>(`/api/domain/${encodeURIComponent(id)}/move`, {
+    card_id: cardId, status,
+  });
+export interface DomainNoteResult {
+  status: string;
+  domain_id: string;
+  card_id: string;
+  application_id: string;
+  note: Record<string, unknown>;
+  event?: Record<string, unknown> | null;
+  card: DomainCard;
+  progress: DomainCardProgress;
+}
+export const addDomainCardNote = (
+  id: string, cardId: string, type: string, text: string, source = "cockpit",
+) =>
+  postJSON<DomainNoteResult>(
+    `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/note`,
+    { type, text, source },
+  );
+
+// Application packet review loop (job_application cards): view the generated
+// materials + agent trace, request changes (regenerates via the agent writer),
+// and approve & submit (validation-gated governed Completed move + email record).
+export interface PacketCheck {
+  id: string; label: string; ok: boolean; level: string; detail: string;
+}
+export interface PacketValidation {
+  ok: boolean; errors: string[]; warnings: string[]; checks: PacketCheck[];
+}
+export interface AgentTraceMessage { role: string; content: string; }
+export interface AgentTraceEntry {
+  ts: string; step: string; attempt: number; model: string;
+  base_url?: string;
+  messages?: AgentTraceMessage[];
+  response?: string;
+  ok?: boolean; error?: string;
+  duration_ms?: number;
+  claim_ids?: string[];
+  problems?: string[];
+  usage?: Record<string, unknown> | null;
+}
+export interface EmailConfigStatus {
+  configured: boolean; missing: string[]; to?: string | null;
+}
+export interface JobPacket {
+  domain_id: string;
+  card_id: string;
+  application_id: string;
+  path: string;
+  record: Record<string, unknown>;
+  files: Record<string, string | null>;
+  agent_trace: AgentTraceEntry[];
+  validation: PacketValidation;
+  email: EmailConfigStatus;
+  submission_record?: Record<string, unknown> | null;
+}
+export const fetchJobPacket = (id: string, cardId: string) =>
+  getJSON<JobPacket>(
+    `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/packet`);
+export interface PacketChangesResult {
+  status: string;
+  regenerate_error?: string | null;
+  domain_id: string; card_id: string; application_id: string;
+  packet: JobPacket;
+  progress: DomainCardProgress;
+}
+export const requestPacketChanges = (
+  id: string, cardId: string, notes: string, regenerate = true,
+) =>
+  postJSON<PacketChangesResult>(
+    `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/packet/request-changes`,
+    { notes, regenerate });
+export interface PacketSubmitResult {
+  status: string;
+  domain_id: string; card_id: string;
+  from_status?: string | null; to_status?: string;
+  event?: Record<string, unknown>;
+  side_effect?: Record<string, unknown> | null;
+  card?: DomainCard;
+  progress?: DomainCardProgress;
+}
+export const submitJobApplication = (id: string, cardId: string) =>
+  postJSON<PacketSubmitResult>(
+    `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/packet/submit`,
+    { confirm: true });
+
+export interface JobProfileControls {
+  writable: boolean;
+  write_gate: string;
+  application_questions: {
+    default_policy: string;
+    review_required: string[];
+    draft_defaults: Record<string, string>;
+    never_auto_answer: string[];
+  };
+  application_questions_source: string;
+  source_paths: Record<string, string>;
+  job_search: {
+    enabled: boolean;
+    timezone: string;
+    daily_run_time: string;
+    require_geoff_selection: boolean;
+    submit_without_geoff_selection: boolean;
+    auto_submit_enabled: boolean;
+    max_suggested_jobs_per_day: number;
+    max_bot_possible_suggestions_per_day: number;
+    max_manual_required_suggestions_per_day: number;
+    max_selected_jobs_per_day: number;
+    board_name: string;
+    data_root: string;
+    digest_path: string;
+  };
+  ranking: Record<string, number>;
+  job_search_config_source: string;
+  job_search_settings_source: string;
+  job_search_settings_writable: boolean;
+  resume_variants: string[];
+  job_categories: {
+    id: string;
+    resume_variant: string;
+    keywords: string[];
+    role_focus: string;
+  }[];
+  company_targets: Record<string, string[]>;
+  executor_fallback: Record<string, string>;
+}
+export const fetchJobProfileControls = () =>
+  getJSON<JobProfileControls>("/api/job-search/profile-controls");
+export const updateJobSearchRuntime = (body: Partial<JobProfileControls["job_search"]>) =>
+  postJSON<{
+    status: string;
+    source: string;
+    job_search: JobProfileControls["job_search"];
+    ranking: JobProfileControls["ranking"];
+    job_categories: JobProfileControls["job_categories"];
+  }>("/api/job-search/profile-controls/runtime", body, "PUT");
+export const updateJobSearchCategory = (
+  categoryId: string,
+  body: { role_focus?: string; keywords?: string[] },
+) =>
+  postJSON<{
+    status: string;
+    source: string;
+    job_search: JobProfileControls["job_search"];
+    ranking: JobProfileControls["ranking"];
+    job_categories: JobProfileControls["job_categories"];
+  }>(`/api/job-search/profile-controls/category/${encodeURIComponent(categoryId)}`, body, "PUT");
+export const updateDraftDefault = (key: string, value: string) =>
+  postJSON<{
+    status: string;
+    key: string;
+    source: string;
+    application_questions: JobProfileControls["application_questions"];
+  }>("/api/job-search/profile-controls/draft-default", { key, value }, "PUT");
+
+export interface BoardRegistryBoard {
+  board_id: string;
+  provider: string;
+  workspace_ref: string;
+  board_ref: string;
+  repo_ids: string[];
+  status_mapping: Record<string, string>;
+  required_fields: string[];
+  allowed_agent_verbs: string[];
+  forbidden_agent_verbs: string[];
+  blockers: string[];
+}
+export interface BoardRegistry {
+  schema_version: string;
+  config_path: string;
+  config_writable: boolean;
+  boards: BoardRegistryBoard[];
+}
+export const fetchBoardRegistry = () => getJSON<BoardRegistry>("/api/board-registry");
+
+export interface ChatRuntime {
+  enabled: boolean;
+  harness: string;
+  transport_surface: string;
+  model_gateway: string;
+  chat_role: ModelRole | null;
+  executors: Executor[];
+  stream_endpoint: string;
+  action_endpoint: string;
+  activity_endpoint: string;
+  external_chats?: {
+    name: string;
+    active: boolean;
+    url?: string | null;
+    env_var: string;
+    reason: string;
+    kind?: string;
+    best_for?: string;
+    recommendation?: string;
+    source_url?: string;
+    handoff_mode?: string;
+  }[];
+  uses_orca: boolean;
+  uses_omnigent: boolean;
+  uses_oxygent?: boolean;
+  specialist_recommendation?: string;
+  chat_memory_note?: string;
+  external_harness_note: string;
+}
+export const fetchChatRuntime = () => getJSON<ChatRuntime>("/api/chat/runtime");
+
+export interface ChatEvent { type: string; [k: string]: unknown; }
+export interface ChatThread {
+  conversation_id: string;
+  id?: string;
+  title: string;
+  updated_at: string;
+  target?: string;
+  last_prompt?: string;
+  model?: string;
+}
+export interface ChatThreadsResponse {
+  threads: ChatThread[];
+  source: string;
+  writable?: boolean;
+  storage?: string;
+}
+export const fetchChatThreads = () => getJSON<ChatThreadsResponse>("/api/chat/threads");
+
+async function postJSON<T>(path: string, body: unknown, method = "POST"): Promise<T> {
   const r = await fetch(path, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method, headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!r.ok) {
@@ -129,6 +491,13 @@ async function postJSON<T>(path: string, body: unknown): Promise<T> {
 
 export const postAction = (action: string, params: Record<string, unknown>) =>
   postJSON<{ result: string }>("/api/action", { action, params });
+export const saveChatThread = (body: {
+  conversation_id: string;
+  title?: string;
+  target?: string;
+  last_prompt?: string;
+  model?: string;
+}) => postJSON<ChatThreadsResponse>("/api/chat/threads", body);
 
 // Stream a chat turn (SSE over fetch): each event (round/tool/tool_result/final)
 // is delivered as it arrives. Errors are surfaced as an event, never swallowed.
@@ -161,5 +530,3 @@ export async function streamChat(
     }
   }
 }
-
-

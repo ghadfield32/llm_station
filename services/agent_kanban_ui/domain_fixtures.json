@@ -1,0 +1,125 @@
+{
+  "_comment": "Committed demo cards so every domain surface renders on a fresh install. No personal data. Domains with a real source (board_store/ledger_missions) do not read this file.",
+  "linkedin_post": [
+    {
+      "card_id": "post-fixture-1",
+      "account": "Geoff",
+      "author_name": "Geoff Hadfield",
+      "author_headline": "Founder, World Model Sports · Applied AI + basketball analytics",
+      "hook": "Most NBA contract models price the player. The good ones price the fit.",
+      "body": "Most NBA contract models price the player. The good ones price the fit.\n\nWe rebuilt our surplus-value model to condition on roster context:\n- archetype overlap with the current rotation\n- lineup pockets the player actually unlocks\n- age-curve risk priced against the contract years, not the season\n\nThe result: two players with identical BPM can differ by $18M in modeled value to the SAME team.\n\nFit is the asset. The player is just the carrier.",
+      "tags": ["#NBA", "#SportsAnalytics", "#BasketballIntelligence"],
+      "scheduled_for": "2026-07-10T13:30:00Z",
+      "approval_state": "In Queue",
+      "source_ref": "content_pipeline/world_model_sports",
+      "post_urn": null,
+      "status": "In Queue"
+    },
+    {
+      "card_id": "post-fixture-2",
+      "account": "World Model Sports",
+      "author_name": "World Model Sports",
+      "author_headline": "Explainable basketball intelligence",
+      "hook": "Lineup data says who played together. Graph data says who actually fit.",
+      "body": "Lineup data says who played together. Graph data says who actually fit.\n\nOur network view treats every lineup as a small graph: players are nodes, possessions are edges, and chemistry shows up as edge weight that survives opponent adjustment.\n\nThree things it caught last season that raw on/off missed are in the thread.",
+      "tags": ["#HoopsWorldModel", "#GraphAnalytics"],
+      "scheduled_for": null,
+      "approval_state": "Draft",
+      "source_ref": "content_pipeline/world_model_sports",
+      "post_urn": null,
+      "status": "Draft"
+    }
+  ],
+  "book": [
+    {
+      "card_id": "book-fixture-1",
+      "title": "Thinking in Bets",
+      "author": "Annie Duke",
+      "progress": 62,
+      "tags": ["decision-making", "uncertainty"],
+      "notes": "Resulting = judging a decision by its outcome. Ch. 4 maps cleanly onto judge calibration: separate decision quality from variance before scoring the router.",
+      "linked_project": "llm_station judge calibration",
+      "status": "In Progress"
+    }
+  ],
+  "paper": [
+    {
+      "card_id": "paper-fixture-1",
+      "title": "Scaling Laws for Reward Model Overoptimization",
+      "venue": "arXiv",
+      "year": 2022,
+      "useful_for": "anti-Goodhart gates",
+      "abstract": "Studies how optimizing against a learned reward model degrades true performance as optimization pressure increases, and characterizes the divergence as a function of policy/RM scale.",
+      "notes": "Directly motivates the anti-Goodhart checks in the improvement loop: hold out a sealed eval the optimizer never sees.",
+      "figures": ["fig2: proxy vs gold reward divergence", "fig4: KL budget curves"],
+      "url": "https://arxiv.org/abs/2210.10760",
+      "status": "To Read"
+    }
+  ],
+  "repo": [
+    {
+      "card_id": "repo-fixture-llm-station",
+      "repo_id": "llm_station",
+      "branch": "feat/research-digest-intake-hygiene-main",
+      "autonomy": "enabled",
+      "checks": "green",
+      "open_prs": 3,
+      "last_mission": "cockpit mission: typed domain surfaces",
+      "merge_wall": "human-only (CODEOWNERS + required checks)",
+      "blockers": [],
+      "risk_tier": "L2",
+      "status": "Active"
+    }
+  ],
+  "dag": [
+    {
+      "card_id": "dag-fixture-job-search",
+      "dag_id": "job_search_daily",
+      "last_run": "2026-07-08T12:00:00Z",
+      "state": "success",
+      "owner": "command_center",
+      "next_run": "2026-07-09T12:00:00Z",
+      "failure_summary": "",
+      "related_repo": "llm_station",
+      "status": "Healthy"
+    },
+    {
+      "card_id": "dag-fixture-self-improvement",
+      "dag_id": "self_improvement_daily",
+      "last_run": "2026-07-08T09:00:00Z",
+      "state": "success",
+      "owner": "command_center",
+      "next_run": "2026-07-09T09:00:00Z",
+      "failure_summary": "",
+      "related_repo": "llm_station",
+      "status": "Healthy"
+    }
+  ],
+  "machine_upkeep": [
+    {
+      "card_id": "upkeep-fixture-weekly",
+      "task": "Weekly readiness sweep",
+      "cadence": "weekly",
+      "last_done": "2026-07-08T00:00:00Z",
+      "health": "ok",
+      "checklist": [
+        "uv run cc doctor",
+        "uv run cc validate",
+        "uv run cc job-search retention --dry-run",
+        "uv run cc usage-digest"
+      ],
+      "notes": "Rotating gateway.log verified bounded; Ollama + LiteLLM + Ledger answering.",
+      "status": "Done"
+    }
+  ],
+  "generic_task": [
+    {
+      "card_id": "task-fixture-1",
+      "title": "Set AppFlowy board Group-by to Status (one-time, manual)",
+      "due": "2026-07-11T00:00:00Z",
+      "priority": "high",
+      "notes": "REST cannot do this. Steps: docs/job_search/READINESS_FAQ.md — board settings -> Group by -> Status, then delete the 3 blank starter rows.",
+      "status": "Backlog"
+    }
+  ]
+}
