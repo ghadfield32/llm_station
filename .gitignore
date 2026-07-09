@@ -113,3 +113,14 @@ Thumbs.db
 # improvement-loop pytest runtime artifacts (cache/proposals are disposable)
 generated/pytest-cache/
 generated/pytest-proposals/
+generated/pytest-tmp*/
+
+# ── Internal board card store — REAL job pipeline data (companies, salaries,
+#    achievement ids). Per-deployment runtime state like kanban-events.jsonl;
+#    never committed. ─────────────────────────────────────────────────────────
+generated/boards/
+
+# ── Cockpit validation screenshots — show the real application pipeline; keep
+#    local as proof, never push. Browser-automation profile dirs likewise. ────
+generated/cockpit-*.png
+.tmp-*/

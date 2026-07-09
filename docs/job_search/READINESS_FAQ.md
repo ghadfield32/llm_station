@@ -79,7 +79,7 @@ Daily DAG / manual suggest -> Suggested Jobs (score >= 70)
 Geoff reviews on phone/AppFlowy, drags good ones -> Selected by Geoff
 process-selected --apply -> In Progress -> Needs Geoff (always, for now)
 Geoff applies manually using the generated materials + checklist
-Geoff runs mark-submitted -> Completed -> 30-day rich memory starts
+Geoff drags card to Completed -> 30-day rich memory starts
 Recruiter/interview activity -> Interviewing -> retention extends
 ```
 
@@ -344,9 +344,9 @@ deliverables) any time and it gets merged the same way.
   once you've set them.
 - `process-selected` only ever reads cards currently in `Selected by Geoff`;
   everything else is ignored, even if it looks stale.
-- Card `Status` cannot be forced to `Completed` by the bot - only
-  `cc job-search mark-submitted <application_id>` (which you run after you
-  actually submit) moves a card there.
+- Card `Status` should move to `Completed` only after a real submission. The
+  cockpit drag now updates `application.yml`, retention, and follow-up state
+  from the card's `application_id`; the old CLI command is fallback only.
 - 3 blank rows may appear in `Suggested Jobs` the first time a board is
   created - that's AppFlowy's own default starter rows on a brand-new
   database, not something our code wrote. Safe to delete manually in the UI.

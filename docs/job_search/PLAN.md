@@ -1,15 +1,14 @@
 # Job Search Command Center — original plan and phase tracker
 
-Status: original design doc, dated 2026-07-07. Most of Phases 3 and 5-9 below
-are now built and live-validated — see the `[x]`/`[ ]` marks in
-"Implementation Phases" for current progress, and
-[JOB_SEARCH_COMMAND_CENTER.md](JOB_SEARCH_COMMAND_CENTER.md) +
-[READINESS_FAQ.md](READINESS_FAQ.md) for how the system actually behaves
-today (this doc's board/automation/CLI specs are the original design intent;
-where they've drifted from what shipped, the other two docs are authoritative).
-Phases 0, 1, 2, and 4 remain genuinely open. Kept in full for the phase
-checklist and the World Model Sports achievement seed content below, neither
-of which exists elsewhere.
+Status: original design doc, dated 2026-07-07; tracker refreshed 2026-07-08.
+The safe MVP is now built around local/profile ingestion, claim-checked
+material generation, 30-day application memory, the daily maintenance DAG,
+and both AppFlowy and cockpit-native board paths. The remaining genuinely
+open work is live job discovery/source adapters, PDF/ATS rendering checks,
+Gmail/recruiter matching, actual rich-file purging/storage reporting, and any
+future `bot_possible` submit path. See the `[x]`/`[ ]` marks in
+"Implementation Phases" plus [JOB_SEARCH_COMMAND_CENTER.md](JOB_SEARCH_COMMAND_CENTER.md)
+and [READINESS_FAQ.md](READINESS_FAQ.md) for the shipped behavior.
 
 This plan turns the current resume-generator idea into a controlled job-search
 command center for Geoff. The operating model is:
@@ -55,7 +54,9 @@ It should use:
   application cache, and archive ledger.
 - `src/command_center/job_search/` for job-search logic.
 - `dags/job_search_daily.py` for the daily recommendation and maintenance DAG.
-- An AppFlowy domain board named `job_search_pipeline` for human review.
+- A cockpit-native board named `job_search_pipeline_internal` for the primary
+  first-party UI, plus an AppFlowy domain board named `job_search_pipeline`
+  when the external workspace surface is useful.
 - Existing Command Center principles: no self-approval, no restricted actions,
   no hidden failures, and no unvalidated long-lived config.
 
@@ -71,7 +72,8 @@ in `docs/`, `configs/`, or `src/`, not in the personal data directory.
 
 ## Board Workflow
 
-Create an AppFlowy board/database called `job_search_pipeline` with these
+Support the same pipeline on the cockpit-native internal board and, where
+desired, an AppFlowy board/database called `job_search_pipeline` with these
 columns:
 
 ```text
@@ -541,32 +543,32 @@ until the first end-to-end slice is proven.
 
 - [ ] Decide whether to vendor `ai-job-search` as a reference under
   `integrations/ai-job-search/` or port only the patterns.
-- [ ] Document portal terms and automation boundaries before adding source
+- [x] Document portal terms and automation boundaries before adding source
   integrations.
-- [ ] Add `JobSearchConfig` and related Pydantic schemas before adding live
+- [x] Add `JobSearchConfig` and related Pydantic schemas before adding live
   `configs/job_search*.yaml`.
-- [ ] Add tests proving no job-search path can bypass manual blockers or send
+- [x] Add tests proving no job-search path can bypass manual blockers or send
   messages without approval.
 
 ### Phase 1 - Profile Ingestion
 
-- [ ] Copy or move the master `.docx` into `data/job_search/profile/`.
-- [ ] Convert the `.docx` bullet bank into `achievement_bank.yml`.
-- [ ] Add World Model Sports as a first-class experience source.
-- [ ] Add `evidence/world_model_sports.md`.
-- [ ] Add any new achievement list Geoff brings into
+- [x] Copy or move the master `.docx` into `data/job_search/profile/`.
+- [x] Convert the `.docx` bullet bank into `achievement_bank.yml`.
+- [x] Add World Model Sports as a first-class experience source.
+- [x] Add `evidence/world_model_sports.md`.
+- [x] Add any new achievement list Geoff brings into
   `data/job_search/profile/inbox/` and merge it into the achievement bank.
-- [ ] Tag every bullet by role family, skill, tool, domain, proof strength, and
+- [x] Tag every bullet by role family, skill, tool, domain, proof strength, and
   source evidence.
 
 ### Phase 2 - Resume Variant Controls
 
-- [ ] Create `resume_variants.yml`.
-- [ ] Create `job_targets.yml`.
-- [ ] Create `writing_style.yml`.
-- [ ] Create `claim_policy.yml`.
-- [ ] Implement claim validation so generated resumes only use approved claims.
-- [ ] Add a resume diff/check report showing which bullets were selected and why.
+- [x] Create `resume_variants.yml`.
+- [x] Create `job_targets.yml`.
+- [x] Create `writing_style.yml`.
+- [x] Create `claim_policy.yml`.
+- [x] Implement claim validation so generated resumes only use approved claims.
+- [x] Add a resume diff/check report showing which bullets were selected and why.
 
 ### Phase 3 - Job Board
 
@@ -575,15 +577,19 @@ until the first end-to-end slice is proven.
 - [x] Add a board setup/reconcile command modeled after the content board scripts.
 - [x] Add a board snapshot command for testing and digesting.
 - [x] Verify that only Geoff-selected cards can enter material generation.
+- [x] Add the cockpit-native `internal` backend (`job_search_pipeline_internal`)
+  so the first-party UI can run without AppFlowy quirks.
+- [x] Wire the first-party `Domains` view so the Jobs domain reads the internal
+  board store directly and keeps fixture/demo origins honest for other domains.
 
 ### Phase 4 - Job Discovery And Ranking
 
 - [ ] Implement source adapters for safe/public sources first.
-- [ ] Normalize all jobs to one schema.
-- [ ] Add dedupe with stable hashes.
-- [ ] Add scoring against target roles, location, salary, seniority, domain,
+- [x] Normalize all jobs to one schema.
+- [x] Add dedupe with stable hashes.
+- [x] Add scoring against target roles, location, salary, seniority, domain,
   tools, and evidence strength.
-- [ ] Generate one-screen explanations for every suggested card.
+- [x] Generate one-screen explanations for every suggested card.
 - [ ] Generate skip reasons for rejected/low-fit jobs.
 
 ### Phase 5 - Material Generation

@@ -231,7 +231,7 @@ Access (on the do-not-build list by default).
 | **Proactive Runner** | Scheduled checks on already-done work. Holds no secrets; its strongest autonomous act is opening a gated mission. |
 | **Discord Gateway** | Discord ↔ LiteLLM (`chat`) ↔ the Growth OS action layer. Fail-fast without `DISCORD_BOT_TOKEN`. The `chat` role is qwen3 (instruct), **not** qwen3-coder — chat surfaces narrate before tool calls, and qwen3-coder's Ollama native parser drops those calls (see §14, 2026-06-13). |
 | Uptime Kuma + restic | Health monitoring and backups. |
-| *(optional profile `ui`)* **Agent Kanban UI** | First-party Cline-styled board + observability over the Ledger (missions kanban) and the agent-call log (metrics). **Read-only** — no write path; approve/kill stay in the signed Ledger endpoints, which it links out to. Loopback + Tailscale + password; `configs/ui.yaml` (`agent_kanban_ui`), repurposed from the deferred Hermes WebUI. React/Vite SPA built + served single-container by a FastAPI backend. |
+| *(optional profile `ui`)* **Agent Kanban UI / Cockpit** | First-party PWA cockpit over the Ledger, internal board store, AppFlowy projection, agent-call log, and GatewayCore chat. Primary nav is **All Boards** (typed domain boards) plus **Controls** (runtime APIs, board registry, job-search/profile settings). Chat uses GatewayCore + LiteLLM, keeps shared recent thread shortcuts by conversation id, and can expose optional ORCA/OmniAgent/OxyGent handoff links from env vars. Governed writes can move board cards and edit profile overrides; approve/kill stay in the signed Ledger endpoints and merge/deploy/submit remain structurally unavailable. Loopback + Tailscale; React/Vite SPA built + served single-container by a FastAPI backend. |
 | *(optional profile)* Hermes | **Not adopted — evaluated 2026-06-13 → DEFER.** Hermes Agent is real now (v0.16.0, PyPI/official image); the old "phantom image" note is stale. An isolated spike (see change log + `evaluation/capability-assessment/hermes/DECISION.md`) found cross-session memory works but is just a local `MEMORY.md` (not beyond-stack) and self-improving skills did not auto-fire. LiteLLM + Ollama + the action layer serve its role; revisit only if autonomous skill self-improvement materializes. |
 
 ### The worker (4090 / currently the same workstation)
@@ -1104,10 +1104,10 @@ printed) and names the single next action, so the runbook is self-verifying.
 
 ### 6.7 The job-search command center (draft/prepare/track → human applies)
 
-A domain workflow, not a separate tracker — a `job_search_pipeline` AppFlowy
-board (same "draft → human approve → execute" pattern as the LinkedIn boards
-above, distinct from `mission_intake`) that finds, scores, and prepares job
-applications while keeping submission itself manual. Validated by
+A domain workflow, not a separate tracker — the cockpit-native
+`job_search_pipeline_internal` board is the primary Jobs board, with AppFlowy as
+an optional projection/fallback. It finds, scores, and prepares job applications
+while keeping submission itself manual. Validated by
 `JobSearchConfig` (`configs/job_search.yaml`); `auto_submit_enabled: true` is
 schema-rejected, and `AutomationPolicy` sets `mvp_submit_disabled=True` on
 every branch including `bot_possible` — nothing is ever auto-submitted.
@@ -1136,6 +1136,12 @@ sponsorship/salary questions) route to `Needs Geoff` — see
 [job_search/JOB_SEARCH_COMMAND_CENTER.md](job_search/JOB_SEARCH_COMMAND_CENTER.md)
 and the living operator FAQ in
 [job_search/READINESS_FAQ.md](job_search/READINESS_FAQ.md).
+
+Operator-tunable daily limits and role-focus keywords can be overridden from
+the cockpit Controls page. Those edits are stored under
+`data/job_search/profile/search_settings.yml` and merged by
+`command_center.job_search.config.load_config()`, so CLI, DAG, and cockpit reads
+share the same effective config without rewriting `configs/job_search.yaml`.
 
 ---
 
@@ -1563,9 +1569,10 @@ llm_station/
 │   │   └── judgectl.py         CLI for invoking judges from hooks/scripts
 │   ├── proactive_runner/       thin scheduler for configs/proactive.yaml checks;
 │   │                           holds no secrets; max action = open a gated mission
-│   └── agent_kanban_ui/        OPTIONAL Phase-4 (profile `ui`): read-only FastAPI over
-│                               Ledger + agent-call log; web/ = React/Vite SPA (Cline-styled
-│                               board + observability), built + served single-container
+│   └── agent_kanban_ui/        OPTIONAL Phase-4 (profile `ui`): full-console FastAPI over
+│                               Ledger + agent-call log + typed boards; web/ = React/Vite SPA
+│                               (PWA board, chat, controls, observability), built + served
+│                               single-container
 │
 ├── scripts/                    non-Python wrappers: cc.ps1 (Windows), live_smoke.{ps1,sh}
 ├── dags/                       Airflow DAGs: self_improvement_daily.py (observer-only daily scan),
@@ -1841,6 +1848,51 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-07-09 — Cockpit PWA mobile polish, All Boards nav, and editable job-search controls
+
+- **Navigation simplified.** The phone/desktop cockpit now treats **All Boards**
+  as the primary board surface. Jobs, Posts, Books, Papers, Repos, DAGs, Upkeep,
+  Missions, and Tasks live there with typed cards. The old top-level Missions
+  and raw AppFlowy Boards views remain URL-addressable for debugging/comparison,
+  but they are not the main mobile nav.
+- **Controls added.** New cockpit Controls view surfaces runtime APIs
+  (Ledger/LiteLLM/AppFlowy/GatewayCore), the `configs/domain_surfaces.yaml`
+  domain registry, the `configs/kanban_boards.yaml` provider registry,
+  job-search daily limits, role-focus keyword categories, profile file paths,
+  and editable application-question defaults.
+- **Board schema editor.** Controls -> All Boards can now add, remove, and
+  update domain boards by writing only `configs/domain_surfaces.yaml` in
+  full-console mode (`KANBAN_UI_DOMAIN_CONFIG_WRITES=1`, writable `./configs`).
+  Every save validates the full file through `DomainSurfacesConfig`; provider
+  registry wiring remains in `configs/kanban_boards.yaml`.
+- **Profile overrides.** `load_config()` now merges
+  `data/job_search/profile/search_settings.yml` over `configs/job_search.yaml`
+  for operator-tunable job-search settings. The cockpit writes only that profile
+  override, validates the merged result through `JobSearchConfig`, and still
+  rejects unsafe changes such as auto-submit.
+- **Mobile formatting.** The top updated timestamp is no longer sticky on
+  phones, board/tab lanes expose top horizontal scrollbars, bottom nav spacing
+  is tighter, cards have larger touch spacing, drawers remain full-screen, and
+  mobile users move cards with `Move to...` instead of drag/drop. Chat recent
+  thread shortcuts use the same top-scrollbar pattern on phones. Horizontal
+  strips now use momentum scrolling, proximity snap, overscroll containment,
+  hidden bottom scrollbars, and viewport-contained bottom navigation; mobile
+  browser checks cover All Boards, Controls, and Chat with no document-level
+  horizontal overflow.
+- **External agent runtime review.** GatewayCore + LiteLLM remains the cockpit
+  runtime and write authority. ORCA
+  (`https://arxiv.org/abs/2603.02438`) is the best first optional specialist
+  for document-heavy job materials such as PDFs, resumes, screenshots, forms,
+  and tables. OmniAgent/Omnigent
+  (`https://arxiv.org/abs/2606.19341`) is a later specialist for long
+  video/audio and screen-recording evidence. OxyGent is a watch-list candidate
+  for modular agent/tool/model components, dynamic planning, visual debugging,
+  and auditability (`https://github.com/jd-opensource/OxyGent`,
+  `https://arxiv.org/abs/2604.25602`), but it is not an active dependency.
+  The cockpit Chat panel exposes optional `*_CHAT_URL` handoff links and shared
+  recent chat shortcuts backed by compact server metadata; governed writes stay
+  in GatewayCore and the action layer.
 
 ### 2026-07-02 — Research intake productized + gateway/log hygiene + skills audit + card deps
 

@@ -117,7 +117,7 @@ Where we stand against the two yardsticks, and what's left (Phase 5).
 - [x] **5.2** — `actions.board_view()` (whole-board grouped read) + `board_state.all_boards_json()` (per-board fail-loud) + `kanban_surface board-snapshot` CLI / `make kanban-board-snapshot` writing `generated/board-snapshot.json` + UI `/api/boards` (reads the snapshot, 503-on-missing) + frontend board tabs (mission_intake/todos/dags/papers/repos/signals). Tests across `test_actions_intent.py` + `test_agent_kanban_ui.py`.
 - [x] **5.3** — `/api/activity` (recent agent-call log, newest-first) + clickable mission **detail drawer** (`/api/mission/{id}` events/status/risk) + `metrics.recent_calls()`. Frontend: activity feed panel + drawer with event tags. `test_agent_kanban_ui.py` (10/10).
 - [x] **5.4** — MASTER + tracker updated; `make validate` + `kanban-surface-validate` + full pytest + ruff green.
-- [ ] **5.5** — detailed review; per-use-case verdicts recorded below.
+- [x] **5.5** — detailed review; per-use-case verdicts recorded below.
 
 > **Resolved tradeoff (was: AppFlowy creds in the UI container).** Instead of the UI reading AppFlowy directly, the board read runs on the **worker** (`make kanban-board-snapshot`, where growthos + creds already live) and writes `generated/board-snapshot.json`; the UI mounts that file **read-only**. So the UI container holds **no AppFlowy credentials** — same pattern as the agent-call log. Snapshot freshness is shown in the UI (`generated_at`); a missing snapshot is a loud 503, never an empty board set.
 
@@ -262,4 +262,48 @@ Found during the live visual pass and fixed (all live-verified):
 - [x] **6.5** live streaming — `GatewayCore.run_turn_events` async-generator + `/api/chat/stream` (SSE) + a streaming chat log (round/tool/tool_result/final). **Live-verified**: events stream as they happen.
 - [x] **6.6** SMS adapter — `channels/sms.py` (Twilio webhook → `GatewayCore` → REST reply), `transport: sms` in `ChannelSpec` (runner auto-dispatches), disabled `sms-main` in `channels.yaml`. Authored + registered + `make validate` green (needs Twilio creds + a public webhook to run, like WhatsApp). **Phone access**: the responsive UI over Tailscale (done in 6.1).
 
+## 9. Phase 7 — typed domain cockpit surfaces
+
+Goal: move beyond generic kanban cards so each operating domain has a visual
+grammar that matches the work: jobs look like applications, posts look like
+LinkedIn previews, books show reading progress, papers show research context,
+repos/DAGs show health, and upkeep/tasks stay compact.
+
+- [x] **7.1** domain registry — `configs/domain_surfaces.yaml` defines nine
+  domains (`job_application`, `linkedin_post`, `book`, `paper`, `repo`, `dag`,
+  `machine_upkeep`, `mission`, `generic_task`), their card components, source
+  bindings, drawer fields, allowed governed verbs, and designed empty states.
+- [x] **7.2** backend API — `services/agent_kanban_ui/app.py` serves
+  `/api/domains`, `/api/domain/{id}/cards`, `/api/domain/{id}/card/{card_id}`,
+  and `/api/domain/{id}/actions`. Origins are explicit: `board_store`,
+  `ledger`, or `fixtures`; fixture data cannot masquerade as live data.
+- [x] **7.3** Jobs on the internal board — `job_search_pipeline_internal`
+  is a `command_center_ui` board in `configs/kanban_boards.yaml`; the Jobs
+  domain reads the same provider/event-fold that the job-search internal
+  backend writes.
+- [x] **7.4** typed SPA view — the React app has a top-level `Domains` view
+  with domain switching, per-domain filters, status filtering, typed cards,
+  detail drawer, LinkedIn desktop/mobile preview toggle, honest demo badges,
+  designed empty states, and read-only disabled governed verbs unless
+  `KANBAN_UI_CHAT_ENABLED=1`.
+- [x] **7.5** validation — `tests/test_domain_surfaces.py`,
+  `tests/test_agent_kanban_ui.py`, `tests/test_kanban_ui_events.py`,
+  TypeScript `--noEmit`, `npm run build`, and live FastAPI endpoint curls
+  validated the domain registry, card payloads, and built SPA serving.
+
 Plan of record: `C:\Users\ghadf\.claude\plans\dapper-crunching-sketch.md`.
+
+## 10. Phase 8 — PWA / mobile polish
+
+- [x] **PWA shell** — Vite public assets now include
+  `manifest.webmanifest`, SVG app icons, and a service worker. The service
+  worker caches the static app shell/assets only and explicitly bypasses
+  `/api/*` plus non-GET requests.
+- [x] **Phone layout** — mobile width uses a fixed bottom nav, full-screen
+  drawers, larger touch targets, horizontal board snapping, and hidden
+  secondary/sidebar domain nav to keep the primary actions reachable.
+- [x] **Tap move path** — generic boards and typed domain cards expose
+  `Move to...` controls for touch devices while desktop drag/drop remains.
+  Moves still go through the existing governed endpoints.
+- [x] **Docs/tests** — quickstart documents install-to-home-screen over
+  Tailscale; `test_agent_kanban_ui.py` asserts the static-only caching policy.
