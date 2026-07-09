@@ -81,6 +81,9 @@ generated/linkedin-token.json
 generated/linkedin-published.json
 generated/linkedin-publish.lock
 
+# ── Cockpit shared chat threads — conversation content, per-deployment ───────
+generated/chat-threads.json
+
 # ── Cross-conversation memory store — per-deployment runtime state ───────────
 # project/board/user-preference memory; sharing is a deliberate export, not a commit
 generated/memory/

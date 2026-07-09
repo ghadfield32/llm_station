@@ -111,18 +111,20 @@ def test_catalog_to_feed_to_scan_apply_creates_a_real_proposed_experiment(tmp_pa
 # --------------------------------------------------------------------- kanban registry: mixed boards
 
 def test_real_kanban_boards_yaml_validates_with_mixed_dependency_fields_usage():
-    """The committed configs/kanban_boards.yaml has THREE boards; only one declares
-    dependency_fields. All three must validate together in one KanbanBoardsConfig load —
+    """The committed configs/kanban_boards.yaml mixes boards with and without
+    dependency_fields. All must validate together in one KanbanBoardsConfig load —
     proves the opt-in field doesn't require every board to declare it."""
     raw = yaml.safe_load(open("configs/kanban_boards.yaml", encoding="utf-8"))
     cfg = KanbanBoardsConfig.model_validate(raw)
     by_id = {b.board_id: b for b in cfg.boards}
-    assert set(by_id) == {"llm_station_command_center", "betts_basketball",
-                          "betts_basketball_appflowy"}
+    assert {"llm_station_command_center", "betts_basketball",
+            "betts_basketball_appflowy", "job_search_pipeline",
+            "job_search_pipeline_internal"} <= set(by_id)
     assert set(by_id["llm_station_command_center"].dependency_fields) == {"blocked_by",
                                                                           "unblocks"}
     assert by_id["betts_basketball"].dependency_fields == []
     assert by_id["betts_basketball_appflowy"].dependency_fields == []
+    assert by_id["job_search_pipeline_internal"].dependency_fields == []
 
 
 # --------------------------------------------------------------------- board_state: mixed rows
