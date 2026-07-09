@@ -280,8 +280,12 @@ def cmd_board_doctor(args) -> int:
 
 
 def cmd_publish_suggestions(args) -> int:
+    # Operators publish to live boards: fixture example postings are excluded
+    # unless explicitly included (they remain available for scoring tests).
+    exclude = () if args.include_fixtures else ("fixture",)
     return _print_board_result(
-        publish_suggestions(backend=args.backend, apply=args.apply)
+        publish_suggestions(backend=args.backend, apply=args.apply,
+                            exclude_sources=exclude)
     )
 
 
@@ -394,6 +398,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
     p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
+    p.add_argument("--include-fixtures", action="store_true",
+                   help="also publish fixture-sourced example postings (test/demo only)")
     p.set_defaults(func=cmd_publish_suggestions)
 
     p = sub.add_parser("process-selected")

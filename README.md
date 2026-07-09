@@ -99,10 +99,12 @@ Local desktop URL:
 http://127.0.0.1:8787
 ```
 
-Private phone/laptop URL over Tailscale Serve:
+Private phone/laptop URL over Tailscale Serve (the hostname is *your*
+machine's tailnet name — find it with `tailscale status`; on this deployment
+it is `vengeance.taile6a055.ts.net`):
 
 ```text
-https://vengeance.taile6a055.ts.net:8787/
+https://<your-machine>.<your-tailnet>.ts.net:8787/
 ```
 
 Install it from the browser as a PWA named **Kanban**. The main nav is **All

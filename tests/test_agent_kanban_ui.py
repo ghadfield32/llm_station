@@ -336,6 +336,7 @@ def test_job_search_runtime_settings_write_profile_override(client, monkeypatch,
     (data_root / "profile").mkdir(parents=True)
 
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
     monkeypatch.setattr(mod, "CONFIGS_DIR", configs)
     monkeypatch.setattr(mod, "_job_search_config_and_root",
                         lambda: (load_config(cfg_path), data_root))
@@ -368,6 +369,7 @@ def test_job_search_category_settings_write_profile_override(client, monkeypatch
     (data_root / "profile").mkdir(parents=True)
 
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
     monkeypatch.setattr(mod, "CONFIGS_DIR", configs)
     monkeypatch.setattr(mod, "_job_search_config_and_root",
                         lambda: (load_config(cfg_path), data_root))
@@ -379,6 +381,25 @@ def test_job_search_category_settings_write_profile_override(client, monkeypatch
     category = next(c for c in r.json()["job_categories"] if c["id"] == "analytics_engineer")
     assert category["role_focus"] == "primary"
     assert category["keywords"] == ["data engineer", "analytics engineer", "dbt"]
+
+
+def test_profile_writes_refused_with_chat_alone(client, monkeypatch):
+    """Chat-enabled is NOT enough for profile YAML writes — the deployment must
+    opt into config writes (same discipline as the domain-config editor)."""
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", False)
+    for path, payload in (
+        ("/api/job-search/profile-controls/runtime",
+         {"max_suggested_jobs_per_day": 40}),
+        ("/api/job-search/profile-controls/category/analytics_engineer",
+         {"role_focus": "primary"}),
+        ("/api/job-search/profile-controls/draft-default",
+         {"key": "work_authorization", "value": "yes"}),
+    ):
+        r = tc.put(path, json=payload)
+        assert r.status_code == 503, (path, r.json())
+        assert "KANBAN_UI_DOMAIN_CONFIG_WRITES" in r.json()["detail"]
 
 
 def test_status_probes_report_ok_and_error(client, monkeypatch):

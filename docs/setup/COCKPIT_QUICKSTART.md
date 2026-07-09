@@ -56,7 +56,9 @@ exposed tailnet-only:
 tailscale serve --bg --https=8787 http://127.0.0.1:8787
 ```
 
-Then on the phone (on the tailnet): `https://vengeance.taile6a055.ts.net:8787`.
+Then on the phone (on the tailnet): `https://<your-machine>.<your-tailnet>.ts.net:8787`
+(find the hostname with `tailscale status`; on this deployment it is
+`vengeance.taile6a055.ts.net`).
 AppFlowy's native mobile app remains the fallback for board approvals on the
 go (`docs/job_search/READINESS_FAQ.md` has its one-time board setup).
 

@@ -281,6 +281,13 @@ def c_start(a):
     rc = c_first_boot([])
     if rc:
         return rc
+    # The cockpit is the primary operator surface (configs/ui.yaml enabled: true),
+    # so "one button" must actually start it — it lives behind the ui profile,
+    # which plain `compose up` skips.
+    print("starting the cockpit (agent-kanban-ui, ui profile)")
+    rc = compose("--profile", "ui", "up", "-d", "--build", "agent-kanban-ui")
+    if rc:
+        return rc
     if want_hermes:
         print("starting Hermes (profile) — note: set a real hermes image in docker-compose.yml first")
         compose("--profile", "hermes", "up", "-d")
@@ -414,7 +421,7 @@ COMMANDS: dict[str, tuple] = {
     "appflowy-up": (c_appflowy_up, "start the AppFlowy board server + curator"),
     # one-button + UIs + channels
     "start": (c_start, "ONE BUTTON: first-boot [+--appflowy] [+--channel NAME] [+--hermes], then open UIs"),
-    "open": (c_open, "open the UIs in your browser (litellm/ledger/kuma[/hermes])"),
+    "open": (c_open, "open the UIs in your browser (cockpit/litellm/ledger/kuma[/hermes])"),
     "channel": (c_channel, "guided favorite-channel setup: cc channel <discord|slack|telegram|whatsapp>"),
     # dev
     "lint": (lambda a: run(sys.executable, "-m", "ruff", "check", "src"), "ruff check src"),

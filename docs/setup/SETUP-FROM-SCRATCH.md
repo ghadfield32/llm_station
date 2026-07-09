@@ -4,7 +4,7 @@ The one setup doc: from "nothing installed" to "control plane up, channels chatt
 agents working in leased worktrees" — in build order. The deep reference is
 [MASTER.md](../MASTER.md); per-channel detail is [channels.md](../architecture/channels.md).
 
-**Four equivalent interfaces** — use whichever fits (full table in the [README](../../README.md#ways-to-run-it-make--uv--docker)):
+**Four equivalent interfaces** — use whichever fits (full table in the [README](../../README.md#ways-to-run-it)):
 `make <target>` (Linux/macOS) · `.\scripts\cc.ps1 <target>` (Windows) · **`uv run cc <command>` (any OS, zero-install)** · `docker compose up -d` (pure Docker; it renders its own config). The fastest start on a fresh machine is **`uv run cc start`** (one button: control plane → keys → health → opens the UIs; add `--appflowy --channel telegram`). The steps below use `make`; substitute freely.
 
 > This doc consolidates the former `runbook.md`, `COMPLETE-SETUP.md`, and
@@ -46,7 +46,11 @@ cd llm_station
 git submodule update --init --recursive   # fetches appflowy_kanban/AppFlowy-Cloud @ pinned commit
 ```
 
-## 2. Install the Python package
+## 2. Install the Python package (optional — only for development)
+
+> Skip this step entirely if you use `uv run cc ...` — it resolves the project
+> environment automatically. The explicit venv is only for IDE integration or
+> hacking on the package itself.
 
 ```bash
 uv venv .venv

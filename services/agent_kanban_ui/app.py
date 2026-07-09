@@ -421,6 +421,17 @@ def _require_domain_config_writable() -> None:
         raise HTTPException(status_code=503, detail=blocker)
 
 
+def _require_profile_writable() -> None:
+    """Profile-controls YAML writes carry the same discipline as the domain
+    config editor: chat alone is not enough — the deployment must opt into
+    config writes (KANBAN_UI_DOMAIN_CONFIG_WRITES=1)."""
+    _require_chat()
+    if not DOMAIN_CONFIG_WRITES:
+        raise HTTPException(
+            status_code=503,
+            detail="profile writes disabled; set KANBAN_UI_DOMAIN_CONFIG_WRITES=1")
+
+
 def _domain_schema_response(data: dict[str, Any] | None = None) -> dict:
     data = data if data is not None else _domain_config()
     path = _domain_config_path()
@@ -1629,7 +1640,7 @@ def job_search_profile_controls() -> dict:
 
 @app.put("/api/job-search/profile-controls/runtime")
 def update_job_search_runtime(body: JobSearchRuntimeSettingsIn) -> dict:
-    _require_chat()
+    _require_profile_writable()
     override = _read_job_search_profile_settings()
     runtime = override.setdefault("job_search", {})
     for key, value in body.model_dump(exclude_none=True).items():
@@ -1640,7 +1651,7 @@ def update_job_search_runtime(body: JobSearchRuntimeSettingsIn) -> dict:
 @app.put("/api/job-search/profile-controls/category/{category_id}")
 def update_job_search_category(category_id: str,
                                body: JobSearchCategorySettingsIn) -> dict:
-    _require_chat()
+    _require_profile_writable()
     category_id = category_id.strip()
     if not re.fullmatch(r"[A-Za-z0-9_:-]+", category_id):
         raise HTTPException(status_code=400, detail="invalid category id")
@@ -1662,7 +1673,7 @@ def update_job_search_category(category_id: str,
 
 @app.put("/api/job-search/profile-controls/draft-default")
 def update_draft_default(body: DraftDefaultIn) -> dict:
-    _require_chat()
+    _require_profile_writable()
     key = body.key.strip()
     if not re.fullmatch(r"[A-Za-z0-9_:-]+", key):
         raise HTTPException(

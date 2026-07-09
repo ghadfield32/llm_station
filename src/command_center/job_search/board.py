@@ -452,6 +452,25 @@ def _claude_review_url(job: dict[str, Any], fit: dict[str, Any]) -> str:
     return "https://claude.ai/new?q=" + quote(prompt)
 
 
+def _normalize_ts(value: Any) -> Any:
+    """One UTC ISO-8601 shape (+00:00) for timestamps. Live sources emit
+    date-only and Z-suffixed variants; a single format keeps card sorting and
+    display honest. Unparseable values pass through untouched."""
+    if not isinstance(value, str) or not value.strip():
+        return value
+    raw = value.strip()
+    try:
+        if len(raw) == 10:  # YYYY-MM-DD (seen from live feeds): midnight UTC
+            dt = datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+        else:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return value
+    return dt.astimezone(timezone.utc).isoformat()
+
+
 def fields_from_suggestion(suggestion: dict[str, Any]) -> dict[str, Any]:
     job = suggestion["job"]
     fit = suggestion["fit"]
@@ -479,7 +498,7 @@ def fields_from_suggestion(suggestion: dict[str, Any]) -> dict[str, Any]:
         "why_apply": "; ".join(fit.get("reasons") or []),
         "risks": "; ".join(risks),
         "deadline": job.get("deadline"),
-        "last_seen_at": job["last_seen_at"],
+        "last_seen_at": _normalize_ts(job["last_seen_at"]),
         "application_id": None,
         "next_action": "Review suggestion and move to Selected by Geoff if it is worth applying.",
         "materials_path": None,
@@ -1100,15 +1119,21 @@ def publish_suggestions(
     root: Path | None = None,
     cfg: JobSearchConfig | None = None,
     env: dict[str, str] | None = None,
+    # Live paths (daily DAG, CLI default) pass ("fixture",) so example postings
+    # from docs/job_search/examples can never land on a real board as jobs;
+    # the default () keeps direct/test callers unchanged.
+    exclude_sources: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     config = cfg or load_config()
     base = root or data_root(config)
     ensure_data_dirs(base)
     all_suggestions = _load_suggestions(base)
+    excluded = {s.strip().lower() for s in exclude_sources}
     eligible_suggestions = [
         item
         for item in all_suggestions
         if int(item["fit"]["score"]) >= config.ranking.min_score_to_show
+        and (item["job"].get("source") or "").strip().lower() not in excluded
     ]
     suggestions = _daily_suggestion_limit(eligible_suggestions, config)
     daily_suggestion_targets = {

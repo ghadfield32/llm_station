@@ -142,7 +142,8 @@ if AIRFLOW_AVAILABLE:
         def publish_to_board(_live: dict) -> dict:
             from command_center.job_search.board import publish_suggestions
 
-            return publish_suggestions(backend="internal", apply=True)
+            return publish_suggestions(backend="internal", apply=True,
+                                       exclude_sources=("fixture",))
 
         @task
         def process_geoff_selected(_published: dict) -> dict:

@@ -34,7 +34,8 @@ uv run cc live-smoke      # prove real local replies through Ollama -> LiteLLM
 Pick your board surface:
 
 - **AppFlowy** (drag-to-approve boards): `uv run cc start --appflowy`.
-- **Internal Command Center UI**: `docker compose --profile ui up -d agent-kanban-ui`.
+- **Internal Command Center UI** (the recommended cockpit; `uv run cc start`
+  already brings it up): `docker compose --profile ui up -d --build agent-kanban-ui`.
 
 Both drive the **same action contract** — see [ADDING_A_KANBAN.md](ADDING_A_KANBAN.md).
 

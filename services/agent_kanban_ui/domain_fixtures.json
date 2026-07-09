@@ -1,5 +1,5 @@
 {
-  "_comment": "Committed demo cards so every domain surface renders on a fresh install. No personal data. Domains with a real source (board_store/ledger_missions) do not read this file.",
+  "_comment": "Committed demo cards so every domain surface renders on a fresh install. The linkedin_post demo cards intentionally use Geoff's public professional persona (name + headline as they appear on LinkedIn) so the preview looks real; no private data (emails, credentials, contact info) anywhere. Domains with a real source (board_store/ledger_missions) do not read this file.",
   "linkedin_post": [
     {
       "card_id": "post-fixture-1",

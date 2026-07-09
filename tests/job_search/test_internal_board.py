@@ -205,3 +205,14 @@ def test_internal_event_log_stays_governed(tmp_path):
     assert all((e.status_after or "").lower() not in
                {"approved", "awaiting approval", "awaiting_approval"}
                for e in events)
+
+
+def test_live_publish_excludes_fixture_sources(tmp_path):
+    """The daily DAG / CLI pass exclude_sources=("fixture",): example postings
+    (docs/job_search/examples carry source: fixture) never land on a live
+    board as real jobs, while direct/test publishes stay unchanged."""
+    suggestion = _write_suggestion(tmp_path, "basketball_ai_data_scientist.md")
+    out = publish_suggestions(backend="internal", apply=True, root=tmp_path,
+                              env=_env(tmp_path), exclude_sources=("fixture",))
+    assert suggestion["job"]["job_key"] not in out.get("would_create", [])
+    assert _provider(tmp_path).list_cards() == []

@@ -45,6 +45,17 @@ AppFlowy route.
 
 ## Phone install steps
 
+Prerequisite: the control plane must already be up with a real `.env`
+(`uv run cc init-env` then `uv run cc start` — see
+`docs/setup/GETTING_STARTED.md`). The compose file bind-mounts `./.env`; on a
+bare clone with no `.env`, Docker silently creates a *directory* named `.env`
+at that path and later breaks `cc init-env`. `uv run cc start` now brings the
+cockpit up too, so step 1 below is only needed when the control plane is
+already running without the ui profile.
+
+All `vengeance.taile6a055.ts.net` URLs in this doc are THIS machine's tailnet
+name — substitute yours (`tailscale status`).
+
 1. Start the cockpit:
 
 ```powershell
