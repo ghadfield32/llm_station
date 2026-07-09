@@ -16,6 +16,7 @@ from command_center.job_search.achievement_bank import (
 )
 from command_center.job_search.application_memory import (
     append_note,
+    append_note_text,
     create_prepared_application,
     mark_submitted,
 )
@@ -25,7 +26,12 @@ from command_center.job_search.config import load_config
 from command_center.job_search.interview_prep import render_answer_bank, select_stories
 from command_center.job_search.resume_selection import select_resume
 from command_center.job_search.retention import apply_retention, plan_retention
-from command_center.job_search.scoring import classify_company_tier, normalize_job_from_text, score_job
+from command_center.job_search.scoring import (
+    application_id_for,
+    classify_company_tier,
+    normalize_job_from_text,
+    score_job,
+)
 from command_center.job_search.schemas import AutomationClass, JobSearchConfig, ProjectType
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,11 +50,84 @@ def test_config_validates_and_auto_submit_is_disabled():
     assert not can_submit(cfg)
 
 
+def test_application_id_includes_job_key_to_avoid_same_title_collisions():
+    first = normalize_job_from_text(
+        """---
+company: Ruby Labs
+role_title: Senior AI Engineer
+location: Remote
+apply_url: https://example.com/jobs/one
+---
+Python and production ML.
+"""
+    )
+    second = normalize_job_from_text(
+        """---
+company: Ruby Labs
+role_title: Senior AI Engineer
+location: Remote
+apply_url: https://example.com/jobs/two
+---
+Python and production ML.
+"""
+    )
+
+    assert application_id_for(first, "2026-07-09") != application_id_for(second, "2026-07-09")
+    assert application_id_for(first, "2026-07-09").endswith(first.job_key[:8])
+
+
 def test_config_rejects_auto_submit_enabled():
     raw = yaml.safe_load((ROOT / "configs" / "job_search.yaml").read_text(encoding="utf-8"))
     raw["job_search"]["auto_submit_enabled"] = True
     with pytest.raises(ValueError, match="auto_submit_enabled"):
         JobSearchConfig.model_validate(raw)
+
+
+def test_profile_search_settings_override_daily_limits_and_categories(tmp_path):
+    raw = yaml.safe_load((ROOT / "configs" / "job_search.yaml").read_text(encoding="utf-8"))
+    raw["job_search"]["data_root"] = str(tmp_path / "data")
+    cfg_path = tmp_path / "job_search.yaml"
+    cfg_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    settings = tmp_path / "data" / "profile" / "search_settings.yml"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(yaml.safe_dump({
+        "job_search": {
+            "max_suggested_jobs_per_day": 40,
+            "max_bot_possible_suggestions_per_day": 15,
+            "max_manual_required_suggestions_per_day": 25,
+            "max_selected_jobs_per_day": 10,
+        },
+        "job_categories": [
+            {
+                "id": "analytics_engineer",
+                "role_focus": "primary",
+                "keywords": ["data engineer", "dbt", "snowflake"],
+            },
+        ],
+    }, sort_keys=False), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+    assert cfg.job_search.max_suggested_jobs_per_day == 40
+    assert cfg.job_search.max_bot_possible_suggestions_per_day == 15
+    assert cfg.job_search.max_manual_required_suggestions_per_day == 25
+    assert cfg.job_search.max_selected_jobs_per_day == 10
+    analytics_engineer = next(c for c in cfg.job_categories if c.id == "analytics_engineer")
+    assert analytics_engineer.role_focus == "primary"
+    assert analytics_engineer.keywords == ["data engineer", "dbt", "snowflake"]
+
+
+def test_profile_search_settings_cannot_enable_auto_submit(tmp_path):
+    raw = yaml.safe_load((ROOT / "configs" / "job_search.yaml").read_text(encoding="utf-8"))
+    raw["job_search"]["data_root"] = str(tmp_path / "data")
+    cfg_path = tmp_path / "job_search.yaml"
+    cfg_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    settings = tmp_path / "data" / "profile" / "search_settings.yml"
+    settings.parent.mkdir(parents=True)
+    settings.write_text("job_search:\n  auto_submit_enabled: true\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="auto_submit_enabled"):
+        load_config(cfg_path)
 
 
 def test_data_job_search_is_gitignored():
@@ -144,8 +223,17 @@ def test_application_memory_and_followup_roundtrip(tmp_path):
     note_file.write_text("Recruiter asked for availability next week.", encoding="utf-8")
     event = append_note(submitted.application_id, "recruiter_call", note_file, root=tmp_path)
     assert event["type"] == "recruiter_call"
+    typed_event = append_note_text(
+        submitted.application_id,
+        "recruiter_email",
+        "Recruiter emailed an interview availability request.",
+        root=tmp_path,
+        source="email",
+    )
+    assert typed_event["source"] == "email"
     followup = (app_dir / "followups.md").read_text(encoding="utf-8")
     assert "Recruiter asked for availability" in followup
+    assert "Recruiter emailed an interview availability request" in followup
 
 
 def test_regenerating_materials_does_not_wipe_existing_communications(tmp_path):
@@ -267,6 +355,12 @@ def test_classify_company_tier_matches_faang_sports_tech_and_league_keyword():
         "General analytics work.\n"
     )
     assert classify_company_tier(unrelated_job, cfg) == "none"
+
+    substring_job = normalize_job_from_text(
+        "---\ncompany: Scorpion\nrole_title: Senior AI Data Engineer\nlocation: Remote\n---\n"
+        "This role will directly influence how data and AI deliver value to clients.\n"
+    )
+    assert classify_company_tier(substring_job, cfg) == "none"
 
 
 def test_target_company_bonus_raises_score_and_sets_company_tier(tmp_path):

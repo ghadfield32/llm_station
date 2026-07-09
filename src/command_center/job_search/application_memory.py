@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
 
 from command_center.job_search.achievement_bank import AchievementBank, ensure_bank
+from command_center.job_search.agent_writer import (
+    TRACE_FILENAME,
+    AgentWriterError,
+    MaterialInputs,
+    generate_materials,
+)
 from command_center.job_search.config import data_root, ensure_data_dirs, load_config
 from command_center.job_search.followups import generate_followup
 from command_center.job_search.interview_prep import render_answer_bank
@@ -21,6 +28,79 @@ from command_center.job_search.schemas import (
     FitResult,
     ResumeSelection,
 )
+
+REVIEW_NOTES_FILENAME = "review_notes.md"
+
+
+def _load_writing_style(base: Path) -> dict[str, str]:
+    path = base / "profile" / "writing_style.yml"
+    if not path.is_file():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return {k: str(v) for k, v in data.items() if isinstance(v, str)}
+
+
+def _agent_writer_enabled() -> bool:
+    """The agent writer is the default path; JOB_SEARCH_AGENT_WRITER=0 pins the
+    deterministic templates (tests, offline runs). Either way application.yml
+    records which mode actually produced the materials."""
+    return os.environ.get("JOB_SEARCH_AGENT_WRITER", "1") != "0"
+
+
+def _read_review_notes(app_dir: Path) -> list[str]:
+    path = app_dir / REVIEW_NOTES_FILENAME
+    if not path.is_file():
+        return []
+    notes: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("- "):
+            notes.append(line[2:].strip())
+    return notes
+
+
+def _append_review_note(app_dir: Path, note: str) -> None:
+    path = app_dir / REVIEW_NOTES_FILENAME
+    if not path.is_file():
+        path.write_text("# Review Notes\n\n", encoding="utf-8")
+    stamp = datetime.now(timezone.utc).isoformat()
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(f"- {note.strip()} ({stamp})\n")
+
+
+def _run_agent_writer(
+    app_dir: Path,
+    inputs: MaterialInputs,
+    bank: AchievementBank,
+    *,
+    trace_step: str,
+) -> dict:
+    """Generate resume/cover letter/recruiter message with the LLM writer and
+    overwrite the packet files. Returns the `generation` provenance dict for
+    application.yml; on failure the template files stay in place and the failure
+    is recorded (mode template_fallback + error) — visible, never silent."""
+    now = datetime.now(timezone.utc).isoformat()
+    if not _agent_writer_enabled():
+        return {
+            "mode": "template_fallback",
+            "error": "agent writer disabled via JOB_SEARCH_AGENT_WRITER=0",
+            "generated_at": now,
+        }
+    try:
+        materials = generate_materials(
+            inputs, bank, trace_path=app_dir / TRACE_FILENAME, trace_step=trace_step)
+    except AgentWriterError as exc:
+        return {"mode": "template_fallback", "error": str(exc), "generated_at": now}
+    (app_dir / "generated_resume.md").write_text(materials.resume + "\n", encoding="utf-8")
+    (app_dir / "cover_letter.md").write_text(materials.cover_letter + "\n", encoding="utf-8")
+    (app_dir / "recruiter_message.md").write_text(
+        materials.recruiter_message + "\n", encoding="utf-8")
+    return {
+        "mode": "agent",
+        "model": materials.model,
+        "attempts": materials.attempts,
+        "claim_ids": materials.claim_ids,
+        "generated_at": now,
+    }
 
 
 def _today() -> date:
@@ -100,7 +180,6 @@ def create_prepared_application(
         },
         bullet_ids_used=selection.selected_achievement_ids,
     )
-    _write_yaml(app_dir / "application.yml", record.model_dump(mode="json"))
     with gzip.open(app_dir / "job_description.md.gz", "wt", encoding="utf-8") as fh:
         fh.write(job.description_text)
     comms_path = app_dir / "communications.jsonl"
@@ -109,6 +188,8 @@ def create_prepared_application(
     notes_path = app_dir / "recruiter_notes.md"
     if not notes_path.exists():
         notes_path.write_text("# Recruiter Notes\n", encoding="utf-8")
+    # Deterministic templates first (they are the honest fallback), then the agent
+    # writer overwrites resume/cover letter/recruiter message when it succeeds.
     (app_dir / "generated_resume.md").write_text(render_resume(job, selection), encoding="utf-8")
     (app_dir / "cover_letter.md").write_text(render_cover_letter(job, selection), encoding="utf-8")
     (app_dir / "recruiter_message.md").write_text(render_recruiter_message(job), encoding="utf-8")
@@ -119,6 +200,23 @@ def create_prepared_application(
     (app_dir / "answer_bank.md").write_text(
         render_answer_bank(job, answer_bank_bank, selection), encoding="utf-8"
     )
+    record.generation = _run_agent_writer(
+        app_dir,
+        MaterialInputs(
+            company=job.company,
+            role_title=job.role_title,
+            description_text=job.description_text,
+            apply_url=job.apply_url,
+            resume_variant=selection.resume_variant,
+            matched_keywords=selection.matched_keywords,
+            fit_reasons=fit.reasons,
+            fit_score=fit.score,
+            writing_style=_load_writing_style(base),
+        ),
+        answer_bank_bank,
+        trace_step="generate_materials",
+    )
+    _write_yaml(app_dir / "application.yml", record.model_dump(mode="json"))
     (app_dir / "executor.json").write_text(
         json.dumps(
             {
@@ -209,8 +307,9 @@ manual blockers, or no-submit MVP behavior.
 3. Upload or paste `cover_letter.md` only if the portal asks for one.
 4. Review `recruiter_message.md` before sending any message.
 5. Answer all review-required questions yourself.
-6. Paste any new portal questions into `recruiter_notes.md` or add them with `cc job-search note`.
-7. After submission, run `uv run cc job-search mark-submitted <application_id>`.
+6. Paste any new portal questions into `recruiter_notes.md`, add them from the cockpit card,
+   or add them with `cc job-search note`.
+7. After submission, drag the cockpit job card to `Completed`.
 
 ## Review-Required Question Types
 {review_required}
@@ -250,10 +349,16 @@ def mark_submitted(app_id: str, *, root: Path | None = None) -> ApplicationRecor
     return record
 
 
-def append_note(app_id: str, note_type: str, note_file: Path, *, root: Path | None = None) -> dict:
+def append_note_text(
+    app_id: str,
+    note_type: str,
+    content: str,
+    *,
+    root: Path | None = None,
+    source: str = "manual_note",
+) -> dict:
     cfg = load_config()
     app_dir, record = load_application(app_id, root=root)
-    content = note_file.read_text(encoding="utf-8")
     summary = content.strip().splitlines()[0][:240] if content.strip() else "Empty note."
     now = datetime.now(timezone.utc)
     event = {
@@ -261,14 +366,109 @@ def append_note(app_id: str, note_type: str, note_file: Path, *, root: Path | No
         "type": note_type,
         "summary": summary,
         "action_needed": "Review follow-up pack and reply draft.",
-        "source": "manual_note",
+        "source": source,
     }
     with (app_dir / "communications.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(event) + "\n")
     record.last_activity_at = now.date().isoformat()
-    record.status = "recruiter_contact" if "recruiter" in note_type else record.status
+    record.status = (
+        "recruiter_contact"
+        if "recruiter" in note_type or "interview" in note_type
+        else record.status
+    )
     record.retention_until = (now.date() + timedelta(days=cfg.retention.rich_application_cache_days)).isoformat()
     record.followup["next_action"] = event["action_needed"]
     save_application(app_dir, record)
     generate_followup(app_dir)
     return event
+
+
+def append_note(app_id: str, note_type: str, note_file: Path, *, root: Path | None = None) -> dict:
+    content = note_file.read_text(encoding="utf-8")
+    return append_note_text(app_id, note_type, content, root=root, source="manual_note")
+
+
+def read_job_description(app_dir: Path) -> str:
+    path = app_dir / "job_description.md.gz"
+    if not path.is_file():
+        return ""
+    with gzip.open(path, "rt", encoding="utf-8") as fh:
+        return fh.read()
+
+
+def request_changes(
+    app_id: str,
+    notes: str,
+    *,
+    root: Path | None = None,
+    source: str = "cockpit",
+) -> tuple[Path, ApplicationRecord]:
+    """Geoff's 'not ready / needs updates' action: record the note, flip the
+    review gate to changes_requested, and log it in communications. Regeneration
+    is a separate explicit step so a failed model call never loses the note."""
+    app_dir, record = load_application(app_id, root=root)
+    text = notes.strip()
+    if not text:
+        raise ValueError("request_changes requires a non-empty note")
+    _append_review_note(app_dir, text)
+    record.review_state = "changes_requested"
+    save_application(app_dir, record)
+    append_note_text(
+        app_id, "review_changes_requested", text, root=root, source=source)
+    _, record = load_application(app_id, root=root)
+    return app_dir, record
+
+
+def regenerate_materials(
+    app_id: str,
+    *,
+    root: Path | None = None,
+    bank: AchievementBank | None = None,
+) -> tuple[Path, ApplicationRecord]:
+    """Re-run the agent writer against ALL accumulated review notes, bump the
+    revision, and return the packet to ready_for_review. The job context comes
+    from the stored record + compressed job description — no re-scrape."""
+    cfg = load_config()
+    base = root or data_root(cfg)
+    app_dir, record = load_application(app_id, root=root)
+    description = read_job_description(app_dir)
+    if not description.strip():
+        raise ValueError(
+            f"application {app_id} has no stored job description; cannot regenerate")
+    writer_bank = bank or ensure_bank(base / "profile" / "achievement_bank.yml")
+    generation = _run_agent_writer(
+        app_dir,
+        MaterialInputs(
+            company=record.company,
+            role_title=record.role_title,
+            description_text=description,
+            apply_url=record.apply_url,
+            resume_variant=record.resume_variant,
+            matched_keywords=list(record.keywords.get("matched", [])),
+            fit_reasons=record.fit.reasons,
+            fit_score=record.fit.score,
+            reviewer_notes=_read_review_notes(app_dir),
+            writing_style=_load_writing_style(base),
+        ),
+        writer_bank,
+        trace_step=f"regenerate_materials_rev{record.revision + 1}",
+    )
+    if generation.get("mode") != "agent":
+        # Keep changes_requested: the notes were NOT addressed. Surfacing the
+        # error is the fix path, not quietly reverting to templates.
+        raise AgentWriterError(str(generation.get("error") or "agent writer failed"))
+    record.generation = generation
+    record.revision = record.revision + 1
+    record.review_state = "ready_for_review"
+    record.last_activity_at = _today().isoformat()
+    save_application(app_dir, record)
+    append_note_text(
+        app_id,
+        "materials_regenerated",
+        f"Materials regenerated (revision {record.revision}) addressing "
+        f"{len(_read_review_notes(app_dir))} review note(s).",
+        root=root,
+        source="agent_writer",
+    )
+    _, record = load_application(app_id, root=root)
+    return app_dir, record

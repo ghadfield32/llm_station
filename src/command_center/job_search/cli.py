@@ -23,9 +23,11 @@ from command_center.job_search.board import (
     process_selected,
     publish_suggestions,
 )
+from command_center.job_search.cache_io import read_json_file, write_json_file_atomic
 from command_center.job_search.config import data_root, ensure_data_dirs, load_config
 from command_center.job_search.digest import write_digest
 from command_center.job_search.followups import generate_followup
+from command_center.job_search.live_sources import discover_live_postings
 from command_center.job_search.profile_ingest import ingest_profile
 from command_center.job_search.resume_selection import select_resume
 from command_center.job_search.retention import apply_retention, plan_retention
@@ -54,7 +56,7 @@ def _suggest_from_file(path: Path, *, write: bool) -> dict:
     }
     if write:
         out = root / "source_cache" / "suggestions" / f"{job.job_key}.json"
-        out.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        write_json_file_atomic(out, result)
         result["cache_path"] = str(out)
     return result
 
@@ -79,7 +81,7 @@ def _load_suggestion(job_key: str) -> dict:
     path = root / "source_cache" / "suggestions" / f"{job_key}.json"
     if not path.exists():
         raise SystemExit(f"Unknown job_key {job_key!r}. Run suggest --from-file <file> --write first.")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return read_json_file(path)
 
 
 def cmd_generate_materials(args) -> int:
@@ -117,6 +119,64 @@ def cmd_mark_submitted(args) -> int:
     record = mark_submitted(args.application_id)
     mark_submitted_on_board(args.application_id)
     print(yaml.safe_dump(record.model_dump(mode="json"), sort_keys=False))
+    return 0
+
+
+def cmd_packet(args) -> int:
+    """Show the full packet: record, validation, and (optionally) agent trace."""
+    from command_center.job_search.agent_writer import read_trace
+    from command_center.job_search.packet_validation import validate_packet
+
+    _, root, bank = _root_and_bank()
+    app_dir, record = load_application(args.application_id, root=root)
+    out = {
+        "application_id": args.application_id,
+        "path": str(app_dir),
+        "record": record.model_dump(mode="json"),
+        "validation": validate_packet(app_dir, record, bank),
+    }
+    if args.trace:
+        out["agent_trace"] = read_trace(app_dir)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    return 0 if out["validation"]["ok"] else 1
+
+
+def cmd_request_changes(args) -> int:
+    """Record review notes and regenerate the materials with the agent writer."""
+    from command_center.job_search.application_memory import (
+        regenerate_materials,
+        request_changes,
+    )
+
+    _, root, bank = _root_and_bank()
+    request_changes(args.application_id, args.notes, root=root, source="cli")
+    if args.no_regenerate:
+        print(json.dumps({"status": "changes_requested",
+                          "application_id": args.application_id}, indent=2))
+        return 0
+    app_dir, record = regenerate_materials(args.application_id, root=root, bank=bank)
+    print(json.dumps({
+        "status": "regenerated",
+        "application_id": args.application_id,
+        "revision": record.revision,
+        "generation": record.generation,
+        "path": str(app_dir),
+    }, indent=2, ensure_ascii=False))
+    return 0
+
+
+def cmd_finalize(args) -> int:
+    """Validate, mark submitted, email the record, write submission evidence."""
+    from command_center.job_search.finalize import FinalizeBlocked, finalize_application
+
+    try:
+        result = finalize_application(args.application_id)
+    except FinalizeBlocked as exc:
+        print(json.dumps({"status": "blocked",
+                          "validation": exc.validation}, indent=2))
+        return 1
+    mark_submitted_on_board(args.application_id)
+    print(json.dumps({"status": "finalized", **result}, indent=2, ensure_ascii=False))
     return 0
 
 
@@ -166,6 +226,37 @@ def cmd_validate_examples(args) -> int:
             }
         )
     print(json.dumps({"examples": outputs}, indent=2))
+    return 0
+
+
+def cmd_discover_live(args) -> int:
+    sources = args.source or ["jobicy"]
+    tags = args.tag or ["python", "machine-learning", "sql", "analytics"]
+    industries = args.industry or []
+    result = discover_live_postings(
+        sources=sources,
+        tags=tags,
+        industries=industries,
+        count=args.count,
+        write=args.write,
+    )
+    suggestions = []
+    if args.write:
+        for path in result["posting_paths"]:
+            suggestion = _suggest_from_file(Path(path), write=True)
+            suggestions.append(
+                {
+                    "file": str(path),
+                    "job_key": suggestion["job"]["job_key"],
+                    "company": suggestion["job"]["company"],
+                    "role_title": suggestion["job"]["role_title"],
+                    "score": suggestion["fit"]["score"],
+                    "automation": suggestion["automation"]["value"],
+                    "variant": suggestion["selection"]["resume_variant"],
+                }
+            )
+    result["suggestions_written"] = suggestions
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -224,6 +315,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("application_id")
     p.set_defaults(func=cmd_mark_submitted)
 
+    p = sub.add_parser(
+        "packet",
+        help="Print the full application packet with validation (exit 1 if not ready).",
+    )
+    p.add_argument("application_id")
+    p.add_argument("--trace", action="store_true",
+                   help="Include the agent trace (prompts + model outputs)")
+    p.set_defaults(func=cmd_packet)
+
+    p = sub.add_parser(
+        "request-changes",
+        help="Record review notes and regenerate materials with the agent writer.",
+    )
+    p.add_argument("application_id")
+    p.add_argument("--notes", required=True)
+    p.add_argument("--no-regenerate", action="store_true",
+                   help="Only record the notes; regenerate later")
+    p.set_defaults(func=cmd_request_changes)
+
+    p = sub.add_parser(
+        "finalize",
+        help="Validate + mark submitted + email the record + write evidence.",
+    )
+    p.add_argument("application_id")
+    p.set_defaults(func=cmd_finalize)
+
     p = sub.add_parser("note")
     p.add_argument("application_id")
     p.add_argument("--type", required=True)
@@ -245,14 +362,26 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("validate-examples")
     p.set_defaults(func=cmd_validate_examples)
 
+    p = sub.add_parser("discover-live")
+    p.add_argument("--source", action="append", choices=["jobicy", "remoteok", "remotive"])
+    p.add_argument("--tag", action="append", help="Jobicy tag to search; repeatable")
+    p.add_argument(
+        "--industry",
+        action="append",
+        help="Jobicy industrySlug to search; repeatable. Fetch valid slugs with ?get=industries.",
+    )
+    p.add_argument("--count", type=int, default=25)
+    p.add_argument("--write", action="store_true", help="Persist live postings and suggestion caches")
+    p.set_defaults(func=cmd_discover_live)
+
     p = sub.add_parser("board-setup")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--backend", choices=["appflowy", "local"], default="appflowy")
+    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
     p.set_defaults(func=cmd_board_setup)
 
     p = sub.add_parser("board-snapshot")
-    p.add_argument("--backend", choices=["appflowy", "local"], default="appflowy")
+    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
     p.set_defaults(func=cmd_board_snapshot)
 
     p = sub.add_parser(
@@ -264,13 +393,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("publish-suggestions")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--backend", choices=["appflowy", "local"], default="appflowy")
+    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
     p.set_defaults(func=cmd_publish_suggestions)
 
     p = sub.add_parser("process-selected")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--backend", choices=["appflowy", "local"], default="appflowy")
+    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
     p.add_argument("--executor", choices=["auto", "claude", "codex"], default="auto")
     p.set_defaults(func=cmd_process_selected)
     return parser
