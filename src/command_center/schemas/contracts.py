@@ -710,6 +710,106 @@ class KanbanBoardsConfig(Strict):
         return self
 
 
+# ---- domain_surfaces.yaml ---------------------------------------------------
+# Typed cockpit surfaces: each domain renders its objects with its own card
+# grammar in agent_kanban_ui (jobs look like jobs, posts preview like posts).
+# A domain BINDS to a data source — a registry board's internal card store, the
+# Ledger's missions, or committed demo fixtures — and lists the governed verbs
+# its cards may offer. The wall is the same wall as kanban boards: no domain may
+# offer approve/merge/deploy/delete, and the validator enforces it structurally.
+_DOMAIN_SOURCES = ("board_store", "ledger_missions", "fixtures")
+_DOMAIN_CARD_COMPONENTS = frozenset({
+    "job_application", "linkedin_post", "book", "paper", "repo", "dag",
+    "machine_upkeep", "mission", "generic_task",
+})
+_DOMAIN_FIELD_KINDS = ("text", "badge", "score", "money", "url", "datetime",
+                       "markdown", "list", "progress")
+
+
+class DomainFieldSpec(Strict):
+    name: str
+    label: str
+    kind: Literal["text", "badge", "score", "money", "url", "datetime",
+                  "markdown", "list", "progress"] = "text"
+
+
+class DomainEmptyState(Strict):
+    title: str
+    hint: str
+    command: str | None = None   # the exact cc command that fills this surface
+
+
+class DomainSurfaceSpec(Strict):
+    domain_id: str
+    title: str
+    card_component: str
+    source: Literal["board_store", "ledger_missions", "fixtures"]
+    board_id: str | None = None          # required iff source == board_store
+    columns: list[str] = Field(default_factory=list)
+    column_actions: dict[str, str] = Field(default_factory=dict)
+    summary_fields: list[DomainFieldSpec] = Field(default_factory=list)
+    drawer_fields: list[DomainFieldSpec] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
+    empty_state: DomainEmptyState
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.domain_id):
+            raise ValueError(f"domain_id {self.domain_id!r} must be a stable id")
+        if self.card_component not in _DOMAIN_CARD_COMPONENTS:
+            raise ValueError(
+                f"domain {self.domain_id!r} card_component must be one of "
+                f"{sorted(_DOMAIN_CARD_COMPONENTS)}; got {self.card_component!r}")
+        if self.source == "board_store" and not self.board_id:
+            raise ValueError(
+                f"domain {self.domain_id!r} with source board_store needs board_id")
+        if self.source != "board_store" and self.board_id:
+            raise ValueError(
+                f"domain {self.domain_id!r} board_id only applies to board_store")
+        if len(self.columns) != len(set(self.columns)):
+            raise ValueError(f"domain {self.domain_id!r} has duplicate columns")
+        unknown_columns = set(self.column_actions) - set(self.columns)
+        if unknown_columns:
+            raise ValueError(
+                f"domain {self.domain_id!r} column_actions reference unknown "
+                f"column(s): {sorted(unknown_columns)}")
+        actions = set(self.allowed_actions)
+        if len(self.allowed_actions) != len(actions):
+            raise ValueError(f"domain {self.domain_id!r} has duplicate allowed_actions")
+        wall = actions & _KANBAN_WALL_VERBS
+        if wall:
+            raise ValueError(
+                f"domain {self.domain_id!r} may never offer wall verb(s): {sorted(wall)}")
+        ungrantable = actions - _KANBAN_GRANTABLE_VERBS
+        if ungrantable:
+            raise ValueError(
+                f"domain {self.domain_id!r} allowed_actions may only grant "
+                f"{sorted(_KANBAN_GRANTABLE_VERBS)}; got: {sorted(ungrantable)}")
+        bad_column_actions = {
+            column: action for column, action in self.column_actions.items()
+            if action not in _KANBAN_GRANTABLE_VERBS
+        }
+        if bad_column_actions:
+            raise ValueError(
+                f"domain {self.domain_id!r} column_actions may only use grantable "
+                f"kanban verbs; got: {bad_column_actions}")
+        return self
+
+
+class DomainSurfacesConfig(Strict):
+    schema_version: str
+    domains: list[DomainSurfaceSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.domain-surfaces.v1":
+            raise ValueError("schema_version must be command-center.domain-surfaces.v1")
+        ids = [d.domain_id for d in self.domains]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate domain_ids")
+        return self
+
+
 # ---- memory.yaml + memory records ------------------------------------------
 # Cross-conversation/project memory. Records persist outside any single chat and
 # are injected only when human-approved, namespaced by scope+subject, redacted,

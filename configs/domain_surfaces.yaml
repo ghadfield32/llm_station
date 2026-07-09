@@ -1,0 +1,252 @@
+schema_version: command-center.domain-surfaces.v1
+
+# Typed cockpit surfaces (agent_kanban_ui "Domains" view): each domain renders
+# with its own card grammar — jobs look like jobs, posts preview like LinkedIn
+# posts. `source` binds the domain to real data:
+#   board_store       — a command_center_ui board's card store + event-log fold
+#   ledger_missions   — the Ledger's missions (live)
+#   fixtures          — committed demo cards (services/agent_kanban_ui/domain_fixtures.json)
+# Domains start on fixtures and flip to a real source when their pipeline lands
+# (job_application flips in the job-search cockpit phase; repo/dag in the ops
+# phase). allowed_actions may only name grantable kanban verbs — the wall
+# (approve/merge/deploy/delete) is rejected by the contract itself.
+domains:
+  - domain_id: job_application
+    title: Jobs
+    card_component: job_application
+    source: board_store
+    board_id: job_search_pipeline_internal
+    columns:
+      - Suggested Jobs
+      - Selected by Geoff
+      - In Progress
+      - Needs Geoff
+      - Completed
+      - Interviewing
+      - Rejected / Skip
+      - Closed / Archived
+    column_actions:
+      Suggested Jobs: add_mission_card
+      Selected by Geoff: stage_card
+      In Progress: start_todo
+      Needs Geoff: block_card
+      Completed: finish_todo
+      Interviewing: stage_card
+      Rejected / Skip: reject_card
+      Closed / Archived: finish_todo
+    summary_fields:
+      - {name: company, label: Company}
+      - {name: role_title, label: Role}
+      - {name: fit_score, label: Fit, kind: score}
+      - {name: salary_text, label: Salary, kind: money}
+      - {name: automation_class, label: Automation, kind: badge}
+      - {name: resume_variant, label: Resume, kind: badge}
+    drawer_fields:
+      - {name: why_apply, label: Why apply, kind: markdown}
+      - {name: risks, label: Risks, kind: markdown}
+      - {name: score_explanation, label: Score explanation, kind: markdown}
+      - {name: manual_reason, label: Manual blockers, kind: markdown}
+      - {name: apply_url, label: Posting, kind: url}
+      - {name: portal, label: Portal, kind: badge}
+      - {name: location, label: Location}
+      - {name: remote_type, label: Remote, kind: badge}
+      - {name: deadline, label: Deadline, kind: datetime}
+      - {name: next_action, label: Next action, kind: markdown}
+      - {name: materials_path, label: Materials}
+    allowed_actions: [stage_card, start_todo, block_card, reject_card, finish_todo]
+    empty_state:
+      title: No jobs surfaced yet
+      hint: The daily DAG writes ranked suggestions here; you can also rank a pasted posting.
+      command: uv run cc job-search suggest --from-file <posting.md>
+
+  - domain_id: linkedin_post
+    title: Posts
+    card_component: linkedin_post
+    source: fixtures
+    columns:
+      - Draft
+      - In Queue
+      - Scheduled
+      - Published
+      - Needs Geoff
+    summary_fields:
+      - {name: account, label: Account, kind: badge}
+      - {name: hook, label: Hook}
+      - {name: scheduled_for, label: Scheduled, kind: datetime}
+      - {name: approval_state, label: Approval, kind: badge}
+    drawer_fields:
+      - {name: body, label: Post, kind: markdown}
+      - {name: tags, label: Tags, kind: list}
+      - {name: source_ref, label: Source}
+      - {name: post_urn, label: PostURN}
+    allowed_actions: [stage_card, block_card, reject_card]
+    empty_state:
+      title: No posts queued
+      hint: Drafts come from the content pipeline; approval stays on the board drag.
+      command: uv run cc linkedin-publish --preflight
+
+  - domain_id: book
+    title: Books
+    card_component: book
+    source: fixtures
+    columns:
+      - To Read
+      - In Progress
+      - Done
+      - Reference
+    summary_fields:
+      - {name: title, label: Title}
+      - {name: author, label: Author}
+      - {name: progress, label: Progress, kind: progress}
+      - {name: tags, label: Tags, kind: list}
+    drawer_fields:
+      - {name: notes, label: Notes, kind: markdown}
+      - {name: linked_project, label: Linked project}
+    allowed_actions: [stage_card, start_todo, finish_todo]
+    empty_state:
+      title: No books tracked
+      hint: The Growth OS library board holds the reading list; sync lands here.
+
+  - domain_id: paper
+    title: Papers
+    card_component: paper
+    source: fixtures
+    columns:
+      - To Read
+      - Reading
+      - Useful
+      - Archived
+    summary_fields:
+      - {name: title, label: Title}
+      - {name: venue, label: Venue, kind: badge}
+      - {name: year, label: Year}
+      - {name: useful_for, label: Useful for, kind: badge}
+    drawer_fields:
+      - {name: abstract, label: Abstract, kind: markdown}
+      - {name: notes, label: Notes, kind: markdown}
+      - {name: figures, label: Figures, kind: list}
+      - {name: url, label: Link, kind: url}
+    allowed_actions: [stage_card, start_todo, finish_todo]
+    empty_state:
+      title: No papers in the queue
+      hint: The research-digest intake feeds the papers board; sync lands here.
+      command: uv run cc research-digest feed
+
+  - domain_id: repo
+    title: Repos
+    card_component: repo
+    source: fixtures
+    columns:
+      - Active
+      - Maintenance
+      - Blocked
+      - Archived
+    summary_fields:
+      - {name: repo_id, label: Repo}
+      - {name: branch, label: Branch, kind: badge}
+      - {name: autonomy, label: Autonomy, kind: badge}
+      - {name: checks, label: Checks, kind: badge}
+      - {name: open_prs, label: PRs}
+    drawer_fields:
+      - {name: last_mission, label: Last mission}
+      - {name: merge_wall, label: Merge wall, kind: badge}
+      - {name: blockers, label: Blockers, kind: list}
+      - {name: risk_tier, label: Risk, kind: badge}
+    allowed_actions: [add_mission_card]
+    empty_state:
+      title: No repos registered
+      hint: Register a repo to drive it from missions.
+      command: uv run cc onboard repo
+
+  - domain_id: dag
+    title: DAGs
+    card_component: dag
+    source: fixtures
+    columns:
+      - Healthy
+      - Running
+      - Failed
+      - Paused
+    summary_fields:
+      - {name: dag_id, label: DAG}
+      - {name: last_run, label: Last run, kind: datetime}
+      - {name: state, label: State, kind: badge}
+      - {name: owner, label: Owner}
+    drawer_fields:
+      - {name: next_run, label: Next run, kind: datetime}
+      - {name: failure_summary, label: Failures, kind: markdown}
+      - {name: related_repo, label: Repo}
+    allowed_actions: [add_mission_card, block_card]
+    empty_state:
+      title: No DAGs visible
+      hint: The Airflow scheduler is not reporting; runs appear once it is up.
+
+  - domain_id: machine_upkeep
+    title: Upkeep
+    card_component: machine_upkeep
+    source: fixtures
+    columns:
+      - Due
+      - In Progress
+      - Done
+      - Blocked
+    summary_fields:
+      - {name: task, label: Task}
+      - {name: cadence, label: Cadence, kind: badge}
+      - {name: last_done, label: Last done, kind: datetime}
+      - {name: health, label: Health, kind: badge}
+    drawer_fields:
+      - {name: checklist, label: Checklist, kind: list}
+      - {name: notes, label: Notes, kind: markdown}
+    allowed_actions: [stage_card, start_todo, finish_todo]
+    empty_state:
+      title: Nothing due
+      hint: Weekly doctor/validate/retention tasks land here when scheduled.
+      command: uv run cc doctor
+
+  - domain_id: mission
+    title: Missions
+    card_component: mission
+    source: ledger_missions
+    columns:
+      - awaiting_approval
+      - open
+      - approved
+      - running
+      - blocked
+      - done
+      - killed
+      - failed
+    summary_fields:
+      - {name: action, label: Mission}
+      - {name: repo, label: Repo, kind: badge}
+      - {name: risk, label: Risk, kind: badge}
+      - {name: status, label: Status, kind: badge}
+    drawer_fields:
+      - {name: created_at, label: Created, kind: datetime}
+    allowed_actions: []
+    empty_state:
+      title: No missions
+      hint: Draft one from a board card or the bridge.
+      command: uv run cc kanban-bridge --dry-run
+
+  - domain_id: generic_task
+    title: Tasks
+    card_component: generic_task
+    source: fixtures
+    columns:
+      - Backlog
+      - Ready
+      - In Progress
+      - Done
+      - Blocked
+    summary_fields:
+      - {name: title, label: Task}
+      - {name: due, label: Due, kind: datetime}
+      - {name: priority, label: Priority, kind: badge}
+    drawer_fields:
+      - {name: notes, label: Notes, kind: markdown}
+    allowed_actions: [stage_card, start_todo, finish_todo, block_card, reject_card]
+    empty_state:
+      title: No open tasks
+      hint: The todos board syncs here.
