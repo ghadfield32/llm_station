@@ -80,6 +80,50 @@ Python, SQL, basketball, NBA forecasting, graph analysis, product analytics, and
     return suggestion
 
 
+def _write_synthetic_suggestion(root: Path, job_key: str, *, score: int, automation: str) -> dict:
+    ensure_data_dirs(root)
+    suggestion = {
+        "job": {
+            "job_key": job_key,
+            "company": f"Company {job_key}",
+            "role_title": f"Role {job_key}",
+            "location": "Remote",
+            "remote_type": "remote",
+            "source": "test",
+            "portal": "company_site",
+            "apply_url": f"https://example.com/jobs/{job_key}",
+            "salary_text": None,
+            "salary_min": None,
+            "salary_max": None,
+            "deadline": None,
+            "last_seen_at": "2026-07-09T00:00:00Z",
+        },
+        "fit": {
+            "score": score,
+            "reasons": ["Synthetic fit reason"],
+            "risks": [],
+            "gaps": [],
+            "company_tier": "none",
+            "explanation": f"Fit score: {score}/100",
+        },
+        "automation": {
+            "value": automation,
+            "reason": "Synthetic automation class",
+            "confidence": 0.9,
+            "blockers": [] if automation == "bot_possible" else ["manual phrase: test"],
+            "mvp_submit_disabled": True,
+        },
+        "selection": {
+            "resume_variant": "analytics_engineer",
+            "selected_bullet_ids": [],
+            "rejected_claims": [],
+        },
+    }
+    out = root / "source_cache" / "suggestions" / f"{job_key}.json"
+    out.write_text(json.dumps(suggestion, indent=2), encoding="utf-8")
+    return suggestion
+
+
 def _setup_and_publish(root: Path, suggestion: dict) -> dict:
     board_setup(backend="local", apply=True, root=root)
     result = publish_suggestions(backend="local", apply=True, root=root)
@@ -155,6 +199,39 @@ def test_publish_suggestions_creates_only_suggested_jobs_cards(tmp_path):
     assert state["cards"][0]["column"] == "Suggested Jobs"
 
 
+def test_publish_suggestions_balances_bot_and_manual_daily_targets(tmp_path):
+    for i in range(30):
+        _write_synthetic_suggestion(
+            tmp_path,
+            f"manual_{i:02d}",
+            score=100 - i,
+            automation="manual_required",
+        )
+        _write_synthetic_suggestion(
+            tmp_path,
+            f"bot_{i:02d}",
+            score=99 - i,
+            automation="bot_possible",
+        )
+    board_setup(backend="local", apply=True, root=tmp_path)
+
+    result = publish_suggestions(backend="local", apply=True, root=tmp_path)
+    state = load_local_state(tmp_path)
+    counts = {}
+    for card in state["cards"]:
+        value = card["fields"]["automation_class"]
+        counts[value] = counts.get(value, 0) + 1
+
+    assert len(state["cards"]) == 50
+    assert counts == {"bot_possible": 25, "manual_required": 25}
+    assert result["selected_suggestion_counts"] == {"bot_possible": 25, "manual_required": 25}
+    assert result["daily_suggestion_targets"] == {
+        "bot_possible": 25,
+        "manual_required": 25,
+        "total": 50,
+    }
+
+
 def test_publish_suggestions_is_idempotent_and_does_not_duplicate_job_key(tmp_path):
     _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=90)
     board_setup(backend="local", apply=True, root=tmp_path)
@@ -162,6 +239,79 @@ def test_publish_suggestions_is_idempotent_and_does_not_duplicate_job_key(tmp_pa
     publish_suggestions(backend="local", apply=True, root=tmp_path)
     state = load_local_state(tmp_path)
     assert len(state["cards"]) == 1
+
+
+def test_publish_suggestions_does_not_create_duplicate_apply_url(tmp_path):
+    suggestion = _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=90)
+    _setup_and_publish(tmp_path, suggestion)
+    duplicate = json.loads(json.dumps(suggestion))
+    duplicate["job"]["job_key"] = "duplicatekey"
+    path = tmp_path / "source_cache" / "suggestions" / "duplicatekey.json"
+    path.write_text(json.dumps(duplicate, indent=2), encoding="utf-8")
+
+    result = publish_suggestions(backend="local", apply=True, root=tmp_path)
+
+    state = load_local_state(tmp_path)
+    assert len(state["cards"]) == 1
+    assert result["would_create"] == []
+    assert result["skipped_existing_user_column"][0]["reason"] == "duplicate_apply_url"
+
+
+def test_publish_suggestions_retires_existing_duplicate_apply_url_card(tmp_path):
+    suggestion = _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=90)
+    _setup_and_publish(tmp_path, suggestion)
+    duplicate = json.loads(json.dumps(suggestion))
+    duplicate["job"]["job_key"] = "duplicatekey"
+    duplicate_path = tmp_path / "source_cache" / "suggestions" / "duplicatekey.json"
+    duplicate_path.write_text(json.dumps(duplicate, indent=2), encoding="utf-8")
+    state = load_local_state(tmp_path)
+    duplicate_card = json.loads(json.dumps(state["cards"][0]))
+    duplicate_card["card_id"] = "job_duplicatekey"
+    duplicate_card["fields"]["job_key"] = "duplicatekey"
+    state["cards"].append(duplicate_card)
+    save_local_state(tmp_path, state)
+
+    result = publish_suggestions(backend="local", apply=True, root=tmp_path)
+
+    cards = {card["fields"]["job_key"]: card for card in load_local_state(tmp_path)["cards"]}
+    assert cards["duplicatekey"]["column"] == "Rejected / Skip"
+    assert result["retired_duplicate_apply_url"][0]["job_key"] == "duplicatekey"
+
+
+def test_publish_suggestions_retires_untouched_card_that_rescores_below_threshold(tmp_path):
+    suggestion = _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=90)
+    _setup_and_publish(tmp_path, suggestion)
+    _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=69)
+
+    result = publish_suggestions(backend="local", apply=True, root=tmp_path)
+
+    state = load_local_state(tmp_path)
+    assert state["cards"][0]["column"] == "Rejected / Skip"
+    assert state["cards"][0]["fields"]["fit_score"] == 69
+    assert result["retired_below_threshold"][0]["job_key"] == suggestion["job"]["job_key"]
+
+    path = tmp_path / "source_cache" / "suggestions" / f"{suggestion['job']['job_key']}.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["fit"]["reasons"] = ["Updated below-threshold reason"]
+    path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    publish_suggestions(backend="local", apply=True, root=tmp_path)
+
+    fields = load_local_state(tmp_path)["cards"][0]["fields"]
+    assert load_local_state(tmp_path)["cards"][0]["column"] == "Rejected / Skip"
+    assert fields["why_apply"] == "Updated below-threshold reason"
+
+
+def test_publish_suggestions_does_not_retire_user_owned_card_below_threshold(tmp_path):
+    suggestion = _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=90)
+    _setup_and_publish(tmp_path, suggestion)
+    _move_job(tmp_path, suggestion["job"]["job_key"], "Selected by Geoff")
+    _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=69)
+
+    result = publish_suggestions(backend="local", apply=True, root=tmp_path)
+
+    state = load_local_state(tmp_path)
+    assert state["cards"][0]["column"] == "Selected by Geoff"
+    assert result["retired_below_threshold"] == []
 
 
 def test_process_selected_ignores_cards_not_in_selected_by_geoff(tmp_path):
@@ -190,6 +340,26 @@ def test_process_selected_apply_moves_selected_to_in_progress_first(tmp_path):
     destinations = [event["to_column"] for event in events]
     assert "In Progress" in destinations
     assert destinations.index("In Progress") < destinations.index("Needs Geoff")
+
+
+def test_process_selected_accepts_unprepared_in_progress_from_ui_drag(tmp_path):
+    suggestion = _write_suggestion(tmp_path, "sportsbook_analytics_engineer.md", score_override=92)
+    board_setup(backend="local", apply=True, root=tmp_path)
+    publish_suggestions(backend="local", apply=True, root=tmp_path)
+    _move_job(tmp_path, suggestion["job"]["job_key"], "In Progress")
+
+    result = process_selected(backend="local", apply=True, root=tmp_path,
+                              executor="codex")
+
+    assert result["selected_count"] == 1
+    assert result["plans"][0]["source_column"] == "In Progress"
+    state = load_local_state(tmp_path)
+    card = state["cards"][0]
+    assert card["column"] == "Needs Geoff"
+    assert card["fields"]["application_id"]
+    assert card["fields"]["materials_path"]
+    app_dir = tmp_path / "applications_active" / card["fields"]["application_id"]
+    assert json.loads((app_dir / "executor.json").read_text())["requested_executor"] == "codex"
 
 
 def test_manual_required_selected_card_ends_in_needs_geoff(tmp_path):
@@ -250,6 +420,26 @@ def test_publish_preserves_existing_user_notes_and_mixed_fields(tmp_path):
     fields = load_local_state(tmp_path)["cards"][0]["fields"]
     assert fields["notes"] == "keep Geoff note"
     assert fields["salary_text"] == "Geoff-entered comp note"
+
+
+def test_publish_updates_generated_reason_fields_on_suggested_cards(tmp_path):
+    suggestion = _write_suggestion(tmp_path, "basketball_ai_data_scientist.md", score_override=90)
+    _setup_and_publish(tmp_path, suggestion)
+    path = tmp_path / "source_cache" / "suggestions" / f"{suggestion['job']['job_key']}.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["fit"]["reasons"] = ["Updated generated reason"]
+    raw["fit"]["risks"] = ["Updated generated risk"]
+    raw["automation"]["blockers"] = ["manual phrase: updated blocker"]
+    raw["automation"]["value"] = "manual_required"
+    path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
+    publish_suggestions(backend="local", apply=True, root=tmp_path)
+
+    fields = load_local_state(tmp_path)["cards"][0]["fields"]
+    assert fields["why_apply"] == "Updated generated reason"
+    assert fields["risks"] == "Updated generated risk"
+    assert fields["manual_reason"] == "manual phrase: updated blocker"
+    assert fields["automation_class"] == "manual_required"
 
 
 def test_missing_appflowy_config_fails_closed(tmp_path):

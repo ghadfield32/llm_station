@@ -2,9 +2,8 @@
 job_search_daily - prepare/manual-first job-search maintenance DAG.
 
 This DAG has no submit authority. Its MVP responsibilities are profile readiness,
-local/example suggestion validation, digest generation, and retention planning.
-Live source adapters and AppFlowy writes should be added only after the CLI path
-and manual blocker tests are reliable.
+live discovery, local/example suggestion validation, digest generation, and
+retention planning.
 """
 from __future__ import annotations
 
@@ -59,21 +58,124 @@ if AIRFLOW_AVAILABLE:
             return {"examples": rows}
 
         @task
+        def discover_live() -> dict:
+            from pathlib import Path
+
+            from command_center.job_search.cli import _suggest_from_file
+            from command_center.job_search.live_sources import discover_live_postings
+
+            runs = [
+                discover_live_postings(
+                    sources=["jobicy"],
+                    tags=[
+                        "python",
+                        "machine-learning",
+                        "sql",
+                        "analytics",
+                        "dbt",
+                        "snowflake",
+                        "airflow",
+                        "experimentation",
+                    ],
+                    industries=[
+                        "data-science",
+                        "engineering",
+                        "dev",
+                        "management",
+                        "accounting-finance",
+                        "marketing",
+                        "business",
+                    ],
+                    count=100,
+                    write=True,
+                ),
+                discover_live_postings(
+                    sources=["remotive"],
+                    tags=[
+                        "data",
+                        "analytics",
+                        "machine learning",
+                        "ai engineer",
+                        "data engineer",
+                        "python",
+                        "sql",
+                        "dbt",
+                        "snowflake",
+                        "airflow",
+                    ],
+                    count=100,
+                    write=True,
+                ),
+                discover_live_postings(
+                    sources=["remoteok"],
+                    tags=[],
+                    count=100,
+                    write=True,
+                ),
+            ]
+            posting_paths = []
+            seen_paths = set()
+            for run in runs:
+                for path in run["posting_paths"]:
+                    if path not in seen_paths:
+                        seen_paths.add(path)
+                        posting_paths.append(path)
+            suggestions = []
+            for path in posting_paths:
+                result = _suggest_from_file(Path(path), write=True)
+                suggestions.append(
+                    {
+                        "file": str(path),
+                        "job_key": result["job"]["job_key"],
+                        "score": result["fit"]["score"],
+                        "automation": result["automation"]["value"],
+                    }
+                )
+            return {
+                "runs": runs,
+                "postings_found": sum(run["postings_found"] for run in runs),
+                "posting_paths": posting_paths,
+                "suggestions_written": suggestions,
+            }
+
+        @task
+        def publish_to_board(_live: dict) -> dict:
+            from command_center.job_search.board import publish_suggestions
+
+            return publish_suggestions(backend="internal", apply=True)
+
+        @task
+        def process_geoff_selected(_published: dict) -> dict:
+            from command_center.job_search.board import process_selected
+
+            return process_selected(backend="internal", apply=True, executor="codex")
+
+        @task
         def retention_plan() -> dict:
             from command_center.job_search.retention import plan_retention
 
             return plan_retention()
 
         @task
-        def emit_digest(_profile: dict, _examples: dict, _retention: dict) -> str:
+        def emit_digest(
+            _profile: dict,
+            _live: dict,
+            _examples: dict,
+            _published: dict,
+            _processed: dict,
+            _retention: dict,
+        ) -> str:
             from command_center.job_search.digest import write_digest
 
             return str(write_digest())
 
         profile = load_profile()
+        live = discover_live()
         examples = validate_examples()
+        published = publish_to_board(live)
+        processed = process_geoff_selected(published)
         retention = retention_plan()
-        emit_digest(profile, examples, retention)
+        emit_digest(profile, live, examples, published, processed, retention)
 
     dag = job_search_daily()
 else:
