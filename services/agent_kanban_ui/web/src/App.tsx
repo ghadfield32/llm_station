@@ -11,7 +11,7 @@ import {
   MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
   fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
   fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse, TranscriptTurn,
-  ChatConversation, fetchChatConversations,
+  ChatConversation, fetchChatConversations, deleteChatConversation,
   fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
   fetchJobPacket, JobPacket, JobStoryEntry, PacketValidation, AgentTraceEntry,
   requestPacketChanges, submitJobApplication, updateJobPacketFile,
@@ -1519,7 +1519,10 @@ const PACKET_TABS: { key: string; label: string; file?: string; editable?: boole
   { key: "agent_trace", label: "Agent Trace" },
 ];
 
-function StoryView({ story }: { story: JobStoryEntry[] }) {
+function StoryView({ story, onOpenAt }: {
+  story: JobStoryEntry[];
+  onOpenAt?: (ts: string) => void;
+}) {
   if (!story.length) {
     return <div className="muted">No story recorded for this card yet.</div>;
   }
@@ -1532,6 +1535,14 @@ function StoryView({ story }: { story: JobStoryEntry[] }) {
             <Badge value={s.kind} />
             <b>{s.title}</b>
             <span className="muted small">{s.summary}</span>
+            {onOpenAt && s.ts && (
+              <button className="clear story-jump"
+                title="open the chat timeline at this moment"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onOpenAt(s.ts); }}>
+                open in chat
+              </button>
+            )}
           </>
         );
         return s.detail ? (
@@ -1609,8 +1620,9 @@ function AgentTraceView({ entries }: { entries: AgentTraceEntry[] }) {
   );
 }
 
-function PacketReviewModal({ spec, card, onClose, onChanged }: {
+function PacketReviewModal({ spec, card, onClose, onChanged, onOpenChatAt }: {
   spec: DomainSpec; card: DomainCard; onClose: () => void; onChanged: () => void;
+  onOpenChatAt?: (ts: string) => void;
 }) {
   const id = cardId(card);
   const [packet, setPacket] = useState<JobPacket | null>(null);
@@ -1775,7 +1787,8 @@ function PacketReviewModal({ spec, card, onClose, onChanged }: {
                 </div>
               </div>
             )}
-            {tab === "story" && <StoryView story={packet.story ?? []} />}
+            {tab === "story" && <StoryView story={packet.story ?? []}
+              onOpenAt={onOpenChatAt} />}
             {PACKET_TABS.filter((t) => t.file).map((t) => tab === t.key && (
               <div key={t.key} className="packet-body">
                 {t.editable && !alreadyApplied && (
@@ -1925,7 +1938,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   refreshKey: string;
   activeDomain: string;
   onActiveDomainChange: (domainId: string) => void;
-  onOpenChat?: (prompt: string, conversationId?: string) => void;
+  onOpenChat?: (prompt: string, conversationId?: string, storyTs?: string) => void;
 }) {
   const [domains, setDomains] = useState<DomainSpec[]>([]);
   const [cards, setCards] = useState<Record<string, DomainCards>>({});
@@ -2049,10 +2062,15 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
       : domainActions?.dispatch_enabled
       ? "drag cards between configured lanes, or use Move to on mobile"
       : "dragging needs console mode: set KANBAN_UI_CHAT_ENABLED=1";
-  const moveTargetsFor = (card: DomainCard) =>
-    canMove
-      ? boardColumns.filter((name) => name !== "Unstaged" && name !== valText(card.status))
-      : [];
+  const moveTargetsFor = (card: DomainCard) => {
+    if (!canMove) return [];
+    const status = valText(card.status);
+    // one-step machine: the backend names the only legal next steps per lane
+    // (jobs: found -> agent complete -> me complete, plus reject/undo)
+    const allowed = pack?.transitions?.[status];
+    if (allowed) return allowed;
+    return boardColumns.filter((name) => name !== "Unstaged" && name !== status);
+  };
   function syncKanbanScroll(key: string, source: "top" | "board", left: number) {
     const target = source === "top" ? boardScrollRefs.current[key] : topScrollRefs.current[key];
     if (target && Math.abs(target.scrollLeft - left) > 1) target.scrollLeft = left;
@@ -2282,6 +2300,13 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
       {packetFor && (
         <PacketReviewModal spec={packetFor.spec} card={packetFor.card}
           onChanged={() => { setDrawerTick((t) => t + 1); void load(); }}
+          onOpenChatAt={onOpenChat
+            ? (ts) => {
+              onOpenChat("",
+                `${packetFor.spec.domain_id}:${cardId(packetFor.card)}`, ts);
+              setPacketFor(null);
+            }
+            : undefined}
           onClose={() => setPacketFor(null)} />
       )}
       {showJobPresets && <JobPresetDrawer onClose={() => setShowJobPresets(false)} />}
@@ -2602,12 +2627,24 @@ function ChatLine({ ev }: { ev: ChatEvent }) {
   }
 }
 
-function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation, onStartRepoChat }: {
+// which task family a conversation belongs to, from its scoped id
+// (job_application:job_x -> jobs; repo:llm_station -> repo; plain ids -> chat)
+const CONV_KINDS: Record<string, string> = {
+  job_application: "job", linkedin_post: "post", paper: "paper", book: "book",
+  repo: "repo", dag: "dag", machine_upkeep: "upkeep", mission: "mission",
+};
+function conversationKind(id: string): string {
+  if (!id.includes(":")) return "chat";
+  return CONV_KINDS[id.split(":", 1)[0]] ?? "chat";
+}
+
+function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation, onStartRepoChat, onDeleteConversation }: {
   runtime: ChatRuntime | null;
   conversations: ChatConversation[];
   activeId: string;
   onOpenConversation: (id: string) => void;
   onStartRepoChat: (repo: { repo_id: string; remote_url: string }) => void;
+  onDeleteConversation: (id: string) => void;
 }) {
   if (!runtime) return <div className="loading">loading chat runtime...</div>;
   const candidates = runtime.chat_role?.candidates ?? [];
@@ -2618,7 +2655,7 @@ function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation
         <div className="diag-head">All Chats</div>
         <p className="muted small">
           Every recorded conversation, across every surface — tap one to read
-          its full story.
+          its full story. Scoped chats carry their task badge.
         </p>
         {conversations.length === 0 && (
           <div className="muted small">
@@ -2628,20 +2665,30 @@ function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation
         )}
         <div className="conv-list">
           {conversations.map((c) => (
-            <button
+            <div
               className={`conv-row ${c.conversation_id === activeId ? "thread-on" : ""}`}
-              key={c.conversation_id}
-              onClick={() => onOpenConversation(c.conversation_id)}>
-              <span className="conv-title">{c.title || c.conversation_id}</span>
-              <span className="muted small">
-                {c.turns} turn{c.turns === 1 ? "" : "s"}
-                {c.surfaces.length ? ` · ${c.surfaces.join("/")}` : ""}
-                {c.last_ts ? ` · ${fmtThreadTime(c.last_ts)}` : ""}
-              </span>
-              {c.last_user_text && (
-                <span className="conv-preview muted small">{c.last_user_text}</span>
-              )}
-            </button>
+              key={c.conversation_id}>
+              <button className="conv-open"
+                onClick={() => onOpenConversation(c.conversation_id)}>
+                <span className="conv-title">
+                  <Badge value={conversationKind(c.conversation_id)} />
+                  {c.title || c.conversation_id}
+                </span>
+                <span className="muted small">
+                  {c.turns} turn{c.turns === 1 ? "" : "s"}
+                  {c.surfaces.length ? ` · ${c.surfaces.join("/")}` : ""}
+                  {c.last_ts ? ` · ${fmtThreadTime(c.last_ts)}` : ""}
+                </span>
+                {c.last_user_text && (
+                  <span className="conv-preview muted small">{c.last_user_text}</span>
+                )}
+              </button>
+              <button className="conv-del"
+                title="delete this chat's history (thread + transcript). Card and board history stays."
+                onClick={() => onDeleteConversation(c.conversation_id)}>
+                ×
+              </button>
+            </div>
           ))}
         </div>
       </div>
@@ -2653,11 +2700,12 @@ function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation
         </p>
         <div className="conv-list">
           {repos.map((r) => (
-            <button className="conv-row" key={r.repo_id}
-              onClick={() => onStartRepoChat(r)}>
-              <span className="conv-title">{r.repo_id}</span>
-              <span className="muted small">{r.remote_url || "local"}</span>
-            </button>
+            <div className="conv-row" key={r.repo_id}>
+              <button className="conv-open" onClick={() => onStartRepoChat(r)}>
+                <span className="conv-title"><Badge value="repo" />{r.repo_id}</span>
+                <span className="muted small">{r.remote_url || "local"}</span>
+              </button>
+            </div>
           ))}
           {repos.length === 0 && (
             <div className="muted small">
@@ -2703,13 +2751,31 @@ function turnsToEvents(turns: TranscriptTurn[]): ChatEvent[] {
   return events;
 }
 
-function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
+function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll,
+  focusTs, onFocused }: {
   transcript: ChatTranscriptResponse | null;
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
   onLoadAll?: (totalTurns: number) => void;
+  focusTs?: string | null;
+  onFocused?: () => void;
 }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    // card-story click-through: land ON that moment in the timeline
+    if (!focusTs || !transcript) return;
+    const nodes = Array.from(
+      rootRef.current?.querySelectorAll<HTMLElement>("[data-ts]") ?? []);
+    const target = nodes.find((el) => (el.dataset.ts ?? "") >= focusTs)
+      ?? nodes[nodes.length - 1] ?? null;
+    if (!target) return;
+    if (target instanceof HTMLDetailsElement) target.open = true;
+    target.scrollIntoView({ block: "center" });
+    target.classList.add("story-focus");
+    onFocused?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusTs, transcript]);
   if (error) return <div className="muted">ERR {error}</div>;
   if (!transcript) return <div className="muted">{loading ? "loading the full story..." : "no story loaded"}</div>;
   const total = transcript.total_turns ?? transcript.turn_count;
@@ -2723,7 +2789,7 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
       { ts: entry.ts ?? "", kind: "story" as const, entry })),
   ].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   return (
-    <div className="chat-story">
+    <div className="chat-story" ref={rootRef}>
       <div className="chat-story-head muted small">
         <span>
           full story — {total} recorded turn{total === 1 ? "" : "s"}
@@ -2760,12 +2826,14 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
             </>
           );
           return s.detail ? (
-            <details className={`story-row story-${s.kind}`} key={i}>
+            <details className={`story-row story-${s.kind}`} key={i}
+              data-ts={s.ts}>
               <summary>{head}</summary>
               <pre className="packet-doc">{s.detail}</pre>
             </details>
           ) : (
-            <div className={`story-row story-${s.kind}`} key={i}>{head}</div>
+            <div className={`story-row story-${s.kind}`} key={i}
+              data-ts={s.ts}>{head}</div>
           );
         }
         const { turn, idx: turnIdx } = row;
@@ -2781,6 +2849,7 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
         const tools = turnEvents.filter((ev) => ev.type === "tool").length;
         return (
           <details className="story-row story-turn" key={i}
+            data-ts={turn.ts ?? ""}
             open={turnIdx === transcript.turns.length - 1}>
             <summary>
               <span className="story-time">{fmtThreadTime(turn.ts ?? "")}</span>
@@ -2832,7 +2901,8 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
 function ChatView({ roles, runtime, draft }: {
   roles: string[];
   runtime: ChatRuntime | null;
-  draft?: { text: string; nonce: number; conversationId?: string } | null;
+  draft?: { text: string; nonce: number; conversationId?: string;
+            storyTs?: string } | null;
 }) {
   const [model, setModel] = useState(roles.includes("chat") ? "chat" : roles[0] ?? "");
   const [conversationId, setConversationId] = useState("app");
@@ -2845,6 +2915,7 @@ function ChatView({ roles, runtime, draft }: {
   const [storyLoading, setStoryLoading] = useState(false);
   const [storyError, setStoryError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
+  const [focusTs, setFocusTs] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   // guards hydration races: a slow transcript fetch for a thread the user has
   // already left must not fill the current thread's log
@@ -2880,17 +2951,26 @@ function ChatView({ roles, runtime, draft }: {
   }, []);
   useEffect(() => {
     if (draft?.text) setInput(draft.text);
-    if (draft?.conversationId && draft.conversationId !== conversationIdRef.current) {
+    if (!draft?.conversationId) return;
+    const changed = draft.conversationId !== conversationIdRef.current;
+    if (changed) {
       conversationIdRef.current = draft.conversationId;
       setConversationId(draft.conversationId);
       setEvents([]);
       setStory(null);
       setStoryError(null);
+    }
+    if (draft.storyTs) {
+      // a card-story click-through: open the full story AT that moment
+      setFocusTs(draft.storyTs);
+      setChatMode("story");
+      void loadStory(draft.conversationId);
+    } else if (changed) {
       setChatMode("live");
       void hydrateThread(draft.conversationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft?.conversationId, draft?.nonce, draft?.text]);
+  }, [draft?.conversationId, draft?.nonce, draft?.text, draft?.storyTs]);
   useEffect(() => {
     // first mount: replay whatever the flight recorder has for the default
     // thread, so a reload (or another device) still shows the conversation
@@ -2978,6 +3058,7 @@ function ChatView({ roles, runtime, draft }: {
     setEvents([]);
     setStory(null);
     setStoryError(null);
+    setFocusTs(null);
     setChatMode(mode);
     if (mode === "story") void loadStory(thread.id);
     else void hydrateThread(thread.id);
@@ -2988,6 +3069,26 @@ function ChatView({ roles, runtime, draft }: {
     const thread = threads.find((t) => t.id === id)
       ?? { id, title: id, updatedAt: "", target: "GatewayCore" };
     openThread(thread, "story");
+  }
+
+  async function deleteConversation(id: string) {
+    if (!window.confirm(
+      `Delete the chat history for "${id}"?\n\nThis removes the thread and its `
+      + "recorded transcript. Card/board history (the governed event log) is "
+      + "kept.")) return;
+    try {
+      const result = await deleteChatConversation(id);
+      const local = threads.filter((t) => t.id !== id);
+      setThreads(local);
+      saveChatThreads(local);
+      setConversations((current) =>
+        current.filter((c) => c.conversation_id !== id));
+      void result;
+      if (conversationIdRef.current === id) startNewChat();
+      loadConversations();
+    } catch (e) {
+      window.alert(`delete failed: ${(e as Error).message}`);
+    }
   }
 
   function startRepoChat(repo: { repo_id: string; remote_url: string }) {
@@ -3057,8 +3158,12 @@ function ChatView({ roles, runtime, draft }: {
         <section className="chat-workspace">
           <div className="chat-bar">
             <span className="muted small">model</span>
-            <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
-              {roles.map((r) => <option key={r}>{r}</option>)}
+            <select className="select" value={model} onChange={(e) => setModel(e.target.value)}
+              title="every role routes through the one LiteLLM gateway — switching is instant">
+              {roles.map((r) => {
+                const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
+                return <option key={r} value={r}>{backing ? `${r} — ${backing}` : r}</option>;
+              })}
             </select>
             <span className="muted small">thread <code>{conversationId}</code></span>
             <span className="chat-bar-hint muted small">the agent moves/assigns via governed verbs — Approved stays human-only</span>
@@ -3106,7 +3211,8 @@ function ChatView({ roles, runtime, draft }: {
             <div className="chat-log chat-log-story">
               <ThreadTimeline transcript={story} loading={storyLoading}
                 error={storyError} onRefresh={() => void loadStory()}
-                onLoadAll={(total) => void loadStory(conversationId, total)} />
+                onLoadAll={(total) => void loadStory(conversationId, total)}
+                focusTs={focusTs} onFocused={() => setFocusTs(null)} />
             </div>
           ) : (
             <div className="chat-log">
@@ -3125,7 +3231,8 @@ function ChatView({ roles, runtime, draft }: {
         <aside className="chat-runtime-wrap">
           <ChatRuntimePanel runtime={runtime} conversations={conversations}
             activeId={conversationId} onOpenConversation={openConversation}
-            onStartRepoChat={startRepoChat} />
+            onStartRepoChat={startRepoChat}
+            onDeleteConversation={(id) => void deleteConversation(id)} />
         </aside>
       </div>
     </div>
@@ -3147,7 +3254,8 @@ export function App() {
   const [runtimeDebug, setRuntimeDebug] = useState<RuntimeDebug | null>(null);
   const [chatRuntime, setChatRuntime] = useState<ChatRuntime | null>(null);
   const [chatDraft, setChatDraft] =
-    useState<{ text: string; nonce: number; conversationId?: string } | null>(null);
+    useState<{ text: string; nonce: number; conversationId?: string;
+               storyTs?: string } | null>(null);
   const [domainNav, setDomainNav] = useState<DomainNavItem[]>([]);
   const [activeDomain, setActiveDomain] = useState(() => initialDomainFromUrl());
   const [updated, setUpdated] = useState<string>("");
@@ -3234,10 +3342,11 @@ export function App() {
   }, []);
 
   const chatOn = !!cfg?.chat_enabled;
-  const openChatWithPrompt = useCallback((prompt: string, conversationId?: string) => {
-    setChatDraft({ text: prompt, conversationId, nonce: Date.now() });
-    setView("chat");
-  }, []);
+  const openChatWithPrompt = useCallback(
+    (prompt: string, conversationId?: string, storyTs?: string) => {
+      setChatDraft({ text: prompt, conversationId, storyTs, nonce: Date.now() });
+      setView("chat");
+    }, []);
   const nav = [...NAV, { id: "chat" as View, label: "Chat" }];
   const domainNavCount = domainNav.reduce((total, item) => total + item.count, 0);
   const counts: Partial<Record<View, number>> = {

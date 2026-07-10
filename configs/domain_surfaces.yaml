@@ -90,11 +90,10 @@ domains:
     card_component: book
     source: appflowy_board
     board: library
-    columns:
-      - To Read
-      - In Progress
+    columns:      # the library board's real lanes (growthos STATUSES)
+      - To read
+      - Reading
       - Done
-      - Reference
     summary_fields:
       - {name: title, label: Title}
       - {name: author, label: Author}

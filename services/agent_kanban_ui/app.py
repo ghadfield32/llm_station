@@ -585,6 +585,37 @@ def _required_job_application_id(card: dict, action: str) -> str:
     return app_id
 
 
+# The job pipeline is a one-step machine around Geoff's three manual gates:
+# 1) select (Suggested Jobs -> Selected by Geoff), 2) review what the agent
+# finished (-> Needs Geoff = "agent complete"), 3) complete (Needs Geoff ->
+# Completed through the validated submit path). Stage skips are refused so an
+# agent's "done" can never masquerade as a submitted application.
+_JOB_TRANSITIONS: dict[str, list[str]] = {
+    "Suggested Jobs": ["Selected by Geoff", "Rejected / Skip"],
+    "Selected by Geoff": ["In Progress", "Suggested Jobs"],
+    "In Progress": ["Needs Geoff", "Selected by Geoff"],
+    "Needs Geoff": ["Completed", "In Progress"],
+    "Completed": ["Interviewing", "Closed / Archived"],
+    "Interviewing": ["Closed / Archived", "Completed"],
+    "Rejected / Skip": ["Suggested Jobs", "Closed / Archived"],
+    "Closed / Archived": [],
+}
+
+
+def _allowed_transitions(spec: dict, from_status: str | None) -> list[str]:
+    """One step forward or backward, never a skip. Jobs use the explicit gate
+    map; other board domains use column adjacency."""
+    if spec.get("domain_id") == "job_application":
+        return list(_JOB_TRANSITIONS.get(str(from_status), []))
+    columns = spec.get("columns") or []
+    if from_status not in columns:
+        return list(columns[:1])       # unknown/new card: enter the first lane
+    i = columns.index(from_status)
+    return [c for c in (columns[i - 1] if i else None,
+                        columns[i + 1] if i + 1 < len(columns) else None)
+            if c]
+
+
 def _column_action(spec: dict, status: str) -> str:
     if spec.get("columns") and status not in spec["columns"]:
         raise HTTPException(
@@ -970,6 +1001,10 @@ def domain_cards(domain_id: str) -> dict:
     # fallback so fixture/store domains render their configured lanes
     out.setdefault("columns", spec.get("columns", []))
     out["empty_state"] = spec.get("empty_state", {})
+    if spec.get("source") == "board_store":
+        # one-step machine: the UI offers only these targets per lane
+        out["transitions"] = {
+            c: _allowed_transitions(spec, c) for c in out["columns"]}
     return out
 
 
@@ -1302,7 +1337,16 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
     previous = card.get("status")
     if previous == body.status:
         return {"status": "unchanged", "domain_id": domain_id, "card": card}
+    # configured-column + wall checks first (400 for a bogus status), THEN
+    # the one-step machine (409 for a real-but-skipped stage)
     action = _column_action(spec, body.status)
+    allowed = _allowed_transitions(spec, previous)
+    if body.status not in allowed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"cards move one step at a time: from {previous!r} the "
+                   f"next steps are {allowed or ['(terminal)']}, "
+                   f"not {body.status!r}")
     side_effect: dict[str, Any] | None = None
     if domain_id == "job_application" and body.status == "Completed":
         # Finalize BEFORE the governed event so a blocked or failed finalize
@@ -1705,6 +1749,13 @@ def domain_card_packet_submit(
     if previous == "Completed":
         raise HTTPException(
             status_code=409, detail="card is already in Completed")
+    if "Completed" not in _allowed_transitions(spec, previous):
+        # the 3-gate flow: submit happens at "agent complete" (Needs Geoff),
+        # never as a stage skip from earlier in the pipeline
+        raise HTTPException(
+            status_code=409,
+            detail=f"submit happens from 'Needs Geoff' (agent complete); this "
+                   f"card is in {previous!r} — move it one step at a time")
     _required_job_application_id(card, "submit the application")
     action = _column_action(spec, "Completed")
     # Finalize BEFORE the governed event (same invariant as the drag): a
@@ -2024,6 +2075,36 @@ def save_chat_thread(body: ChatThreadIn) -> dict:
         "threads": _read_chat_threads(),
         "source": str(CHAT_THREADS_FILE),
         **_transcript_storage(),
+    }
+
+
+@app.delete("/api/chat/threads/{conversation_id}")
+def delete_chat_conversation(conversation_id: str) -> dict:
+    """Clear ONE conversation's chat history: the thread shortcut and the
+    flight-recorder transcript file. Chat hygiene only — the governed kanban
+    event log (card/board history) is a different record and is untouched;
+    this can never delete a card, board, or mission."""
+    _require_chat()
+    from command_center.channels.transcript import transcript_path
+
+    threads = [row for row in _read_chat_threads()
+               if row.get("conversation_id") != conversation_id]
+    _write_chat_threads(threads)
+    removed_transcript = False
+    try:
+        path = transcript_path(conversation_id)
+        if path.is_file():
+            path.unlink()
+            removed_transcript = True
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"could not remove transcript: {exc}") from exc
+    return {
+        "status": "deleted",
+        "conversation_id": conversation_id,
+        "transcript_removed": removed_transcript,
+        "threads": threads,
     }
 
 

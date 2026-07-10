@@ -877,21 +877,36 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   gap: 12px; margin-bottom: 12px;
 }
 /* All Chats / scoped-chat pickers in the chat side panel */
-.conv-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+.conv-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px;
+  overflow-y: auto; overscroll-behavior: contain; }
 .conv-row {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
-  text-align: left; background: var(--col); color: var(--fg);
-  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
-  min-height: 44px; cursor: pointer; font: inherit;
+  display: flex; align-items: stretch; background: var(--col); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0;
+  min-height: 44px; overflow: hidden;
 }
 .conv-row:hover, .conv-row.thread-on { border-color: var(--accent); background: var(--card); }
+.conv-open {
+  flex: 1; min-width: 0; display: flex; flex-direction: column;
+  align-items: flex-start; gap: 2px; text-align: left; background: none;
+  border: 0; color: inherit; font: inherit; padding: 8px 10px; cursor: pointer;
+}
 .conv-title {
   width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-weight: 600; font-size: 13px;
+  font-weight: 600; font-size: 13px; display: flex; gap: 6px; align-items: center;
 }
+.conv-title .badge, .conv-title span[class*="badge"] { flex: 0 0 auto; }
 .conv-preview {
   width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.conv-del {
+  flex: 0 0 auto; min-width: 44px; border: 0; border-left: 1px solid var(--border);
+  background: none; color: var(--muted); font-size: 16px; cursor: pointer;
+}
+.conv-del:hover, .conv-del:active { color: var(--bad); background: var(--card); }
+
+/* story click-through */
+.story-jump { flex: 0 0 auto; font-size: 11px; color: var(--accent); }
+.story-focus { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* LinkedIn preview cards */
 .li-card {

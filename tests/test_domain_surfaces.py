@@ -215,12 +215,15 @@ def test_job_move_to_in_progress_prepares_packet_immediately(client, monkeypatch
     monkeypatch.setattr(
         mod, "_job_search_config_and_root", lambda: (load_config(), tmp_path))
 
+    # gate 1 of the 3-step flow: found -> Selected by Geoff. The selection
+    # drag triggers packet prep; the pipeline advances the card to Needs
+    # Geoff (agent complete) on its own — Geoff never touches In Progress.
     resp = tc.post("/api/domain/job_application/move",
-                   json={"card_id": card_id, "status": "In Progress"})
+                   json={"card_id": card_id, "status": "Selected by Geoff"})
 
     assert resp.status_code == 200, resp.json()
     body = resp.json()
-    assert body["event"]["status_after"] == "In Progress"
+    assert body["event"]["status_after"] == "Selected by Geoff"
     assert body["side_effect"]["operation"] == "process_selected"
     assert body["side_effect"]["selected_count"] == 1
     assert body["side_effect"]["plans"][0]["card_id"] == card_id
@@ -269,28 +272,50 @@ def test_job_domain_move_accepts_each_pipeline_stage(client, monkeypatch):
         status="Suggested Jobs")
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
 
-    stages = [
-        "Selected by Geoff", "In Progress", "Needs Geoff",
-        "Interviewing", "Rejected / Skip", "Closed / Archived", "Suggested Jobs",
-    ]
-    for stage in stages:
+    # a stage skip is refused, and the error NAMES the legal next steps
+    resp = tc.post("/api/domain/job_application/move",
+                   json={"card_id": "job-validation-sportsbook",
+                         "status": "Needs Geoff"})
+    assert resp.status_code == 409
+    assert "one step at a time" in resp.json()["detail"]
+    assert "Selected by Geoff" in resp.json()["detail"]
+
+    # the legal path: found -> selected -> in progress -> agent complete
+    for stage in ["Selected by Geoff", "In Progress", "Needs Geoff"]:
         resp = tc.post("/api/domain/job_application/move",
                        json={"card_id": "job-validation-sportsbook",
                              "status": stage})
         assert resp.status_code == 200, (stage, resp.json())
         assert resp.json()["card"]["status"] == stage
 
+    # one step backward (send back for regeneration) is allowed
+    resp = tc.post("/api/domain/job_application/move",
+                   json={"card_id": "job-validation-sportsbook",
+                         "status": "In Progress"})
+    assert resp.status_code == 200
+    resp = tc.post("/api/domain/job_application/move",
+                   json={"card_id": "job-validation-sportsbook",
+                         "status": "Needs Geoff"})
+    assert resp.status_code == 200
+
     progress = tc.get(
         "/api/domain/job_application/card/job-validation-sportsbook/progress").json()
     event_actions = {event["action"] for event in progress["events"]}
-    assert {"stage_card", "start_todo", "block_card", "reject_card",
-            "finish_todo", "add_mission_card"} <= event_actions
+    assert {"stage_card", "start_todo", "block_card"} <= event_actions
 
+    # Completed is adjacent from Needs Geoff, but still demands the packet
     resp = tc.post("/api/domain/job_application/move",
                    json={"card_id": "job-validation-sportsbook",
                          "status": "Completed"})
     assert resp.status_code == 400
     assert "no application_id" in resp.json()["detail"]
+
+    # the one-step map travels with the cards payload for the UI dropdowns
+    pack = tc.get("/api/domain/job_application/cards").json()
+    assert pack["transitions"]["Needs Geoff"] == ["Completed", "In Progress"]
+    assert pack["transitions"]["Suggested Jobs"] == [
+        "Selected by Geoff", "Rejected / Skip"]
+    assert pack["transitions"]["Closed / Archived"] == []
 
 
 def test_job_domain_completed_marks_application_submitted(client, monkeypatch):

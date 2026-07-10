@@ -180,6 +180,9 @@ services:
       - GATEWAY_TRANSCRIPT_DIR=/snapshot/chat-transcripts
       - GATEWAY_TRANSCRIPTS=${GATEWAY_TRANSCRIPTS:-1}
       - LITELLM_BASE_URL=http://litellm:4000/v1
+      # Ollama lives on the HOST (same pattern as AppFlowy below); the chat
+      # tool layer's network_health probe reads this instead of localhost.
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://host.docker.internal:11434}
       # AppFlowy runs as a separate stack on the HOST (not in this compose), so the
       # action layer reaches it via host.docker.internal (the Ollama pattern). This
       # env overrides growth-os/.env's localhost:8081 (growthos Settings: env > .env).

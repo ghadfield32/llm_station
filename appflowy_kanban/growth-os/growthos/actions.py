@@ -9,6 +9,7 @@ a slug derived from the title (recomputed here, callers just pass titles).
 from __future__ import annotations
 
 import difflib
+import os
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -611,11 +612,19 @@ def network_health() -> dict:
             checks[name] = f"ERROR: {str(exc)[:120]}"
 
     probe("appflowy", lambda: client().list_row_ids("todos"))
+    # env first: inside the cockpit container the hops are compose hostnames
+    # (litellm:4000, host.docker.internal:11434), not localhost — a hardcoded
+    # localhost reported a HEALTHY stack as down.
+    ollama_base = (os.environ.get("OLLAMA_API_BASE")
+                   or st.ollama_base_url or "http://localhost:11434")
     probe("ollama", lambda: httpx.get(
-        f"{(st.ollama_base_url or 'http://localhost:11434').rstrip('/')}/api/tags",
+        f"{ollama_base.rstrip('/')}/api/tags",
         timeout=10).raise_for_status())
+    litellm_root = (os.environ.get("LITELLM_BASE_URL")
+                    or "http://localhost:4000/v1")
+    litellm_root = litellm_root.rstrip("/").removesuffix("/v1")
     probe("litellm", lambda: httpx.get(
-        "http://localhost:4000/health/liveliness", timeout=10).raise_for_status())
+        f"{litellm_root}/health/liveliness", timeout=10).raise_for_status())
     probe("ledger", lambda: httpx.get(
         f"{st.ledger_base_url.rstrip('/')}/health", timeout=10).raise_for_status())
 

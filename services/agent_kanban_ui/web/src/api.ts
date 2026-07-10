@@ -179,8 +179,12 @@ export interface DomainCards {
   origin: DomainOrigin;
   board_id?: string;
   columns?: string[];
+  // one-step machine: legal next lanes per current lane (board_store domains)
+  transitions?: Record<string, string[]>;
   cards: DomainCard[];
   empty_state: EmptyState;
+  generated_at?: string;
+  note?: string;
 }
 export interface DomainCardDetail {
   domain_id: string; card: DomainCard; drawer_fields: FieldSpec[];
@@ -482,6 +486,22 @@ export interface ChatConversationsResponse {
 }
 export const fetchChatConversations = () =>
   getJSON<ChatConversationsResponse>("/api/chat/conversations");
+
+// Clears ONE conversation's chat history (thread shortcut + transcript file).
+// Card/board history lives in the governed event log and is untouched.
+export async function deleteChatConversation(conversationId: string) {
+  const r = await fetch(
+    `/api/chat/threads/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE" });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(d.detail ?? `delete failed (${r.status})`);
+  }
+  return r.json() as Promise<{
+    status: string; conversation_id: string;
+    transcript_removed: boolean; threads: ChatThread[];
+  }>;
+}
 
 export interface ChatEvent { type: string; [k: string]: unknown; }
 export interface ChatThread {

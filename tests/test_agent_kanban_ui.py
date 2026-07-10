@@ -261,6 +261,38 @@ def test_chat_conversations_index_merges_recorder_and_threads(
 def test_chat_conversations_stay_behind_the_chat_wall(client):
     _, tc = client
     assert tc.get("/api/chat/conversations").status_code == 503
+    # chat-history delete is chat-gated too
+    assert tc.delete("/api/chat/threads/any").status_code == 503
+
+
+def test_delete_conversation_clears_chat_history_only(
+        client, monkeypatch, tmp_path):
+    """Deleting a chat removes the thread shortcut + transcript file — and
+    NOTHING else: the governed kanban event log is a different record."""
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "CHAT_THREADS_FILE", tmp_path / "chat-threads.json")
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path / "transcripts"))
+    monkeypatch.delenv("GATEWAY_TRANSCRIPTS", raising=False)
+
+    from command_center.channels.transcript import TurnRecorder, transcript_path
+    rec = TurnRecorder(surface="app", model="chat",
+                       conversation_id="bye", user_text="hello")
+    rec.final("done")
+    rec.flush()
+    tc.post("/api/chat/threads", json={
+        "conversation_id": "bye", "title": "Bye", "last_prompt": "hello"})
+    tc.post("/api/chat/threads", json={
+        "conversation_id": "keep", "title": "Keep", "last_prompt": "stay"})
+    assert transcript_path("bye").is_file()
+
+    body = tc.delete("/api/chat/threads/bye").json()
+    assert body["status"] == "deleted" and body["transcript_removed"] is True
+    assert not transcript_path("bye").is_file()
+    remaining = {t["conversation_id"] for t in body["threads"]}
+    assert remaining == {"keep"}
+    index = tc.get("/api/chat/conversations").json()
+    assert all(c["conversation_id"] != "bye" for c in index["conversations"])
 
 
 def test_appflowy_board_domain_serves_snapshot_cards(client, monkeypatch, tmp_path):
