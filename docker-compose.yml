@@ -173,6 +173,12 @@ services:
       # Full-console only: allow Controls -> All Boards to edit
       # configs/domain_surfaces.yaml after schema validation.
       - KANBAN_UI_DOMAIN_CONFIG_WRITES=1
+      # Chat flight recorder: full-fidelity per-turn transcripts (tool args,
+      # results, injected context, final answer) under the ./generated mount —
+      # host-persisted, gitignored, never leaves the machine. Set
+      # GATEWAY_TRANSCRIPTS=0 to keep thread metadata only.
+      - GATEWAY_TRANSCRIPT_DIR=/snapshot/chat-transcripts
+      - GATEWAY_TRANSCRIPTS=${GATEWAY_TRANSCRIPTS:-1}
       - LITELLM_BASE_URL=http://litellm:4000/v1
       # AppFlowy runs as a separate stack on the HOST (not in this compose), so the
       # action layer reaches it via host.docker.internal (the Ollama pattern). This

@@ -41,10 +41,24 @@ def _safe_args(args: dict) -> dict:
     return out
 
 
+def _current_conversation() -> str | None:
+    """Join key to the gateway's turn transcripts. Guarded import: growth-os
+    runs standalone in some surfaces where command_center is not importable,
+    and observability must never fail because of an optional enrichment."""
+    try:
+        from command_center.channels.transcript import current_conversation
+        return current_conversation.get()
+    except Exception:
+        return None
+
+
 def record_call(surface: str, tool: str, args: dict, *, ok: bool, ms: float,
                 detail: str = "", path: str | Path | None = None) -> dict:
     rec = {"ts": datetime.now(timezone.utc).isoformat(), "surface": surface, "tool": tool,
            "args": _safe_args(args), "ok": ok, "ms": round(ms, 1), "detail": detail[:200]}
+    conversation_id = _current_conversation()
+    if conversation_id:
+        rec["conversation_id"] = conversation_id
     p = Path(path) if path is not None else log_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as fh:

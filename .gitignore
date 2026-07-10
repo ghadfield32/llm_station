@@ -84,6 +84,9 @@ generated/linkedin-publish.lock
 # ── Cockpit shared chat threads — conversation content, per-deployment ───────
 generated/chat-threads.json
 
+# ── Gateway turn transcripts — full-fidelity conversation content, never commit ──
+generated/chat-transcripts/
+
 # ── Cross-conversation memory store — per-deployment runtime state ───────────
 # project/board/user-preference memory; sharing is a deliberate export, not a commit
 generated/memory/

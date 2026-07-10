@@ -35,6 +35,8 @@ from typing import Any, Callable, Hashable
 import httpx
 
 from .board_state import collect_board_state, load_agent_surface_config
+from .transcript import TurnRecorder
+from .transcript import current_conversation as transcript_conversation
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # src/command_center/channels/ -> repo root
 GROWTHOS_ROOT = REPO_ROOT / "appflowy_kanban" / "growth-os"
@@ -245,6 +247,10 @@ class GatewayCore:
     channel; call run_turn() with a stable conversation id (channel id, chat id,
     phone number) and the user's text."""
 
+    # token counts from the most recent completion; None until the first real
+    # gateway response (tests inject _completion fakes that never set it)
+    last_usage: dict | None = None
+
     def __init__(self, cfg: GatewayConfig):
         self.cfg = cfg
         self.system = build_system(cfg.surface)
@@ -281,11 +287,20 @@ class GatewayCore:
         body: dict[str, Any] = {"model": self.cfg.model, "messages": messages}
         if with_tools:
             body["tools"] = self.tools
+        # Same join key as the flight recorder: LiteLLM groups requests that
+        # share a litellm_session_id into one Session Logs view, so the proxy's
+        # spend-log net and our transcripts index by the same conversation id.
+        conversation = transcript_conversation.get()
+        if conversation:
+            body["litellm_session_id"] = f"{self.cfg.surface}:{conversation}"
         r = await self.http.post(
             f"{self.cfg.litellm_base}/chat/completions",
             headers=headers, json=body)
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]
+        data = r.json()
+        # per-completion token counts, recorded into the turn transcript
+        self.last_usage = data.get("usage")
+        return data["choices"][0]["message"]
 
     async def run_turn(self, conversation_id: Hashable, user_text: str) -> str:
         """Busy rules wrap the model loop:
@@ -331,6 +346,10 @@ class GatewayCore:
                    "content": "still working on your previous message — one moment."}
             return
         self._inflight.add(conversation_id)
+        # Flight recorder: full-fidelity turn capture at the only seam where the
+        # untruncated story exists (SSE events below stay truncated). Fail-open.
+        rec = TurnRecorder(surface=self.cfg.surface, model=self.cfg.model,
+                           conversation_id=conversation_id, user_text=user_text)
         try:
             async with self._slots:
                 history = self.histories[conversation_id]
@@ -338,27 +357,36 @@ class GatewayCore:
                 messages = [{"role": "system", "content": self.system}]
                 if self.board_knobs.enabled:
                     messages.append(self._board_message())
-                messages += self._memory_messages(user_text)
+                    rec.context("board_state")
+                mem = self._memory_messages(user_text)
+                messages += mem
+                if mem:
+                    rec.context("growthos_memory")
                 messages += list(history)
                 seen: set[tuple[str, str]] = set()
                 refresh = self.board_knobs.refresh_every_rounds
                 for round_idx in range(self.cfg.max_rounds):
                     yield {"type": "round", "n": round_idx + 1}
+                    rec.event("round", n=round_idx + 1)
                     try:
                         msg = await self._completion(messages, with_tools=True)
                     except httpx.HTTPError as exc:
+                        rec.final(f"LiteLLM gateway error: {exc}")
                         yield {"type": "final", "content": f"LiteLLM gateway error: {exc}"}
                         return
+                    rec.usage(self.last_usage)
                     messages.append(msg)
                     calls = msg.get("tool_calls") or []
                     if not calls:
                         content = _clean(msg.get("content") or "")
                         history.append({"role": "assistant", "content": content})
+                        rec.final(content)
                         yield {"type": "final", "content": content or "(no response)"}
                         return
                     for call in calls:
                         name = call["function"]["name"]
                         raw = call["function"].get("arguments") or "{}"
+                        rec.tool(name, raw)
                         yield {"type": "tool", "name": name, "args": raw[:200]}
                         if (name, raw) in seen:
                             result = "(repeat suppressed — identical call already made)"
@@ -368,44 +396,67 @@ class GatewayCore:
                                 result = self.dispatch[name](**json.loads(raw))
                             except Exception as exc:
                                 result = f"error: {exc}"
+                        rec.tool_result(name, result)
                         yield {"type": "tool_result", "name": name,
                                "result": str(result)[:300]}
                         messages.append({"role": "tool", "tool_call_id": call["id"],
                                          "content": json.dumps(result, default=str)})
                     if self.board_knobs.enabled and refresh and (round_idx + 1) % refresh == 0:
                         messages.append(self._board_message())
+                        rec.context("board_state_refresh")
                     mem_refresh = self.memory_cfg.refresh_every_rounds
                     if mem_refresh and (round_idx + 1) % mem_refresh == 0:
                         messages += self._memory_messages(user_text)
+                        rec.context("growthos_memory_refresh")
                 messages.append({"role": "user", "content":
                                  "Tool budget exhausted. Answer now using the tool "
                                  "results above; say plainly what couldn't be done."})
                 try:
                     msg = await self._completion(messages, with_tools=False)
                 except httpx.HTTPError as exc:
+                    rec.final(f"LiteLLM gateway error: {exc}")
                     yield {"type": "final", "content": f"LiteLLM gateway error: {exc}"}
                     return
+                rec.usage(self.last_usage)
                 content = _clean(msg.get("content") or "")
                 history.append({"role": "assistant", "content": content})
+                rec.final(content or "(no answer after budget)")
                 yield {"type": "final", "content": content or "(no answer after budget)"}
         finally:
+            rec.flush()
             self._inflight.discard(conversation_id)
 
     async def _run_turn(self, conversation_id: Hashable, user_text: str) -> str:
+        rec = TurnRecorder(surface=self.cfg.surface, model=self.cfg.model,
+                           conversation_id=conversation_id, user_text=user_text)
+        try:
+            return await self._run_turn_recorded(conversation_id, user_text, rec)
+        finally:
+            rec.flush()
+
+    async def _run_turn_recorded(self, conversation_id: Hashable, user_text: str,
+                                 rec: "TurnRecorder") -> str:
         history = self.histories[conversation_id]
         history.append({"role": "user", "content": user_text})
         messages = [{"role": "system", "content": self.system}]
         if self.board_knobs.enabled:        # harness re-injects the single source of truth
             messages.append(self._board_message())
-        messages += self._memory_messages(user_text)
+            rec.context("board_state")
+        _mem = self._memory_messages(user_text)
+        messages += _mem
+        if _mem:
+            rec.context("growthos_memory")
         messages += list(history)
         seen_calls: set[tuple[str, str]] = set()
         refresh = self.board_knobs.refresh_every_rounds
         for round_idx in range(self.cfg.max_rounds):
+            rec.event("round", n=round_idx + 1)
             try:
                 msg = await self._completion(messages, with_tools=True)
             except httpx.HTTPError as exc:   # surfaced, never swallowed
+                rec.final(f"LiteLLM gateway error: {exc}")
                 return f"LiteLLM gateway error: {exc}"
+            rec.usage(self.last_usage)
             messages.append(msg)
             calls = msg.get("tool_calls") or []
             if not calls:
@@ -423,12 +474,15 @@ class GatewayCore:
                             f"path did not parse. This channel needs a tool-robust "
                             f"model role — see configs/models.yaml `chat:`.")
                     history.append({"role": "assistant", "content": diag})
+                    rec.final(diag)
                     return diag
                 history.append({"role": "assistant", "content": content})
+                rec.final(content or "(no response)")
                 return content or "(no response)"
             for call in calls:
                 name = call["function"]["name"]
                 raw_args = call["function"].get("arguments") or "{}"
+                rec.tool(name, raw_args)
                 key = (name, raw_args)
                 if key in seen_calls:        # deterministic loop-breaker
                     result = ("you already called this with identical "
@@ -441,15 +495,18 @@ class GatewayCore:
                         result = self.dispatch[name](**json.loads(raw_args))
                     except Exception as exc:  # tool errors go back to the model
                         result = f"error: {exc}"
+                rec.tool_result(name, result)
                 messages.append({"role": "tool", "tool_call_id": call["id"],
                                  "content": json.dumps(result, default=str)})
             # re-state the board after mutations so later rounds act on fresh state
             if self.board_knobs.enabled and refresh and (round_idx + 1) % refresh == 0:
                 messages.append(self._board_message())
+                rec.context("board_state_refresh")
             # re-surface durable memory on its own cadence (keeps it in-window on deep turns)
             mem_refresh = self.memory_cfg.refresh_every_rounds
             if mem_refresh and (round_idx + 1) % mem_refresh == 0:
                 messages += self._memory_messages(user_text)
+                rec.context("growthos_memory_refresh")
         # round cap reached: force a text answer from gathered context
         messages.append({"role": "user", "content":
                          "Tool budget exhausted. Answer my original question "
@@ -458,7 +515,10 @@ class GatewayCore:
         try:
             msg = await self._completion(messages, with_tools=False)
         except httpx.HTTPError as exc:
+            rec.final(f"LiteLLM gateway error: {exc}")
             return f"LiteLLM gateway error: {exc}"
+        rec.usage(self.last_usage)
         content = _clean(msg.get("content") or "")
         history.append({"role": "assistant", "content": content})
+        rec.final(content or "(no answer after tool budget)")
         return content or "(no answer after tool budget)"
