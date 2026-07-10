@@ -174,6 +174,62 @@ def test_completion_carries_litellm_session_id(tmp_path, monkeypatch):
     assert "litellm_session_id" not in captured["body"]   # no turn, no key
 
 
+def test_stream_loop_refuses_leaked_tool_markup(tmp_path, monkeypatch):
+    """The SSE loop must fail as loud as the non-stream loop: raw tool-call
+    markup a serving path failed to parse becomes a diagnostic, never output
+    (regression: only _run_turn had the tripwire)."""
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path))
+    gw = _gateway(monkeypatch)
+    leaked = '<function=stage_card>{"card": "X"}</function>'
+    monkeypatch.setattr(gw, "_completion",
+                        _scripted({"content": leaked, "tool_calls": []}))
+
+    async def collect():
+        return [ev async for ev in gw.run_turn_events("leak-conv", "hi")]
+
+    events = asyncio.run(collect())
+    final = next(e for e in events if e["type"] == "final")
+    assert "gateway misconfiguration" in final["content"]
+    assert "<function=" not in final["content"]
+    # the transcript records the diagnostic too, not the markup
+    assert "gateway misconfiguration" in transcript.read_transcript(
+        "leak-conv")[0]["final"]
+
+
+def test_stream_survives_malformed_gateway_response(tmp_path, monkeypatch):
+    """A malformed 200 (missing choices / bad JSON) must yield an error frame,
+    not abort the SSE stream mid-air with no explanation."""
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path))
+    gw = _gateway(monkeypatch)
+
+    async def broken(messages, with_tools):
+        raise KeyError("choices")
+
+    monkeypatch.setattr(gw, "_completion", broken)
+
+    async def collect():
+        return [ev async for ev in gw.run_turn_events("broken-conv", "hi")]
+
+    events = asyncio.run(collect())
+    final = next(e for e in events if e["type"] == "final")
+    assert "gateway error" in final["content"]
+
+
+def test_usage_rides_the_message_not_shared_state(tmp_path, monkeypatch):
+    """Token usage is attached to the completion message and popped per turn —
+    a shared attribute would misattribute usage across concurrent turns."""
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path))
+    gw = _gateway(monkeypatch)
+    monkeypatch.setattr(gw, "_completion", _scripted(
+        {"content": "ok", "tool_calls": [],
+         "_usage": {"prompt_tokens": 3, "completion_tokens": 4,
+                    "total_tokens": 7}}))
+    asyncio.run(gw.run_turn("usage-conv", "hi"))
+    turn = transcript.read_transcript("usage-conv")[0]
+    usage = [e for e in turn["events"] if e["type"] == "usage"]
+    assert usage and usage[0]["total_tokens"] == 7
+
+
 # ---- agent-call log join key -------------------------------------------------
 
 def test_agent_call_log_carries_conversation_join_key(tmp_path, monkeypatch):

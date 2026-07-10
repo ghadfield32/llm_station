@@ -508,15 +508,17 @@ export interface TranscriptEvent {
   args?: string;
   result?: string;
 }
+// All fields optional: a corrupt_line row (partial JSONL append) carries none
+// of the normal keys, and the UI must render around it, not crash on it.
 export interface TranscriptTurn {
-  ts: string;
-  conversation_id: string;
-  surface: string;
-  model_role: string;
-  user_text: string;
-  context_blocks: string[];
-  events: TranscriptEvent[];
-  final: string | null;
+  ts?: string;
+  conversation_id?: string;
+  surface?: string;
+  model_role?: string;
+  user_text?: string;
+  context_blocks?: string[];
+  events?: TranscriptEvent[];
+  final?: string | null;
   corrupt_line?: string;
 }
 export interface ChatTranscriptResponse {
@@ -528,9 +530,10 @@ export interface ChatTranscriptResponse {
   source: string;
   recording_enabled: boolean;
 }
-export const fetchChatTranscript = (conversationId: string) =>
+export const fetchChatTranscript = (conversationId: string, limit?: number) =>
   getJSON<ChatTranscriptResponse>(
-    `/api/chat/threads/${encodeURIComponent(conversationId)}/transcript`);
+    `/api/chat/threads/${encodeURIComponent(conversationId)}/transcript`
+    + (limit ? `?limit=${limit}` : ""));
 
 async function postJSON<T>(path: string, body: unknown, method = "POST"): Promise<T> {
   const r = await fetch(path, {

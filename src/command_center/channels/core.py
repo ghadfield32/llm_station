@@ -247,10 +247,6 @@ class GatewayCore:
     channel; call run_turn() with a stable conversation id (channel id, chat id,
     phone number) and the user's text."""
 
-    # token counts from the most recent completion; None until the first real
-    # gateway response (tests inject _completion fakes that never set it)
-    last_usage: dict | None = None
-
     def __init__(self, cfg: GatewayConfig):
         self.cfg = cfg
         self.system = build_system(cfg.surface)
@@ -298,9 +294,27 @@ class GatewayCore:
             headers=headers, json=body)
         r.raise_for_status()
         data = r.json()
-        # per-completion token counts, recorded into the turn transcript
-        self.last_usage = data.get("usage")
-        return data["choices"][0]["message"]
+        msg = data["choices"][0]["message"]
+        # Token counts ride ON the message (popped by the caller before the
+        # message joins history) — a shared self.last_usage would misattribute
+        # usage across concurrent turns.
+        msg["_usage"] = data.get("usage")
+        return msg
+
+    def _leak_diagnostic(self, content: str) -> str | None:
+        """Fail-loud guard shared by BOTH loops: raw tool-call markup a serving
+        path failed to parse must never reach a user surface (see
+        _TOOL_CALL_MARKERS). Returns the operator-facing diagnostic, or None
+        when the content is clean."""
+        if not _leaked_tool_call(content):
+            return None
+        print(f"[gateway] UNPARSED TOOL CALL from model role "
+              f"{self.cfg.model!r}; head: {content[:300]!r}",
+              file=sys.stderr)
+        return (f"gateway misconfiguration: model role {self.cfg.model!r} "
+                f"emitted a tool call the serving path did not parse. This "
+                f"channel needs a tool-robust model role — see "
+                f"configs/models.yaml `chat:`.")
 
     async def run_turn(self, conversation_id: Hashable, user_text: str) -> str:
         """Busy rules wrap the model loop:
@@ -370,15 +384,24 @@ class GatewayCore:
                     rec.event("round", n=round_idx + 1)
                     try:
                         msg = await self._completion(messages, with_tools=True)
-                    except httpx.HTTPError as exc:
-                        rec.final(f"LiteLLM gateway error: {exc}")
-                        yield {"type": "final", "content": f"LiteLLM gateway error: {exc}"}
+                    except (httpx.HTTPError, KeyError, IndexError,
+                            ValueError) as exc:
+                        # HTTP failure or a malformed 200 (bad JSON / missing
+                        # choices) — surface an error frame, never a dead stream
+                        rec.final(f"LiteLLM gateway error: {exc!r}")
+                        yield {"type": "final", "content": f"LiteLLM gateway error: {exc!r}"}
                         return
-                    rec.usage(self.last_usage)
+                    rec.usage(msg.pop("_usage", None))
                     messages.append(msg)
                     calls = msg.get("tool_calls") or []
                     if not calls:
                         content = _clean(msg.get("content") or "")
+                        diag = self._leak_diagnostic(content)
+                        if diag:
+                            history.append({"role": "assistant", "content": diag})
+                            rec.final(diag)
+                            yield {"type": "final", "content": diag}
+                            return
                         history.append({"role": "assistant", "content": content})
                         rec.final(content)
                         yield {"type": "final", "content": content or "(no response)"}
@@ -413,12 +436,14 @@ class GatewayCore:
                                  "results above; say plainly what couldn't be done."})
                 try:
                     msg = await self._completion(messages, with_tools=False)
-                except httpx.HTTPError as exc:
-                    rec.final(f"LiteLLM gateway error: {exc}")
-                    yield {"type": "final", "content": f"LiteLLM gateway error: {exc}"}
+                except (httpx.HTTPError, KeyError, IndexError,
+                        ValueError) as exc:
+                    rec.final(f"LiteLLM gateway error: {exc!r}")
+                    yield {"type": "final", "content": f"LiteLLM gateway error: {exc!r}"}
                     return
-                rec.usage(self.last_usage)
+                rec.usage(msg.pop("_usage", None))
                 content = _clean(msg.get("content") or "")
+                content = self._leak_diagnostic(content) or content
                 history.append({"role": "assistant", "content": content})
                 rec.final(content or "(no answer after budget)")
                 yield {"type": "final", "content": content or "(no answer after budget)"}
@@ -453,26 +478,17 @@ class GatewayCore:
             rec.event("round", n=round_idx + 1)
             try:
                 msg = await self._completion(messages, with_tools=True)
-            except httpx.HTTPError as exc:   # surfaced, never swallowed
-                rec.final(f"LiteLLM gateway error: {exc}")
-                return f"LiteLLM gateway error: {exc}"
-            rec.usage(self.last_usage)
+            except (httpx.HTTPError, KeyError, IndexError,
+                    ValueError) as exc:   # surfaced, never swallowed
+                rec.final(f"LiteLLM gateway error: {exc!r}")
+                return f"LiteLLM gateway error: {exc!r}"
+            rec.usage(msg.pop("_usage", None))
             messages.append(msg)
             calls = msg.get("tool_calls") or []
             if not calls:
                 content = _clean(msg.get("content") or "")
-                if _leaked_tool_call(content):
-                    # fail loud: a tool call the serving path didn't parse must
-                    # not reach the user as raw markup. Log the evidence for the
-                    # operator; return a clean diagnostic that names the cause and
-                    # the fix — never the markup itself (see _TOOL_CALL_MARKERS).
-                    print(f"[gateway] UNPARSED TOOL CALL from model role "
-                          f"{self.cfg.model!r}; head: {content[:300]!r}",
-                          file=sys.stderr)
-                    diag = (f"gateway misconfiguration: model role "
-                            f"{self.cfg.model!r} emitted a tool call the serving "
-                            f"path did not parse. This channel needs a tool-robust "
-                            f"model role — see configs/models.yaml `chat:`.")
+                diag = self._leak_diagnostic(content)
+                if diag:
                     history.append({"role": "assistant", "content": diag})
                     rec.final(diag)
                     return diag
@@ -514,11 +530,12 @@ class GatewayCore:
                          "if something could not be determined."})
         try:
             msg = await self._completion(messages, with_tools=False)
-        except httpx.HTTPError as exc:
-            rec.final(f"LiteLLM gateway error: {exc}")
-            return f"LiteLLM gateway error: {exc}"
-        rec.usage(self.last_usage)
+        except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
+            rec.final(f"LiteLLM gateway error: {exc!r}")
+            return f"LiteLLM gateway error: {exc!r}"
+        rec.usage(msg.pop("_usage", None))
         content = _clean(msg.get("content") or "")
+        content = self._leak_diagnostic(content) or content
         history.append({"role": "assistant", "content": content})
         rec.final(content or "(no answer after tool budget)")
         return content or "(no answer after tool budget)"

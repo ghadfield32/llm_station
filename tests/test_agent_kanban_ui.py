@@ -133,8 +133,16 @@ def test_pwa_assets_cache_static_assets_only():
     assert "/icons/apple-touch-icon.png" in service_worker
 
 
+def test_chat_runtime_stays_behind_the_chat_wall(client):
+    # specialist URLs come from operator env — a read-only deployment must
+    # not serve them (nor lane/executor config) from /api/chat/runtime
+    _, tc = client
+    assert tc.get("/api/chat/runtime").status_code == 503
+
+
 def test_chat_runtime_reports_gateway_not_external_harness(client, monkeypatch):
     mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
     monkeypatch.setattr(mod, "CONFIGS_DIR", Path(__file__).resolve().parents[1] / "configs")
     monkeypatch.delenv("ORCA_CHAT_URL", raising=False)
     monkeypatch.delenv("OMNIGENT_CHAT_URL", raising=False)
@@ -157,6 +165,7 @@ def test_chat_runtime_reports_gateway_not_external_harness(client, monkeypatch):
 
 def test_chat_runtime_marks_configured_specialist_links_active(client, monkeypatch):
     mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
     monkeypatch.setattr(mod, "CONFIGS_DIR", Path(__file__).resolve().parents[1] / "configs")
     monkeypatch.setenv("ORCA_CHAT_URL", "http://orca.local/chat")
     monkeypatch.setenv("OMNIAGENT_CHAT_URL", "http://omniagent.local/chat")
@@ -240,6 +249,52 @@ def test_chat_transcript_endpoint_stays_behind_the_chat_wall(client):
     # conversation content
     _, tc = client
     assert tc.get("/api/chat/threads/any/transcript").status_code == 503
+
+
+def test_chat_transcript_pages_from_the_newest_end(client, monkeypatch, tmp_path):
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path / "transcripts"))
+    monkeypatch.delenv("GATEWAY_TRANSCRIPTS", raising=False)
+
+    from command_center.channels.transcript import TurnRecorder
+    for n in range(5):
+        rec = TurnRecorder(surface="app", model="chat",
+                           conversation_id="paged", user_text=f"turn {n}")
+        rec.final(f"answer {n}")
+        rec.flush()
+
+    body = tc.get("/api/chat/threads/paged/transcript?limit=2").json()
+    assert body["total_turns"] == 5 and body["turn_count"] == 2
+    assert [t["user_text"] for t in body["turns"]] == ["turn 3", "turn 4"]
+    older = tc.get("/api/chat/threads/paged/transcript?limit=2&offset=2").json()
+    assert [t["user_text"] for t in older["turns"]] == ["turn 1", "turn 2"]
+
+
+def test_chat_endpoint_survives_prompts_longer_than_thread_preview(
+        client, monkeypatch, tmp_path):
+    """Pasting a job description (>2000 chars) must not 500 the turn: the
+    thread metadata keeps a truncated preview while the model gets it all."""
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "CHAT_THREADS_FILE", tmp_path / "chat-threads.json")
+    monkeypatch.setattr(mod, "_validated_model", lambda model: model)
+    seen = {}
+
+    class _Core:
+        async def run_turn(self, conversation_id, text):
+            seen["text"] = text
+            return "got it"
+
+    monkeypatch.setattr(mod, "_get_core", lambda model: _Core())
+    long_text = "job description " * 250            # ~4000 chars
+    r = tc.post("/api/chat", json={
+        "text": long_text, "conversation_id": "c-long", "model": "chat"})
+    assert r.status_code == 200 and r.json()["reply"] == "got it"
+    assert seen["text"] == long_text                # model saw the full paste
+    threads = tc.get("/api/chat/threads").json()["threads"]
+    assert threads[0]["conversation_id"] == "c-long"
+    assert len(threads[0]["last_prompt"]) <= 2000   # preview, not a 500
 
 
 def test_job_search_profile_controls_surface_question_policy(client):

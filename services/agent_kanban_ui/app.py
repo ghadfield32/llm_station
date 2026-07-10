@@ -1904,7 +1904,10 @@ def board_registry() -> dict:
 
 @app.get("/api/chat/runtime")
 def chat_runtime() -> dict:
-    """What the cockpit chat actually uses. No inference from marketing names."""
+    """What the cockpit chat actually uses. No inference from marketing names.
+    Chat-gated like every /api/chat* route: the external specialist URLs come
+    from operator env and must not leak from a read-only deployment."""
+    _require_chat()
     lanes = models()
     chat_role = next((r for r in lanes["roles"] if r["role"] == "chat"), None)
     external_chats = [
@@ -2078,9 +2081,12 @@ async def chat(body: ChatIn) -> dict:
     _require_chat()
     core = _get_core(_validated_model(body.model))
     reply = await core.run_turn(body.conversation_id, body.text)
+    # thread metadata keeps a 2000-char preview; the full prompt still reaches
+    # the model and the flight recorder (an untruncated text here would fail
+    # ChatThreadIn validation and 500 a turn that already ran)
     _upsert_chat_thread(ChatThreadIn(
         conversation_id=body.conversation_id,
-        last_prompt=body.text,
+        last_prompt=body.text[:2000],
         model=body.model,
     ))
     return {"reply": reply, "model": body.model}
@@ -2092,9 +2098,11 @@ async def chat_stream(body: ChatIn) -> StreamingResponse:
     answer as it happens — 'watch what the LLM is doing now'."""
     _require_chat()
     core = _get_core(_validated_model(body.model))
+    # 2000-char preview only — a longer paste (a job description) must not
+    # 500 the stream before it starts; the model gets the full text below
     _upsert_chat_thread(ChatThreadIn(
         conversation_id=body.conversation_id,
-        last_prompt=body.text,
+        last_prompt=body.text[:2000],
         model=body.model,
     ))
 

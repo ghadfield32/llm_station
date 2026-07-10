@@ -10,7 +10,7 @@ import {
   fetchBoardRegistry,
   MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
   fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
-  fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse,
+  fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse, TranscriptTurn,
   fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
   fetchJobPacket, JobPacket, JobStoryEntry, PacketValidation, AgentTraceEntry,
   requestPacketChanges, submitJobApplication, updateJobPacketFile,
@@ -2599,6 +2599,7 @@ function externalChatHref(chat: ExternalChat, handoffText: string) {
 
 function ChatLine({ ev }: { ev: ChatEvent }) {
   switch (ev.type) {
+    case "history": return <div className="cl round">{String(ev.content)}</div>;
     case "you": return <div className="cl you">{String(ev.content)}</div>;
     case "final": return <div className="cl final">{String(ev.content)}</div>;
     case "error": return <div className="cl err">⚠ {String(ev.message ?? ev.detail)}</div>;
@@ -2694,24 +2695,53 @@ function ChatRuntimePanel({ runtime, handoffText = "" }: { runtime: ChatRuntime 
   );
 }
 
-function ThreadTimeline({ transcript, loading, error, onRefresh }: {
+// Replay recorded turns as live-log events (same truncation as the SSE
+// stream) so reopening a thread shows its conversation instead of a blank
+// log; the Full story view keeps the untruncated record.
+function turnsToEvents(turns: TranscriptTurn[]): ChatEvent[] {
+  const events: ChatEvent[] = [];
+  for (const turn of turns) {
+    if (turn.corrupt_line) continue;   // partial JSONL append — nothing to replay
+    if (turn.user_text) events.push({ type: "you", content: turn.user_text });
+    for (const ev of turn.events ?? []) {
+      if (ev.type === "tool") {
+        events.push({ type: "tool", name: ev.name, args: (ev.args ?? "").slice(0, 200) });
+      } else if (ev.type === "tool_result") {
+        events.push({ type: "tool_result", name: ev.name, result: (ev.result ?? "").slice(0, 300) });
+      }
+    }
+    events.push({ type: "final", content: turn.final ?? "(no final answer recorded)" });
+  }
+  return events;
+}
+
+function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
   transcript: ChatTranscriptResponse | null;
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
+  onLoadAll?: (totalTurns: number) => void;
 }) {
   if (error) return <div className="muted">ERR {error}</div>;
   if (!transcript) return <div className="muted">{loading ? "loading the full story..." : "no story loaded"}</div>;
+  const total = transcript.total_turns ?? transcript.turn_count;
   return (
     <div className="chat-story">
       <div className="chat-story-head muted small">
         <span>
-          full story — {transcript.turn_count} recorded turn{transcript.turn_count === 1 ? "" : "s"}
+          full story — {total} recorded turn{total === 1 ? "" : "s"}
+          {transcript.turn_count < total ? ` (newest ${transcript.turn_count} shown)` : ""}
           {" "}(flight recorder{transcript.recording_enabled ? "" : " — recording OFF (GATEWAY_TRANSCRIPTS=0)"})
         </span>
-        <button className="clear" onClick={onRefresh} disabled={loading}>
-          {loading ? "…" : "refresh"}
-        </button>
+        <span>
+          {transcript.turn_count < total && onLoadAll && (
+            <button className="clear" disabled={loading}
+              onClick={() => onLoadAll(total)}>show all {total}</button>
+          )}
+          <button className="clear" onClick={onRefresh} disabled={loading}>
+            {loading ? "…" : "refresh"}
+          </button>
+        </span>
       </div>
       {transcript.turns.length === 0 && (
         <div className="muted">
@@ -2721,21 +2751,30 @@ function ThreadTimeline({ transcript, loading, error, onRefresh }: {
         </div>
       )}
       {transcript.turns.map((turn, i) => {
-        const tools = turn.events.filter((ev) => ev.type === "tool").length;
+        if (turn.corrupt_line) {
+          return (
+            <div className="story-row story-note muted small" key={i}>
+              one recorded line was corrupt (partial write) and was skipped
+            </div>
+          );
+        }
+        const turnEvents = turn.events ?? [];
+        const blocks = turn.context_blocks ?? [];
+        const tools = turnEvents.filter((ev) => ev.type === "tool").length;
         return (
           <details className="story-row story-turn" key={i} open={i === transcript.turns.length - 1}>
             <summary>
-              <span className="story-time">{fmtThreadTime(turn.ts)}</span>
+              <span className="story-time">{fmtThreadTime(turn.ts ?? "")}</span>
               <Badge value={turn.surface || "app"} />
               <b>{turn.user_text ? (turn.user_text.length > 90 ? turn.user_text.slice(0, 87) + "..." : turn.user_text) : "(no user text)"}</b>
               <span className="muted small">{turn.model_role}{tools ? ` · ${tools} tool call${tools === 1 ? "" : "s"}` : ""}</span>
             </summary>
             <div className="story-turn-body">
-              {turn.context_blocks.length > 0 && (
-                <div className="muted small">context injected: {turn.context_blocks.join(", ")}</div>
+              {blocks.length > 0 && (
+                <div className="muted small">context injected: {blocks.join(", ")}</div>
               )}
               {turn.user_text && <pre className="packet-doc story-user">{turn.user_text}</pre>}
-              {turn.events.map((ev, j) => {
+              {turnEvents.map((ev, j) => {
                 if (ev.type === "round") {
                   return <div className="muted small story-round" key={j}>— round {ev.n} —</div>;
                 }
@@ -2787,6 +2826,10 @@ function ChatView({ roles, runtime, draft }: {
   const [storyLoading, setStoryLoading] = useState(false);
   const [storyError, setStoryError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+  // guards hydration races: a slow transcript fetch for a thread the user has
+  // already left must not fill the current thread's log
+  const conversationIdRef = useRef(conversationId);
+  useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
   const activeThread = threads.find((t) => t.id === conversationId);
   const handoffText = input.trim() || activeThread?.lastPrompt || `Open cockpit conversation ${conversationId}`;
   useEffect(() => { endRef.current?.scrollIntoView(); }, [events]);
@@ -2813,15 +2856,44 @@ function ChatView({ roles, runtime, draft }: {
   }, []);
   useEffect(() => {
     if (draft?.text) setInput(draft.text);
-    if (draft?.conversationId) setConversationId(draft.conversationId);
+    if (draft?.conversationId && draft.conversationId !== conversationIdRef.current) {
+      conversationIdRef.current = draft.conversationId;
+      setConversationId(draft.conversationId);
+      setEvents([]);
+      setStory(null);
+      setStoryError(null);
+      setChatMode("live");
+      void hydrateThread(draft.conversationId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft?.conversationId, draft?.nonce, draft?.text]);
+  useEffect(() => {
+    // first mount: replay whatever the flight recorder has for the default
+    // thread, so a reload (or another device) still shows the conversation
+    void hydrateThread(conversationIdRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function hydrateThread(id: string) {
+    try {
+      const t = await fetchChatTranscript(id);
+      if (conversationIdRef.current !== id) return;   // user moved on
+      setStory(t);
+      if (!t.turns.length) return;
+      setEvents((current) => current.length ? current : [
+        { type: "history", content: "replayed from the flight recorder — open full story for tool-level detail" },
+        ...turnsToEvents(t.turns),
+      ]);
+    } catch { /* recorder is optional — live chat works without it */ }
+  }
 
   function persistThread(thread: ChatThread, modelRole = model) {
     void saveChatThread({
       conversation_id: thread.id,
       title: thread.title,
       target: thread.target,
-      last_prompt: thread.lastPrompt,
+      // server metadata keeps a 2000-char preview; longer pastes would 422
+      last_prompt: (thread.lastPrompt ?? "").slice(0, 2000),
       model: modelRole,
     })
       .then((body) => {
@@ -2853,6 +2925,7 @@ function ChatView({ roles, runtime, draft }: {
 
   function startNewChat() {
     const id = newConversationId();
+    conversationIdRef.current = id;
     setConversationId(id);
     setInput("");
     setEvents([]);
@@ -2870,47 +2943,65 @@ function ChatView({ roles, runtime, draft }: {
       saveChatThreads(next);
       return next;
     });
-    persistThread(thread);
+    // local chip only — the server thread is persisted on the first send
+    // (rememberThread), so abandoned empty chats don't pile up cross-device
   }
 
-  function openThread(thread: ChatThread) {
+  function openThread(thread: ChatThread, mode: "live" | "story" = chatMode) {
+    conversationIdRef.current = thread.id;
     setConversationId(thread.id);
     if (thread.lastPrompt) setInput(thread.lastPrompt);
+    setEvents([]);
     setStory(null);
     setStoryError(null);
-    if (chatMode === "story") void loadStory(thread.id);
+    setChatMode(mode);
+    if (mode === "story") void loadStory(thread.id);
+    else void hydrateThread(thread.id);
   }
 
-  async function loadStory(id = conversationId) {
+  async function loadStory(id = conversationId, limit?: number) {
     setStoryLoading(true);
     try {
-      setStory(await fetchChatTranscript(id));
+      const t = await fetchChatTranscript(id, limit);
+      if (conversationIdRef.current !== id) return;   // user moved on
+      setStory(t);
       setStoryError(null);
+      setStoryLoading(false);
     } catch (e) {
+      if (conversationIdRef.current !== id) return;
       setStoryError((e as Error).message);
-    } finally { setStoryLoading(false); }
+      setStoryLoading(false);
+    }
   }
 
-  function toggleStory() {
-    if (chatMode === "story") { setChatMode("live"); return; }
-    setChatMode("story");
-    void loadStory();
+  function setMode(mode: "live" | "story") {
+    setChatMode(mode);
+    if (mode === "story") void loadStory();   // always fresh on entry
+    // coming back to live for a thread with no live events yet: replay the
+    // recorded history instead of dead-ending on the empty state
+    else if (!events.length) void hydrateThread(conversationIdRef.current);
   }
 
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
+    const id = conversationId;   // pin: stream events must not follow a thread switch
     setInput("");
     setChatMode("live");   // watch the turn stream; the story view is for review
     setEvents((e) => [...e, { type: "you", content: text }]);
-    rememberThread(conversationId, text);
+    rememberThread(id, text);
     setBusy(true);
     try {
-      await streamChat({ text, model, conversation_id: conversationId },
-        (ev) => setEvents((e) => [...e, ev]));
+      await streamChat({ text, model, conversation_id: id },
+        (ev) => { if (conversationIdRef.current === id) setEvents((e) => [...e, ev]); });
     } catch (e) {
-      setEvents((ev) => [...ev, { type: "error", message: (e as Error).message }]);
-    } finally { setBusy(false); }
+      if (conversationIdRef.current === id) {
+        setEvents((ev) => [...ev, { type: "error", message: (e as Error).message }]);
+      }
+    } finally {
+      setBusy(false);
+      void loadStory(id);   // keep the full-story badge/timeline current
+    }
   }
 
   return (
@@ -2923,13 +3014,20 @@ function ChatView({ roles, runtime, draft }: {
               {roles.map((r) => <option key={r}>{r}</option>)}
             </select>
             <span className="muted small">thread <code>{conversationId}</code></span>
-            <span className="muted small">the agent moves/assigns via governed verbs — Approved stays human-only</span>
+            <span className="chat-bar-hint muted small">the agent moves/assigns via governed verbs — Approved stays human-only</span>
+            <div className="chat-mode-toggle" role="tablist" aria-label="Chat view mode">
+              <button role="tab" aria-selected={chatMode === "live"}
+                className={chatMode === "live" ? "mode-on" : ""}
+                onClick={() => setMode("live")}>live</button>
+              <button role="tab" aria-selected={chatMode === "story"}
+                className={chatMode === "story" ? "mode-on" : ""}
+                title="everything recorded for this thread: full tool args/results, injected context, final answers"
+                onClick={() => setMode("story")}>
+                full story{story && story.conversation_id === conversationId
+                  ? ` · ${story.total_turns ?? story.turn_count}` : ""}
+              </button>
+            </div>
             <button className="clear" onClick={startNewChat}>new chat</button>
-            <button className={`clear ${chatMode === "story" ? "thread-on" : ""}`}
-              title="the flight-recorder story of this thread: every turn with full tool args/results, injected context, and the final answer"
-              onClick={toggleStory}>
-              {chatMode === "story" ? "live view" : "full story"}
-            </button>
             {events.length > 0 && chatMode === "live" && (
               <button className="clear" onClick={() => setEvents([])}>clear</button>
             )}
@@ -2941,20 +3039,27 @@ function ChatView({ roles, runtime, draft }: {
                 <button className="thread-chip thread-empty" disabled>No recent cockpit chats</button>
               )}
               {threads.map((thread) => (
-                <button
+                <div
                   className={`thread-chip ${thread.id === conversationId ? "thread-on" : ""}`}
-                  key={thread.id}
-                  onClick={() => openThread(thread)}>
-                  <span>{thread.title}</span>
-                  <small>{thread.target ?? "GatewayCore"} {fmtThreadTime(thread.updatedAt)}</small>
-                </button>
+                  key={thread.id}>
+                  <button className="thread-open" onClick={() => openThread(thread)}>
+                    <span>{thread.title}</span>
+                    <small>{thread.target ?? "GatewayCore"} {fmtThreadTime(thread.updatedAt)}</small>
+                  </button>
+                  <button className="thread-story"
+                    title="open this thread's full story (flight recorder)"
+                    onClick={() => openThread(thread, "story")}>
+                    story
+                  </button>
+                </div>
               ))}
             </HorizontalScroller>
           </div>
           {chatMode === "story" ? (
             <div className="chat-log chat-log-story">
               <ThreadTimeline transcript={story} loading={storyLoading}
-                error={storyError} onRefresh={() => void loadStory()} />
+                error={storyError} onRefresh={() => void loadStory()}
+                onLoadAll={(total) => void loadStory(conversationId, total)} />
             </div>
           ) : (
             <div className="chat-log">
