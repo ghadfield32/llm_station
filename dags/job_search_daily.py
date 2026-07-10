@@ -62,21 +62,26 @@ if AIRFLOW_AVAILABLE:
             from pathlib import Path
 
             from command_center.job_search.cli import _suggest_from_file
+            from command_center.job_search.config import load_config
             from command_center.job_search.live_sources import discover_live_postings
+
+            # Search terms derive from the ADJUSTABLE job categories
+            # (configs/job_search.yaml + profile/search_settings.yml overrides,
+            # editable from the cockpit Jobs settings drawer) — changing a
+            # category's keywords changes what this DAG looks for tomorrow.
+            cfg = load_config()
+            keywords = sorted({
+                kw
+                for category in cfg.job_categories
+                for kw in category.keywords
+            })
+            # Jobicy wants slug-style tags; Remotive takes free text.
+            jobicy_tags = sorted({kw.lower().replace(" ", "-") for kw in keywords})
 
             runs = [
                 discover_live_postings(
                     sources=["jobicy"],
-                    tags=[
-                        "python",
-                        "machine-learning",
-                        "sql",
-                        "analytics",
-                        "dbt",
-                        "snowflake",
-                        "airflow",
-                        "experimentation",
-                    ],
+                    tags=jobicy_tags,
                     industries=[
                         "data-science",
                         "engineering",
@@ -91,18 +96,7 @@ if AIRFLOW_AVAILABLE:
                 ),
                 discover_live_postings(
                     sources=["remotive"],
-                    tags=[
-                        "data",
-                        "analytics",
-                        "machine learning",
-                        "ai engineer",
-                        "data engineer",
-                        "python",
-                        "sql",
-                        "dbt",
-                        "snowflake",
-                        "airflow",
-                    ],
+                    tags=keywords,
                     count=100,
                     write=True,
                 ),

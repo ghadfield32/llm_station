@@ -18,6 +18,7 @@ import {
   fetchDomainSchema, fetchJobProfileControls, fetchMetrics, fetchMission, fetchMissions, fetchModels,
   fetchRuntimeDebug, fetchStatus, moveDomainCard, postAction, RuntimeDebug, streamChat,
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
+  StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
 } from "./api";
 
 type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "chat";
@@ -820,9 +821,200 @@ function DraftDefaultRow({ name, value, writable, onSaved }: {
   );
 }
 
+function StandingAnswerRow({ row, writable, onSaved }: {
+  row: StandingAnswer; writable: boolean; onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.answer);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateStandingAnswer({ topic: row.topic, answer: draft });
+      setEditing(false); onSaved(); setMsg("updated");
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="preset-row">
+      <div className="preset-row-head">
+        <b>{row.question ?? row.topic}</b>
+        {writable && !editing &&
+          <button className="editbtn" onClick={() => setEditing(true)}>edit</button>}
+      </div>
+      {editing ? (
+        <>
+          <textarea value={draft} disabled={busy}
+            onChange={(e) => setDraft(e.target.value)} />
+          <div className="preset-actions">
+            <button className="actbtn" disabled={busy} onClick={save}>save</button>
+            <button className="clear" disabled={busy}
+              onClick={() => { setDraft(row.answer); setEditing(false); }}>cancel</button>
+          </div>
+        </>
+      ) : (
+        <div className="preset-value">{row.answer}
+          {row.answer_rule && <span className="muted"> · rule: upper end of posted range when known</span>}
+        </div>
+      )}
+      {(row.covers?.length ?? 0) > 0 && (
+        <div className="preset-covers">
+          <span className="muted">auto-answers:</span> <ChipList values={row.covers} />
+        </div>
+      )}
+      {msg && <div className="muted">{msg}</div>}
+    </div>
+  );
+}
+
+function JobCategoryRow({ cat, writable, onSaved }: {
+  cat: JobProfileControls["job_categories"][number];
+  writable: boolean; onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [keywords, setKeywords] = useState(cat.keywords.join(", "));
+  const [focus, setFocus] = useState(cat.role_focus);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchCategory(cat.id, {
+        keywords: keywords.split(",").map((s) => s.trim()).filter(Boolean),
+        role_focus: focus,
+      });
+      setEditing(false); onSaved();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  async function remove() {
+    if (!window.confirm(`Remove search category "${cat.id}"? The daily search stops looking for it (re-addable later).`)) return;
+    setBusy(true); setMsg(null);
+    try { await removeJobSearchCategory(cat.id); onSaved(); }
+    catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="preset-category" key={cat.id}>
+      <div className="preset-row-head">
+        <b>{cat.id}</b>
+        {writable && !editing && (
+          <span className="preset-actions">
+            <button className="editbtn" onClick={() => setEditing(true)}>edit</button>
+            <button className="editbtn" disabled={busy} onClick={remove}>remove</button>
+          </span>
+        )}
+      </div>
+      {editing ? (
+        <>
+          <label className="muted">keywords (comma-separated)</label>
+          <textarea value={keywords} disabled={busy}
+            onChange={(e) => setKeywords(e.target.value)} />
+          <label className="muted">focus{" "}
+            <select value={focus} disabled={busy}
+              onChange={(e) => setFocus(e.target.value)}>
+              <option value="primary">primary (always-on search)</option>
+              <option value="secondary">secondary (target companies)</option>
+            </select>
+          </label>
+          <div className="preset-actions">
+            <button className="actbtn" disabled={busy} onClick={save}>save</button>
+            <button className="clear" disabled={busy}
+              onClick={() => setEditing(false)}>cancel</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <span>{cat.role_focus} · {cat.resume_variant}</span>
+          <ChipList values={cat.keywords} />
+        </>
+      )}
+      {msg && <div className="error">ERR {msg}</div>}
+    </div>
+  );
+}
+
+function AddCategoryForm({ variants, onSaved }: {
+  variants: string[]; onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [id, setId] = useState("");
+  const [variant, setVariant] = useState(variants[0] ?? "");
+  const [keywords, setKeywords] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  if (!open) {
+    return <button className="actbtn" onClick={() => setOpen(true)}>+ add job type</button>;
+  }
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchCategory(id.trim().replace(/\s+/g, "_").toLowerCase(), {
+        keywords: keywords.split(",").map((s) => s.trim()).filter(Boolean),
+        resume_variant: variant,
+      });
+      setOpen(false); setId(""); setKeywords(""); onSaved();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="preset-category">
+      <b>New job type</b>
+      <label className="muted">id (e.g. quant_researcher)</label>
+      <input value={id} disabled={busy} onChange={(e) => setId(e.target.value)} />
+      <label className="muted">resume variant{" "}
+        <select value={variant} disabled={busy}
+          onChange={(e) => setVariant(e.target.value)}>
+          {variants.map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+      </label>
+      <label className="muted">keywords (comma-separated)</label>
+      <textarea value={keywords} disabled={busy}
+        onChange={(e) => setKeywords(e.target.value)} />
+      <div className="preset-actions">
+        <button className="actbtn" disabled={busy || !id.trim() || !keywords.trim()}
+          onClick={save}>create</button>
+        <button className="clear" disabled={busy} onClick={() => setOpen(false)}>cancel</button>
+      </div>
+      {msg && <div className="error">ERR {msg}</div>}
+    </div>
+  );
+}
+
+function DailyTargetRow({ label, name, value, writable, onSaved }: {
+  label: string; name: string; value: number; writable: boolean;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function save() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchRuntime({ [name]: Number(draft) });
+      onSaved(); setMsg("saved");
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="settings-row">
+      <span>{label}</span>
+      <span className="preset-actions">
+        <input className="num-input" type="number" value={draft} disabled={busy || !writable}
+          onChange={(e) => setDraft(e.target.value)} />
+        {writable && Number(draft) !== value &&
+          <button className="actbtn" disabled={busy} onClick={save}>save</button>}
+        {msg && <span className="muted">{msg}</span>}
+      </span>
+    </div>
+  );
+}
+
 function JobPresetDrawer({ onClose }: { onClose: () => void }) {
   const [controls, setControls] = useState<JobProfileControls | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [showPolicy, setShowPolicy] = useState(false);
   const load = useCallback(() => {
     setErr(null);
     fetchJobProfileControls().then(setControls)
@@ -830,8 +1022,9 @@ function JobPresetDrawer({ onClose }: { onClose: () => void }) {
   }, []);
   useEffect(() => { load(); }, [load]);
   const questions = controls?.application_questions;
+  const dag = controls?.dag;
   return (
-    <DrawerShell title="Job Presets" onClose={onClose}>
+    <DrawerShell title="Job Search Settings" onClose={onClose}>
       {err && <div className="error">ERR {err}</div>}
       {!controls && !err && <div className="loading">...</div>}
       {controls && questions && (
@@ -842,38 +1035,100 @@ function JobPresetDrawer({ onClose }: { onClose: () => void }) {
             </span>
             <span>{controls.write_gate}</span>
           </div>
-          <h3>Question Policy</h3>
-          <div className="diag-table">
-            <div className="diag-row"><span>default</span><code>{questions.default_policy}</code></div>
-            <div className="diag-row"><span>source</span><code>{controls.application_questions_source}</code></div>
-          </div>
-          <h3>Draft Defaults</h3>
-          {Object.entries(questions.draft_defaults).map(([name, value]) => (
-            <DraftDefaultRow key={name} name={name} value={value}
+
+          <h3>Standing Answers</h3>
+          <p className="muted">
+            Your answers to the common application questions. A question
+            covered here is auto-answered into each packet&apos;s App Answers
+            file instead of blocking the bot.
+          </p>
+          {(controls.standing_answers?.answers ?? []).map((row) => (
+            <StandingAnswerRow key={row.topic} row={row}
               writable={controls.writable} onSaved={load} />
           ))}
-          <h3>Review Required</h3>
-          <ChipList values={questions.review_required} />
-          <h3>Never Auto-answer</h3>
-          <ChipList values={questions.never_auto_answer} />
-          <h3>Resume Variants</h3>
-          <ChipList values={controls.resume_variants} />
-          <h3>Job Categories</h3>
+          {!(controls.standing_answers?.answers ?? []).length && (
+            <div className="muted">
+              none on file — {controls.standing_answers?.source}
+            </div>
+          )}
+
+          <h3>Job Types Searched</h3>
+          <p className="muted">
+            The daily discovery searches these keywords (primary types always;
+            secondary at target companies). Edit, remove, or add types here —
+            the DAG picks up changes on its next run.
+          </p>
           <div className="preset-category-list">
             {controls.job_categories.map((cat) => (
-              <div className="preset-category" key={cat.id}>
-                <b>{cat.id}</b>
-                <span>{cat.role_focus} · {cat.resume_variant}</span>
-                <ChipList values={cat.keywords} />
+              <JobCategoryRow key={cat.id} cat={cat}
+                writable={controls.writable} onSaved={load} />
+            ))}
+          </div>
+          {controls.writable &&
+            <AddCategoryForm variants={controls.resume_variants} onSaved={load} />}
+
+          <h3>Daily Targets &amp; Schedule</h3>
+          <div className="settings-list">
+            <DailyTargetRow label="Bot-possible suggestions / day"
+              name="max_bot_possible_suggestions_per_day"
+              value={controls.job_search.max_bot_possible_suggestions_per_day}
+              writable={controls.writable} onSaved={load} />
+            <DailyTargetRow label="Manual-required suggestions / day"
+              name="max_manual_required_suggestions_per_day"
+              value={controls.job_search.max_manual_required_suggestions_per_day}
+              writable={controls.writable} onSaved={load} />
+            <DailyTargetRow label="Total suggestions / day"
+              name="max_suggested_jobs_per_day"
+              value={controls.job_search.max_suggested_jobs_per_day}
+              writable={controls.writable} onSaved={load} />
+            <DailyTargetRow label="Selected / prepared per day"
+              name="max_selected_jobs_per_day"
+              value={controls.job_search.max_selected_jobs_per_day}
+              writable={controls.writable} onSaved={load} />
+            {dag && (
+              <>
+                <div className="settings-row">
+                  <span>pipeline</span>
+                  <code>{dag.dag_id} · {dag.schedule}</code>
+                </div>
+                <div className="settings-row">
+                  <span>last digest</span>
+                  <code>{dag.last_digest_at ? dateText(dag.last_digest_at) : "no digest visible from this deployment"}</code>
+                </div>
+              </>
+            )}
+          </div>
+          {dag && <p className="muted">{dag.note}</p>}
+
+          <h3>
+            <button className="editbtn" onClick={() => setShowPolicy(!showPolicy)}>
+              {showPolicy ? "hide" : "show"} question policy &amp; control files
+            </button>
+          </h3>
+          {showPolicy && (
+            <>
+              <div className="diag-table">
+                <div className="diag-row"><span>default</span><code>{questions.default_policy}</code></div>
+                <div className="diag-row"><span>source</span><code>{controls.application_questions_source}</code></div>
+                <div className="diag-row"><span>standing answers</span><code>{controls.standing_answers?.source}</code></div>
               </div>
-            ))}
-          </div>
-          <h3>Control Files</h3>
-          <div className="diag-table">
-            {Object.entries(controls.source_paths).map(([name, path]) => (
-              <div className="diag-row" key={name}><span>{name}</span><code>{path}</code></div>
-            ))}
-          </div>
+              <h3>Draft Defaults</h3>
+              {Object.entries(questions.draft_defaults).map(([name, value]) => (
+                <DraftDefaultRow key={name} name={name} value={value}
+                  writable={controls.writable} onSaved={load} />
+              ))}
+              <h3>Review Required</h3>
+              <ChipList values={questions.review_required} />
+              <h3>Never Auto-answer</h3>
+              <ChipList values={questions.never_auto_answer} />
+              <h3>Control Files</h3>
+              <div className="diag-table">
+                {Object.entries(controls.source_paths).map(([name, path]) => (
+                  <div className="diag-row" key={name}><span>{name}</span><code>{path}</code></div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
     </DrawerShell>
@@ -1510,9 +1765,11 @@ const PACKET_TABS: { key: string; label: string; file?: string; editable?: boole
   { key: "overview", label: "Overview" },
   { key: "story", label: "Story" },
   { key: "resume", label: "Resume", file: "resume", editable: true },
+  { key: "resume_ats", label: "ATS Text", file: "resume_ats" },
   { key: "cover_letter", label: "Cover Letter", file: "cover_letter", editable: true },
-  { key: "answer_bank", label: "Answers", file: "answer_bank", editable: true },
-  { key: "recruiter_message", label: "Recruiter Msg", file: "recruiter_message", editable: true },
+  { key: "application_answers", label: "App Answers", file: "application_answers", editable: true },
+  { key: "answer_bank", label: "Interview Answers", file: "answer_bank", editable: true },
+  { key: "recruiter_message", label: "Outreach", file: "recruiter_message", editable: true },
   { key: "followups", label: "Follow-ups", file: "followups" },
   { key: "manual_checklist", label: "Checklist", file: "manual_checklist" },
   { key: "job_description", label: "Job Description", file: "job_description" },
@@ -2120,7 +2377,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
         </div>
         {isJobDomain && (
           <button className="actbtn" onClick={() => setShowJobPresets(true)}>
-            Job presets
+            Search &amp; answers settings
           </button>
         )}
         {pack?.origin === "fixtures" && <span className="demo-badge">demo data</span>}

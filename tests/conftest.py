@@ -13,6 +13,12 @@ values win the merge and read as unconfigured.
 GATEWAY_TRANSCRIPT_DIR is pinned to the test's tmp dir: the flight recorder
 fires on EVERY GatewayCore turn, so any test that runs a turn would otherwise
 append real transcript files under the repo's generated/chat-transcripts/.
+
+classify_automation loads Geoff's REAL profile/standing_answers.yml through
+config.data_root (tests pass tmp roots to functions, but the config still
+points at data/job_search) — pinned to [] so classification outcomes never
+depend on the operator's personal answers; tests for the coverage behavior
+monkeypatch their own answers in.
 """
 import pytest
 
@@ -29,3 +35,6 @@ def _hermetic_job_search(monkeypatch, tmp_path):
         monkeypatch.setenv(var, "")
     monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR",
                        str(tmp_path / "chat-transcripts"))
+    from command_center.job_search import automation_policy
+    monkeypatch.setattr(automation_policy, "load_standing_answers",
+                        lambda base: [])

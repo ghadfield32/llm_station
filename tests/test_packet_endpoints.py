@@ -261,6 +261,72 @@ def test_story_lists_moments_in_linear_order(client, monkeypatch):
     assert stamps == sorted(stamps)
 
 
+def test_settings_menu_answers_categories_and_dag(client, monkeypatch):
+    """One organized settings surface: standing answers (upsert + coverage),
+    job categories (create + remove), and the DAG's adjustable daily targets
+    all live on /api/job-search/profile-controls."""
+    mod, tc, tmp_path = client
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
+    _prepared_card(tmp_path)   # ensures the tmp profile dir exists
+
+    body = tc.get("/api/job-search/profile-controls").json()
+    assert body["standing_answers"]["answers"] == []      # tmp profile: none
+    dag = body["dag"]
+    assert dag["dag_id"] == "job_search_daily"
+    assert dag["daily_targets"]["bot_possible"] == 25
+    assert dag["daily_targets"]["manual_required"] == 25
+    assert dag["targets_adjustable_via"].endswith("/runtime")
+
+    # standing answer: creating a new topic requires question text
+    resp = tc.put("/api/job-search/profile-controls/standing-answer",
+                  json={"topic": "background_check", "answer": "Yes"})
+    assert resp.status_code == 400
+    resp = tc.put("/api/job-search/profile-controls/standing-answer",
+                  json={"topic": "background_check", "answer": "Yes",
+                        "question": "Willing to undergo a background check?",
+                        "covers": ["background check"]})
+    assert resp.status_code == 200, resp.json()
+    rows = resp.json()["standing_answers"]["answers"]
+    assert rows[0]["covers"] == ["background check"]
+    # edit-in-place of the same topic keeps one entry
+    tc.put("/api/job-search/profile-controls/standing-answer",
+           json={"topic": "background_check", "answer": "Yes, any time"})
+    body = tc.get("/api/job-search/profile-controls").json()
+    assert [a["answer"] for a in body["standing_answers"]["answers"]] == [
+        "Yes, any time"]
+
+    # categories: create requires a known resume_variant, then remove works
+    resp = tc.put("/api/job-search/profile-controls/category/quant_researcher",
+                  json={"keywords": ["quant", "research"]})
+    assert resp.status_code == 400                       # no variant given
+    resp = tc.put("/api/job-search/profile-controls/category/quant_researcher",
+                  json={"keywords": ["quant", "research"],
+                        "resume_variant": "applied_ml_data_scientist"})
+    assert resp.status_code == 200, resp.json()
+    body = tc.get("/api/job-search/profile-controls").json()
+    ids = {c["id"] for c in body["job_categories"]}
+    assert "quant_researcher" in ids
+    resp = tc.delete(
+        "/api/job-search/profile-controls/category/quant_researcher")
+    assert resp.status_code == 200
+    body = tc.get("/api/job-search/profile-controls").json()
+    assert "quant_researcher" not in {c["id"] for c in body["job_categories"]}
+
+
+def test_story_and_packet_show_application_answers(client):
+    """The answers used on the application are a first-class story moment and
+    an editable packet file."""
+    _, tc, tmp_path = client
+    _prepared_card(tmp_path)
+    body = tc.get("/api/domain/job_application/card/job-review-me/packet").json()
+    assert body["files"]["application_answers"]
+    story_kinds = {s["kind"] for s in body["story"]}
+    assert "answers" in story_kinds
+    row = next(s for s in body["story"] if s["kind"] == "answers")
+    assert row["title"] == "application answers prepared"
+    assert row["detail"].startswith("# Application Answers")
+
+
 def test_packet_file_edit_saves_and_records_manual_edit(client):
     _, tc, tmp_path = client
     app_id = _prepared_card(tmp_path)
@@ -281,6 +347,93 @@ def test_packet_file_edit_saves_and_records_manual_edit(client):
                   json={"file": "application", "content": "x"}).status_code == 400
     assert tc.put("/api/domain/job_application/card/job-review-me/packet/file",
                   json={"file": "resume", "content": "   "}).status_code == 400
+
+
+def _write_ats_profile(tmp_path):
+    """The new-standard profile inputs: contact block + evidence policy."""
+    (tmp_path / "profile" / "contact.yml").write_text(
+        "name: Geoffrey Hadfield\nemail: ghadfield32@gmail.com\n"
+        "phone: 253-245-7959\nlocation: Sanford, FL\n", encoding="utf-8")
+    (tmp_path / "profile" / "evidence_policy.yml").write_text(
+        "held_claims:\n"
+        "  - id: uptime_10k\n"
+        "    claim: 99.9% uptime serving 10K+ daily predictions\n"
+        "    reason: single source variant\n"
+        "    detect: ['99.9%']\n", encoding="utf-8")
+
+
+def _ats_generated(cover_extra: str = ""):
+    from command_center.job_search.agent_writer import GeneratedMaterials
+    return GeneratedMaterials(
+        resume=("# GEOFFREY HADFIELD\n"
+                "Sanford, FL | 253-245-7959 | ghadfield32@gmail.com\n"
+                "## Professional Summary\nATS-standard resume body\n"),
+        cover_letter="grounded cover letter" + cover_extra + "\n",
+        recruiter_message="## Recruiter Direct Message\nhello\n",
+        claim_ids=["wms_founder_platform"],
+        model="chat",
+        attempts=1,
+        answers="## Why this role?\nSituation ... Learning.\n",
+    )
+
+
+def test_ats_standard_packet_validates_clean_and_serves_ats_text(
+        client, monkeypatch):
+    """The full new standard through the endpoint: contact header, held-claims
+    screen, no internal ids, ATS text variant — all green, and the answers
+    section replaces the template answer bank."""
+    _, tc, tmp_path = client
+    _prepared_card(tmp_path)
+    _write_ats_profile(tmp_path)
+    from command_center.job_search import application_memory
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(
+        application_memory, "generate_materials",
+        lambda inputs, bank, *, trace_path, trace_step, **kw: _ats_generated())
+    tc.post("/api/domain/job_application/card/job-review-me/packet/request-changes",
+            json={"notes": "", "regenerate": True})
+    body = tc.get("/api/domain/job_application/card/job-review-me/packet").json()
+    checks = {c["id"]: c for c in body["validation"]["checks"]}
+    for check_id in ("held_claims", "contact_extractable", "no_internal_ids",
+                     "ats_text"):
+        assert checks[check_id]["ok"], checks[check_id]
+    assert body["validation"]["ok"] is True
+    assert "GEOFFREY HADFIELD" in body["files"]["resume_ats"]
+    assert "ghadfield32@gmail.com" in body["files"]["resume_ats"]
+    assert "Why this role?" in body["files"]["answer_bank"]
+
+
+def test_held_claim_on_disk_blocks_submit(client, monkeypatch):
+    """A held claim that reaches the materials (e.g. via manual edit) is an
+    accuracy failure — submit must 409 with the leak named."""
+    _, tc, tmp_path = client
+    _prepared_card(tmp_path)
+    _write_ats_profile(tmp_path)
+    from command_center.job_search import application_memory
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(
+        application_memory, "generate_materials",
+        lambda inputs, bank, *, trace_path, trace_step, **kw:
+            _ats_generated(cover_extra=" with 99.9% uptime"))
+    tc.post("/api/domain/job_application/card/job-review-me/packet/request-changes",
+            json={"notes": "", "regenerate": True})
+    resp = tc.post(
+        "/api/domain/job_application/card/job-review-me/packet/submit",
+        json={"confirm": True})
+    assert resp.status_code == 409
+    assert "held claim" in resp.json()["detail"].lower()
+
+
+def test_resume_edit_regenerates_ats_text(client):
+    _, tc, tmp_path = client
+    app_id = _prepared_card(tmp_path)
+    tc.put("/api/domain/job_application/card/job-review-me/packet/file",
+           json={"file": "resume",
+                 "content": "# GEOFFREY HADFIELD\n## Professional Summary\nedited"})
+    app_dir = tmp_path / "applications_active" / app_id
+    ats = (app_dir / "resume_ats.txt").read_text(encoding="utf-8")
+    assert "PROFESSIONAL SUMMARY" in ats     # derived file cannot drift
+    assert "edited" in ats
 
 
 def test_regenerate_without_notes_records_no_review_note(client, monkeypatch):
@@ -305,6 +458,34 @@ def test_regenerate_without_notes_records_no_review_note(client, monkeypatch):
         "/api/domain/job_application/card/job-review-me/packet/request-changes",
         json={"notes": "", "regenerate": False})
     assert resp.status_code == 400
+
+
+def test_failed_no_notes_regenerate_reports_failure_not_changes(
+        client, monkeypatch):
+    """No-notes regenerate + writer failure recorded nothing and changed
+    nothing; the status must say so ("regenerate_failed"), never the false
+    "changes_requested"."""
+    _, tc, tmp_path = client
+    app_id = _prepared_card(tmp_path)
+    from command_center.job_search import application_memory
+    from command_center.job_search.agent_writer import AgentWriterError
+
+    def boom(*a, **k):
+        raise AgentWriterError("model down")
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(application_memory, "generate_materials", boom)
+    resp = tc.post(
+        "/api/domain/job_application/card/job-review-me/packet/request-changes",
+        json={"notes": "", "regenerate": True})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "regenerate_failed"
+    assert "model down" in body["regenerate_error"]
+    record = body["packet"]["record"]
+    assert record["revision"] == 1                       # nothing bumped
+    assert record["review_state"] == "ready_for_review"  # submit not blocked
+    app_dir = tmp_path / "applications_active" / app_id
+    assert not (app_dir / "review_notes.md").exists()    # no phantom note
 
 
 def test_submit_requires_confirm(client):

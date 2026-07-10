@@ -183,6 +183,10 @@ services:
       # Ollama lives on the HOST (same pattern as AppFlowy below); the chat
       # tool layer's network_health probe reads this instead of localhost.
       - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://host.docker.internal:11434}
+      # Packet writer timeout: qwen3:30b generations take 20-90s alone but
+      # 4-5 min when other GPU stacks (betts_basketball Airflow) contend for
+      # VRAM — the 300s default dies at that margin (observed 2026-07-09).
+      - JOB_SEARCH_WRITER_TIMEOUT=${JOB_SEARCH_WRITER_TIMEOUT:-600}
       # AppFlowy runs as a separate stack on the HOST (not in this compose), so the
       # action layer reaches it via host.docker.internal (the Ollama pattern). This
       # env overrides growth-os/.env's localhost:8081 (growthos Settings: env > .env).

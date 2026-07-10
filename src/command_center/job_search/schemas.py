@@ -299,6 +299,9 @@ class AutomationResult(Strict):
     reason: str
     confidence: float = Field(ge=0, le=1)
     blockers: list[str] = []
+    # detected questions covered by profile/standing_answers.yml — rendered
+    # into the packet's application_answers.md instead of blocking automation
+    auto_answered: list[str] = []
     mvp_submit_disabled: bool = True
 
 

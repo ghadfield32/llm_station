@@ -402,9 +402,51 @@ export interface JobProfileControls {
   }[];
   company_targets: Record<string, string[]>;
   executor_fallback: Record<string, string>;
+  standing_answers: {
+    answers: StandingAnswer[];
+    source: string;
+    coverage_note: string;
+  };
+  dag: {
+    dag_id: string;
+    schedule: string;
+    daily_targets: {
+      suggested: number;
+      bot_possible: number;
+      manual_required: number;
+      selected: number;
+    };
+    targets_adjustable_via: string;
+    digest_path: string;
+    last_digest_at: string | null;
+    note: string;
+  };
+}
+export interface StandingAnswer {
+  topic: string;
+  question?: string;
+  answer: string;
+  answer_rule?: string;
+  covers?: string[];
 }
 export const fetchJobProfileControls = () =>
   getJSON<JobProfileControls>("/api/job-search/profile-controls");
+export const updateStandingAnswer = (body: {
+  topic: string; answer: string; question?: string; covers?: string[];
+}) =>
+  postJSON<{
+    status: string;
+    topic: string;
+    source: string;
+    standing_answers: JobProfileControls["standing_answers"];
+  }>("/api/job-search/profile-controls/standing-answer", body, "PUT");
+export const removeJobSearchCategory = (categoryId: string) =>
+  postJSON<{
+    status: string;
+    source: string;
+    job_categories: JobProfileControls["job_categories"];
+  }>(`/api/job-search/profile-controls/category/${encodeURIComponent(categoryId)}`,
+     undefined, "DELETE");
 export const updateJobSearchRuntime = (body: Partial<JobProfileControls["job_search"]>) =>
   postJSON<{
     status: string;
@@ -415,7 +457,7 @@ export const updateJobSearchRuntime = (body: Partial<JobProfileControls["job_sea
   }>("/api/job-search/profile-controls/runtime", body, "PUT");
 export const updateJobSearchCategory = (
   categoryId: string,
-  body: { role_focus?: string; keywords?: string[] },
+  body: { role_focus?: string; keywords?: string[]; resume_variant?: string },
 ) =>
   postJSON<{
     status: string;

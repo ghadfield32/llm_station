@@ -1178,6 +1178,15 @@ class JobSearchRuntimeSettingsIn(BaseModel):
 class JobSearchCategorySettingsIn(BaseModel):
     role_focus: str | None = None
     keywords: list[str] | None = None
+    # required only when CREATING a new category (must name a known variant)
+    resume_variant: str | None = None
+
+
+class StandingAnswerIn(BaseModel):
+    topic: str
+    answer: str
+    question: str | None = None
+    covers: list[str] | None = None
 
 
 def _validation_blockers_detail(validation: dict) -> str:
@@ -1435,8 +1444,10 @@ def domain_card_note(domain_id: str, card_id: str, body: DomainNoteIn) -> dict:
 # ── Packet review loop: view materials → notes/regenerate → approve & submit ──
 _PACKET_FILES = (
     ("resume", "generated_resume.md"),
+    ("resume_ats", "resume_ats.txt"),
     ("cover_letter", "cover_letter.md"),
     ("recruiter_message", "recruiter_message.md"),
+    ("application_answers", "application_answers.md"),
     ("answer_bank", "answer_bank.md"),
     ("followups", "followups.md"),
     ("manual_checklist", "manual_checklist.md"),
@@ -1574,6 +1585,22 @@ def _job_card_story(spec: dict, card: dict, app_id: str, app_dir: Path) -> list[
             "summary": ", ".join(summary_bits),
             "detail": t.get("response") or t.get("error"),
         })
+    answers_path = app_dir / "application_answers.md"
+    if answers_path.is_file():
+        answers_text = answers_path.read_text(encoding="utf-8",
+                                              errors="replace")
+        asked = answers_text.count("(asked in this posting)")
+        entries.append({
+            "ts": datetime.fromtimestamp(
+                answers_path.stat().st_mtime, UTC).isoformat(),
+            "kind": "answers",
+            "title": "application answers prepared",
+            "summary": (f"{asked} question(s) detected in this posting have "
+                        "standing answers" if asked else
+                        "standing answers rendered (none detected in this "
+                        "posting)"),
+            "detail": answers_text,
+        })
     submission_path = app_dir / "submission_record.json"
     if submission_path.is_file():
         evidence = json.loads(submission_path.read_text(encoding="utf-8"))
@@ -1651,8 +1678,11 @@ def domain_card_packet_request_changes(
     })
     provider.upsert_card(card_id, fields)
     return {
+        # no-notes + failed writer recorded nothing and changed nothing —
+        # saying "changes_requested" there would be a false status
         "status": ("regenerated" if body.regenerate and not regenerate_error
-                   else "changes_requested"),
+                   else "changes_requested" if notes
+                   else "regenerate_failed"),
         "regenerate_error": regenerate_error,
         "domain_id": domain_id,
         "card_id": card_id,
@@ -1666,6 +1696,7 @@ _EDITABLE_PACKET_FILES = {
     "resume": "generated_resume.md",
     "cover_letter": "cover_letter.md",
     "recruiter_message": "recruiter_message.md",
+    "application_answers": "application_answers.md",
     "answer_bank": "answer_bank.md",
     "recruiter_notes": "recruiter_notes.md",
 }
@@ -1706,6 +1737,12 @@ def domain_card_packet_file(
     _, root = _job_search_config_and_root()
     app_dir, record = load_application(app_id, root=root)
     (app_dir / filename).write_text(content + "\n", encoding="utf-8")
+    if body.file == "resume":
+        # the plain-text ATS variant is derived from the resume — regenerate
+        # on every resume edit so the two files cannot drift
+        from command_center.job_search.agent_writer import resume_ats_text
+        (app_dir / "resume_ats.txt").write_text(
+            resume_ats_text(content), encoding="utf-8")
     generation = dict(record.generation)
     edits = list(generation.get("manual_edits") or [])
     edits.append({"file": body.file,
@@ -1857,6 +1894,14 @@ def job_search_profile_controls() -> dict:
     the exact source files so a blank UI can never masquerade as missing policy.
     """
     cfg, root = _job_search_config_and_root()
+    # same base + same override file the PUT endpoints write — the menu can
+    # never show different values than the ones it just saved. Read-only
+    # deployments without configs/job_search.yaml keep the resolved config.
+    try:
+        cfg = _validate_job_search_profile_settings(
+            _read_job_search_profile_settings())
+    except HTTPException:
+        pass
     policy, policy_source = _application_question_policy()
     profile_dir = root / "profile"
     source_paths = {
@@ -1887,6 +1932,55 @@ def job_search_profile_controls() -> dict:
         "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
         "company_targets": cfg.company_targets.model_dump(mode="json"),
         "executor_fallback": cfg.executor_fallback.model_dump(mode="json"),
+        "standing_answers": _standing_answers_block(root),
+        "dag": _job_search_dag_block(cfg),
+    }
+
+
+def _standing_answers_block(root: Path) -> dict:
+    from command_center.job_search.standing_answers import (
+        load_standing_answers,
+        standing_answers_path,
+    )
+
+    answers = load_standing_answers(root)
+    return {
+        "answers": answers,
+        "source": str(standing_answers_path(root)),
+        "coverage_note": (
+            "a manual phrase listed in an entry's `covers` no longer blocks "
+            "automation — the answer is rendered into each packet's "
+            "application_answers.md instead"),
+    }
+
+
+def _job_search_dag_block(cfg) -> dict:
+    """The daily pipeline as seen from the settings menu: the schedule and
+    target numbers it runs with (all adjustable via the runtime PUT), plus
+    last-run evidence from the digest file."""
+    # the digest lands next to the kanban event log (host ./generated,
+    # container /snapshot) — resolve through the same mount
+    digest_path = Path(KANBAN_EVENT_LOG).parent / Path(
+        cfg.job_search.digest_path).name
+    last_digest = None
+    if digest_path.is_file():
+        last_digest = datetime.fromtimestamp(
+            digest_path.stat().st_mtime, UTC).isoformat()
+    return {
+        "dag_id": "job_search_daily",
+        "schedule": (f"daily at {cfg.job_search.daily_run_time} "
+                     f"{cfg.job_search.timezone}"),
+        "daily_targets": {
+            "suggested": cfg.job_search.max_suggested_jobs_per_day,
+            "bot_possible": cfg.job_search.max_bot_possible_suggestions_per_day,
+            "manual_required": cfg.job_search.max_manual_required_suggestions_per_day,
+            "selected": cfg.job_search.max_selected_jobs_per_day,
+        },
+        "targets_adjustable_via": "/api/job-search/profile-controls/runtime",
+        "digest_path": str(digest_path),
+        "last_digest_at": last_digest,
+        "note": ("discovery tags derive from the job categories above — "
+                 "editing category keywords changes what the DAG searches"),
     }
 
 
@@ -1903,6 +1997,50 @@ def update_job_search_runtime(body: JobSearchRuntimeSettingsIn) -> dict:
 @app.put("/api/job-search/profile-controls/category/{category_id}")
 def update_job_search_category(category_id: str,
                                body: JobSearchCategorySettingsIn) -> dict:
+    """Upsert a search category: patch an existing one, or CREATE a new one
+    when the id is unknown (new categories need resume_variant + keywords so
+    scoring and discovery know what to do with them)."""
+    _require_profile_writable()
+    category_id = category_id.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_:-]+", category_id):
+        raise HTTPException(status_code=400, detail="invalid category id")
+    override = _read_job_search_profile_settings()
+    cfg = _validate_job_search_profile_settings(override)
+    existing_ids = {category.id for category in cfg.job_categories}
+    creating = category_id not in existing_ids
+    if creating:
+        if not body.resume_variant or not body.keywords:
+            raise HTTPException(
+                status_code=400,
+                detail=f"category {category_id!r} does not exist yet — to "
+                       "create it, provide resume_variant and keywords")
+        if body.resume_variant not in cfg.resume_variants:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown resume_variant {body.resume_variant!r}; "
+                       f"pick from {sorted(cfg.resume_variants)}")
+    patches = override.setdefault("job_categories", [])
+    patch = next((row for row in patches if row.get("id") == category_id), None)
+    if patch is None:
+        patch = {"id": category_id}
+        patches.append(patch)
+    patch.pop("remove", None)   # re-adding a previously removed category
+    if body.resume_variant is not None:
+        patch["resume_variant"] = body.resume_variant
+    if body.role_focus is not None:
+        patch["role_focus"] = body.role_focus
+    elif creating:
+        patch["role_focus"] = "secondary"
+    if body.keywords is not None:
+        patch["keywords"] = [kw.strip() for kw in body.keywords if kw.strip()]
+    return _write_job_search_profile_settings(override)
+
+
+@app.delete("/api/job-search/profile-controls/category/{category_id}")
+def remove_job_search_category(category_id: str) -> dict:
+    """Remove a search category (recorded as a remove patch in
+    search_settings.yml, so a base-config category stays removed and can be
+    re-added later from the same menu)."""
     _require_profile_writable()
     category_id = category_id.strip()
     if not re.fullmatch(r"[A-Za-z0-9_:-]+", category_id):
@@ -1910,17 +2048,64 @@ def update_job_search_category(category_id: str,
     override = _read_job_search_profile_settings()
     cfg = _validate_job_search_profile_settings(override)
     if category_id not in {category.id for category in cfg.job_categories}:
-        raise HTTPException(status_code=404, detail=f"unknown job category {category_id!r}")
+        raise HTTPException(
+            status_code=404, detail=f"unknown job category {category_id!r}")
+    if len(cfg.job_categories) <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="refusing to remove the last search category — the daily "
+                   "search would have nothing to look for")
     patches = override.setdefault("job_categories", [])
-    patch = next((row for row in patches if row.get("id") == category_id), None)
-    if patch is None:
-        patch = {"id": category_id}
-        patches.append(patch)
-    if body.role_focus is not None:
-        patch["role_focus"] = body.role_focus
-    if body.keywords is not None:
-        patch["keywords"] = [kw.strip() for kw in body.keywords if kw.strip()]
+    patches[:] = [row for row in patches if row.get("id") != category_id]
+    patches.append({"id": category_id, "remove": True})
     return _write_job_search_profile_settings(override)
+
+
+@app.put("/api/job-search/profile-controls/standing-answer")
+def update_standing_answer(body: StandingAnswerIn) -> dict:
+    """Upsert one standing answer. An edit takes effect on the NEXT packet
+    preparation/regeneration; classification of new discoveries uses it
+    immediately."""
+    _require_profile_writable()
+    topic = body.topic.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_:-]+", topic):
+        raise HTTPException(
+            status_code=400,
+            detail="standing answer topic must be a stable token "
+                   "([A-Za-z0-9_:-]+)")
+    if not body.answer.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="answer text is required — delete the entry from "
+                   "profile/standing_answers.yml to stop covering a question")
+    from command_center.job_search.standing_answers import (
+        load_standing_answers,
+        save_standing_answers,
+    )
+
+    _, root = _job_search_config_and_root()
+    answers = load_standing_answers(root)
+    row = next((a for a in answers if a.get("topic") == topic), None)
+    if row is None:
+        if not body.question:
+            raise HTTPException(
+                status_code=400,
+                detail=f"topic {topic!r} does not exist yet — provide "
+                       "`question` text to create it")
+        row = {"topic": topic}
+        answers.append(row)
+    row["answer"] = body.answer.strip()
+    if body.question is not None:
+        row["question"] = body.question.strip()
+    if body.covers is not None:
+        row["covers"] = [c.strip() for c in body.covers if c.strip()]
+    source = save_standing_answers(root, answers)
+    return {
+        "status": "updated",
+        "topic": topic,
+        "source": str(source),
+        "standing_answers": _standing_answers_block(root),
+    }
 
 
 @app.put("/api/job-search/profile-controls/draft-default")

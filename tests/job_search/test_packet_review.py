@@ -36,6 +36,11 @@ def _prepare(tmp_path: Path) -> tuple[Path, str]:
     ensure_data_dirs(tmp_path)
     cfg = load_config()
     bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
+    # the new-standard profile inputs (ATS contact block); agent-mode packets
+    # fail contact_extractable without them
+    (tmp_path / "profile" / "contact.yml").write_text(
+        "name: Geoffrey Hadfield\nemail: ghadfield32@gmail.com\n",
+        encoding="utf-8")
     job = normalize_job_from_text(
         (EXAMPLES / "basketball_ai_data_scientist.md").read_text(encoding="utf-8"))
     app_dir = create_prepared_application(
@@ -51,7 +56,8 @@ def _prepare(tmp_path: Path) -> tuple[Path, str]:
 
 def _fake_generated(claims: list[str]) -> GeneratedMaterials:
     return GeneratedMaterials(
-        resume="# Geoffrey Hadfield\nregenerated resume\n## Claim Traceability\n- `x`",
+        resume=("# GEOFFREY HADFIELD\nghadfield32@gmail.com\n"
+                "## Professional Summary\nregenerated resume"),
         cover_letter="regenerated cover letter",
         recruiter_message="regenerated recruiter message",
         claim_ids=claims,

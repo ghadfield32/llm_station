@@ -1,16 +1,11 @@
 {
   "applied_code_changes": false,
-  "date": "2026-06-20",
-  "draft_kanban": false,
+  "date": "2026-07-10",
+  "draft_kanban": true,
   "drafted_card_ids": [],
   "n_findings": 4,
-  "report_path": "",
+  "report_path": "generated\\self-improvement-report.md",
   "schema_version": "command-center.self-improvement-daily.v1",
-  "status": "observed",
-  "would_draft_ids": [
-    "EXP-scan-code-remove-swallowed-excepti-1f191e01",
-    "EXP-scan-code-refactor-over-long-funct-9188489d",
-    "EXP-scan-stru-split-oversized-modules-3559a76c",
-    "EXP-scan-code-burn-down-todo-fixme-deb-ff05c1f2"
-  ]
+  "status": "drafted",
+  "would_draft_ids": []
 }

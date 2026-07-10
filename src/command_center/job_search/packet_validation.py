@@ -9,13 +9,25 @@ from __future__ import annotations
 from pathlib import Path
 
 from command_center.job_search.achievement_bank import AchievementBank, validate_claim_ids
-from command_center.job_search.agent_writer import TRACE_FILENAME, read_trace
+from command_center.job_search.agent_writer import (
+    TRACE_FILENAME,
+    load_contact,
+    load_evidence_policy,
+    read_trace,
+)
 from command_center.job_search.application_memory import read_job_description
 from command_center.job_search.schemas import ApplicationRecord
 
 
 def _check(check_id: str, label: str, ok: bool, level: str, detail: str) -> dict:
     return {"id": check_id, "label": label, "ok": ok, "level": level, "detail": detail}
+
+
+def _read_material(app_dir: Path, filename: str) -> str:
+    path = app_dir / filename
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def validate_packet(
@@ -102,6 +114,69 @@ def validate_packet(
         "tone", "No AI-tell phrasing survived generation",
         not tone_flags, "warning",
         "clean" if not tone_flags else "; ".join(tone_flags)))
+
+    # ATS / employer-facing checks re-run against the files ON DISK so a
+    # manual edit-in-place is judged the same as fresh generation. The profile
+    # dir is the packet root's sibling: <root>/applications_active/<id>.
+    profile_base = app_dir.parent.parent
+    resume_text = _read_material(app_dir, "generated_resume.md")
+    employer_texts = "\n".join([
+        resume_text,
+        _read_material(app_dir, "cover_letter.md"),
+        _read_material(app_dir, "recruiter_message.md"),
+        _read_material(app_dir, "answer_bank.md"),
+    ])
+
+    held = load_evidence_policy(profile_base)
+    leaks = []
+    lowered_all = employer_texts.lower()
+    for h in held:
+        for needle in (h.get("detect") or []):
+            if str(needle).lower() in lowered_all:
+                leaks.append(f"{h.get('claim', h.get('id'))} (matched {needle!r})")
+                break
+    checks.append(_check(
+        "held_claims", "No held claim (unresolved evidence) in the materials",
+        not leaks, "error",
+        f"{len(held)} held claim(s) screened; none present" if not leaks
+        else "held claims leaked: " + "; ".join(leaks)))
+
+    contact = load_contact(profile_base)
+    email = str(contact.get("email") or "")
+    if mode != "agent":
+        contact_ok, contact_detail = True, "not judged until the packet is agent-generated"
+    elif not contact:
+        contact_ok = False
+        contact_detail = ("profile/contact.yml is missing — ATS needs an "
+                          "extractable contact block in the resume body")
+    else:
+        contact_ok = bool(email) and email in resume_text
+        contact_detail = (f"contact header present ({email})" if contact_ok
+                          else f"resume is missing the contact email {email}")
+    checks.append(_check(
+        "contact_extractable", "Resume carries an extractable contact block",
+        contact_ok, "error", contact_detail))
+
+    internal_markers = ["Target:", "## Claim Traceability"]
+    internal_hits = [m for m in internal_markers if m in resume_text]
+    internal_hits += [a.id for a in bank.achievements if a.id in resume_text]
+    checks.append(_check(
+        "no_internal_ids", "Resume has no internal-only content",
+        mode != "agent" or not internal_hits, "error",
+        "clean — no claim ids, Target line, or traceability section"
+        if not internal_hits else
+        "internal content in the employer-facing resume: "
+        + ", ".join(internal_hits)
+        + ("" if mode == "agent" else " (template draft — regenerate)")))
+
+    ats_text = _read_material(app_dir, "resume_ats.txt")
+    checks.append(_check(
+        "ats_text", "Plain-text ATS resume variant exists",
+        mode != "agent" or (bool(ats_text.strip())
+                            and (not email or email in ats_text)),
+        "warning",
+        f"resume_ats.txt present ({len(ats_text)} chars)" if ats_text.strip()
+        else "resume_ats.txt missing — regenerate to produce the ATS variant"))
 
     checks.append(_check(
         "review_clean", "No unresolved change requests",

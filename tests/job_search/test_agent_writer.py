@@ -36,35 +36,47 @@ def _inputs(**overrides) -> MaterialInputs:
 
 
 def _valid_output(claim_ids: list[str], *, with_master_sections: bool = False,
-                  resume_extra: str = "", cover_extra: str = "") -> str:
+                  resume_extra: str = "", cover_extra: str = "",
+                  contact_line: str = "") -> str:
     resume = [
-        "# Geoffrey Hadfield",
-        "Target: Acme Analytics — Senior Data Scientist",
-        "## Summary",
+        "# GEOFFREY HADFIELD",
+        *( [contact_line] if contact_line else [] ),
+        "DATA SCIENTIST | EXPERIMENTATION | ML DELIVERY",
+        "## Professional Summary",
         "Applied ML data scientist.",
         "## Experience",
-        "JP Morgan Chase — Analytics Engineer, Associate (Jun 2023 - Aug 2025)",
-        "- Built an A/B testing framework (Statsmodels + GitHub Actions); ~12% engagement lift",
+        "World Model Sports LLC | Founder (2026 - Present)",
+        "- Built Hoops World Model decision-support workflows",
+        "JPMorgan Chase | Analytics Engineer, Associate (Jun 2023 - Aug 2025)",
+        "- Built an A/B testing framework (Statsmodels + GitHub Actions); "
+        "standardized experiment guardrails",
+        "Driveline Baseball | Sports Science Intern (Feb 2025 - Mar 2025)",
+        "- Built time-series fatigue workflows on biomechanical signals",
     ]
     if with_master_sections:
         resume.extend([
-            "## Core Skills",
+            "## Core Expertise",
             "Modeling: PyMC | Engineering: Python, SQL",
-            "## Projects",
+            "## Selected Technical Projects",
             "- NBA Player Value Forecasting System",
             "## Education",
             "M.S. Data Science — University of West Florida",
         ])
-    resume.extend(["## Claim Traceability", *[f"- `{c}`" for c in claim_ids]])
     if resume_extra:
         resume.append(resume_extra)
+    # 250-ish words: the writer enforces the 250-350 standard with slack
+    cover_body = " ".join(["evidence-backed sentence content"] * 80)
     return "\n".join([
         "=== RESUME ===",
         *resume,
         "=== COVER LETTER ===",
-        "Dear Acme hiring team, ..." + cover_extra,
-        "=== RECRUITER MESSAGE ===",
+        f"Dear Acme hiring team, {cover_body}{cover_extra}",
+        "=== OUTREACH ===",
+        "## Recruiter Direct Message",
         "Hi — interested in the Senior Data Scientist role.",
+        "=== ANSWERS ===",
+        "## Why are you interested in this role?",
+        "Situation: ... Decision: ... Action: ... Result: ... Learning: ...",
         "=== CLAIM IDS ===",
         *claim_ids,
     ])
@@ -101,7 +113,7 @@ def test_generate_writes_materials_and_full_trace(tmp_path):
         config=CFG, post_fn=post)
     assert out.claim_ids == ["wms_founder_platform", "jpmc_ab_testing_framework"]
     assert out.attempts == 1
-    assert "Geoffrey Hadfield" in out.resume
+    assert "GEOFFREY HADFIELD" in out.resume
     assert "hiring team" in out.cover_letter
     trace = read_trace(tmp_path)
     assert len(trace) == 1
@@ -138,7 +150,7 @@ def test_still_invalid_after_retries_raises(tmp_path):
     with pytest.raises(AgentWriterError, match="unknown achievement id"):
         generate_materials(
             _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
-            config=CFG, post_fn=post)
+            config=CFG, post_fn=post, max_attempts=2)
     assert len(read_trace(tmp_path)) == 2
 
 
@@ -209,11 +221,33 @@ def test_master_bank_lands_in_prompt_with_format_contract():
     assert "MASTER RESUME BANK" in user
     assert "M.S. Data Science" in user
     # the format contract demands Geoff's real structure and voice
-    assert "## Core Skills" in system
+    assert "## Core Expertise" in system
     assert "## Education" in system
-    assert "4-6 bullets" in system
+    assert "## Selected Technical Projects" in system
+    assert "3-4 bullets" in system
     assert "spearheaded" in system   # banned-phrase list is spelled out
     assert "near-verbatim" in system
+    # employer-facing hygiene is an explicit prompt rule
+    assert "Do NOT include: a 'Target:' line" in system
+
+
+def test_contact_and_held_claims_and_exemplar_land_in_prompt():
+    contact = {"location": "Sanford, FL", "phone": "253-245-7959",
+               "email": "ghadfield32@gmail.com",
+               "portfolio": "portfolio.ghadfield.com"}
+    held = [{"id": "uptime_10k_predictions",
+             "claim": "99.9% uptime serving 10K+ daily predictions",
+             "reason": "appears in only one source variant",
+             "detect": ["99.9%"]}]
+    messages = build_messages(
+        _inputs(contact=contact, held_claims=held,
+                format_example="GEOFFREY HADFIELD\nEXEMPLAR BODY"), BANK)
+    system, user = messages[0]["content"], messages[1]["content"]
+    assert "Sanford, FL | 253-245-7959 | ghadfield32@gmail.com" in system
+    assert "HELD CLAIMS" in user
+    assert "99.9% uptime serving 10K+ daily predictions" in user
+    assert "APPROVED RESUME EXEMPLAR" in user
+    assert "EXEMPLAR BODY" in user
 
 
 def test_master_bank_resume_missing_education_gets_retry(tmp_path):
@@ -236,7 +270,7 @@ def test_surviving_tone_flags_are_kept_not_template_fallback(tmp_path):
     post, _ = _fake_post([stubborn, stubborn])
     out = generate_materials(
         _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
-        config=CFG, post_fn=post)
+        config=CFG, post_fn=post, max_attempts=2)
     # retried once for tone, then ACCEPTED with the flags surfaced — a word
     # choice never forces the deterministic-template fallback
     assert out.attempts == 2
@@ -245,6 +279,99 @@ def test_surviving_tone_flags_are_kept_not_template_fallback(tmp_path):
     trace = read_trace(tmp_path)
     assert [t["ok"] for t in trace] == [True, True]   # tone flags are soft
     assert all(t["problems"] for t in trace)          # but never hidden
+
+
+def test_held_claim_leak_gets_corrective_retry(tmp_path):
+    held = [{"id": "uptime_10k_predictions",
+             "claim": "99.9% uptime serving 10K+ daily predictions",
+             "reason": "single source variant",
+             "detect": ["99.9%", "10k+ daily"]}]
+    post, calls = _fake_post([
+        _valid_output(["wms_founder_platform"],
+                      cover_extra=" Maintained 99.9% uptime."),
+        _valid_output(["wms_founder_platform"]),
+    ])
+    out = generate_materials(
+        _inputs(held_claims=held), BANK,
+        trace_path=tmp_path / "agent_trace.jsonl", config=CFG, post_fn=post)
+    assert out.attempts == 2
+    first = read_trace(tmp_path)[0]
+    assert any("held claim leaked" in p for p in first["problems"])
+    assert "never using a held claim" in calls[1][-1]["content"]
+    assert "99.9%" not in out.cover_letter
+
+
+def test_missing_contact_header_gets_corrective_retry(tmp_path):
+    contact = {"email": "ghadfield32@gmail.com", "phone": "253-245-7959"}
+    line = "Sanford, FL | 253-245-7959 | ghadfield32@gmail.com"
+    post, _ = _fake_post([
+        _valid_output(["wms_founder_platform"]),                  # no contact
+        _valid_output(["wms_founder_platform"], contact_line=line),
+    ])
+    out = generate_materials(
+        _inputs(contact=contact), BANK,
+        trace_path=tmp_path / "agent_trace.jsonl", config=CFG, post_fn=post)
+    assert out.attempts == 2
+    first = read_trace(tmp_path)[0]
+    assert any("contact header" in p for p in first["problems"])
+    assert "ghadfield32@gmail.com" in out.resume
+
+
+def test_internal_content_in_resume_gets_corrective_retry(tmp_path):
+    post, _ = _fake_post([
+        _valid_output(["wms_founder_platform"],
+                      resume_extra="Target: Acme — Senior DS"),
+        _valid_output(["wms_founder_platform"]),
+    ])
+    out = generate_materials(
+        _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
+        config=CFG, post_fn=post)
+    assert out.attempts == 2
+    first = read_trace(tmp_path)[0]
+    assert any("internal-only content" in p for p in first["problems"])
+    assert "Target:" not in out.resume
+
+
+def test_dropped_employer_and_short_cover_get_retry(tmp_path):
+    good = _valid_output(["wms_founder_platform"])
+    bad = good.replace("Driveline Baseball | Sports Science Intern", "Elsewhere")
+    bad = bad.replace(" ".join(["evidence-backed sentence content"] * 80),
+                      "short cover")
+    post, _ = _fake_post([bad, good])
+    out = generate_materials(
+        _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
+        config=CFG, post_fn=post)
+    assert out.attempts == 2
+    problems = read_trace(tmp_path)[0]["problems"]
+    assert any("Driveline Baseball" in p and "dropped" in p for p in problems)
+    assert any("cover letter is" in p and "250-350" in p for p in problems)
+    assert "Driveline Baseball" in out.resume
+
+
+def test_outreach_and_answers_are_returned(tmp_path):
+    post, _ = _fake_post([_valid_output(["wms_founder_platform"])])
+    out = generate_materials(
+        _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
+        config=CFG, post_fn=post)
+    assert "Recruiter Direct Message" in out.recruiter_message
+    assert "Situation:" in out.answers
+
+
+def test_resume_ats_text_strips_markdown():
+    from command_center.job_search.agent_writer import resume_ats_text
+    md = "\n".join([
+        "# GEOFFREY HADFIELD",
+        "Sanford, FL | ghadfield32@gmail.com",
+        "## Professional Summary",
+        "Data scientist with **production** `ML` work.",
+        "## Experience",
+        "- Built a thing; measured a result",
+    ])
+    text = resume_ats_text(md)
+    assert "GEOFFREY HADFIELD" in text
+    assert "PROFESSIONAL SUMMARY" in text
+    assert "• Built a thing; measured a result" in text
+    assert "#" not in text and "**" not in text and "`" not in text
 
 
 def test_transport_error_is_traced_then_raised(tmp_path):

@@ -15,12 +15,21 @@ from command_center.job_search.agent_writer import (
     MaterialInputs,
     ensure_master_bank_text,
     generate_materials,
+    load_contact,
+    load_evidence_policy,
+    load_format_example,
+    resume_ats_text,
 )
 from command_center.job_search.config import data_root, ensure_data_dirs, load_config
 from command_center.job_search.followups import generate_followup
 from command_center.job_search.interview_prep import render_answer_bank
 from command_center.job_search.resume_selection import render_selection_report
 from command_center.job_search.scoring import application_id_for
+from command_center.job_search.standing_answers import (
+    load_standing_answers,
+    render_application_answers,
+    split_detected_phrases,
+)
 from command_center.job_search.schemas import (
     ApplicationRecord,
     ApplicationSalary,
@@ -92,18 +101,26 @@ def _run_agent_writer(
     except AgentWriterError as exc:
         return {"mode": "template_fallback", "error": str(exc), "generated_at": now}
     (app_dir / "generated_resume.md").write_text(materials.resume + "\n", encoding="utf-8")
+    (app_dir / "resume_ats.txt").write_text(
+        resume_ats_text(materials.resume), encoding="utf-8")
     (app_dir / "cover_letter.md").write_text(materials.cover_letter + "\n", encoding="utf-8")
     (app_dir / "recruiter_message.md").write_text(
         materials.recruiter_message + "\n", encoding="utf-8")
+    if materials.answers.strip():
+        (app_dir / "answer_bank.md").write_text(
+            materials.answers + "\n", encoding="utf-8")
     return {
         "mode": "agent",
         "model": materials.model,
         "attempts": materials.attempts,
         "claim_ids": materials.claim_ids,
         "generated_at": now,
-        # provenance for validation: was Geoff's master bullet bank in the
-        # context, and did any AI-tell phrases survive the corrective retry?
+        # provenance for validation: which profile context was in the prompt,
+        # and did any AI-tell phrases survive the corrective retry?
         "master_bank": bool(inputs.master_bank.strip()),
+        "contact": bool(inputs.contact),
+        "evidence_policy": bool(inputs.held_claims),
+        "format_example": bool(inputs.format_example.strip()),
         "tone_flags": materials.tone_flags,
     }
 
@@ -177,6 +194,7 @@ def create_prepared_application(
             "manual_checklist": "manual_checklist.md",
             "executor_metadata": "executor.json",
             "answer_bank": "answer_bank.md",
+            "application_answers": "application_answers.md",
         },
         followup={
             "next_action": "Geoff reviews the prepared materials and submits manually if appropriate.",
@@ -205,6 +223,16 @@ def create_prepared_application(
     (app_dir / "answer_bank.md").write_text(
         render_answer_bank(job, answer_bank_bank, selection), encoding="utf-8"
     )
+    # Standing answers are rendered deterministically (compliance answers are
+    # exact, never model-paraphrased) using THIS posting's detected questions
+    # and salary range.
+    (app_dir / "application_answers.md").write_text(
+        render_application_answers(
+            load_standing_answers(base),
+            salary_max=job.salary_max, salary_text=job.salary_text,
+            currency=job.currency,
+            detected_phrases=automation.auto_answered),
+        encoding="utf-8")
     record.generation = _run_agent_writer(
         app_dir,
         MaterialInputs(
@@ -218,6 +246,9 @@ def create_prepared_application(
             fit_score=fit.score,
             writing_style=_load_writing_style(base),
             master_bank=ensure_master_bank_text(base),
+            contact=load_contact(base),
+            held_claims=load_evidence_policy(base),
+            format_example=load_format_example(base),
         ),
         answer_bank_bank,
         trace_step="generate_materials",
@@ -295,6 +326,13 @@ def render_manual_checklist(job: CanonicalJob, automation: AutomationResult, cfg
         f"- {item}" for item in cfg.application_questions.never_auto_answer
     )
     blocker_lines = "\n".join(f"- {item}" for item in blockers)
+    auto_answered_block = ""
+    if automation.auto_answered:
+        answered = "\n".join(f"- {item}" for item in automation.auto_answered)
+        auto_answered_block = (
+            "\n## Questions Auto-Answered From Standing Answers\n"
+            "Review them in application_answers.md before submitting.\n"
+            f"{answered}\n")
     return f"""# Manual Application Checklist - {job.company} {job.role_title}
 
 ## Apply URL
@@ -302,6 +340,7 @@ def render_manual_checklist(job: CanonicalJob, automation: AutomationResult, cfg
 
 ## Why Automation Stopped
 {blocker_lines}
+{auto_answered_block}
 
 ## Executor
 Requested executor: `{executor}`. Executor choice does not weaken claim validation,
@@ -456,6 +495,9 @@ def regenerate_materials(
             reviewer_notes=_read_review_notes(app_dir),
             writing_style=_load_writing_style(base),
             master_bank=ensure_master_bank_text(base),
+            contact=load_contact(base),
+            held_claims=load_evidence_policy(base),
+            format_example=load_format_example(base),
         ),
         writer_bank,
         trace_step=f"regenerate_materials_rev{record.revision + 1}",
@@ -464,6 +506,18 @@ def regenerate_materials(
         # Keep changes_requested: the notes were NOT addressed. Surfacing the
         # error is the fix path, not quietly reverting to templates.
         raise AgentWriterError(str(generation.get("error") or "agent writer failed"))
+    # Refresh the deterministic standing answers alongside the regenerated
+    # materials so profile edits (Jobs settings drawer) propagate on the next
+    # regenerate; detected questions are re-derived from the stored JD.
+    standing = load_standing_answers(base)
+    asked, _uncovered = split_detected_phrases(
+        description, cfg.automation.manual_phrases, standing)
+    (app_dir / "application_answers.md").write_text(
+        render_application_answers(
+            standing,
+            salary_max=record.salary.max, salary_text=record.salary.notes,
+            currency=record.salary.currency, detected_phrases=asked),
+        encoding="utf-8")
     # Re-load before mutating: the model call above can take minutes, and a
     # note that landed meanwhile (append_note_text load->save) must not be
     # clobbered by saving this function's stale pre-call snapshot.
@@ -472,6 +526,7 @@ def regenerate_materials(
     record.revision = record.revision + 1
     record.review_state = "ready_for_review"
     record.last_activity_at = _today().isoformat()
+    record.materials.setdefault("application_answers", "application_answers.md")
     save_application(app_dir, record)
     append_note_text(
         app_id,

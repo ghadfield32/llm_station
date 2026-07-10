@@ -45,18 +45,31 @@ def merge_profile_settings(base: dict[str, Any],
 
     patches = override.get("job_categories")
     if isinstance(patches, list):
+        category_list = merged.setdefault("job_categories", [])
         categories = {
             str(category.get("id")): category
-            for category in merged.get("job_categories", [])
+            for category in category_list
             if isinstance(category, dict) and category.get("id")
         }
         for patch in patches:
             if not isinstance(patch, dict) or not patch.get("id"):
                 continue
-            category = categories.get(str(patch["id"]))
-            if not category:
+            cat_id = str(patch["id"])
+            category = categories.get(cat_id)
+            if patch.get("remove"):
+                # search types are adjustable both ways: a removed category
+                # disappears from scoring and discovery until re-added
+                if category is not None:
+                    category_list.remove(category)
+                    categories.pop(cat_id, None)
                 continue
-            for key in ("keywords", "role_focus"):
+            if category is None:
+                # NEW category added from the settings drawer; must carry the
+                # full shape — JobSearchConfig validation rejects partials
+                category = {"id": cat_id}
+                category_list.append(category)
+                categories[cat_id] = category
+            for key in ("keywords", "role_focus", "resume_variant"):
                 if key in patch:
                     category[key] = patch[key]
 
