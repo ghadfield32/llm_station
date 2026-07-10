@@ -454,30 +454,34 @@ export interface ChatRuntime {
   transport_surface: string;
   model_gateway: string;
   chat_role: ModelRole | null;
+  roles?: ModelRole[];
   executors: Executor[];
   stream_endpoint: string;
   action_endpoint: string;
   activity_endpoint: string;
-  external_chats?: {
-    name: string;
-    active: boolean;
-    url?: string | null;
-    env_var: string;
-    reason: string;
-    kind?: string;
-    best_for?: string;
-    recommendation?: string;
-    source_url?: string;
-    handoff_mode?: string;
-  }[];
-  uses_orca: boolean;
-  uses_omnigent: boolean;
-  uses_oxygent?: boolean;
-  specialist_recommendation?: string;
+  conversations_endpoint?: string;
+  repos?: { repo_id: string; remote_url: string }[];
+  provider_note?: string;
   chat_memory_note?: string;
-  external_harness_note: string;
 }
 export const fetchChatRuntime = () => getJSON<ChatRuntime>("/api/chat/runtime");
+
+// The review index: every conversation the flight recorder has seen, across
+// all surfaces, merged with the shared thread shortcuts.
+export interface ChatConversation {
+  conversation_id: string;
+  turns: number;
+  last_ts: string;
+  surfaces: string[];
+  last_user_text: string;
+  title: string | null;
+}
+export interface ChatConversationsResponse {
+  conversations: ChatConversation[];
+  total: number;
+}
+export const fetchChatConversations = () =>
+  getJSON<ChatConversationsResponse>("/api/chat/conversations");
 
 export interface ChatEvent { type: string; [k: string]: unknown; }
 export interface ChatThread {
@@ -527,6 +531,9 @@ export interface ChatTranscriptResponse {
   turn_count: number;
   total_turns?: number;
   offset?: number;
+  // card-scoped chats (domain:card ids) also carry the card's board/agent
+  // history — same row shape as the packet story
+  card_story?: JobStoryEntry[];
   source: string;
   recording_enabled: boolean;
 }

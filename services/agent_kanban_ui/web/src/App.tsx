@@ -11,6 +11,7 @@ import {
   MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
   fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
   fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse, TranscriptTurn,
+  ChatConversation, fetchChatConversations,
   fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
   fetchJobPacket, JobPacket, JobStoryEntry, PacketValidation, AgentTraceEntry,
   requestPacketChanges, submitJobApplication, updateJobPacketFile,
@@ -2509,7 +2510,6 @@ function DrawerShell({ title, onClose, children }: {
 }
 
 // ---- chat (the console as a channel) --------------------------------------
-type ExternalChat = NonNullable<ChatRuntime["external_chats"]>[number];
 type ChatThread = {
   id: string;
   title: string;
@@ -2583,20 +2583,6 @@ function fmtThreadTime(value: string) {
   return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function externalChatHref(chat: ExternalChat, handoffText: string) {
-  if (!chat.active || !chat.url) return null;
-  const prompt = handoffText.trim();
-  if (!prompt) return chat.url;
-  try {
-    const url = new URL(chat.url, window.location.href);
-    url.searchParams.set("q", prompt);
-    return url.toString();
-  } catch {
-    const sep = chat.url.includes("?") ? "&" : "?";
-    return `${chat.url}${sep}q=${encodeURIComponent(prompt)}`;
-  }
-}
-
 function ChatLine({ ev }: { ev: ChatEvent }) {
   switch (ev.type) {
     case "history": return <div className="cl round">{String(ev.content)}</div>;
@@ -2616,80 +2602,82 @@ function ChatLine({ ev }: { ev: ChatEvent }) {
   }
 }
 
-function ChatRuntimePanel({ runtime, handoffText = "" }: { runtime: ChatRuntime | null; handoffText?: string }) {
+function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation, onStartRepoChat }: {
+  runtime: ChatRuntime | null;
+  conversations: ChatConversation[];
+  activeId: string;
+  onOpenConversation: (id: string) => void;
+  onStartRepoChat: (repo: { repo_id: string; remote_url: string }) => void;
+}) {
   if (!runtime) return <div className="loading">loading chat runtime...</div>;
   const candidates = runtime.chat_role?.candidates ?? [];
-  const externalChats = runtime.external_chats ?? [
-    {
-      name: "ORCA", active: runtime.uses_orca, url: null, env_var: "ORCA_CHAT_URL",
-      reason: "not configured", kind: "document visual QA specialist",
-      best_for: "PDFs, resumes, application packets, screenshots, tables, and forms.",
-      recommendation: "Best first pilot for document-heavy job materials.",
-    },
-    {
-      name: "OmniAgent / Omnigent", active: runtime.uses_omnigent, url: null,
-      env_var: "OMNIGENT_CHAT_URL or OMNIAGENT_CHAT_URL", reason: "not configured",
-      kind: "omni-modal active perception specialist",
-      best_for: "Video, audio/video evidence, screen recordings, and long multimodal review.",
-      recommendation: "Useful later; not the first cockpit runtime replacement.",
-    },
-  ];
+  const repos = runtime.repos ?? [];
   return (
     <div className="chat-runtime">
       <div className="metric diag-card">
-        <div className="diag-head">Chat Runtime</div>
-        <div className="diag-row"><span>harness</span><code>{runtime.harness}</code></div>
-        <div className="diag-row"><span>gateway</span><code>{runtime.model_gateway}</code></div>
-        <div className="diag-row"><span>surface</span><code>{runtime.transport_surface}</code></div>
-        <div className="diag-row"><span>stream</span><code>{runtime.stream_endpoint}</code></div>
-        <p className="muted small">{runtime.specialist_recommendation ?? runtime.external_harness_note}</p>
+        <div className="diag-head">All Chats</div>
+        <p className="muted small">
+          Every recorded conversation, across every surface — tap one to read
+          its full story.
+        </p>
+        {conversations.length === 0 && (
+          <div className="muted small">
+            Nothing recorded yet — send a message anywhere (cockpit, Discord,
+            CLI) and it lands here.
+          </div>
+        )}
+        <div className="conv-list">
+          {conversations.map((c) => (
+            <button
+              className={`conv-row ${c.conversation_id === activeId ? "thread-on" : ""}`}
+              key={c.conversation_id}
+              onClick={() => onOpenConversation(c.conversation_id)}>
+              <span className="conv-title">{c.title || c.conversation_id}</span>
+              <span className="muted small">
+                {c.turns} turn{c.turns === 1 ? "" : "s"}
+                {c.surfaces.length ? ` · ${c.surfaces.join("/")}` : ""}
+                {c.last_ts ? ` · ${fmtThreadTime(c.last_ts)}` : ""}
+              </span>
+              {c.last_user_text && (
+                <span className="conv-preview muted small">{c.last_user_text}</span>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="metric diag-card">
-        <div className="diag-head">Models + Executors</div>
+        <div className="diag-head">New Scoped Chat</div>
+        <p className="muted small">
+          Start a conversation anchored to a registered repo — everything the
+          agents do for it stays reviewable under one thread.
+        </p>
+        <div className="conv-list">
+          {repos.map((r) => (
+            <button className="conv-row" key={r.repo_id}
+              onClick={() => onStartRepoChat(r)}>
+              <span className="conv-title">{r.repo_id}</span>
+              <span className="muted small">{r.remote_url || "local"}</span>
+            </button>
+          ))}
+          {repos.length === 0 && (
+            <div className="muted small">
+              No registered repos — <code>uv run cc onboard repo --path &lt;path&gt;</code>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="metric diag-card">
+        <div className="diag-head">Models + Runtime</div>
+        <div className="diag-row"><span>harness</span><code>{runtime.harness}</code></div>
+        <div className="diag-row"><span>gateway</span><code>{runtime.model_gateway}</code></div>
+        <div className="diag-row"><span>stream</span><code>{runtime.stream_endpoint}</code></div>
         <div className="domain-badges">
           {candidates.map((c) => <Badge key={c.alias} value={`${c.alias}: ${c.model}`} />)}
         </div>
         <div className="domain-badges">
           {runtime.executors.map((e) => <Badge key={e.name} value={`${e.name} #${e.priority}`} />)}
         </div>
-        <p className="muted small">{runtime.external_harness_note}</p>
-      </div>
-      <div className="metric diag-card chat-specialists">
-        <div className="diag-head">Chat Specialists</div>
-        <div className="specialist-list">
-          {externalChats.map((chat) => {
-            const href = externalChatHref(chat, handoffText);
-            return (
-              <div className="specialist-card" key={chat.name}>
-                <div className="specialist-head">
-                  <div>
-                    <b>{chat.name}</b>
-                    <span>{chat.kind ?? "external specialist"}</span>
-                  </div>
-                  <span className={`status-pill ${chat.active ? "pill-run" : "pill-warn"}`}>
-                    {chat.active ? "linked" : "not linked"}
-                  </span>
-                </div>
-                <p>{chat.best_for}</p>
-                <div className="muted small">{chat.recommendation}</div>
-                <div className="specialist-actions">
-                  {href ? (
-                    <a className="actbtn specialist-open" href={href} target="_blank" rel="noreferrer">
-                      open
-                    </a>
-                  ) : (
-                    <span className="status-pill pill-warn" title={chat.env_var}>{chat.env_var}</span>
-                  )}
-                  {chat.source_url && (
-                    <a className="clear specialist-source" href={chat.source_url} target="_blank" rel="noreferrer">
-                      source
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <p className="muted small">{runtime.provider_note}</p>
       </div>
     </div>
   );
@@ -2725,11 +2713,21 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
   if (error) return <div className="muted">ERR {error}</div>;
   if (!transcript) return <div className="muted">{loading ? "loading the full story..." : "no story loaded"}</div>;
   const total = transcript.total_turns ?? transcript.turn_count;
+  const cardStory = transcript.card_story ?? [];
+  // one chronological timeline: card history (board moves, agent attempts,
+  // submission evidence) interleaved with the recorded chat turns
+  const rows = [
+    ...transcript.turns.map((turn, idx) => (
+      { ts: turn.ts ?? "", kind: "turn" as const, turn, idx })),
+    ...cardStory.map((entry) => (
+      { ts: entry.ts ?? "", kind: "story" as const, entry })),
+  ].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
   return (
     <div className="chat-story">
       <div className="chat-story-head muted small">
         <span>
           full story — {total} recorded turn{total === 1 ? "" : "s"}
+          {cardStory.length ? ` + ${cardStory.length} card moment${cardStory.length === 1 ? "" : "s"}` : ""}
           {transcript.turn_count < total ? ` (newest ${transcript.turn_count} shown)` : ""}
           {" "}(flight recorder{transcript.recording_enabled ? "" : " — recording OFF (GATEWAY_TRANSCRIPTS=0)"})
         </span>
@@ -2743,14 +2741,34 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
           </button>
         </span>
       </div>
-      {transcript.turns.length === 0 && (
+      {rows.length === 0 && (
         <div className="muted">
-          No recorded turns for this thread yet. Turns are recorded from the moment the
+          Nothing recorded for this thread yet. Turns are recorded from the moment the
           flight recorder shipped — older conversations are not back-filled. Send a
           message, then refresh.
         </div>
       )}
-      {transcript.turns.map((turn, i) => {
+      {rows.map((row, i) => {
+        if (row.kind === "story") {
+          const s = row.entry;
+          const head = (
+            <>
+              <span className="story-time">{fmtThreadTime(s.ts)}</span>
+              <Badge value={s.kind} />
+              <b>{s.title}</b>
+              <span className="muted small">{s.summary}</span>
+            </>
+          );
+          return s.detail ? (
+            <details className={`story-row story-${s.kind}`} key={i}>
+              <summary>{head}</summary>
+              <pre className="packet-doc">{s.detail}</pre>
+            </details>
+          ) : (
+            <div className={`story-row story-${s.kind}`} key={i}>{head}</div>
+          );
+        }
+        const { turn, idx: turnIdx } = row;
         if (turn.corrupt_line) {
           return (
             <div className="story-row story-note muted small" key={i}>
@@ -2762,7 +2780,8 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll }: {
         const blocks = turn.context_blocks ?? [];
         const tools = turnEvents.filter((ev) => ev.type === "tool").length;
         return (
-          <details className="story-row story-turn" key={i} open={i === transcript.turns.length - 1}>
+          <details className="story-row story-turn" key={i}
+            open={turnIdx === transcript.turns.length - 1}>
             <summary>
               <span className="story-time">{fmtThreadTime(turn.ts ?? "")}</span>
               <Badge value={turn.surface || "app"} />
@@ -2825,14 +2844,19 @@ function ChatView({ roles, runtime, draft }: {
   const [story, setStory] = useState<ChatTranscriptResponse | null>(null);
   const [storyLoading, setStoryLoading] = useState(false);
   const [storyError, setStoryError] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const endRef = useRef<HTMLDivElement | null>(null);
   // guards hydration races: a slow transcript fetch for a thread the user has
   // already left must not fill the current thread's log
   const conversationIdRef = useRef(conversationId);
   useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
-  const activeThread = threads.find((t) => t.id === conversationId);
-  const handoffText = input.trim() || activeThread?.lastPrompt || `Open cockpit conversation ${conversationId}`;
   useEffect(() => { endRef.current?.scrollIntoView(); }, [events]);
+  function loadConversations() {
+    fetchChatConversations()
+      .then((body) => setConversations(body.conversations))
+      .catch(() => { /* the review index is optional; chat works without it */ });
+  }
+  useEffect(() => { loadConversations(); }, []);
   useEffect(() => {
     if (!roles.length) return;
     setModel((current) => (
@@ -2959,6 +2983,28 @@ function ChatView({ roles, runtime, draft }: {
     else void hydrateThread(thread.id);
   }
 
+  function openConversation(id: string) {
+    // review-first: any conversation from the index opens on its full story
+    const thread = threads.find((t) => t.id === id)
+      ?? { id, title: id, updatedAt: "", target: "GatewayCore" };
+    openThread(thread, "story");
+  }
+
+  function startRepoChat(repo: { repo_id: string; remote_url: string }) {
+    // one stable thread per repo: everything agents do for it accumulates
+    // in a single reviewable story
+    const id = `repo:${repo.repo_id}`;
+    conversationIdRef.current = id;
+    setConversationId(id);
+    setEvents([]);
+    setStory(null);
+    setStoryError(null);
+    setChatMode("live");
+    setInput(`Working on registered repo ${repo.repo_id}`
+      + (repo.remote_url ? ` (${repo.remote_url})` : "") + ". ");
+    void hydrateThread(id);
+  }
+
   async function loadStory(id = conversationId, limit?: number) {
     setStoryLoading(true);
     try {
@@ -3001,6 +3047,7 @@ function ChatView({ roles, runtime, draft }: {
     } finally {
       setBusy(false);
       void loadStory(id);   // keep the full-story badge/timeline current
+      loadConversations();  // and the All Chats index
     }
   }
 
@@ -3076,7 +3123,9 @@ function ChatView({ roles, runtime, draft }: {
           </div>
         </section>
         <aside className="chat-runtime-wrap">
-          <ChatRuntimePanel runtime={runtime} handoffText={handoffText} />
+          <ChatRuntimePanel runtime={runtime} conversations={conversations}
+            activeId={conversationId} onOpenConversation={openConversation}
+            onStartRepoChat={startRepoChat} />
         </aside>
       </div>
     </div>
@@ -3280,7 +3329,6 @@ export function App() {
         )}
         {view === "chat" && !chatOn &&
           <div className="chat">
-            <ChatRuntimePanel runtime={chatRuntime} />
             <div className="empty">chat is not enabled in this deployment. Set `KANBAN_UI_CHAT_ENABLED=1` to use the streaming GatewayCore chat and governed actions.</div>
           </div>}
       </main>

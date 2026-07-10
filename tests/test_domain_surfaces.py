@@ -137,11 +137,13 @@ def test_board_store_domain_empty_is_empty_plus_designed_state(client):
 
 
 def test_card_detail_and_404(client):
+    # linkedin_post is the remaining fixture-backed domain (paper/repo/dag/book
+    # now read the AppFlowy board snapshot)
     _, tc, _ = client
-    detail = tc.get("/api/domain/paper/card/paper-fixture-1").json()
-    assert detail["card"]["title"].startswith("Scaling Laws")
+    detail = tc.get("/api/domain/linkedin_post/card/post-fixture-1").json()
+    assert detail["card"]["card_id"] == "post-fixture-1"
     assert detail["drawer_fields"]                  # drawer grammar travels along
-    assert tc.get("/api/domain/paper/card/nope").status_code == 404
+    assert tc.get("/api/domain/linkedin_post/card/nope").status_code == 404
     assert tc.get("/api/domain/nope/cards").status_code == 404
 
 

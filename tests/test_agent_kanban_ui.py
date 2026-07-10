@@ -140,44 +140,23 @@ def test_chat_runtime_stays_behind_the_chat_wall(client):
     assert tc.get("/api/chat/runtime").status_code == 503
 
 
-def test_chat_runtime_reports_gateway_not_external_harness(client, monkeypatch):
+def test_chat_runtime_is_one_gateway_no_specialist_links(client, monkeypatch):
+    """The specialist link-outs (ORCA/OmniAgent/OxyGent) are GONE: one harness,
+    one gateway, model switching through roles, scoped-chat repo targets."""
     mod, tc = client
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
     monkeypatch.setattr(mod, "CONFIGS_DIR", Path(__file__).resolve().parents[1] / "configs")
-    monkeypatch.delenv("ORCA_CHAT_URL", raising=False)
-    monkeypatch.delenv("OMNIGENT_CHAT_URL", raising=False)
-    monkeypatch.delenv("OMNIAGENT_CHAT_URL", raising=False)
-    monkeypatch.delenv("OXYGENT_CHAT_URL", raising=False)
     body = tc.get("/api/chat/runtime").json()
     assert body["harness"] == "GatewayCore"
     assert body["model_gateway"] == "LiteLLM"
-    assert body["uses_orca"] is False
-    assert body["uses_omnigent"] is False
-    assert body["uses_oxygent"] is False
     assert body["stream_endpoint"] == "/api/chat/stream"
-    assert "GatewayCore + LiteLLM remains" in body["specialist_recommendation"]
-    external = {chat["name"]: chat for chat in body["external_chats"]}
-    assert external["ORCA"]["kind"] == "document visual QA specialist"
-    assert "PDFs" in external["ORCA"]["best_for"]
-    assert external["OmniAgent / Omnigent"]["source_url"].endswith("2606.19341")
-    assert external["OxyGent"]["env_var"] == "OXYGENT_CHAT_URL"
-
-
-def test_chat_runtime_marks_configured_specialist_links_active(client, monkeypatch):
-    mod, tc = client
-    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
-    monkeypatch.setattr(mod, "CONFIGS_DIR", Path(__file__).resolve().parents[1] / "configs")
-    monkeypatch.setenv("ORCA_CHAT_URL", "http://orca.local/chat")
-    monkeypatch.setenv("OMNIAGENT_CHAT_URL", "http://omniagent.local/chat")
-    monkeypatch.setenv("OXYGENT_CHAT_URL", "http://oxygent.local/chat")
-    body = tc.get("/api/chat/runtime").json()
-    assert body["uses_orca"] is True
-    assert body["uses_omnigent"] is True
-    assert body["uses_oxygent"] is True
-    external = {chat["name"]: chat for chat in body["external_chats"]}
-    assert external["ORCA"]["url"] == "http://orca.local/chat"
-    assert external["OmniAgent / Omnigent"]["env_var"] == "OMNIAGENT_CHAT_URL"
-    assert external["OxyGent"]["handoff_mode"] == "external_link"
+    assert body["conversations_endpoint"] == "/api/chat/conversations"
+    assert "external_chats" not in body
+    assert "uses_orca" not in body
+    repo_ids = {r["repo_id"] for r in body["repos"]}
+    assert "llm_station" in repo_ids       # registered repos are chat targets
+    assert "LiteLLM gateway" in body["provider_note"]
+    assert "operator decision" in body["provider_note"]
 
 
 def test_chat_threads_store_shared_metadata(client, monkeypatch, tmp_path):
@@ -249,6 +228,95 @@ def test_chat_transcript_endpoint_stays_behind_the_chat_wall(client):
     # conversation content
     _, tc = client
     assert tc.get("/api/chat/threads/any/transcript").status_code == 503
+
+
+def test_chat_conversations_index_merges_recorder_and_threads(
+        client, monkeypatch, tmp_path):
+    """The All Chats index: every recorded conversation (any surface) plus
+    thread shortcuts that have not produced a recorded turn yet."""
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "CHAT_THREADS_FILE", tmp_path / "chat-threads.json")
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path / "transcripts"))
+    monkeypatch.delenv("GATEWAY_TRANSCRIPTS", raising=False)
+
+    from command_center.channels.transcript import TurnRecorder
+    rec = TurnRecorder(surface="Discord", model="chat",
+                       conversation_id="disc-1", user_text="from discord")
+    rec.final("hello")
+    rec.flush()
+    tc.post("/api/chat/threads", json={
+        "conversation_id": "app-only", "title": "No turns yet",
+        "last_prompt": "queued question"})
+
+    body = tc.get("/api/chat/conversations").json()
+    by_id = {c["conversation_id"]: c for c in body["conversations"]}
+    assert by_id["disc-1"]["turns"] == 1
+    assert by_id["disc-1"]["surfaces"] == ["Discord"]
+    assert by_id["app-only"]["turns"] == 0             # shortcut, not recorded
+    assert by_id["app-only"]["title"] == "No turns yet"
+    assert body["total"] >= 2
+
+
+def test_chat_conversations_stay_behind_the_chat_wall(client):
+    _, tc = client
+    assert tc.get("/api/chat/conversations").status_code == 503
+
+
+def test_appflowy_board_domain_serves_snapshot_cards(client, monkeypatch, tmp_path):
+    """The real papers/repos/dags data: cards come from the worker's board
+    snapshot with an honest origin, the board's REAL lanes, and stable ids."""
+    mod, tc = client
+    snap = {
+        "generated_at": "2026-07-01T00:00:00+00:00",
+        "boards": [{
+            "board": "papers",
+            "statuses": ["Inbox", "Reading", "Read", "Archived"],
+            "columns": [{
+                "name": "Inbox",
+                "cards": [{
+                    "title": "Attention Is All You Need",
+                    "meta": "9.9",
+                    "fields": {"URL": "http://arxiv.org/abs/1706.03762",
+                               "Authors": "Vaswani et al.",
+                               "Abstract": "Transformers.",
+                               "Topics": "cs.LG", "Score": "9.9",
+                               "Status": "Inbox"},
+                }],
+            }],
+        }],
+    }
+    snap_path = tmp_path / "board-snapshot.json"
+    snap_path.write_text(json.dumps(snap), encoding="utf-8")
+    monkeypatch.setattr(mod, "BOARD_SNAPSHOT", snap_path)
+
+    out = mod._appflowy_board_cards(
+        {"domain_id": "paper", "board": "papers", "columns": []})
+    assert out["origin"] == "board_snapshot"
+    assert out["generated_at"] == "2026-07-01T00:00:00+00:00"
+    assert out["columns"] == ["Inbox", "Reading", "Read", "Archived"]
+    card = out["cards"][0]
+    assert card["title"] == "Attention Is All You Need"
+    assert card["abstract"] == "Transformers."
+    assert card["useful_for"] == "cs.LG"
+    assert card["status"] == "Inbox"
+    assert card["card_id"]                       # stable id for drawers/chat
+
+    missing = mod._appflowy_board_cards(
+        {"domain_id": "book", "board": "library", "columns": []})
+    assert missing["cards"] == [] and "not in the snapshot" in missing["note"]
+
+
+def test_transcript_card_story_is_fail_soft(client, monkeypatch, tmp_path):
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path / "transcripts"))
+    # a plain (non card-scoped) conversation carries no card story
+    assert mod._conversation_card_story("app") == []
+    # unknown domain prefix: empty, never an error
+    assert mod._conversation_card_story("nope:card-1") == []
+    body = tc.get("/api/chat/threads/app/transcript").json()
+    assert body["card_story"] == []
 
 
 def test_chat_transcript_pages_from_the_newest_end(client, monkeypatch, tmp_path):

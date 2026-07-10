@@ -717,7 +717,8 @@ class KanbanBoardsConfig(Strict):
 # Ledger's missions, or committed demo fixtures — and lists the governed verbs
 # its cards may offer. The wall is the same wall as kanban boards: no domain may
 # offer approve/merge/deploy/delete, and the validator enforces it structurally.
-_DOMAIN_SOURCES = ("board_store", "ledger_missions", "fixtures")
+_DOMAIN_SOURCES = ("board_store", "ledger_missions", "fixtures",
+                   "appflowy_board")
 _DOMAIN_CARD_COMPONENTS = frozenset({
     "job_application", "linkedin_post", "book", "paper", "repo", "dag",
     "machine_upkeep", "mission", "generic_task",
@@ -743,8 +744,12 @@ class DomainSurfaceSpec(Strict):
     domain_id: str
     title: str
     card_component: str
-    source: Literal["board_store", "ledger_missions", "fixtures"]
+    source: Literal["board_store", "ledger_missions", "fixtures",
+                    "appflowy_board"]
     board_id: str | None = None          # required iff source == board_store
+    # required iff source == appflowy_board: the snapshot board name — a
+    # READ-ONLY projection of the worker's board-snapshot.json (no writes)
+    board: str | None = None
     columns: list[str] = Field(default_factory=list)
     column_actions: dict[str, str] = Field(default_factory=dict)
     summary_fields: list[DomainFieldSpec] = Field(default_factory=list)
@@ -766,6 +771,13 @@ class DomainSurfaceSpec(Strict):
         if self.source != "board_store" and self.board_id:
             raise ValueError(
                 f"domain {self.domain_id!r} board_id only applies to board_store")
+        if self.source == "appflowy_board" and not self.board:
+            raise ValueError(
+                f"domain {self.domain_id!r} with source appflowy_board needs "
+                f"board (the snapshot board name)")
+        if self.source != "appflowy_board" and self.board:
+            raise ValueError(
+                f"domain {self.domain_id!r} board only applies to appflowy_board")
         if len(self.columns) != len(set(self.columns)):
             raise ValueError(f"domain {self.domain_id!r} has duplicate columns")
         unknown_columns = set(self.column_actions) - set(self.columns)

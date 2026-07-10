@@ -87,42 +87,6 @@ MISSION_COLUMNS = ["awaiting_approval", "open", "approved", "running",
                    "blocked", "done", "killed", "failed"]
 
 
-def _external_chat_status(
-    name: str,
-    env_names: tuple[str, ...],
-    *,
-    kind: str,
-    best_for: str,
-    recommendation: str,
-    source_url: str,
-) -> dict:
-    metadata = {
-        "kind": kind,
-        "best_for": best_for,
-        "recommendation": recommendation,
-        "source_url": source_url,
-        "handoff_mode": "external_link",
-    }
-    for env_name in env_names:
-        url = os.environ.get(env_name, "").strip()
-        if url:
-            return {
-                "name": name,
-                "active": True,
-                "url": url,
-                "env_var": env_name,
-                "reason": f"configured by {env_name}",
-                **metadata,
-            }
-    return {
-        "name": name,
-        "active": False,
-        "url": None,
-        "env_var": " or ".join(env_names),
-        "reason": "not configured; cockpit chat will use GatewayCore/LiteLLM",
-        **metadata,
-    }
-
 app = FastAPI(title="Agent Kanban UI", version="1.0.0")
 
 
@@ -497,6 +461,62 @@ def _domain_spec(domain_id: str) -> dict:
     raise HTTPException(status_code=404, detail=f"unknown domain {domain_id!r}")
 
 
+# snapshot board field -> the domain card grammar the typed components render
+_APPFLOWY_FIELD_MAPS: dict[str, dict[str, str]] = {
+    "paper": {"Title": "title", "Authors": "authors", "Abstract": "abstract",
+              "URL": "url", "Published": "year", "Topics": "useful_for",
+              "Score": "score", "ArxivID": "arxiv_id"},
+    "repo": {"Name": "repo_id", "Owner": "owner", "URL": "url",
+             "Stars": "stars", "Language": "language", "Why": "why",
+             "Topics": "topics", "Score": "score", "Updated": "updated"},
+    "dag": {"DagID": "dag_id", "Status": "state", "Schedule": "schedule",
+            "NextRun": "next_run", "LastSeen": "last_run", "Owners": "owner",
+            "Path": "related_repo", "Description": "description",
+            "Notes": "failure_summary"},
+    "book": {"Title": "title", "Author": "author", "Type": "type",
+             "Tier": "tier", "Hours": "hours", "Section": "section",
+             "Module": "module", "Notes": "notes"},
+}
+
+
+def _appflowy_board_cards(spec: dict) -> dict:
+    """Real items from the AppFlowy board snapshot (worker-produced, mounted
+    under ./generated) — a read-only projection with an honest origin and the
+    snapshot timestamp. A missing snapshot/board reads as an explicit empty
+    with the fix named, never a fabricated count."""
+    board_name = spec.get("board")
+    if not BOARD_SNAPSHOT.is_file():
+        return {"origin": "board_snapshot", "cards": [],
+                "note": f"board snapshot not found at {BOARD_SNAPSHOT} — "
+                        f"run `make kanban-board-snapshot` on the worker"}
+    snap = json.loads(BOARD_SNAPSHOT.read_text(encoding="utf-8"))
+    board = next((b for b in snap.get("boards", [])
+                  if b.get("board") == board_name), None)
+    if board is None:
+        return {"origin": "board_snapshot", "cards": [],
+                "generated_at": snap.get("generated_at"),
+                "note": f"board {board_name!r} is not in the snapshot — add it "
+                        f"to board_state.UI_BOARDS and regenerate"}
+    fmap = _APPFLOWY_FIELD_MAPS.get(spec["domain_id"], {})
+    cards: list[dict] = []
+    for col in board.get("columns", []):
+        status = col.get("name")
+        for raw in col.get("cards", []):
+            fields = raw.get("fields") or {}
+            card = {fmap.get(k, k.lower()): v for k, v in fields.items()}
+            card.setdefault("title", raw.get("title"))
+            card["status"] = status or card.get("status")
+            card["card_id"] = str(
+                card.get("dag_id") or card.get("arxiv_id")
+                or card.get("url") or card.get("repo_id")
+                or card.get("title") or "")[:200]
+            cards.append(card)
+    return {"origin": "board_snapshot",
+            "generated_at": snap.get("generated_at"),
+            "columns": board.get("statuses") or spec.get("columns", []),
+            "cards": cards}
+
+
 def _domain_cards(spec: dict) -> dict:
     source = spec.get("source")
     if source == "fixtures":
@@ -505,6 +525,8 @@ def _domain_cards(spec: dict) -> dict:
             fixtures = json.loads(FIXTURES_FILE.read_text(encoding="utf-8"))
         return {"origin": "fixtures",
                 "cards": fixtures.get(spec["domain_id"], [])}
+    if source == "appflowy_board":
+        return _appflowy_board_cards(spec)
     if source == "board_store":
         from command_center.boards.command_center_provider import (
             CommandCenterBoardProvider)
@@ -944,7 +966,9 @@ def domain_cards(domain_id: str) -> dict:
     spec = _domain_spec(domain_id)
     out = _domain_cards(spec)
     out["domain_id"] = domain_id
-    out["columns"] = spec.get("columns", [])
+    # a live loader may report the board's REAL lanes; spec.columns is the
+    # fallback so fixture/store domains render their configured lanes
+    out.setdefault("columns", spec.get("columns", []))
     out["empty_state"] = spec.get("empty_state", {})
     return out
 
@@ -1902,88 +1926,56 @@ def board_registry() -> dict:
     }
 
 
+def _registered_repos() -> list[dict]:
+    """Registered repos (configs/autonomy.yaml repo_manifests) — the scoped-
+    chat targets. Read-only; any failure means an empty list, never a broken
+    chat view."""
+    try:
+        data = _read_yaml_file(CONFIGS_DIR / "autonomy.yaml")
+        return [
+            {"repo_id": str(r.get("repo_id")),
+             "remote_url": str(r.get("remote_url") or "")}
+            for r in (data.get("repo_manifests") or []) if r.get("repo_id")
+        ]
+    except Exception:
+        return []
+
+
 @app.get("/api/chat/runtime")
 def chat_runtime() -> dict:
-    """What the cockpit chat actually uses. No inference from marketing names.
-    Chat-gated like every /api/chat* route: the external specialist URLs come
-    from operator env and must not leak from a read-only deployment."""
+    """What the cockpit chat actually uses: ONE harness (GatewayCore), ONE
+    gateway (LiteLLM). Every model role routes through the gateway, so
+    switching models — Ollama today; OpenAI/Anthropic/OpenRouter if the
+    operator enables them in models.yaml + .env — is the dropdown, not a
+    migration. Chat-gated like every /api/chat* route."""
     _require_chat()
     lanes = models()
     chat_role = next((r for r in lanes["roles"] if r["role"] == "chat"), None)
-    external_chats = [
-        _external_chat_status(
-            "ORCA",
-            ("ORCA_CHAT_URL",),
-            kind="document visual QA specialist",
-            best_for=(
-                "PDFs, resumes, application packets, screenshots, tables, forms, "
-                "and document questions that benefit from specialist routing plus "
-                "debate/stress-checking."
-            ),
-            recommendation=(
-                "Best first pilot for this cockpit when the task is document-heavy. "
-                "Use as a read/advice handoff; keep governed writes in GatewayCore."
-            ),
-            source_url="https://arxiv.org/abs/2603.02438",
-        ),
-        _external_chat_status(
-            "OmniAgent / Omnigent",
-            ("OMNIGENT_CHAT_URL", "OMNIAGENT_CHAT_URL"),
-            kind="omni-modal active perception specialist",
-            best_for=(
-                "Long video, audio/video evidence, screen recordings, and cases "
-                "where the agent should inspect only the relevant moments."
-            ),
-            recommendation=(
-                "Useful later for video/audio evidence. Not the first replacement "
-                "for cockpit chat or board control."
-            ),
-            source_url="https://arxiv.org/abs/2606.19341",
-        ),
-        _external_chat_status(
-            "OxyGent",
-            ("OXYGENT_CHAT_URL",),
-            kind="modular multi-agent framework candidate",
-            best_for=(
-                "Planning graphs, observable agent/tool/model components, visual "
-                "debugging, auditability, and future framework experiments."
-            ),
-            recommendation=(
-                "Worth watching as a framework spike, but do not add as a cockpit "
-                "dependency until a scoped pilot beats GatewayCore + LiteLLM."
-            ),
-            source_url="https://arxiv.org/abs/2604.25602",
-        ),
-    ]
     return {
         "enabled": CHAT_ENABLED,
         "harness": "GatewayCore",
         "transport_surface": "app",
         "model_gateway": "LiteLLM",
         "chat_role": chat_role,
+        "roles": lanes["roles"],
         "executors": lanes["executors"],
         "stream_endpoint": "/api/chat/stream",
         "action_endpoint": "/api/action",
         "activity_endpoint": "/api/activity",
-        "external_chats": external_chats,
-        "uses_orca": external_chats[0]["active"],
-        "uses_omnigent": external_chats[1]["active"],
-        "uses_oxygent": external_chats[2]["active"],
-        "specialist_recommendation": (
-            "GatewayCore + LiteLLM remains the cockpit runtime and write authority. "
-            "ORCA is the best first optional specialist for document-heavy job "
-            "materials; OmniAgent/Omnigent is a later video/audio specialist; "
-            "OxyGent is a framework watch-list item."
+        "conversations_endpoint": "/api/chat/conversations",
+        "repos": _registered_repos(),
+        "provider_note": (
+            "Every chat model routes through the one LiteLLM gateway; roles "
+            "come from configs/models.yaml (local Ollama today). To add an "
+            "OpenAI/Anthropic/OpenRouter model, add a role candidate in "
+            "models.yaml with its key referenced from .env — the model picker "
+            "above sees it immediately. The forbidden-provider scan gates "
+            "cloud providers on purpose: enabling one is an explicit operator "
+            "decision, never an agent's."
         ),
         "chat_memory_note": (
-            "The web app can reopen shared cockpit chat shortcuts by "
-            "conversation id. The server stores compact thread metadata, not "
-            "full transcripts."
-        ),
-        "external_harness_note": (
-            "External chat links are optional handoffs. The cockpit chat itself "
-            "uses GatewayCore through the configured LiteLLM role and the "
-            "existing governed action layer."
+            "Thread shortcuts sync across devices; full turn transcripts live "
+            "in the flight recorder and are browsable under All chats."
         ),
     }
 
@@ -2035,6 +2027,96 @@ def save_chat_thread(body: ChatThreadIn) -> dict:
     }
 
 
+@app.get("/api/chat/conversations")
+def chat_conversations(limit: int = 200) -> dict:
+    """Every conversation the flight recorder has seen, across ALL surfaces
+    (app/Discord/CLI/...), merged with the shared thread shortcuts — the
+    review index: pick any conversation, read its full story."""
+    _require_chat()
+    from command_center.channels.transcript import (
+        read_transcript,
+        transcript_dir,
+    )
+
+    by_id: dict[str, dict] = {}
+    tdir = transcript_dir()
+    for path in (sorted(tdir.glob("*.jsonl")) if tdir.is_dir() else []):
+        turns = [t for t in read_transcript(path.stem)
+                 if "conversation_id" in t]
+        if not turns:
+            continue
+        last = turns[-1]
+        cid = str(last.get("conversation_id"))
+        by_id[cid] = {
+            "conversation_id": cid,
+            "turns": len(turns),
+            "last_ts": str(last.get("ts") or ""),
+            "surfaces": sorted({str(t.get("surface") or "?") for t in turns}),
+            "last_user_text": str(last.get("user_text") or "")[:160],
+            "title": None,
+        }
+    for row in _read_chat_threads():
+        cid = row["conversation_id"]
+        entry = by_id.setdefault(cid, {
+            "conversation_id": cid, "turns": 0, "last_ts": "",
+            "surfaces": [],
+            "last_user_text": str(row.get("last_prompt") or "")[:160],
+            "title": None,
+        })
+        entry["title"] = row.get("title")
+        entry["last_ts"] = max(entry["last_ts"],
+                               str(row.get("updated_at") or ""))
+    rows = sorted(by_id.values(), key=lambda r: r["last_ts"], reverse=True)
+    return {"conversations": rows[:max(1, limit)], "total": len(rows),
+            **_transcript_storage()}
+
+
+def _conversation_card_story(conversation_id: str) -> list[dict]:
+    """Card-scoped chats (ids like 'job_application:job_x') carry the card's
+    board/agent history into the chat story, so the full story is never empty
+    for work the system already did. Fail-soft: any gap -> fewer rows, never
+    a broken chat."""
+    if ":" not in conversation_id:
+        return []
+    domain_id, card_id = conversation_id.split(":", 1)
+    try:
+        spec = _domain_spec(domain_id)
+    except Exception:
+        return []
+    # jobs: the full packet story (board moves + notes + agent attempts +
+    # submission evidence) — the same builder the packet modal uses
+    try:
+        provider = _board_store_provider(spec)
+        card = _find_domain_card(provider, card_id)
+        app_id = str(card.get("application_id") or "")
+        if app_id:
+            from command_center.job_search.application_memory import (
+                load_application,
+            )
+            _, root = _job_search_config_and_root()
+            app_dir, _record = load_application(app_id, root=root)
+            return _job_card_story(spec, card, app_id, app_dir)
+    except Exception:
+        pass
+    # any other domain: the governed board moves recorded for this card
+    entries: list[dict] = []
+    try:
+        for e in EventLog(KANBAN_EVENT_LOG).read():
+            if e.board_id == spec.get("board_id") and e.card_id == card_id:
+                entries.append({
+                    "ts": str(e.created_at or ""),
+                    "kind": "board",
+                    "title": _event_headline(e),
+                    "summary": (f"{e.actor_type or 'actor'} via "
+                                f"{e.source_surface or 'surface'}"),
+                    "detail": None,
+                })
+    except Exception:
+        return []
+    entries.sort(key=lambda r: r["ts"])
+    return entries
+
+
 @app.get("/api/chat/threads/{conversation_id}/transcript")
 def chat_thread_transcript(
     conversation_id: str, limit: int = 100, offset: int = 0,
@@ -2061,6 +2143,9 @@ def chat_thread_transcript(
         "turn_count": len(turns),
         "total_turns": len(all_turns),
         "offset": offset,
+        # card-scoped chats also get the card's board/agent history, so the
+        # story is populated even before the first chat turn
+        "card_story": _conversation_card_story(conversation_id),
         "source": str(transcript_path(conversation_id)),
         "recording_enabled": transcripts_enabled(),
     }

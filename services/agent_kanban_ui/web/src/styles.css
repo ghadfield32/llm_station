@@ -291,8 +291,6 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 .chat-workspace { min-height: 0; display: flex; flex-direction: column; }
 .chat-runtime-wrap { min-height: 0; overflow-y: auto; padding-right: 2px; }
 .chat-runtime-wrap .chat-runtime { grid-template-columns: 1fr; margin-bottom: 0; }
-.chat-runtime-wrap .chat-specialists { grid-column: auto; }
-.chat-runtime-wrap .specialist-list { grid-template-columns: 1fr; }
 .chat-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
 .chat-log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
   background: var(--col); border: 1px solid var(--border); border-radius: 10px;
@@ -415,12 +413,14 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 /* phone */
 @media (max-width: 720px) {
   .shell { display: block; min-height: 100vh; }
+  /* nav rides the TOP on phones — thumbs scroll content, eyes find sections */
   .sidebar {
-    position: fixed; top: auto; left: 0; right: 0; bottom: 0; z-index: 40;
-    width: 100vw; max-width: 100vw; height: auto; min-height: 68px; flex: none;
+    position: fixed; top: 0; left: 0; right: 0; bottom: auto; z-index: 40;
+    width: 100vw; max-width: 100vw; height: auto; min-height: 60px; flex: none;
     flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px;
-    overflow-x: hidden; border-right: 0; border-top: 1px solid var(--border);
-    padding: 9px 10px calc(9px + env(safe-area-inset-bottom));
+    overflow-x: hidden; border-right: 0; border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    padding: calc(8px + env(safe-area-inset-top)) 10px 8px;
     overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch;
   }
   .brand, .badge, .domain-nav-section { display: none; }
@@ -433,12 +433,14 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   .sidebar, .sidebar nav { scrollbar-width: none; }
   .sidebar::-webkit-scrollbar, .sidebar nav::-webkit-scrollbar { display: none; }
   .navitem {
-    flex: 0 0 auto; justify-content: center; min-width: 82px; min-height: 50px;
+    flex: 0 0 auto; justify-content: center; min-width: 82px; min-height: 44px;
     text-align: center; padding: 8px 10px; border-radius: 8px;
   }
   .navcount { margin-left: 6px; }
   .main {
-    width: 100%; max-width: none; padding: 12px 12px calc(92px + env(safe-area-inset-bottom));
+    width: 100%; max-width: none;
+    padding: calc(72px + env(safe-area-inset-top)) 12px
+             calc(24px + env(safe-area-inset-bottom));
   }
   .topbar {
     position: static; align-items: flex-start; gap: 8px;
@@ -447,25 +449,29 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   .hops { flex: 1 1 100%; gap: 8px 12px; min-width: 0; }
   .topright { width: 100%; justify-content: space-between; margin-left: 0; }
   .metrics-row { grid-template-columns: repeat(2, 1fr); }
+  /* snap ONLY on short strips (tabs/chips). Snap on the full-height board
+     containers hijacked vertical page scrolling on iOS: every up/down swipe
+     started inside the snap scroller and the page refused to move. */
   .tabs.scrollframe-content,
-  .board.scrollframe-content,
   .domain-tabs.scrollframe-content,
-  .domain-kanban.scrollframe-content,
   .job-board-controls.scrollframe-content,
   .thread-strip.scrollframe-content {
     scroll-snap-type: x proximity; scroll-padding-inline: 12px;
     touch-action: pan-x pan-y;
   }
   .tabs.scrollframe-content > .scrollframe-inner > *,
-  .board.scrollframe-content > .scrollframe-inner > *,
   .domain-tabs.scrollframe-content > .scrollframe-inner > *,
-  .domain-kanban.scrollframe-content > .scrollframe-inner > *,
   .job-board-controls.scrollframe-content > .scrollframe-inner > *,
   .thread-strip.scrollframe-content > .scrollframe-inner > * {
     scroll-snap-align: start;
   }
-  .board { gap: 10px; scroll-snap-type: x proximity; }
-  .column { flex-basis: 90vw; scroll-snap-align: start; border-radius: 8px; }
+  .board.scrollframe-content,
+  .domain-kanban.scrollframe-content {
+    scroll-snap-type: none; touch-action: pan-x pan-y;
+    overscroll-behavior-y: auto;
+  }
+  .board { gap: 10px; }
+  .column { flex-basis: 90vw; border-radius: 8px; }
   .card { padding: 12px; min-height: 72px; }
   .touch-move { display: block; min-height: 44px; }
   .domain-card .touch-move { width: calc(100% - 24px); margin: 0 12px 12px; }
@@ -513,18 +519,15 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   .chat-bar .select { flex: 1 1 130px; }
   .chat-log { min-height: 160px; border-radius: 8px; }
   .chat-input {
-    position: sticky; bottom: calc(76px + env(safe-area-inset-bottom));
+    /* nav is at the top now — the input sticks to the real bottom edge */
+    position: sticky; bottom: env(safe-area-inset-bottom);
     z-index: 3; background: var(--bg); padding-top: 8px;
-    /* mask the sliver between the sticky input and the bottom nav */
-    box-shadow: 0 10px 0 var(--bg);
   }
   .chat-input input { min-width: 0; }
   .thread-chip { flex-basis: 76vw; max-width: 76vw; min-height: 58px; }
   /* the thread strip has 2px inline padding (not the 12px of full-bleed
      strips) — match the snap offset or chips rest 10px off the edge */
   .thread-strip.scrollframe-content { scroll-padding-inline: 2px; }
-  .specialist-list { grid-template-columns: 1fr; }
-  .specialist-card { padding: 12px; }
   .lane, .stage { flex-direction: column; gap: 4px; }
   .lane-name, .stage-name { flex-basis: auto; }
   .diag-grid { grid-template-columns: 1fr; }
@@ -873,25 +876,22 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px; margin-bottom: 12px;
 }
-.chat-specialists { grid-column: 1 / -1; }
-.specialist-list {
-  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+/* All Chats / scoped-chat pickers in the chat side panel */
+.conv-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; }
+.conv-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; background: var(--col); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  min-height: 44px; cursor: pointer; font: inherit;
 }
-.specialist-card {
-  background: var(--col); border: 1px solid var(--border); border-radius: 8px;
-  padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+.conv-row:hover, .conv-row.thread-on { border-color: var(--accent); background: var(--card); }
+.conv-title {
+  width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 600; font-size: 13px;
 }
-.specialist-head {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 8px; min-width: 0;
+.conv-preview {
+  width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.specialist-head div { min-width: 0; }
-.specialist-head b { display: block; line-height: 1.2; overflow-wrap: anywhere; }
-.specialist-head div span { display: block; color: var(--muted); font-size: 12px; line-height: 1.25; }
-.specialist-card p { margin: 0; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
-.specialist-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; }
-.specialist-open { min-height: 32px; display: inline-flex; align-items: center; }
-.specialist-source { padding: 4px 0; }
 
 /* LinkedIn preview cards */
 .li-card {
@@ -934,11 +934,13 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   .domain-kanban { gap: 10px; margin: 0 -12px; padding: 0 12px 8px; }
   .domain-kanban.scrollframe-content {
     margin: 0 -12px; padding: 0 12px 8px;
-    scroll-snap-type: x proximity;
+    /* NO scroll-snap here: full-height snap containers hijack vertical page
+       scrolling on iOS — swiping up/down over the board went nowhere */
+    scroll-snap-type: none; touch-action: pan-x pan-y;
+    overscroll-behavior-y: auto;
   }
   .domain-kanban.scrollframe-content > .scrollframe-inner { gap: 10px; }
   .domain-column { flex-basis: 92vw; }
-  .domain-column { scroll-snap-align: start; }
   .domain-column-head { padding: 12px; }
   .domain-column-body { padding: 10px 8px; gap: 10px; }
   .domain-head { align-items: flex-start; flex-wrap: wrap; }
@@ -957,8 +959,6 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   .domain-board-section-head { flex-direction: column; gap: 6px; }
   .domain-top-scroll { margin-left: -12px; margin-right: -12px; border-radius: 0; }
   .chat-runtime { grid-template-columns: 1fr; }
-  .specialist-list { grid-template-columns: 1fr; }
-  .specialist-card { padding: 12px; }
   .settings-grid { grid-template-columns: 1fr; }
   .settings-form-grid { grid-template-columns: 1fr 1fr; }
   .settings-head-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }

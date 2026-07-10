@@ -172,8 +172,10 @@ def render_board_state(sections: list[BoardSection], knobs: BoardStateKnobs) -> 
 
 
 # The AppFlowy boards surfaced by the UI/snapshot, in display order. mission_intake
-# (cards) + todos + dags are kanban-shaped; the research inboxes are triage lanes.
-UI_BOARDS = ["mission_intake", "todos", "dags", "papers", "repos", "signals"]
+# (cards) + todos + dags are kanban-shaped; the research inboxes are triage lanes;
+# library backs the cockpit Books domain (reading list).
+UI_BOARDS = ["mission_intake", "todos", "dags", "papers", "repos", "signals",
+             "library"]
 
 
 def all_boards_json(boards: list[str] | None = None) -> list[dict]:

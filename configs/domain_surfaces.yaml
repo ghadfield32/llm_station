@@ -88,7 +88,8 @@ domains:
   - domain_id: book
     title: Books
     card_component: book
-    source: fixtures
+    source: appflowy_board
+    board: library
     columns:
       - To Read
       - In Progress
@@ -97,35 +98,39 @@ domains:
     summary_fields:
       - {name: title, label: Title}
       - {name: author, label: Author}
-      - {name: progress, label: Progress, kind: progress}
-      - {name: tags, label: Tags, kind: list}
+      - {name: tier, label: Tier, kind: badge}
+      - {name: type, label: Type, kind: badge}
     drawer_fields:
       - {name: notes, label: Notes, kind: markdown}
-      - {name: linked_project, label: Linked project}
+      - {name: section, label: Section}
+      - {name: module, label: Module}
+      - {name: hours, label: Hours}
     allowed_actions: [stage_card, start_todo, finish_todo]
     empty_state:
-      title: No books tracked
-      hint: The Growth OS library board holds the reading list; sync lands here.
+      title: No books in the snapshot yet
+      hint: The Growth OS library board holds the reading list; add `library`
+        to the board worker's UI_BOARDS and regenerate the snapshot.
+      command: make kanban-board-snapshot
 
   - domain_id: paper
     title: Papers
     card_component: paper
-    source: fixtures
+    source: appflowy_board
+    board: papers
     columns:
-      - To Read
+      - Inbox
       - Reading
-      - Useful
+      - Read
       - Archived
     summary_fields:
       - {name: title, label: Title}
-      - {name: venue, label: Venue, kind: badge}
-      - {name: year, label: Year}
-      - {name: useful_for, label: Useful for, kind: badge}
+      - {name: score, label: Score, kind: badge}
+      - {name: useful_for, label: Topics, kind: badge}
     drawer_fields:
+      - {name: authors, label: Authors}
       - {name: abstract, label: Abstract, kind: markdown}
-      - {name: notes, label: Notes, kind: markdown}
-      - {name: figures, label: Figures, kind: list}
       - {name: url, label: Link, kind: url}
+      - {name: score, label: Score}
     allowed_actions: [stage_card, start_todo, finish_todo]
     empty_state:
       title: No papers in the queue
@@ -135,47 +140,53 @@ domains:
   - domain_id: repo
     title: Repos
     card_component: repo
-    source: fixtures
+    source: appflowy_board
+    board: repos
     columns:
-      - Active
-      - Maintenance
-      - Blocked
+      - Inbox
+      - Trying
+      - Using
       - Archived
     summary_fields:
       - {name: repo_id, label: Repo}
-      - {name: branch, label: Branch, kind: badge}
-      - {name: autonomy, label: Autonomy, kind: badge}
-      - {name: checks, label: Checks, kind: badge}
-      - {name: open_prs, label: PRs}
+      - {name: language, label: Language, kind: badge}
+      - {name: stars, label: Stars, kind: badge}
+      - {name: score, label: Score, kind: badge}
     drawer_fields:
-      - {name: last_mission, label: Last mission}
-      - {name: merge_wall, label: Merge wall, kind: badge}
-      - {name: blockers, label: Blockers, kind: list}
-      - {name: risk_tier, label: Risk, kind: badge}
+      - {name: why, label: Why it matters, kind: markdown}
+      - {name: url, label: Link, kind: url}
+      - {name: topics, label: Topics}
+      - {name: owner, label: Owner}
+      - {name: updated, label: Updated}
     allowed_actions: [add_mission_card]
     empty_state:
-      title: No repos registered
-      hint: Register a repo to drive it from missions.
+      title: No repos on the board
+      hint: The repo scout feeds this board; registered work repos live in
+        configs/autonomy.yaml.
       command: uv run cc onboard repo
 
   - domain_id: dag
     title: DAGs
     card_component: dag
-    source: fixtures
+    source: appflowy_board
+    board: dags
     columns:
-      - Healthy
-      - Running
-      - Failed
+      - Active
       - Paused
+      - Manual
+      - Broken
+      - Retired
     summary_fields:
       - {name: dag_id, label: DAG}
       - {name: last_run, label: Last run, kind: datetime}
       - {name: state, label: State, kind: badge}
       - {name: owner, label: Owner}
     drawer_fields:
+      - {name: schedule, label: Schedule}
       - {name: next_run, label: Next run, kind: datetime}
-      - {name: failure_summary, label: Failures, kind: markdown}
-      - {name: related_repo, label: Repo}
+      - {name: description, label: Description, kind: markdown}
+      - {name: failure_summary, label: Notes, kind: markdown}
+      - {name: related_repo, label: Path}
     allowed_actions: [add_mission_card, block_card]
     empty_state:
       title: No DAGs visible
