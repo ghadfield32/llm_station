@@ -13,6 +13,7 @@ from command_center.job_search.agent_writer import (
     TRACE_FILENAME,
     AgentWriterError,
     MaterialInputs,
+    ensure_master_bank_text,
     generate_materials,
 )
 from command_center.job_search.config import data_root, ensure_data_dirs, load_config
@@ -100,6 +101,10 @@ def _run_agent_writer(
         "attempts": materials.attempts,
         "claim_ids": materials.claim_ids,
         "generated_at": now,
+        # provenance for validation: was Geoff's master bullet bank in the
+        # context, and did any AI-tell phrases survive the corrective retry?
+        "master_bank": bool(inputs.master_bank.strip()),
+        "tone_flags": materials.tone_flags,
     }
 
 
@@ -212,6 +217,7 @@ def create_prepared_application(
             fit_reasons=fit.reasons,
             fit_score=fit.score,
             writing_style=_load_writing_style(base),
+            master_bank=ensure_master_bank_text(base),
         ),
         answer_bank_bank,
         trace_step="generate_materials",
@@ -449,6 +455,7 @@ def regenerate_materials(
             fit_score=record.fit.score,
             reviewer_notes=_read_review_notes(app_dir),
             writing_style=_load_writing_style(base),
+            master_bank=ensure_master_bank_text(base),
         ),
         writer_bank,
         trace_step=f"regenerate_materials_rev{record.revision + 1}",
@@ -457,6 +464,10 @@ def regenerate_materials(
         # Keep changes_requested: the notes were NOT addressed. Surfacing the
         # error is the fix path, not quietly reverting to templates.
         raise AgentWriterError(str(generation.get("error") or "agent writer failed"))
+    # Re-load before mutating: the model call above can take minutes, and a
+    # note that landed meanwhile (append_note_text load->save) must not be
+    # clobbered by saving this function's stale pre-call snapshot.
+    app_dir, record = load_application(app_id, root=root)
     record.generation = generation
     record.revision = record.revision + 1
     record.review_state = "ready_for_review"

@@ -73,8 +73,14 @@ def build_email_html(app_dir: Path, record: ApplicationRecord) -> str:
     for filename, label in _ATTACHMENTS:
         path = app_dir / filename
         if path.is_file():
-            parts.append(_section(label.title(), path.read_text(encoding="utf-8")))
-    description = read_job_description(app_dir)
+            # errors="replace": a stray non-UTF-8 byte degrades one character
+            # of the email body, it must not sink the whole record
+            parts.append(_section(
+                label.title(), path.read_text(encoding="utf-8", errors="replace")))
+    try:
+        description = read_job_description(app_dir)
+    except (OSError, EOFError) as exc:
+        description = f"(job description unreadable: {type(exc).__name__}: {exc})"
     if description.strip():
         parts.append(_section("Job Description", description))
     return "\n".join(parts)
@@ -118,11 +124,17 @@ def send_application_record(
     """Write the durable HTML record, then send it when SMTP is configured.
     Returns {status: recorded_only|sent|error, record_path, to, missing?, error?}."""
     e = env if env is not None else writer_env()
-    html_body = build_email_html(app_dir, record)
     record_path = app_dir / EMAIL_RECORD_FILENAME
-    record_path.write_text(html_body, encoding="utf-8")
     status = email_config_status(e)
     result = {"record_path": str(record_path), "to": status["to"]}
+    try:
+        html_body = build_email_html(app_dir, record)
+        record_path.write_text(html_body, encoding="utf-8")
+    except Exception as exc:  # the email step must never sink a finalize —
+        # the failure is reported verbatim in the result and evidence file
+        return {**result, "status": "error",
+                "error": f"building/writing the record failed: "
+                         f"{type(exc).__name__}: {exc}"}
     if not status["configured"]:
         return {
             **result,

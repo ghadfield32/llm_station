@@ -35,17 +35,34 @@ def _inputs(**overrides) -> MaterialInputs:
     return MaterialInputs(**base)
 
 
-def _valid_output(claim_ids: list[str]) -> str:
-    return "\n".join([
-        "=== RESUME ===",
+def _valid_output(claim_ids: list[str], *, with_master_sections: bool = False,
+                  resume_extra: str = "", cover_extra: str = "") -> str:
+    resume = [
         "# Geoffrey Hadfield",
         "Target: Acme Analytics — Senior Data Scientist",
         "## Summary",
         "Applied ML data scientist.",
-        "## Claim Traceability",
-        *[f"- `{c}`" for c in claim_ids],
+        "## Experience",
+        "JP Morgan Chase — Analytics Engineer, Associate (Jun 2023 - Aug 2025)",
+        "- Built an A/B testing framework (Statsmodels + GitHub Actions); ~12% engagement lift",
+    ]
+    if with_master_sections:
+        resume.extend([
+            "## Core Skills",
+            "Modeling: PyMC | Engineering: Python, SQL",
+            "## Projects",
+            "- NBA Player Value Forecasting System",
+            "## Education",
+            "M.S. Data Science — University of West Florida",
+        ])
+    resume.extend(["## Claim Traceability", *[f"- `{c}`" for c in claim_ids]])
+    if resume_extra:
+        resume.append(resume_extra)
+    return "\n".join([
+        "=== RESUME ===",
+        *resume,
         "=== COVER LETTER ===",
-        "Dear Acme hiring team, ...",
+        "Dear Acme hiring team, ..." + cover_extra,
         "=== RECRUITER MESSAGE ===",
         "Hi — interested in the Senior Data Scientist role.",
         "=== CLAIM IDS ===",
@@ -134,6 +151,100 @@ def test_missing_section_is_a_problem_not_a_crash(tmp_path):
     assert out.attempts == 2
     first = read_trace(tmp_path)[0]
     assert any("missing or empty section" in p for p in first["problems"])
+
+
+def test_malformed_gateway_response_is_traced_then_raised(tmp_path):
+    """A 200 with a bodiless payload must follow the same AgentWriterError +
+    trace contract as a transport failure — not escape as a bare KeyError."""
+    def empty_choices(config, messages):
+        return {"choices": []}
+    with pytest.raises(AgentWriterError, match="malformed completion payload"):
+        generate_materials(
+            _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
+            config=CFG, post_fn=empty_choices)
+    trace = read_trace(tmp_path)
+    assert trace[0]["ok"] is False
+    assert "malformed gateway response" in trace[0]["error"]
+
+
+def test_malformed_claim_tokens_are_flagged_not_dropped(tmp_path):
+    """A hallucinated 'JPMC-AB-Testing' style id must FAIL claim validation and
+    trigger the corrective retry — silently discarding it would let unvalidated
+    claims through."""
+    post, calls = _fake_post([
+        _valid_output(["JPMC-AB-Testing"]),
+        _valid_output(["jpmc_ab_testing_framework"]),
+    ])
+    out = generate_materials(
+        _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
+        config=CFG, post_fn=post)
+    assert out.attempts == 2
+    first = read_trace(tmp_path)[0]
+    assert any("JPMC-AB-Testing" in p for p in first["problems"])
+
+
+def test_non_numeric_timeout_env_is_a_writer_error():
+    with pytest.raises(AgentWriterError, match="JOB_SEARCH_WRITER_TIMEOUT"):
+        WriterConfig.from_env({"JOB_SEARCH_WRITER_TIMEOUT": "5m"})
+
+
+MASTER_BANK = "\n".join([
+    "PROFESSIONAL SUMMARIES",
+    "Applied ML Data Scientist",
+    "Applied data scientist blending machine learning and production delivery.",
+    "EXPERIENCE BULLETS",
+    "JP Morgan Chase — Analytics Engineer, Associate (Jun 2023 - Aug 2025)",
+    "Built an A/B testing framework; ~12% engagement lift [Applied ML]",
+    "CORE SKILLS SECTIONS",
+    "Applied ML Data Scientist Skills",
+    "Modeling: PyMC | Engineering: Python, SQL",
+    "EDUCATION",
+    "M.S. Data Science — University of West Florida",
+])
+
+
+def test_master_bank_lands_in_prompt_with_format_contract():
+    messages = build_messages(_inputs(master_bank=MASTER_BANK), BANK)
+    system, user = messages[0]["content"], messages[1]["content"]
+    assert "MASTER RESUME BANK" in user
+    assert "M.S. Data Science" in user
+    # the format contract demands Geoff's real structure and voice
+    assert "## Core Skills" in system
+    assert "## Education" in system
+    assert "4-6 bullets" in system
+    assert "spearheaded" in system   # banned-phrase list is spelled out
+    assert "near-verbatim" in system
+
+
+def test_master_bank_resume_missing_education_gets_retry(tmp_path):
+    post, _ = _fake_post([
+        _valid_output(["wms_founder_platform"]),                        # no Education
+        _valid_output(["wms_founder_platform"], with_master_sections=True),
+    ])
+    out = generate_materials(
+        _inputs(master_bank=MASTER_BANK), BANK,
+        trace_path=tmp_path / "agent_trace.jsonl", config=CFG, post_fn=post)
+    assert out.attempts == 2
+    first = read_trace(tmp_path)[0]
+    assert any("## Education" in p for p in first["problems"])
+    assert "M.S. Data Science" in out.resume
+
+
+def test_surviving_tone_flags_are_kept_not_template_fallback(tmp_path):
+    stubborn = _valid_output(
+        ["wms_founder_platform"], cover_extra=" I am thrilled to leverage this!")
+    post, _ = _fake_post([stubborn, stubborn])
+    out = generate_materials(
+        _inputs(), BANK, trace_path=tmp_path / "agent_trace.jsonl",
+        config=CFG, post_fn=post)
+    # retried once for tone, then ACCEPTED with the flags surfaced — a word
+    # choice never forces the deterministic-template fallback
+    assert out.attempts == 2
+    assert any("thrilled" in f for f in out.tone_flags)
+    assert any("exclamation" in f for f in out.tone_flags)
+    trace = read_trace(tmp_path)
+    assert [t["ok"] for t in trace] == [True, True]   # tone flags are soft
+    assert all(t["problems"] for t in trace)          # but never hidden
 
 
 def test_transport_error_is_traced_then_raised(tmp_path):

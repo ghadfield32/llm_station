@@ -211,3 +211,57 @@ def test_finalize_blocks_then_succeeds_with_evidence(tmp_path, monkeypatch):
     with pytest.raises(FinalizeBlocked) as exc2:
         finalize_application(app_id, root=tmp_path, env={})
     assert "not_already_submitted" in exc2.value.validation["errors"]
+
+
+def test_post_submission_recruiter_note_does_not_rearm_finalize(tmp_path, monkeypatch):
+    """append_note_text flips status to recruiter_contact, but applied_at is the
+    durable submit marker — a recruiter reply must never enable a duplicate
+    submission that overwrites the real applied_at and re-emails the record."""
+    from command_center.job_search.application_memory import append_note_text
+
+    app_dir, app_id = _prepare(tmp_path)
+    finalize_application(app_id, root=tmp_path, env={})
+    append_note_text(
+        app_id, "recruiter_email", "Thanks — can you interview Tuesday?",
+        root=tmp_path)
+    _, record = load_application(app_id, root=tmp_path)
+    assert record.status == "recruiter_contact"   # status DID mutate
+    with pytest.raises(FinalizeBlocked) as exc:
+        finalize_application(app_id, root=tmp_path, env={})
+    assert "not_already_submitted" in exc.value.validation["errors"]
+
+
+def test_corrupt_job_description_is_a_failed_check_not_a_crash(tmp_path):
+    app_dir, app_id = _prepare(tmp_path)
+    (app_dir / "job_description.md.gz").write_bytes(b"not gzip at all")
+    _, record = load_application(app_id, root=tmp_path)
+    bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
+    result = validate_packet(app_dir, record, bank)
+    assert result["ok"] is False
+    assert "job_description" in result["errors"]
+    by_id = {c["id"]: c for c in result["checks"]}
+    assert "corrupt" in by_id["job_description"]["detail"]
+
+
+def test_regenerate_does_not_clobber_concurrent_note(tmp_path, monkeypatch):
+    """A note that lands while the (slow) model call is running must survive the
+    regeneration save — the record is re-loaded before mutation."""
+    from command_center.job_search.application_memory import append_note_text
+
+    app_dir, app_id = _prepare(tmp_path)
+    request_changes(app_id, "tighten it", root=tmp_path)
+
+    def slow_generate(inputs, bank, *, trace_path, trace_step, **kwargs):
+        # simulate a note arriving mid-generation
+        append_note_text(
+            app_id, "portal_question", "Portal asks for salary range.",
+            root=tmp_path)
+        return _fake_generated(["wms_founder_platform"])
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(application_memory, "generate_materials", slow_generate)
+    _, record = regenerate_materials(app_id, root=tmp_path)
+    assert record.revision == 2
+    # the mid-flight note's record changes were not clobbered
+    assert record.followup["next_action"] == "Review follow-up pack and reply draft."
+    comms = (app_dir / "communications.jsonl").read_text(encoding="utf-8")
+    assert "Portal asks for salary range." in comms

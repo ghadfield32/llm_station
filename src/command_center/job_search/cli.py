@@ -116,6 +116,17 @@ def cmd_generate_materials(args) -> int:
 
 
 def cmd_mark_submitted(args) -> int:
+    """Low-level submit marker. Runs the same packet validation gate as
+    finalize — this command must not be a bypass around the review loop; use
+    `finalize` for the full validate + email + evidence path."""
+    from command_center.job_search.packet_validation import validate_packet
+
+    _, root, bank = _root_and_bank()
+    app_dir, record = load_application(args.application_id, root=root)
+    validation = validate_packet(app_dir, record, bank)
+    if not validation["ok"]:
+        print(json.dumps({"status": "blocked", "validation": validation}, indent=2))
+        return 1
     record = mark_submitted(args.application_id)
     mark_submitted_on_board(args.application_id)
     print(yaml.safe_dump(record.model_dump(mode="json"), sort_keys=False))
@@ -175,8 +186,19 @@ def cmd_finalize(args) -> int:
         print(json.dumps({"status": "blocked",
                           "validation": exc.validation}, indent=2))
         return 1
-    mark_submitted_on_board(args.application_id)
-    print(json.dumps({"status": "finalized", **result}, indent=2, ensure_ascii=False))
+    # This syncs only the legacy LOCAL board backend; the cockpit's internal
+    # board is event-log driven and reconciles when the card is dragged (or
+    # submitted) to Completed — that move is idempotent for applied records.
+    board_sync = mark_submitted_on_board(args.application_id)
+    print(json.dumps({
+        "status": "finalized",
+        **result,
+        "board_sync": board_sync,
+        "cockpit_hint": (
+            "drag the cockpit card to Completed (or press Approve & Submit) to "
+            "sync the internal board; already-applied records complete "
+            "idempotently without a second email"),
+    }, indent=2, ensure_ascii=False))
     return 0
 
 

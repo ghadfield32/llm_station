@@ -39,12 +39,17 @@ def validate_packet(
         "OK: " + ", ".join(record.materials.values()) if not missing_files and not empty_files
         else "missing: " + ", ".join(missing_files) + ("; empty: " + ", ".join(empty_files) if empty_files else "")))
 
-    description = read_job_description(app_dir)
+    try:
+        description = read_job_description(app_dir)
+        description_detail = (
+            f"{len(description)} characters stored" if description.strip()
+            else "job_description.md.gz is missing or empty")
+    except (OSError, EOFError) as exc:
+        description = ""
+        description_detail = f"job_description.md.gz is corrupt: {type(exc).__name__}: {exc}"
     checks.append(_check(
         "job_description", "Job description is stored and readable",
-        bool(description.strip()), "error",
-        f"{len(description)} characters stored" if description.strip()
-        else "job_description.md.gz is missing or empty"))
+        bool(description.strip()), "error", description_detail))
 
     checks.append(_check(
         "apply_url", "Apply URL is recorded",
@@ -76,14 +81,38 @@ def validate_packet(
         f"{len(trace)} trace entr(ies) in {TRACE_FILENAME}" if trace
         else "no agent trace recorded (template-mode packet)"))
 
+    used_master = bool(record.generation.get("master_bank"))
+    if used_master:
+        master_detail = "master bullet bank was in the writer context"
+    elif mode != "agent":
+        # vacuously ok: the agent_generated warning above already tells Geoff
+        # to regenerate; this check judges master-bank use of AGENT output
+        master_detail = "not judged until the packet is agent-generated"
+    else:
+        master_detail = (
+            "written without profile/master_resume_bank.md (or the source "
+            ".docx) — regenerate after restoring it so the resume uses "
+            "Geoff's own bullets, skills sections, and education")
+    checks.append(_check(
+        "master_bank", "Resume composed from Geoff's master bullet bank",
+        mode != "agent" or used_master, "warning", master_detail))
+
+    tone_flags = [str(t) for t in (record.generation.get("tone_flags") or [])]
+    checks.append(_check(
+        "tone", "No AI-tell phrasing survived generation",
+        not tone_flags, "warning",
+        "clean" if not tone_flags else "; ".join(tone_flags)))
+
     checks.append(_check(
         "review_clean", "No unresolved change requests",
         record.review_state != "changes_requested", "error",
         f"review_state={record.review_state}, revision={record.revision}"))
 
+    # Keyed on applied_at, not status: a later recruiter/interview note flips
+    # status to recruiter_contact but must never re-arm a second submission.
     checks.append(_check(
         "not_already_submitted", "Application has not already been submitted",
-        record.status != "applied", "error",
+        not record.applied_at, "error",
         f"status={record.status}, applied_at={record.applied_at or '-'}"))
 
     errors = [c for c in checks if not c["ok"] and c["level"] == "error"]
