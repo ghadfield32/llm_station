@@ -447,6 +447,19 @@ export const removeJobSearchCategory = (categoryId: string) =>
     job_categories: JobProfileControls["job_categories"];
   }>(`/api/job-search/profile-controls/category/${encodeURIComponent(categoryId)}`,
      undefined, "DELETE");
+export interface ReclassifyResult {
+  status: string;
+  cards_scanned: number;
+  counts: Record<string, number>;
+  changed: {
+    card_id: string; application_id: string; company: string;
+    role_title: string; before: string; after: string;
+    auto_answered: string[];
+  }[];
+  errors: { card_id: string; application_id: string; error: string }[];
+}
+export const reclassifyJobApplications = () =>
+  postJSON<ReclassifyResult>("/api/job-search/reclassify", {});
 export const updateJobSearchRuntime = (body: Partial<JobProfileControls["job_search"]>) =>
   postJSON<{
     status: string;
@@ -502,6 +515,9 @@ export interface ChatRuntime {
   chat_role: ModelRole | null;
   roles?: ModelRole[];
   executors: Executor[];
+  executor_note?: string;
+  frontier_models?: FrontierModelOption[];
+  frontier_note?: string;
   stream_endpoint: string;
   action_endpoint: string;
   activity_endpoint: string;
@@ -509,6 +525,22 @@ export interface ChatRuntime {
   repos?: { repo_id: string; remote_url: string }[];
   provider_note?: string;
   chat_memory_note?: string;
+  external_chats?: {
+    name: string; active: boolean; url: string | null;
+    env_var?: string; reason?: string; kind?: string; best_for?: string;
+  }[];
+}
+// The paid, opt-in escalation lane (GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6 today) —
+// read-only pricing/availability signal; `selectable` is false until an operator
+// sets budgets.default.enabled=true AND the provider key.
+export interface FrontierModelOption {
+  model_id: string;
+  provider: string;
+  estimated_cost_per_turn_usd: number | null;
+  context_tokens: number | null;
+  lane_enabled: boolean;
+  key_present: boolean;
+  selectable: boolean;
 }
 export const fetchChatRuntime = () => getJSON<ChatRuntime>("/api/chat/runtime");
 

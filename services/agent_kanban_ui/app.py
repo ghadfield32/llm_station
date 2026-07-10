@@ -710,6 +710,29 @@ def _application_summary(card: dict) -> dict[str, Any]:
     }
 
 
+def _manual_action_detail(card: dict) -> str:
+    """What the manual step needs, stated so answered questions read as HANDLED
+    and only real blockers read as work. `manual_reason` now holds only real
+    blockers; `auto_answered` (set at classify/reclassify time) is presented
+    separately as a positive."""
+    auto = str(card.get("auto_answered") or "").strip()
+    answered = (f" Auto-answered from your standing answers: {auto} "
+                "(see the App Answers tab)." if auto else "")
+    klass = str(card.get("automation_class") or "")
+    reason = str(card.get("manual_reason") or "").strip()
+    if klass == "bot_possible":
+        base = ("Bot-ready: no questions block this application. Review the "
+                "packet, then submit and move the card to Completed.")
+    elif klass == "prepare_only":
+        base = (f"Materials are prepared. {reason or 'No clear apply workflow'} "
+                "— open the apply URL yourself, then submit.")
+    elif reason:
+        base = f"Needs you: {reason}. Review the packet, then submit."
+    else:
+        base = card.get("next_action") or "Review the packet, then submit."
+    return base + answered
+
+
 def _job_progress_steps(card: dict, events: list[dict], application: dict) -> list[dict]:
     status = str(card.get("status") or "")
     selected = status not in {"", "Suggested Jobs"}
@@ -768,7 +791,7 @@ def _job_progress_steps(card: dict, events: list[dict], application: dict) -> li
             "id": "manual_action",
             "label": "Manual/application action",
             "state": "done" if terminal_or_active else "current" if manual_now else "waiting",
-            "detail": card.get("manual_reason") or card.get("next_action") or "No manual note recorded.",
+            "detail": _manual_action_detail(card),
         },
         {
             "id": "followup_memory",
@@ -1047,12 +1070,20 @@ def _role_names() -> set[str]:
     return {r["role"] for r in models()["roles"]}
 
 
+_FRONTIER_PREFIX = "frontier:"
+
+
 def _get_core(model: str):
     """One GatewayCore per model role (cached) — the same loop Discord uses, so
-    the in-app agent can chat AND drive the governed action verbs."""
+    the in-app agent can chat AND drive the governed action verbs. A
+    "frontier:<id>" model routes to the paid frontier-router lane instead of
+    LiteLLM — no tools, no board/memory context (see channels/frontier_client.py)."""
     if model not in _cores:
         from command_center.channels.core import GatewayConfig, GatewayCore
-        _cores[model] = GatewayCore(GatewayConfig.build(surface="app", model=model))
+        frontier_id = (model[len(_FRONTIER_PREFIX):]
+                       if model.startswith(_FRONTIER_PREFIX) else None)
+        _cores[model] = GatewayCore(GatewayConfig.build(
+            surface="app", model=model, frontier_model_id=frontier_id))
     return _cores[model]
 
 
@@ -2108,6 +2139,63 @@ def update_standing_answer(body: StandingAnswerIn) -> dict:
     }
 
 
+@app.post("/api/job-search/reclassify")
+def reclassify_job_applications() -> dict:
+    """Re-run automation classification for every prepared (not-yet-applied)
+    job card against the CURRENT standing answers and manual rules, refresh
+    each application_answers.md, and re-sort the board card between the Bot and
+    Manual boards. Idempotent and repeatable — run it after editing answers or
+    search rules so existing cards catch up. Applied cards are left untouched."""
+    _require_chat()
+    from command_center.job_search.application_memory import reclassify_application
+
+    spec = _require_job_domain("job_application")
+    provider = _board_store_provider(spec)
+    _, root = _job_search_config_and_root()
+
+    changes: list[dict] = []
+    errors: list[dict] = []
+    counts = {"bot_possible": 0, "manual_required": 0, "prepare_only": 0,
+              "skip": 0, "unclassified": 0}
+    for card in provider.list_cards():
+        app_id = str(card.get("application_id") or "").strip()
+        if not app_id:
+            counts["unclassified"] += 1
+            continue
+        try:
+            result = reclassify_application(app_id, root=root)
+        except FileNotFoundError:
+            errors.append({"card_id": card.get("card_id"), "application_id": app_id,
+                           "error": "no application on disk"})
+            continue
+        after = result["after"]
+        counts[after] = counts.get(after, 0) + 1
+        # push the fresh class + reason onto the board card so the Bot/Manual
+        # split and the card badge reflect the new decision
+        fields = _card_store_fields(card)
+        fields["automation_class"] = after
+        fields["manual_reason"] = result.get("manual_reason")
+        if result.get("auto_answered"):
+            fields["auto_answered"] = "; ".join(result["auto_answered"])
+        provider.upsert_card(str(card["card_id"]), fields)
+        if result["changed"]:
+            changes.append({
+                "card_id": card.get("card_id"),
+                "application_id": app_id,
+                "company": card.get("company"),
+                "role_title": card.get("role_title"),
+                "before": result["before"], "after": after,
+                "auto_answered": result.get("auto_answered", []),
+            })
+    return {
+        "status": "reclassified",
+        "cards_scanned": sum(counts.values()) + len(errors),
+        "counts": counts,
+        "changed": changes,
+        "errors": errors,
+    }
+
+
 @app.put("/api/job-search/profile-controls/draft-default")
 def update_draft_default(body: DraftDefaultIn) -> dict:
     _require_profile_writable()
@@ -2179,14 +2267,21 @@ def _registered_repos() -> list[dict]:
 
 @app.get("/api/chat/runtime")
 def chat_runtime() -> dict:
-    """What the cockpit chat actually uses: ONE harness (GatewayCore), ONE
-    gateway (LiteLLM). Every model role routes through the gateway, so
-    switching models — Ollama today; OpenAI/Anthropic/OpenRouter if the
-    operator enables them in models.yaml + .env — is the dropdown, not a
-    migration. Chat-gated like every /api/chat* route."""
+    """What the cockpit chat actually uses: ONE harness (GatewayCore), TWO lanes.
+    LOCAL (default): every `roles` entry routes through the one LiteLLM gateway
+    to Ollama — free, tool-integrated, board/memory-aware. FRONTIER (opt-in,
+    paid): `frontier_models` lists the budgeted OpenRouter escalation lane
+    (configs/frontier-router-{providers,budgets}.yaml) — plain conversation
+    only (no tools, no board/memory context leaves the machine), selectable
+    only once an operator sets budgets.default.enabled=true AND the provider
+    key. `executors` (Claude Code / Codex CLI) are a THIRD, distinct thing:
+    agentic coding harnesses that drive leased worktrees via their own
+    subscription/OAuth login, not conversational chat models — they never
+    appear in this picker. Chat-gated like every /api/chat* route."""
     _require_chat()
     lanes = models()
     chat_role = next((r for r in lanes["roles"] if r["role"] == "chat"), None)
+    from command_center.channels.frontier_client import available_frontier_models
     return {
         "enabled": CHAT_ENABLED,
         "harness": "GatewayCore",
@@ -2195,19 +2290,35 @@ def chat_runtime() -> dict:
         "chat_role": chat_role,
         "roles": lanes["roles"],
         "executors": lanes["executors"],
+        "executor_note": (
+            "Claude Code and Codex CLI are agentic coding EXECUTORS, not chat "
+            "roles — they drive leased repo worktrees under their own "
+            "subscription/OAuth login (never a LiteLLM API key) and are "
+            "launched from missions, not this chat picker."
+        ),
+        "frontier_models": available_frontier_models(),
+        "frontier_note": (
+            "Paid escalation lane for open-weight frontier models too large "
+            "for local VRAM (GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6 — the top "
+            "3 open-weight models on Artificial Analysis's July 2026 index). "
+            "Off by default; enabling it is a deliberate operator decision: "
+            "set OPENROUTER_API_KEY, flip "
+            "configs/frontier-router-budgets.yaml default.enabled to true, "
+            "then run `make frontier-router-egress-check`. A frontier turn "
+            "never carries tools, board state, or memory to the provider."
+        ),
         "stream_endpoint": "/api/chat/stream",
         "action_endpoint": "/api/action",
         "activity_endpoint": "/api/activity",
         "conversations_endpoint": "/api/chat/conversations",
         "repos": _registered_repos(),
         "provider_note": (
-            "Every chat model routes through the one LiteLLM gateway; roles "
-            "come from configs/models.yaml (local Ollama today). To add an "
-            "OpenAI/Anthropic/OpenRouter model, add a role candidate in "
-            "models.yaml with its key referenced from .env — the model picker "
-            "above sees it immediately. The forbidden-provider scan gates "
-            "cloud providers on purpose: enabling one is an explicit operator "
-            "decision, never an agent's."
+            "The LOCAL lane (roles above) is the only tool-integrated, "
+            "board-aware chat surface, and it stays cloud-free by design "
+            "(forbidden-provider scan). The FRONTIER lane (frontier_models "
+            "above) is the sanctioned path to a paid model — a separate, "
+            "budgeted, redacted escalation, never a change to the local "
+            "lane's roles."
         ),
         "chat_memory_note": (
             "Thread shortcuts sync across devices; full turn transcripts live "
@@ -2418,6 +2529,25 @@ def chat_thread_transcript(
 
 
 def _validated_model(model: str) -> str:
+    if model.startswith(_FRONTIER_PREFIX):
+        from command_center.channels.frontier_client import available_frontier_models
+        frontier_id = model[len(_FRONTIER_PREFIX):]
+        options = {r["model_id"]: r for r in available_frontier_models()}
+        row = options.get(frontier_id)
+        if row is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown frontier model {frontier_id!r}; pick from "
+                       f"{sorted(options)}")
+        if not row["selectable"]:
+            reason = ("the frontier-router lane is disabled "
+                      "(configs/frontier-router-budgets.yaml default.enabled=false)"
+                      if not row["lane_enabled"] else
+                      "no provider API key is set for this model")
+            raise HTTPException(
+                status_code=503,
+                detail=f"frontier model {frontier_id!r} is not enabled yet: {reason}")
+        return model
     roles = _role_names()
     if model not in roles:
         raise HTTPException(status_code=400,

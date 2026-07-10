@@ -19,6 +19,7 @@ import {
   fetchRuntimeDebug, fetchStatus, moveDomainCard, postAction, RuntimeDebug, streamChat,
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
   StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
+  reclassifyJobApplications, ReclassifyResult,
 } from "./api";
 
 type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "chat";
@@ -570,6 +571,57 @@ function MarkdownText({ value }: { value: unknown }) {
   );
 }
 
+// Inline markdown: **bold**, `code`, and *italic* → JSX, so a resume/cover
+// letter reads like a real document instead of raw asterisks.
+function renderInline(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  const re = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
+  let last = 0; let m: RegExpExecArray | null; let k = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    const tok = m[0];
+    if (tok.startsWith("**")) parts.push(<strong key={k++}>{tok.slice(2, -2)}</strong>);
+    else if (tok.startsWith("`")) parts.push(<code key={k++}>{tok.slice(1, -1)}</code>);
+    else parts.push(<em key={k++}>{tok.slice(1, -1)}</em>);
+    last = m.index + tok.length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
+// A polished document view for the employer-facing packet files (resume,
+// cover letter, answers). Renders headings, bullets, and the contact/skills
+// lines as a clean paper-like layout — this is what "nicely formatted" means
+// for review: it should read the way a hiring manager will see it.
+function DocumentView({ text, kind = "doc" }: { text: string; kind?: string }) {
+  if (!text.trim()) return <div className="muted">not generated for this packet</div>;
+  const lines = text.replace(/\r/g, "").split("\n");
+  const out: React.ReactNode[] = [];
+  let bullets: string[] = [];
+  let key = 0;
+  const flush = () => {
+    if (bullets.length) {
+      out.push(<ul key={key++} className="doc-bullets">
+        {bullets.map((b, i) => <li key={i}>{renderInline(b)}</li>)}</ul>);
+      bullets = [];
+    }
+  };
+  lines.forEach((raw, idx) => {
+    const line = raw.trimEnd();
+    const t = line.trim();
+    if (!t) { flush(); return; }
+    if (t.startsWith("## ")) { flush(); out.push(<h4 key={key++} className="doc-h2">{renderInline(t.slice(3))}</h4>); return; }
+    if (t.startsWith("# ")) { flush(); out.push(<h3 key={key++} className="doc-h1">{renderInline(t.slice(2))}</h3>); return; }
+    if (/^[-*•]\s+/.test(t)) { bullets.push(t.replace(/^[-*•]\s+/, "")); return; }
+    flush();
+    // the first two lines of a resume are the name-headline + contact block
+    const isHead = kind === "resume" && idx <= 3;
+    out.push(<p key={key++} className={isHead ? "doc-contact" : "doc-p"}>{renderInline(t)}</p>);
+  });
+  flush();
+  return <div className={`document-view document-${kind}`}>{out}</div>;
+}
+
 function LinkedInBody({ text }: { text: string }) {
   const blocks = text.split(/\n\s*\n/).filter(Boolean);
   return (
@@ -1011,6 +1063,50 @@ function DailyTargetRow({ label, name, value, writable, onSaved }: {
   );
 }
 
+function ReclassifyPanel({ writable }: { writable: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ReclassifyResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  async function run() {
+    setBusy(true); setErr(null); setResult(null);
+    try { setResult(await reclassifyJobApplications()); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="reclassify-panel">
+      <button className="actbtn" disabled={busy || !writable} onClick={run}>
+        {busy ? "re-sorting..." : "Re-sort all applications with current answers"}
+      </button>
+      <p className="muted">
+        Applies your standing answers and search rules to the jobs already on
+        the board — a job whose only blockers are now answered moves to the Bot
+        board.
+      </p>
+      {err && <div className="error">ERR {err}</div>}
+      {result && (
+        <div className="reclassify-result">
+          <div className="muted">
+            scanned {result.cards_scanned} · bot {result.counts.bot_possible ?? 0}
+            {" "}· manual {result.counts.manual_required ?? 0}
+            {" "}· prepare-only {result.counts.prepare_only ?? 0}
+          </div>
+          {result.changed.length === 0
+            ? <div className="muted">no cards changed board</div>
+            : result.changed.map((c) => (
+                <div className="reclassify-row" key={c.card_id}>
+                  <b>{c.company}</b> {c.role_title}
+                  <span className="chip">{c.before} → {c.after}</span>
+                  {c.auto_answered.length > 0 &&
+                    <span className="muted"> (answered: {c.auto_answered.join(", ")})</span>}
+                </div>
+              ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function JobPresetDrawer({ onClose }: { onClose: () => void }) {
   const [controls, setControls] = useState<JobProfileControls | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -1035,6 +1131,8 @@ function JobPresetDrawer({ onClose }: { onClose: () => void }) {
             </span>
             <span>{controls.write_gate}</span>
           </div>
+
+          <ReclassifyPanel writable={controls.writable} />
 
           <h3>Standing Answers</h3>
           <p className="muted">
@@ -2074,7 +2172,13 @@ function PacketReviewModal({ spec, card, onClose, onChanged, onOpenChatAt }: {
                   ? <textarea className="packet-edit" value={editText}
                       onChange={(e) => setEditText(e.target.value)} />
                   : packet.files[t.file as string]
-                    ? <pre className="packet-doc">{packet.files[t.file as string]}</pre>
+                    // resume_ats and job_description are deliberately plain
+                    // text (what an ATS parser sees) — keep them monospace;
+                    // everything else renders as a formatted document
+                    ? (t.key === "resume_ats" || t.key === "job_description"
+                        ? <pre className="packet-doc">{packet.files[t.file as string]}</pre>
+                        : <DocumentView text={packet.files[t.file as string] ?? ""}
+                            kind={t.key === "resume" ? "resume" : "doc"} />)
                     : <div className="muted">not generated for this packet</div>}
               </div>
             ))}
@@ -2135,9 +2239,24 @@ function DomainDrawer({
     finally { setBusy(false); }
   }
 
+  const hasPacket = spec.domain_id === "job_application" && !!activeCard.application_id;
   return (
     <DrawerShell title={title || id || spec.title} onClose={onClose}>
       {err && <div className="error">ERR {err}</div>}
+      {hasPacket && onOpenPacket && (
+        <div className="packet-banner">
+          <div className="packet-banner-text">
+            <b>Application packet ready</b>
+            <span className="muted small">
+              {valText(activeCard.company)} · {valText(activeCard.role_title)}
+              {activeCard.automation_class ? ` · ${valText(activeCard.automation_class)}` : ""}
+            </span>
+          </div>
+          <button className="actbtn packet-banner-btn" onClick={() => onOpenPacket()}>
+            Review Packet →
+          </button>
+        </div>
+      )}
       {spec.card_component === "linkedin_post" && (
         <>
           <div className="drawer-toggle">
@@ -2979,10 +3098,43 @@ function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation
         <div className="domain-badges">
           {candidates.map((c) => <Badge key={c.alias} value={`${c.alias}: ${c.model}`} />)}
         </div>
+        <p className="muted small">{runtime.provider_note}</p>
+      </div>
+      <div className="metric diag-card">
+        <div className="diag-head">Frontier lane (paid, opt-in)</div>
+        <p className="muted small">{runtime.frontier_note}</p>
+        <div className="conv-list">
+          {(runtime.frontier_models ?? []).map((f) => (
+            <div className="conv-row" key={f.model_id}>
+              <div className="conv-open" style={{ cursor: "default" }}>
+                <span className="conv-title">
+                  <Badge value={f.selectable ? "ready" : "not enabled"}
+                    tone={f.selectable ? "good" : "warn"} />
+                  {f.model_id}
+                </span>
+                <span className="muted small">
+                  {f.provider}
+                  {f.estimated_cost_per_turn_usd != null
+                    ? ` · ~$${f.estimated_cost_per_turn_usd.toFixed(4)}/turn est.`
+                    : ""}
+                  {f.context_tokens ? ` · ${(f.context_tokens / 1000).toFixed(0)}k ctx` : ""}
+                </span>
+              </div>
+            </div>
+          ))}
+          {(runtime.frontier_models ?? []).length === 0 && (
+            <div className="muted small">
+              No frontier candidates configured — see configs/frontier-router-providers.yaml.
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="metric diag-card">
+        <div className="diag-head">Executors (not chat models)</div>
+        <p className="muted small">{runtime.executor_note}</p>
         <div className="domain-badges">
           {runtime.executors.map((e) => <Badge key={e.name} value={`${e.name} #${e.priority}`} />)}
         </div>
-        <p className="muted small">{runtime.provider_note}</p>
       </div>
     </div>
   );
@@ -3155,14 +3307,19 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll,
   );
 }
 
-function ChatView({ roles, runtime, draft }: {
+function ChatView({ roles, runtime, draft, onBack }: {
   roles: string[];
   runtime: ChatRuntime | null;
   draft?: { text: string; nonce: number; conversationId?: string;
             storyTs?: string } | null;
+  onBack?: () => void;
 }) {
   const [model, setModel] = useState(roles.includes("chat") ? "chat" : roles[0] ?? "");
   const [conversationId, setConversationId] = useState("app");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // which agent we're talking to: GatewayCore (in-app) or a configured
+  // external specialist (ORCA/OmniAgent/OxyGent) opened in its own tab
+  const [target, setTarget] = useState("GatewayCore");
   const [input, setInput] = useState("");
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads());
@@ -3409,21 +3566,94 @@ function ChatView({ roles, runtime, draft }: {
     }
   }
 
+  const externalChats = runtime?.external_chats ?? [];
+  const activeExternal = externalChats.find((c) => c.name === target);
   return (
     <div className="chat">
       <div className="chat-layout">
         <section className="chat-workspace">
-          <div className="chat-bar">
-            <span className="muted small">model</span>
-            <select className="select" value={model} onChange={(e) => setModel(e.target.value)}
-              title="every role routes through the one LiteLLM gateway — switching is instant">
-              {roles.map((r) => {
-                const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
-                return <option key={r} value={r}>{backing ? `${r} — ${backing}` : r}</option>;
-              })}
-            </select>
+          {/* Row 1: navigation — back, target/agent, model, thread */}
+          <div className="chat-header">
+            <div className="chat-header-left">
+              {onBack && (
+                <button className="chat-back" onClick={onBack} title="back to the board">
+                  ← Back
+                </button>
+              )}
+              <label className="chat-field">
+                <span className="muted small">agent</span>
+                <select className="select" value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  title="GatewayCore runs in-app; specialists open in their own tab">
+                  <option value="GatewayCore">GatewayCore (in-app)</option>
+                  {externalChats.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name}{c.active ? "" : " (not configured)"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {target === "GatewayCore" && (
+                <label className="chat-field">
+                  <span className="muted small">model</span>
+                  <select className="select" value={model}
+                    onChange={(e) => setModel(e.target.value)}
+                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane — see the Chat Runtime panel.">
+                    <optgroup label="Local (free)">
+                      {roles.map((r) => {
+                        const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
+                        return <option key={r} value={r}>{backing ? `${r} — ${backing}` : r}</option>;
+                      })}
+                    </optgroup>
+                    {(runtime?.frontier_models ?? []).length > 0 && (
+                      <optgroup label="Frontier (paid, opt-in)">
+                        {(runtime?.frontier_models ?? []).map((f) => (
+                          <option key={f.model_id} value={`frontier:${f.model_id}`}
+                            disabled={!f.selectable}>
+                            {f.model_id}
+                            {f.estimated_cost_per_turn_usd != null
+                              ? ` — ~$${f.estimated_cost_per_turn_usd.toFixed(4)}/turn`
+                              : ""}
+                            {f.selectable ? "" : !f.lane_enabled ? " (lane disabled)" : " (no key)"}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="chat-header-right">
+              <button className="chat-history-toggle"
+                aria-expanded={historyOpen}
+                onClick={() => setHistoryOpen((v) => !v)}
+                title="recent chats & all conversations">
+                History {historyOpen ? "▾" : "▸"}
+              </button>
+              <button className="clear" onClick={startNewChat}>new chat</button>
+            </div>
+          </div>
+          {/* External specialist: hand off, don't fake an in-app chat */}
+          {target !== "GatewayCore" && activeExternal && (
+            <div className="chat-external">
+              <div><b>{activeExternal.name}</b> — {activeExternal.kind || "external specialist"}</div>
+              {activeExternal.best_for && <p className="muted">{activeExternal.best_for}</p>}
+              {activeExternal.active && activeExternal.url ? (
+                <a className="actbtn" href={activeExternal.url} target="_blank" rel="noreferrer">
+                  Open {activeExternal.name} ↗
+                </a>
+              ) : (
+                <div className="muted">
+                  Not configured — set <code>{activeExternal.env_var}</code> to enable the handoff.
+                  {" "}Meanwhile, GatewayCore handles this in-app.
+                </div>
+              )}
+            </div>
+          )}
+          {/* Row 2: thread id + live/story toggle (only for GatewayCore) */}
+          {target === "GatewayCore" && (
+          <div className="chat-subbar">
             <span className="muted small">thread <code>{conversationId}</code></span>
-            <span className="chat-bar-hint muted small">the agent moves/assigns via governed verbs — Approved stays human-only</span>
             <div className="chat-mode-toggle" role="tablist" aria-label="Chat view mode">
               <button role="tab" aria-selected={chatMode === "live"}
                 className={chatMode === "live" ? "mode-on" : ""}
@@ -3436,35 +3666,38 @@ function ChatView({ roles, runtime, draft }: {
                   ? ` · ${story.total_turns ?? story.turn_count}` : ""}
               </button>
             </div>
-            <button className="clear" onClick={startNewChat}>new chat</button>
             {events.length > 0 && chatMode === "live" && (
               <button className="clear" onClick={() => setEvents([])}>clear</button>
             )}
           </div>
-          <div className="chat-threads">
-            <div className="muted small">recent chats</div>
-            <HorizontalScroller className="thread-strip" ariaLabel="Recent cockpit chats">
-              {threads.length === 0 && (
-                <button className="thread-chip thread-empty" disabled>No recent cockpit chats</button>
-              )}
-              {threads.map((thread) => (
-                <div
-                  className={`thread-chip ${thread.id === conversationId ? "thread-on" : ""}`}
-                  key={thread.id}>
-                  <button className="thread-open" onClick={() => openThread(thread)}>
-                    <span>{thread.title}</span>
-                    <small>{thread.target ?? "GatewayCore"} {fmtThreadTime(thread.updatedAt)}</small>
-                  </button>
-                  <button className="thread-story"
-                    title="open this thread's full story (flight recorder)"
-                    onClick={() => openThread(thread, "story")}>
-                    story
-                  </button>
-                </div>
-              ))}
-            </HorizontalScroller>
-          </div>
-          {chatMode === "story" ? (
+          )}
+          {/* Collapsible history: recent chats, tucked away until opened */}
+          {historyOpen && (
+            <div className="chat-threads">
+              <div className="muted small">recent chats</div>
+              <HorizontalScroller className="thread-strip" ariaLabel="Recent cockpit chats">
+                {threads.length === 0 && (
+                  <button className="thread-chip thread-empty" disabled>No recent cockpit chats</button>
+                )}
+                {threads.map((thread) => (
+                  <div
+                    className={`thread-chip ${thread.id === conversationId ? "thread-on" : ""}`}
+                    key={thread.id}>
+                    <button className="thread-open" onClick={() => openThread(thread)}>
+                      <span>{thread.title}</span>
+                      <small>{thread.target ?? "GatewayCore"} {fmtThreadTime(thread.updatedAt)}</small>
+                    </button>
+                    <button className="thread-story"
+                      title="open this thread's full story (flight recorder)"
+                      onClick={() => openThread(thread, "story")}>
+                      story
+                    </button>
+                  </div>
+                ))}
+              </HorizontalScroller>
+            </div>
+          )}
+          {target !== "GatewayCore" ? null : chatMode === "story" ? (
             <div className="chat-log chat-log-story">
               <ThreadTimeline transcript={story} loading={storyLoading}
                 error={storyError} onRefresh={() => void loadStory()}
@@ -3478,19 +3711,25 @@ function ChatView({ roles, runtime, draft }: {
               <div ref={endRef} />
             </div>
           )}
-          <div className="chat-input">
-            <input value={input} placeholder="ask the agent…"
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
-            <button onClick={send} disabled={busy}>{busy ? "…" : "send"}</button>
-          </div>
+          {target === "GatewayCore" && (
+            <div className="chat-input">
+              <input value={input} placeholder="ask the agent…"
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+              <button onClick={send} disabled={busy}>{busy ? "…" : "send"}</button>
+            </div>
+          )}
         </section>
-        <aside className="chat-runtime-wrap">
-          <ChatRuntimePanel runtime={runtime} conversations={conversations}
-            activeId={conversationId} onOpenConversation={openConversation}
-            onStartRepoChat={startRepoChat}
-            onDeleteConversation={(id) => void deleteConversation(id)} />
-        </aside>
+        {/* History is a side drawer now — hidden until toggled, so the chat
+            itself is not bunched up against the conversation index */}
+        {historyOpen && (
+          <aside className="chat-runtime-wrap">
+            <ChatRuntimePanel runtime={runtime} conversations={conversations}
+              activeId={conversationId} onOpenConversation={openConversation}
+              onStartRepoChat={startRepoChat}
+              onDeleteConversation={(id) => void deleteConversation(id)} />
+          </aside>
+        )}
       </div>
     </div>
   );
@@ -3513,6 +3752,8 @@ export function App() {
   const [chatDraft, setChatDraft] =
     useState<{ text: string; nonce: number; conversationId?: string;
                storyTs?: string } | null>(null);
+  // where the chat was opened from, so the chat's Back button can return there
+  const [chatReturnView, setChatReturnView] = useState<View>("domains");
   const [domainNav, setDomainNav] = useState<DomainNavItem[]>([]);
   const [activeDomain, setActiveDomain] = useState(() => initialDomainFromUrl());
   const [updated, setUpdated] = useState<string>("");
@@ -3602,7 +3843,8 @@ export function App() {
   const openChatWithPrompt = useCallback(
     (prompt: string, conversationId?: string, storyTs?: string) => {
       setChatDraft({ text: prompt, conversationId, storyTs, nonce: Date.now() });
-      setView("chat");
+      // remember where we came from so Chat's Back button returns there
+      setView((prev) => { if (prev !== "chat") setChatReturnView(prev); return "chat"; });
     }, []);
   const nav = [...NAV, { id: "chat" as View, label: "Chat" }];
   const domainNavCount = domainNav.reduce((total, item) => total + item.count, 0);
@@ -3690,7 +3932,8 @@ export function App() {
         {/* chat stays MOUNTED so the conversation persists across view switches */}
         {chatOn && (
           <div style={{ display: view === "chat" ? "block" : "none" }}>
-            <ChatView roles={cfg?.model_roles ?? []} runtime={chatRuntime} draft={chatDraft} />
+            <ChatView roles={cfg?.model_roles ?? []} runtime={chatRuntime} draft={chatDraft}
+              onBack={() => setView(chatReturnView)} />
           </div>
         )}
         {view === "chat" && !chatOn &&

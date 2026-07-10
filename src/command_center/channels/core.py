@@ -212,9 +212,15 @@ class GatewayConfig:
     """Per-channel runtime config. Transport tokens/allowlists are NOT here — each
     adapter reads those from its own env names. This is just the model wiring."""
     surface: str                                  # display name, e.g. "Discord"
-    model: str                                    # a models.yaml role alias
+    model: str                                    # a models.yaml role alias, OR
+                                                   # (when frontier_model_id is set) a
+                                                   # display label for the frontier model
     litellm_base: str
     litellm_key: str
+    # Set only for a frontier-router turn (an id from frontier-router-providers.yaml,
+    # e.g. "glm-5.2"). When set, _completion routes to frontier_client instead of
+    # LiteLLM, and board/memory/tool context injection is skipped — see is_frontier.
+    frontier_model_id: str | None = None
     max_history: int = 12
     max_rounds: int = 6
     # Max model turns this gateway runs at once. Sized to the GPU tier's real
@@ -226,7 +232,7 @@ class GatewayConfig:
     max_concurrency: int = 1
 
     @classmethod
-    def build(cls, *, surface: str, model: str,
+    def build(cls, *, surface: str, model: str, frontier_model_id: str | None = None,
               max_history: int = 12, max_rounds: int = 6) -> "GatewayConfig":
         e = env()
         concurrency = e.get("GATEWAY_MAX_CONCURRENCY") or e.get("OLLAMA_NUM_PARALLEL") or "1"
@@ -236,6 +242,7 @@ class GatewayConfig:
             litellm_base=e.get("LITELLM_BASE_URL", "http://localhost:4000/v1").rstrip("/"),
             # the proxy enforces auth; a virtual key wins, else the master key
             litellm_key=e.get("LITELLM_API_KEY") or e.get("LITELLM_MASTER_KEY", ""),
+            frontier_model_id=frontier_model_id,
             max_history=max_history,
             max_rounds=max_rounds,
             max_concurrency=max(1, int(concurrency)),
@@ -249,6 +256,9 @@ class GatewayCore:
 
     def __init__(self, cfg: GatewayConfig):
         self.cfg = cfg
+        # A frontier turn is plain conversation: no tools, no board/memory context
+        # travels to the paid provider. See channels/frontier_client.py docstring.
+        self.is_frontier = bool(cfg.frontier_model_id)
         self.system = build_system(cfg.surface)
         self.tools, self.dispatch = load_tool_layer(cfg.surface)
         # Live kanban sync: funnel every governed card/todo verb (this surface
@@ -278,6 +288,15 @@ class GatewayCore:
         await self.http.aclose()
 
     async def _completion(self, messages: list, with_tools: bool) -> dict:
+        if self.is_frontier:
+            # Live paid-API path — every gate (lane enabled, redaction, key,
+            # per-request/conversation/monthly budget) lives in frontier_client;
+            # this never touches LiteLLM and never attaches tools.
+            from .frontier_client import frontier_chat_completion
+            conversation = transcript_conversation.get() or "frontier"
+            return await frontier_chat_completion(
+                model_id=self.cfg.frontier_model_id, conversation_id=conversation,
+                messages=messages, http=self.http)
         headers = {"Authorization": f"Bearer {self.cfg.litellm_key}"} \
             if self.cfg.litellm_key else {}
         body: dict[str, Any] = {"model": self.cfg.model, "messages": messages}
@@ -340,11 +359,20 @@ class GatewayCore:
         lines, never an empty/stale block."""
         return {"role": "system", "content": collect_board_state(self.board_knobs)}
 
+    @property
+    def _inject_context(self) -> bool:
+        """Board/growthos-memory re-injection is a LOCAL-lane feature. A frontier
+        turn's messages leave the machine for a paid provider, so board state and
+        durable memory are never attached — see channels/frontier_client.py."""
+        return self.board_knobs.enabled and not self.is_frontier
+
     def _memory_messages(self, query: str) -> list[dict]:
         """Durable cross-conversation memory relevant to `query`, re-injected like the
-        board (never stored in history). Empty list when memory is disabled or there is
-        nothing to recall, so no empty block is added. collect_memory_state is fail-loud:
-        it renders an ERROR line, never raises into the turn."""
+        board (never stored in history). Empty list when memory is disabled, there is
+        nothing to recall, or this is a frontier turn (see _inject_context).
+        collect_memory_state is fail-loud: it renders an ERROR line, never raises."""
+        if self.is_frontier:
+            return []
         from growthos.memory import collect_memory_state
         block = collect_memory_state(query, self.memory_cfg)
         return [{"role": "system", "content": block}] if block else []
@@ -369,7 +397,7 @@ class GatewayCore:
                 history = self.histories[conversation_id]
                 history.append({"role": "user", "content": user_text})
                 messages = [{"role": "system", "content": self.system}]
-                if self.board_knobs.enabled:
+                if self._inject_context:
                     messages.append(self._board_message())
                     rec.context("board_state")
                 mem = self._memory_messages(user_text)
@@ -424,7 +452,7 @@ class GatewayCore:
                                "result": str(result)[:300]}
                         messages.append({"role": "tool", "tool_call_id": call["id"],
                                          "content": json.dumps(result, default=str)})
-                    if self.board_knobs.enabled and refresh and (round_idx + 1) % refresh == 0:
+                    if self._inject_context and refresh and (round_idx + 1) % refresh == 0:
                         messages.append(self._board_message())
                         rec.context("board_state_refresh")
                     mem_refresh = self.memory_cfg.refresh_every_rounds
@@ -464,7 +492,7 @@ class GatewayCore:
         history = self.histories[conversation_id]
         history.append({"role": "user", "content": user_text})
         messages = [{"role": "system", "content": self.system}]
-        if self.board_knobs.enabled:        # harness re-injects the single source of truth
+        if self._inject_context:            # harness re-injects the single source of truth
             messages.append(self._board_message())
             rec.context("board_state")
         _mem = self._memory_messages(user_text)
@@ -515,7 +543,7 @@ class GatewayCore:
                 messages.append({"role": "tool", "tool_call_id": call["id"],
                                  "content": json.dumps(result, default=str)})
             # re-state the board after mutations so later rounds act on fresh state
-            if self.board_knobs.enabled and refresh and (round_idx + 1) % refresh == 0:
+            if self._inject_context and refresh and (round_idx + 1) % refresh == 0:
                 messages.append(self._board_message())
                 rec.context("board_state_refresh")
             # re-surface durable memory on its own cadence (keeps it in-window on deep turns)

@@ -140,12 +140,28 @@ def test_chat_runtime_stays_behind_the_chat_wall(client):
     assert tc.get("/api/chat/runtime").status_code == 503
 
 
+def _disable_frontier_lane(monkeypatch):
+    """Explicit, self-contained disabled state — not a read of the live repo
+    config, whose default.enabled is a genuine, changeable operator decision
+    (see tests/test_frontier_client.py)."""
+    from command_center.channels import frontier_client as fc_mod
+    from command_center.improvement.frontier_router_eval import load_budgets
+    budgets = load_budgets()
+    disabled = budgets.model_copy(deep=True)
+    disabled.default.enabled = False
+    monkeypatch.setattr(fc_mod, "load_budgets", lambda: disabled)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
+
+
 def test_chat_runtime_is_one_gateway_no_specialist_links(client, monkeypatch):
     """The specialist link-outs (ORCA/OmniAgent/OxyGent) are GONE: one harness,
-    one gateway, model switching through roles, scoped-chat repo targets."""
+    one gateway, model switching through LOCAL roles + the opt-in FRONTIER lane,
+    scoped-chat repo targets."""
     mod, tc = client
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
     monkeypatch.setattr(mod, "CONFIGS_DIR", Path(__file__).resolve().parents[1] / "configs")
+    _disable_frontier_lane(monkeypatch)
     body = tc.get("/api/chat/runtime").json()
     assert body["harness"] == "GatewayCore"
     assert body["model_gateway"] == "LiteLLM"
@@ -155,8 +171,36 @@ def test_chat_runtime_is_one_gateway_no_specialist_links(client, monkeypatch):
     assert "uses_orca" not in body
     repo_ids = {r["repo_id"] for r in body["repos"]}
     assert "llm_station" in repo_ids       # registered repos are chat targets
-    assert "LiteLLM gateway" in body["provider_note"]
-    assert "operator decision" in body["provider_note"]
+    assert "FRONTIER lane" in body["provider_note"]
+    assert "cloud-free by design" in body["provider_note"]
+    # executors (Claude Code / Codex CLI) are explicitly NOT chat models
+    assert "not chat roles" in body["executor_note"]
+    executor_names = {e["name"] for e in body["executors"]}
+    assert {"claude-code", "codex-cli"} <= executor_names
+    # the top-3 frontier candidates are reported (real config, real pricing,
+    # unselectable by default since this test env has no key + lane disabled)
+    frontier_ids = {f["model_id"] for f in body["frontier_models"]}
+    assert {"glm-5.2", "deepseek-v4-pro", "kimi-k2.6"} <= frontier_ids
+    assert all(not f["selectable"] for f in body["frontier_models"]
+              if f["model_id"] in frontier_ids)
+
+
+def test_frontier_model_selection_gated_off_by_default(client, monkeypatch):
+    """A frontier: prefixed model is a real, known candidate — but stays
+    unselectable (503, not 400) until the operator enables the lane + key.
+    An unknown frontier id 400s distinctly from an unknown local role."""
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    _disable_frontier_lane(monkeypatch)
+    r = tc.post("/api/chat/stream", json={
+        "text": "hi", "conversation_id": "c1", "model": "frontier:glm-5.2"})
+    assert r.status_code == 503
+    assert "not enabled yet" in r.json()["detail"]
+
+    r2 = tc.post("/api/chat/stream", json={
+        "text": "hi", "conversation_id": "c1", "model": "frontier:not-a-real-model"})
+    assert r2.status_code == 400
+    assert "unknown frontier model" in r2.json()["detail"]
 
 
 def test_chat_threads_store_shared_metadata(client, monkeypatch, tmp_path):

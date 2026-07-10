@@ -25,13 +25,31 @@ those lists show real counts instead of demo fixtures.
 **Chat** was evaluated and rebuilt this pass — full detail in §14's
 2026-07-09/10 entry and
 [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md).
-Headline: GatewayCore + LiteLLM remains the only runtime; a first-party
+Headline: GatewayCore + LiteLLM remains the only LOCAL runtime; a first-party
 flight recorder makes every turn on every surface reviewable
 (`GET /api/chat/conversations` → any conversation → its full story, with
 click-through from any kanban card's Story tab to the exact moment); the
 previously-planned ORCA/OmniAgent/OxyGent specialist link-outs were removed
 in favor of the existing LiteLLM model-role dropdown (one gateway, switch by
 role, cloud providers stay behind the forbidden-provider scan on purpose).
+Claude Code and Codex CLI never appear in this picker — they are agentic
+coding **executors** (their own subscription/OAuth login, driving leased
+repo worktrees), not conversational chat models; `/api/chat/runtime`
+`executor_note` says so explicitly now, since this was a real point of
+operator confusion ("why don't I see Claude Code as a chat option").
+
+**A second, opt-in lane now exists: the frontier-router backup lane**
+(§5.4, §14 2026-07-10 entry) — GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6 via
+OpenRouter, the current top-3 open-weight models on Artificial Analysis's
+July 2026 index, none of which fit local VRAM. Off by default (fails the
+strict `cc validate` provider scan on purpose if a key is ever present
+without the lane being reconciled); Geoff enabled it 2026-07-10
+(`OPENROUTER_API_KEY` in `.env` + `configs/frontier-router-budgets.yaml`
+`default.enabled: true`) to test cost/latency/correctness directly. A
+frontier turn carries **no tools and no board/memory context** — plain
+conversation only, by design, so nothing repo-specific reaches a paid API.
+Real measured results and the honest caveat on the correctness KPI are in
+§14.
 
 **Kanban board moves are now a one-step machine** — no domain card may skip
 a lane, forward or backward; the job-search pipeline is exactly Geoff's 3
@@ -2300,6 +2318,134 @@ across the two days (transcript fidelity/durability/fail-open/join-key,
 domain-surface origin honesty, one-step transition enforcement, chat wall
 regressions); `cc validate`, ruff, and `tsc`/`vite build` clean at each
 commit (`d8e593d`, `c01baec`, `54b62d2`, `d416f93`, `0696a5a`, `7e6b367`).
+
+### 2026-07-10 (later) — Frontier-router chat lane: the top-3 pick, wired, tested, and real money spent to prove it
+
+**Why the chat model picker only showed qwen.** `configs/models.yaml`'s
+`chat:` role has exactly one candidate (`chat-qwen`) — that's the whole
+local model catalog, by design (local-only, `provider: ollama` everywhere,
+enforced by `check_forbidden_providers`). Claude Code and Codex CLI were
+never missing from the picker by accident: `executors:` in the same file is
+a *different* concept — agentic coding harnesses authenticated by their own
+subscription/OAuth login, launched from missions to drive leased repo
+worktrees, never a LiteLLM chat completion. `/api/chat/runtime` now says
+this explicitly (`executor_note`).
+
+**Landed the frontier-router backup lane** from the dormant
+`feat/model-eval-clean` branch (PR never merged; cherry-picked commit
+`54527c9`) — it already had the provider/budget config schema, cost
+estimator, and a fail-closed preflight gate, but deliberately made no live
+call ("`call_frontier` ... REFUSE to make a live call ... requires
+reconciling `check_forbidden_providers` ... an explicit operator opt-in").
+That reconciliation is what shipped this pass:
+
+- **The top-3 pick** (researched 2026-07-10 against OpenRouter's own
+  listings + Artificial Analysis's July 2026 Intelligence Index):
+  **GLM-5.2** (Z.ai, 51.1 index score, #1 open-weight — $0.532/$1.672 per
+  Mtok in/out via OpenRouter), **DeepSeek V4 Pro** (44.3, #2, 1.6T/49B MoE,
+  wins on LiveCodeBench + price — $0.435/$0.87/Mtok), **Kimi K2.6**
+  (Moonshot AI, 44.2, #3, wins SWE-bench Pro 58.6% vs 55.4% — $0.66/$3.41/
+  Mtok). All three added to `configs/frontier-router-providers.yaml` with
+  cited `price_source` URLs and a `2026-07-10` `price_observed_at`.
+- **A new task class**, `cockpit_chat_manual_select`, added to
+  `allowed_task_classes` — a human picking a frontier model in the chat
+  dropdown for one turn, distinct from the lane's original
+  reference-eval/comparison classes, still under every redaction/budget/
+  usage gate.
+- **The live-call path** (`src/command_center/channels/frontier_client.py`,
+  new): reuses `frontier_router_eval.preflight()` for the single-call gates
+  (lane enabled, task class, key present, per-request cap) and adds what a
+  single preflight can't — a persisted usage ledger
+  (`generated/frontier-router-usage.jsonl`, gitignored) with a **monthly**
+  running total (resets each calendar month, paired with
+  `monthly_cap_usd`) and a **lifetime per-conversation** running total
+  (never resets, paired with `per_run_cap_usd` — a long-lived chat thread
+  cannot outrun its cap by waiting for the next month), a block-and-tell
+  secret scanner (`scan_for_secrets` — refuses to send, never silently
+  strips), and the actual OpenAI-compatible HTTP call. `fail_on_missing_
+  usage` is enforced: a provider response with no usage block raises
+  and records nothing, rather than guessing a cost.
+- **A frontier turn carries no tools and no board/growthos-memory
+  context** — a deliberate safety line, not an oversight. `GatewayCore`
+  gained `is_frontier`/`frontier_model_id`; `_completion` routes to
+  `frontier_client` instead of LiteLLM when set; a new `_inject_context`
+  property (`board_knobs.enabled and not is_frontier`) replaced 4 separate
+  `board_knobs.enabled` checks across both turn loops so context injection
+  can't be missed at one call site and caught at another.
+- **Cockpit wiring**: `_get_core`/`_validated_model` accept a
+  `frontier:<id>` model prefix (400 for an unknown id, 503 with the exact
+  reason — lane disabled or no key — for a real-but-unselectable one, never
+  a silent local fallback); `/api/chat/runtime` gained `frontier_models`
+  (live pricing/selectable status per candidate) and `frontier_note`; the
+  model `<select>` gained a "Frontier (paid, opt-in)" optgroup with
+  per-option cost estimates, disabled until selectable; the Chat Runtime
+  side panel gained a dedicated card listing all configured candidates with
+  a ready/not-enabled badge.
+- **A real bug found wiring this in**: `frontier_client.py` first read
+  `os.environ.get(secret_env)` directly — but the cockpit container only
+  gets the `.env` *file* mounted, not every key auto-exported as a
+  container env var, so a key set only in `.env` would have silently never
+  been seen. Fixed to resolve keys through the same `channels.core.env()`
+  merge (`.env` file + live process env) GatewayCore's own LiteLLM key
+  lookup already uses.
+- **Continual KPI-check harness** (`src/command_center/improvement/
+  frontier_benchmark.py`, `make frontier-router-benchmark`): runs
+  `configs/model-benchmarks.yaml` suites — the SAME cases used to judge
+  local incumbents — against the frontier candidates. `--dry-run` (default)
+  is a cost-only preview, no egress, works with the lane disabled. `--live`
+  makes real calls under `frontier_reference_eval` (can never promote a
+  local model) and scores each case against its own declared contract
+  (JSON keys/values, required/forbidden substrings) — no LLM judge, no
+  fabricated quality number.
+- **Enabled 2026-07-10 by Geoff's explicit request** (`OPENROUTER_API_KEY`
+  set in `.env`, `configs/frontier-router-budgets.yaml`
+  `default.enabled: true`) specifically to test cost/latency/correctness.
+  `cc validate`'s default forbidden-provider check now fails on this
+  checkout — **on purpose**: the strict scan never relaxes for a key it
+  finds in `.env`; `make frontier-router-egress-check`
+  (`check_forbidden_providers --allow-frontier-router-egress`) is the
+  correct validation command whenever the lane is active, and confirms the
+  local LiteLLM lane is unaffected either way. `.env.example`'s stray
+  `OPENROUTER_API_KEY=sk-or-your-real-key` (with unrelated `ANSWER_LLM_
+  PROVIDER`/`ANSWER_AGENT_MODEL` vars this repo never reads) was replaced
+  with a commented, correctly-documented placeholder so a fresh clone's
+  `cc validate` stays clean by default.
+- **Live-proved end-to-end**, real money spent (all logged): one smoke
+  call to DeepSeek V4 Pro (`$0.00004`), then the full `chat` suite against
+  all three candidates via `make frontier-router-benchmark LIVE=1`
+  (`$0.0007` total). Real, measured, comparable results:
+
+  | model | median latency | measured cost (3 cases) |
+  |---|---|---|
+  | glm-5.2 | 3.75s | $0.0007 |
+  | deepseek-v4-pro | 6.69s | $0.0006 |
+  | kimi-k2.6 | 13.11s | $0.0077 |
+
+  **Honest caveat — the correctness/pass-rate KPI read 0% for all three,
+  and that is a benchmark-suite mismatch, not a quality verdict.** The
+  `chat` suite's cases (`configs/model-benchmarks.yaml`) expect an EXACT
+  tool name (`search`, `read_item`) or the literal string `"unknown"` for
+  the stop-behavior case — calibrated for a LOCAL model that receives the
+  full tool schema + live board state via GatewayCore's normal context
+  injection. A frontier turn gets neither (by the safety design above), so
+  it cannot know our internal tool vocabulary; the raw responses were
+  reasonable (e.g. Kimi K2.6 on the unknown-stop case: *"I cannot proceed
+  because the repository name is required but has not been provided. I
+  will not invent a repository name"* — the correct safety behavior,
+  worded differently than the expected literal `"unknown"`). A frontier-
+  appropriate case suite (semantic scoring, not exact-tool-name matching)
+  is the real fix and is **not built yet** — tracked as open work, not
+  claimed as done.
+
+Validation: 88 new/updated tests (frontier_client, gateway frontier
+routing, cockpit backend, the benchmark harness, plus fixes to 2 pre-
+existing frontier_router_eval tests that assumed the shipped config stays
+disabled — now self-contained, since the lane's enabled state is a real
+operator decision, not a fixed invariant) — all green and hermetic
+(explicit disabled/enabled config fixtures, mocked HTTP transport, no key
+required to run the suite); the full non-job-search regression suite
+(1000+ tests) green; `cc validate`/cross-refs clean;
+`frontier-router-egress-check` clean in egress mode.
 
 ### 2026-07-02 — Research intake productized + gateway/log hygiene + skills audit + card deps
 

@@ -19,6 +19,16 @@ def _enabled_budgets():
     })
 
 
+def _disabled_budgets():
+    """An explicitly DISABLED budget — self-contained, so this test does not
+    depend on whatever configs/frontier-router-budgets.yaml's live
+    default.enabled happens to be on this checkout (that value is a genuine
+    operator decision, not a fixed invariant this suite should assert)."""
+    cfg = _enabled_budgets().model_dump(mode="json")
+    cfg["default"]["enabled"] = False
+    return FrontierRouterBudgetsConfig.model_validate(cfg)
+
+
 def _kwargs(**over):
     base = dict(
         model_id="kimi-k2", provider="openrouter", input_tokens=2000, output_tokens=500,
@@ -28,10 +38,22 @@ def _kwargs(**over):
     return base
 
 
-def test_real_config_lane_is_disabled_by_default():
-    # The shipped config has enabled=false -> any preflight refuses, fail-closed.
+def test_preflight_refuses_when_lane_disabled():
     with pytest.raises(fre.RouterDisabledError, match="disabled"):
-        fre.preflight(**_kwargs(budgets_cfg=fre.load_budgets()))
+        fre.preflight(**_kwargs(budgets_cfg=_disabled_budgets()))
+
+
+def test_real_config_is_schema_valid_whatever_its_enabled_state():
+    """Whether the operator has the lane on or off is a real, changeable
+    decision (see docs — enabling requires the key + this flag +
+    `make frontier-router-egress-check`); what must ALWAYS hold is that the
+    checked-in file still satisfies the safety invariants the schema enforces
+    (redaction required, usage accounting required if enabled, etc.)."""
+    cfg = fre.load_budgets()
+    assert cfg.default.require_redaction is True
+    if cfg.default.enabled:
+        assert cfg.default.fail_on_missing_usage is True
+        assert cfg.default.require_human_approval_for_live_repo_context is True
 
 
 def test_preflight_allows_when_every_gate_passes():
@@ -86,7 +108,9 @@ def test_dry_run_report_previews_cost_without_calling():
         model_id="glm-5.2", provider="openrouter", input_tokens=120_000,
         output_tokens=8_000, task_class="frontier_reference_eval")
     assert rep["live_call"] is False
-    assert rep["lane_enabled"] is False           # shipped config is disabled
+    # lane_enabled just mirrors the live config's current operator decision —
+    # a bool either way, never a crash/None
+    assert isinstance(rep["lane_enabled"], bool)
     assert rep["estimated_cost_usd"] > 0
     assert rep["provider"] == "openrouter"
 
@@ -95,7 +119,7 @@ def test_dry_run_report_picks_cheapest_when_provider_omitted():
     rep = fre.dry_run_report(
         model_id="glm-5.2", provider=None, input_tokens=2_000, output_tokens=500,
         task_class="frontier_reference_eval")
-    # glm-5.2 openrouter ($1.20/$4.10) is cheaper than z_ai_direct ($1.40/$4.40) at this size
+    # glm-5.2 openrouter ($0.532/$1.672) is cheaper than z_ai_direct ($1.40/$4.40)
     assert rep["provider"] == "openrouter"
     assert rep["budget_verdict"] == "allowed"
 

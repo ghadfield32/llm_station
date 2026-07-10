@@ -3,7 +3,6 @@ only when the budget is enabled with redaction + usage accounting. The local lan
 """
 import textwrap
 
-import pytest
 
 from command_center.cli import check_forbidden_providers as cfp
 

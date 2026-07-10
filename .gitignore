@@ -94,6 +94,12 @@ generated/memory/
 # ── Kanban event log — source-of-truth event stream, per-deployment runtime ──
 generated/kanban-events.jsonl
 
+# ── Frontier-router usage ledger + benchmark reports — real per-deployment spend
+# data and point-in-time comparison results, regenerate via make frontier-router-* ──
+generated/frontier-router-usage.jsonl
+generated/frontier-benchmark-report.json
+generated/frontier-benchmark-report.md
+
 # ── Local staging / scratch ───────────────────────────────────────────────
 _staging/
 .codex_tmp/

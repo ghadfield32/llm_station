@@ -202,6 +202,9 @@ frontier-router-price-audit:  ## Flag stale frontier-router provider prices (nev
 frontier-router-egress-check:  ## Forbidden-providers check in EGRESS mode (permits budgeted router keys; local lane stays strict).
 	@$(PY) -m command_center.cli.check_forbidden_providers --allow-frontier-router-egress
 
+frontier-router-benchmark:  ## Continual top-3 KPI check (configs/model-benchmarks.yaml suite vs frontier candidates). SUITE= LIVE=1 for real calls (spends money if the lane is enabled).
+	@$(PY) -m command_center.improvement.frontier_benchmark --suite $(or $(SUITE),chat) $(if $(LIVE),--live,)
+
 model-fit:  ## Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
 	@$(PY) -m command_center.cli.model_fit $(if $(CTX),--ctx $(CTX),) $(if $(MODEL),--model $(MODEL),) $(if $(ENV),--env $(ENV),) $(if $(VRAM),--vram-gb $(VRAM),)
 

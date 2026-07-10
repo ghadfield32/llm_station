@@ -32,17 +32,24 @@ price_freshness:
   stale_action: warn_in_scan
   auto_update: false
 
+# 2026-07-10 top-3 pick (research: WebSearch against OpenRouter's own listing pages +
+# artificialanalysis.ai's July 2026 Intelligence Index; see docs/reviews/2026-07-10-frontier-model-pick.md
+# for the full comparison and citations). All three are open-weight, all three are the CURRENT
+# generation as of this date, and — per Artificial Analysis's July 2026 index — they hold the
+# top 3 open-weight positions: GLM-5.2 (51.1, #1 open-weight), DeepSeek V4 Pro (44.3, #2),
+# Kimi K2.6 (44.2, #3). None fit local VRAM (frontier_watch lane) — this file is the ONLY path
+# to using them, and only once an operator budgets + keys the lane (see frontier-router-budgets.yaml).
 models:
   glm-5.2:                       # local_lane stays frontier_watch (does_not_fit 24/16/56 GB)
     local_lane: frontier_watch
     router_candidates:
       - provider: openrouter
         model: z-ai/glm-5.2
-        input_usd_per_mtok: 1.20
-        output_usd_per_mtok: 4.10
-        context_tokens: 1000000
-        price_source: public_provider_page
-        price_observed_at: "2026-06-20"
+        input_usd_per_mtok: 0.532
+        output_usd_per_mtok: 1.672
+        context_tokens: 1048576
+        price_source: https://openrouter.ai/z-ai/glm-5.2
+        price_observed_at: "2026-07-10"
         price_is_drift_prone: true
       - provider: z_ai_direct
         model: glm-5.2
@@ -54,6 +61,36 @@ models:
         price_observed_at: "2026-06-20"
         price_is_drift_prone: true
 
+  # DeepSeek V4 Pro (1.6T total / 49B active MoE): #2 open-weight on the July 2026 AA index,
+  # wins on LiveCodeBench, the 1M-token context, and PRICE — the cheapest of the top 3.
+  deepseek-v4-pro:
+    local_lane: frontier_watch
+    router_candidates:
+      - provider: openrouter
+        model: deepseek/deepseek-v4-pro
+        input_usd_per_mtok: 0.435
+        output_usd_per_mtok: 0.87
+        context_tokens: 1048576
+        price_source: https://openrouter.ai/deepseek/deepseek-v4-pro
+        price_observed_at: "2026-07-10"
+        price_is_drift_prone: true
+
+  # Kimi K2.6 (Moonshot AI): #3 open-weight on the July 2026 AA index; wins SWE-bench Pro
+  # (58.6% vs DeepSeek V4 Pro's 55.4%), HLE-with-tools, native agent swarms, and multimodal —
+  # the strongest of the three on agentic/tool-use quality, which is our chat role's KPI.
+  kimi-k2.6:
+    local_lane: frontier_watch
+    router_candidates:
+      - provider: openrouter
+        model: moonshotai/kimi-k2.6
+        input_usd_per_mtok: 0.66
+        output_usd_per_mtok: 3.41
+        context_tokens: 262144
+        price_source: https://openrouter.ai/moonshotai/kimi-k2.6
+        price_observed_at: "2026-07-10"
+        price_is_drift_prone: true
+
+  # Prior Kimi generations — kept for continuity/comparison, superseded by kimi-k2.6 above.
   kimi-k2:
     local_lane: frontier_watch
     router_candidates:
