@@ -175,9 +175,12 @@ def test_chat_threads_store_shared_metadata(client, monkeypatch, tmp_path):
     mod, tc = client
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
     monkeypatch.setattr(mod, "CHAT_THREADS_FILE", tmp_path / "chat-threads.json")
+    # transcripts off -> the server keeps compact thread metadata ONLY
+    monkeypatch.setenv("GATEWAY_TRANSCRIPTS", "0")
     body = tc.get("/api/chat/threads").json()
     assert body["threads"] == []
     assert body["storage"] == "server_metadata_only"
+    assert body["transcripts"]["enabled"] is False
 
     saved = tc.post("/api/chat/threads", json={
         "conversation_id": "job_application:job_1",
@@ -196,6 +199,47 @@ def test_chat_threads_store_shared_metadata(client, monkeypatch, tmp_path):
     assert len(updated["threads"]) == 1
     assert updated["threads"][0]["title"] == "What is the next action?"
     assert updated["threads"][0]["last_prompt"] == "What is the next action?"
+
+
+def test_chat_thread_transcript_serves_full_story(client, monkeypatch, tmp_path):
+    """The timeline endpoint returns the flight-recorder turns UNTRUNCATED —
+    the whole point vs the SSE stream's 200/300-char cuts."""
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "CHAT_THREADS_FILE", tmp_path / "chat-threads.json")
+    monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path / "transcripts"))
+    monkeypatch.delenv("GATEWAY_TRANSCRIPTS", raising=False)
+
+    from command_center.channels.transcript import TurnRecorder
+    long_args = '{"query": "' + "x" * 400 + '"}'
+    rec = TurnRecorder(surface="app", model="chat",
+                       conversation_id="story-1", user_text="do the thing")
+    rec.context("board_state")
+    rec.tool("stage_card", long_args)
+    rec.tool_result("stage_card", "ok-" + "y" * 400)
+    rec.final("done")
+    rec.flush()
+
+    threads = tc.get("/api/chat/threads").json()
+    assert threads["storage"] == "server_metadata_plus_transcripts"
+    assert threads["transcripts"]["enabled"] is True
+
+    body = tc.get("/api/chat/threads/story-1/transcript").json()
+    assert body["turn_count"] == 1 and body["recording_enabled"] is True
+    turn = body["turns"][0]
+    assert turn["final"] == "done"
+    assert turn["context_blocks"] == ["board_state"]
+    tool = next(e for e in turn["events"] if e["type"] == "tool")
+    assert tool["args"] == long_args                 # full args, no truncation
+    result = next(e for e in turn["events"] if e["type"] == "tool_result")
+    assert result["result"] == "ok-" + "y" * 400
+
+
+def test_chat_transcript_endpoint_stays_behind_the_chat_wall(client):
+    # read-only deployments (no KANBAN_UI_CHAT_ENABLED) must not serve
+    # conversation content
+    _, tc = client
+    assert tc.get("/api/chat/threads/any/transcript").status_code == 503
 
 
 def test_job_search_profile_controls_surface_question_policy(client):

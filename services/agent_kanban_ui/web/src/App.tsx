@@ -10,9 +10,10 @@ import {
   fetchBoardRegistry,
   MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
   fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
-  fetchChatThreads, fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
-  fetchJobPacket, JobPacket, PacketValidation, AgentTraceEntry,
-  requestPacketChanges, submitJobApplication,
+  fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse,
+  fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
+  fetchJobPacket, JobPacket, JobStoryEntry, PacketValidation, AgentTraceEntry,
+  requestPacketChanges, submitJobApplication, updateJobPacketFile,
   fetchDomainSchema, fetchJobProfileControls, fetchMetrics, fetchMission, fetchMissions, fetchModels,
   fetchRuntimeDebug, fetchStatus, moveDomainCard, postAction, RuntimeDebug, streamChat,
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
@@ -717,11 +718,12 @@ function GenericTaskCard({ card }: { card: DomainCard }) {
   );
 }
 function DomainCardTile({
-  spec, card, onOpen, canDrag = false, onDragStart, moveTargets = [], onMove,
+  spec, card, onOpen, canDrag = false, onDragStart, moveTargets = [], onMove, onOpenPacket,
 }: {
   spec: DomainSpec; card: DomainCard; onOpen: () => void;
   canDrag?: boolean; onDragStart?: () => void;
   moveTargets?: string[]; onMove?: (status: string) => void;
+  onOpenPacket?: () => void;
 }) {
   let body: ReactNode;
   switch (spec.card_component) {
@@ -742,6 +744,14 @@ function DomainCardTile({
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(); }}>
       {body}
+      {onOpenPacket && (
+        <button className="actbtn card-packet-btn"
+          title="open the application packet: resume, cover letter, story, approve & submit"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onOpenPacket(); }}>
+          review packet
+        </button>
+      )}
       {moveTargets.length > 0 && (
         <select className="touch-move domain-touch-move"
           aria-label={`Move ${domainTitle(card, spec)} to lane`}
@@ -1495,17 +1505,46 @@ function DomainProgressPanel({ progress, onOpenChat, onProgressChanged, onOpenPa
 }
 
 // ---- application packet review (resume/cover letter/answers + agent trace) --
-const PACKET_TABS: { key: string; label: string; file?: string }[] = [
+const PACKET_TABS: { key: string; label: string; file?: string; editable?: boolean }[] = [
   { key: "overview", label: "Overview" },
-  { key: "resume", label: "Resume", file: "resume" },
-  { key: "cover_letter", label: "Cover Letter", file: "cover_letter" },
-  { key: "answer_bank", label: "Answers", file: "answer_bank" },
-  { key: "recruiter_message", label: "Recruiter Msg", file: "recruiter_message" },
+  { key: "story", label: "Story" },
+  { key: "resume", label: "Resume", file: "resume", editable: true },
+  { key: "cover_letter", label: "Cover Letter", file: "cover_letter", editable: true },
+  { key: "answer_bank", label: "Answers", file: "answer_bank", editable: true },
+  { key: "recruiter_message", label: "Recruiter Msg", file: "recruiter_message", editable: true },
   { key: "followups", label: "Follow-ups", file: "followups" },
   { key: "manual_checklist", label: "Checklist", file: "manual_checklist" },
   { key: "job_description", label: "Job Description", file: "job_description" },
   { key: "agent_trace", label: "Agent Trace" },
 ];
+
+function StoryView({ story }: { story: JobStoryEntry[] }) {
+  if (!story.length) {
+    return <div className="muted">No story recorded for this card yet.</div>;
+  }
+  return (
+    <div className="packet-story">
+      {story.map((s, i) => {
+        const head = (
+          <>
+            <span className="story-time">{dateText(s.ts)}</span>
+            <Badge value={s.kind} />
+            <b>{s.title}</b>
+            <span className="muted small">{s.summary}</span>
+          </>
+        );
+        return s.detail ? (
+          <details className={`story-row story-${s.kind}`} key={i}>
+            <summary>{head}</summary>
+            <pre className="packet-doc">{s.detail}</pre>
+          </details>
+        ) : (
+          <div className={`story-row story-${s.kind}`} key={i}>{head}</div>
+        );
+      })}
+    </div>
+  );
+}
 
 function PacketChecklist({ validation }: { validation: PacketValidation }) {
   return (
@@ -1577,9 +1616,11 @@ function PacketReviewModal({ spec, card, onClose, onChanged }: {
   const [err, setErr] = useState<string | null>(null);
   const [tab, setTab] = useState("overview");
   const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState<"changes" | "submit" | null>(null);
+  const [busy, setBusy] = useState<"changes" | "submit" | "edit" | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<Record<string, unknown> | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
 
   useEffect(() => {
     let live = true;
@@ -1589,18 +1630,30 @@ function PacketReviewModal({ spec, card, onClose, onChanged }: {
     return () => { live = false; };
   }, [spec.domain_id, id]);
 
-  async function sendChanges() {
-    const text = notes.trim();
-    if (!text) return;
+  async function sendChanges(text: string) {
     setBusy("changes");
-    setMsg("notes recorded — regenerating with the agent writer (this can take a minute)...");
+    setMsg(text
+      ? "notes recorded — regenerating with the agent writer (this can take a minute)..."
+      : "regenerating with the current writer (this can take a minute)...");
     try {
       const result = await requestPacketChanges(spec.domain_id, id, text);
       setPacket(result.packet);
       setNotes("");
       setMsg(result.regenerate_error
-        ? `ERR notes recorded, but regeneration failed: ${result.regenerate_error}`
+        ? `ERR ${text ? "notes recorded, but " : ""}regeneration failed: ${result.regenerate_error}`
         : `regenerated — revision ${String(result.packet.record.revision)} is ready for review`);
+      onChanged();
+    } catch (e) { setMsg("ERR " + (e as Error).message); }
+    finally { setBusy(null); }
+  }
+
+  async function saveEdit(fileKey: string) {
+    setBusy("edit"); setMsg(null);
+    try {
+      const result = await updateJobPacketFile(spec.domain_id, id, fileKey, editText);
+      setPacket(result.packet);
+      setEditing(null);
+      setMsg(`${fileKey.replace(/_/g, " ")} saved — recorded as a manual edit in the story`);
       onChanged();
     } catch (e) { setMsg("ERR " + (e as Error).message); }
     finally { setBusy(null); }
@@ -1615,19 +1668,25 @@ function PacketReviewModal({ spec, card, onClose, onChanged }: {
     try {
       const result = await submitJobApplication(spec.domain_id, id);
       setSubmitted(result.side_effect ?? {});
-      const email = (result.side_effect as { email?: { status?: string; detail?: string; to?: string } } | null)?.email;
-      setMsg(`submitted — card moved to Completed; email record: ${email?.status ?? "unknown"}`
-        + (email?.status === "sent" ? ` to ${email?.to}` : email?.detail ? ` (${email.detail})` : ""));
-      const refreshed = await fetchJobPacket(spec.domain_id, id);
-      setPacket(refreshed);
+      const email = (result.side_effect as {
+        email?: { status?: string; detail?: string; error?: string; to?: string };
+      } | null)?.email;
+      const emailNote = email?.status === "sent" ? ` to ${email?.to}`
+        : (email?.detail || email?.error) ? ` (${email.detail ?? email.error})` : "";
+      setMsg(`submitted — card moved to Completed; email record: ${email?.status ?? "unknown"}${emailNote}`);
       onChanged();
-    } catch (e) { setMsg("ERR " + (e as Error).message); }
+    } catch (e) { setMsg("ERR " + (e as Error).message); setBusy(null); return; }
     finally { setBusy(null); }
+    // refresh is best-effort: a failed refetch must not overwrite the
+    // submit-succeeded message above
+    try { setPacket(await fetchJobPacket(spec.domain_id, id)); } catch { /* keep result */ }
   }
 
   const record = packet?.record ?? {};
   const validation = packet?.validation;
-  const alreadyApplied = valText(record.status) === "applied";
+  // applied_at is the durable submit marker — status mutates later (e.g. a
+  // recruiter note flips it to recruiter_contact) and must not re-arm submit
+  const alreadyApplied = !!record.applied_at || valText(record.status) === "applied";
   const canSubmit = !!validation?.ok && !alreadyApplied && !busy;
   const title = `${valText(record.company) || valText(card.company)} — ${valText(record.role_title) || valText(card.role_title)}`;
 
@@ -1684,8 +1743,13 @@ function PacketReviewModal({ spec, card, onClose, onChanged }: {
                     onChange={(e) => setNotes(e.target.value)} />
                   <div className="note-actions">
                     <button className="actbtn" disabled={!!busy || !notes.trim() || alreadyApplied}
-                      onClick={() => void sendChanges()}>
+                      onClick={() => void sendChanges(notes.trim())}>
                       {busy === "changes" ? "regenerating..." : "request changes & regenerate"}
+                    </button>
+                    <button className="actbtn" disabled={!!busy || alreadyApplied}
+                      title="rewrite the materials with the current writer and existing notes — no new note is recorded"
+                      onClick={() => void sendChanges("")}>
+                      regenerate (no new notes)
                     </button>
                   </div>
                 </div>
@@ -1710,11 +1774,37 @@ function PacketReviewModal({ spec, card, onClose, onChanged }: {
                 </div>
               </div>
             )}
+            {tab === "story" && <StoryView story={packet.story ?? []} />}
             {PACKET_TABS.filter((t) => t.file).map((t) => tab === t.key && (
               <div key={t.key} className="packet-body">
-                {packet.files[t.file as string]
-                  ? <pre className="packet-doc">{packet.files[t.file as string]}</pre>
-                  : <div className="muted">not generated for this packet</div>}
+                {t.editable && !alreadyApplied && (
+                  <div className="note-actions packet-edit-bar">
+                    {editing === t.file ? (
+                      <>
+                        <button className="actbtn" disabled={busy === "edit" || !editText.trim()}
+                          onClick={() => void saveEdit(t.file as string)}>
+                          {busy === "edit" ? "saving..." : "save changes"}
+                        </button>
+                        <button className="actbtn" disabled={busy === "edit"}
+                          onClick={() => setEditing(null)}>cancel</button>
+                      </>
+                    ) : (
+                      <button className="actbtn"
+                        onClick={() => {
+                          setEditing(t.file as string);
+                          setEditText(packet.files[t.file as string] ?? "");
+                        }}>
+                        edit {t.label.toLowerCase()}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {editing === t.file
+                  ? <textarea className="packet-edit" value={editText}
+                      onChange={(e) => setEditText(e.target.value)} />
+                  : packet.files[t.file as string]
+                    ? <pre className="packet-doc">{packet.files[t.file as string]}</pre>
+                    : <div className="muted">not generated for this packet</div>}
               </div>
             ))}
             {tab === "agent_trace" && <AgentTraceView entries={packet.agent_trace} />}
@@ -1727,12 +1817,14 @@ function PacketReviewModal({ spec, card, onClose, onChanged }: {
 
 function DomainDrawer({
   spec, card, actions, moveTargets = [], onMove, onChanged, onClose, onOpenChat, onOpenPacket,
+  refreshTick = 0,
 }: {
   spec: DomainSpec; card: DomainCard; actions?: DomainActions;
   moveTargets?: string[]; onMove?: (status: string) => void;
   onChanged: () => void; onClose: () => void;
   onOpenChat?: (prompt: string, conversationId?: string) => void;
   onOpenPacket?: () => void;
+  refreshTick?: number;
 }) {
   const [detail, setDetail] = useState<DomainCardDetail | null>(null);
   const [progress, setProgress] = useState<DomainCardProgress | null>(null);
@@ -1754,7 +1846,9 @@ function DomainDrawer({
       .then((d) => { if (live) setProgress(d); })
       .catch((e) => { if (live) setProgressErr((e as Error).message); });
     return () => { live = false; };
-  }, [spec.domain_id, id]);
+    // refreshTick: packet review actions (regenerate/submit) bump it so the
+    // open drawer refetches instead of showing pre-action progress
+  }, [spec.domain_id, id, refreshTick]);
 
   const activeCard = detail?.card ?? card;
   const fields = detail?.drawer_fields ?? spec.drawer_fields;
@@ -1847,6 +1941,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   const [showJobPresets, setShowJobPresets] = useState(false);
   const [jobBoardMode, setJobBoardMode] = useState<JobBoardMode>("manual");
   const [packetFor, setPacketFor] = useState<{ spec: DomainSpec; card: DomainCard } | null>(null);
+  const [drawerTick, setDrawerTick] = useState(0);
   const topScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const boardScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
@@ -2142,6 +2237,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                                 canDrag={canMove} onDragStart={() => setDragged({ spec, card })}
                                 moveTargets={moveTargetsFor(card)}
                                 onMove={(target) => void moveDomainCardTo(card, target)}
+                                onOpenPacket={isJobDomain && card.application_id
+                                  ? () => setPacketFor({ spec, card })
+                                  : undefined}
                                 onOpen={() => setSelected({ spec, card })} />
                             ))}
                           </div>
@@ -2161,6 +2259,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                 canDrag={canMove} onDragStart={() => setDragged({ spec, card })}
                 moveTargets={moveTargetsFor(card)}
                 onMove={(target) => void moveDomainCardTo(card, target)}
+                onOpenPacket={isJobDomain && card.application_id
+                  ? () => setPacketFor({ spec, card })
+                  : undefined}
                 onOpen={() => setSelected({ spec, card })} />
             ))}
           </div>
@@ -2171,6 +2272,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
           moveTargets={selected.spec.domain_id === spec.domain_id ? moveTargetsFor(selected.card) : []}
           onMove={(target) => void moveDomainCardTo(selected.card, target)}
           onChanged={load}
+          refreshTick={drawerTick}
           onClose={() => setSelected(null)} onOpenChat={onOpenChat}
           onOpenPacket={selected.spec.domain_id === "job_application"
             ? () => setPacketFor(selected)
@@ -2178,7 +2280,8 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
       )}
       {packetFor && (
         <PacketReviewModal spec={packetFor.spec} card={packetFor.card}
-          onChanged={load} onClose={() => setPacketFor(null)} />
+          onChanged={() => { setDrawerTick((t) => t + 1); void load(); }}
+          onClose={() => setPacketFor(null)} />
       )}
       {showJobPresets && <JobPresetDrawer onClose={() => setShowJobPresets(false)} />}
     </>
@@ -2591,6 +2694,83 @@ function ChatRuntimePanel({ runtime, handoffText = "" }: { runtime: ChatRuntime 
   );
 }
 
+function ThreadTimeline({ transcript, loading, error, onRefresh }: {
+  transcript: ChatTranscriptResponse | null;
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+}) {
+  if (error) return <div className="muted">ERR {error}</div>;
+  if (!transcript) return <div className="muted">{loading ? "loading the full story..." : "no story loaded"}</div>;
+  return (
+    <div className="chat-story">
+      <div className="chat-story-head muted small">
+        <span>
+          full story — {transcript.turn_count} recorded turn{transcript.turn_count === 1 ? "" : "s"}
+          {" "}(flight recorder{transcript.recording_enabled ? "" : " — recording OFF (GATEWAY_TRANSCRIPTS=0)"})
+        </span>
+        <button className="clear" onClick={onRefresh} disabled={loading}>
+          {loading ? "…" : "refresh"}
+        </button>
+      </div>
+      {transcript.turns.length === 0 && (
+        <div className="muted">
+          No recorded turns for this thread yet. Turns are recorded from the moment the
+          flight recorder shipped — older conversations are not back-filled. Send a
+          message, then refresh.
+        </div>
+      )}
+      {transcript.turns.map((turn, i) => {
+        const tools = turn.events.filter((ev) => ev.type === "tool").length;
+        return (
+          <details className="story-row story-turn" key={i} open={i === transcript.turns.length - 1}>
+            <summary>
+              <span className="story-time">{fmtThreadTime(turn.ts)}</span>
+              <Badge value={turn.surface || "app"} />
+              <b>{turn.user_text ? (turn.user_text.length > 90 ? turn.user_text.slice(0, 87) + "..." : turn.user_text) : "(no user text)"}</b>
+              <span className="muted small">{turn.model_role}{tools ? ` · ${tools} tool call${tools === 1 ? "" : "s"}` : ""}</span>
+            </summary>
+            <div className="story-turn-body">
+              {turn.context_blocks.length > 0 && (
+                <div className="muted small">context injected: {turn.context_blocks.join(", ")}</div>
+              )}
+              {turn.user_text && <pre className="packet-doc story-user">{turn.user_text}</pre>}
+              {turn.events.map((ev, j) => {
+                if (ev.type === "round") {
+                  return <div className="muted small story-round" key={j}>— round {ev.n} —</div>;
+                }
+                if (ev.type === "tool" || ev.type === "tool_result") {
+                  const payload = ev.type === "tool" ? ev.args : ev.result;
+                  return (
+                    <details className="story-ev" key={j}>
+                      <summary>
+                        <span className="story-time">{fmtThreadTime(ev.ts ?? "")}</span>
+                        <Badge value={ev.type === "tool" ? "call" : "result"} />
+                        <code>{ev.name}</code>
+                      </summary>
+                      <pre>{payload || "(empty)"}</pre>
+                    </details>
+                  );
+                }
+                return (
+                  <details className="story-ev" key={j}>
+                    <summary><Badge value={ev.type} /></summary>
+                    <pre>{JSON.stringify(ev, null, 2)}</pre>
+                  </details>
+                );
+              })}
+              <div className="story-row story-final">
+                <b>final</b>
+                <pre className="packet-doc">{turn.final ?? "(no final answer recorded)"}</pre>
+              </div>
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
 function ChatView({ roles, runtime, draft }: {
   roles: string[];
   runtime: ChatRuntime | null;
@@ -2602,6 +2782,10 @@ function ChatView({ roles, runtime, draft }: {
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads());
   const [busy, setBusy] = useState(false);
+  const [chatMode, setChatMode] = useState<"live" | "story">("live");
+  const [story, setStory] = useState<ChatTranscriptResponse | null>(null);
+  const [storyLoading, setStoryLoading] = useState(false);
+  const [storyError, setStoryError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   const activeThread = threads.find((t) => t.id === conversationId);
   const handoffText = input.trim() || activeThread?.lastPrompt || `Open cockpit conversation ${conversationId}`;
@@ -2672,6 +2856,9 @@ function ChatView({ roles, runtime, draft }: {
     setConversationId(id);
     setInput("");
     setEvents([]);
+    setChatMode("live");
+    setStory(null);
+    setStoryError(null);
     const thread = {
       id,
       title: "New cockpit chat",
@@ -2689,12 +2876,32 @@ function ChatView({ roles, runtime, draft }: {
   function openThread(thread: ChatThread) {
     setConversationId(thread.id);
     if (thread.lastPrompt) setInput(thread.lastPrompt);
+    setStory(null);
+    setStoryError(null);
+    if (chatMode === "story") void loadStory(thread.id);
+  }
+
+  async function loadStory(id = conversationId) {
+    setStoryLoading(true);
+    try {
+      setStory(await fetchChatTranscript(id));
+      setStoryError(null);
+    } catch (e) {
+      setStoryError((e as Error).message);
+    } finally { setStoryLoading(false); }
+  }
+
+  function toggleStory() {
+    if (chatMode === "story") { setChatMode("live"); return; }
+    setChatMode("story");
+    void loadStory();
   }
 
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
+    setChatMode("live");   // watch the turn stream; the story view is for review
     setEvents((e) => [...e, { type: "you", content: text }]);
     rememberThread(conversationId, text);
     setBusy(true);
@@ -2718,7 +2925,12 @@ function ChatView({ roles, runtime, draft }: {
             <span className="muted small">thread <code>{conversationId}</code></span>
             <span className="muted small">the agent moves/assigns via governed verbs — Approved stays human-only</span>
             <button className="clear" onClick={startNewChat}>new chat</button>
-            {events.length > 0 && (
+            <button className={`clear ${chatMode === "story" ? "thread-on" : ""}`}
+              title="the flight-recorder story of this thread: every turn with full tool args/results, injected context, and the final answer"
+              onClick={toggleStory}>
+              {chatMode === "story" ? "live view" : "full story"}
+            </button>
+            {events.length > 0 && chatMode === "live" && (
               <button className="clear" onClick={() => setEvents([])}>clear</button>
             )}
           </div>
@@ -2739,11 +2951,18 @@ function ChatView({ roles, runtime, draft }: {
               ))}
             </HorizontalScroller>
           </div>
-          <div className="chat-log">
-            {events.length === 0 && <div className="muted">Ask the agent to do something — e.g. "stage the odds_promote card", "what's blocked?", "archive the oldest paper".</div>}
-            {events.map((ev, i) => <ChatLine key={i} ev={ev} />)}
-            <div ref={endRef} />
-          </div>
+          {chatMode === "story" ? (
+            <div className="chat-log chat-log-story">
+              <ThreadTimeline transcript={story} loading={storyLoading}
+                error={storyError} onRefresh={() => void loadStory()} />
+            </div>
+          ) : (
+            <div className="chat-log">
+              {events.length === 0 && <div className="muted">Ask the agent to do something — e.g. "stage the odds_promote card", "what's blocked?", "archive the oldest paper".</div>}
+              {events.map((ev, i) => <ChatLine key={i} ev={ev} />)}
+              <div ref={endRef} />
+            </div>
+          )}
           <div className="chat-input">
             <input value={input} placeholder="ask the agent…"
               onChange={(e) => setInput(e.target.value)}

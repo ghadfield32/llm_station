@@ -243,6 +243,41 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 .packet-submission > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .packet-submit { border-color: var(--ok); font-weight: 600; }
 .packet-overview h3 { margin: 14px 0 8px; }
+.packet-story { display: flex; flex-direction: column; gap: 6px; }
+.story-row { display: block; background: var(--col); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; font-size: 13px; }
+.story-row > summary, .story-row.story-plain { cursor: default; }
+.story-row > summary { cursor: pointer; }
+.story-row > summary, .story-row:not(details) { display: flex; gap: 8px;
+  align-items: baseline; flex-wrap: wrap; }
+.story-time { color: var(--muted); font-family: ui-monospace, monospace;
+  font-size: 12px; flex: 0 0 auto; }
+.story-agent { border-left: 3px solid var(--accent); }
+.story-submission { border-left: 3px solid var(--ok); }
+.story-note { border-left: 3px solid var(--warn); }
+.story-row .packet-doc { margin-top: 8px; }
+.packet-edit { width: 100%; min-height: 340px; font-size: 13px; line-height: 1.5;
+  font-family: ui-monospace, monospace; background: var(--col);
+  border: 1px solid var(--accent); border-radius: 8px; padding: 12px;
+  color: var(--fg); resize: vertical; }
+.packet-edit-bar { margin-bottom: 8px; }
+.card-packet-btn { margin-top: 8px; width: 100%; font-size: 12px; }
+
+/* chat full-story timeline (flight recorder) — reuses the story-row grammar */
+.chat-story { display: flex; flex-direction: column; gap: 6px; }
+.chat-story-head { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.story-turn { border-left: 3px solid var(--accent); }
+.story-turn-body { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.story-user { max-height: 200px; overflow: auto; }
+.story-round { text-align: center; }
+.story-ev { background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 8px; font-size: 12px; }
+.story-ev > summary { cursor: pointer; display: flex; gap: 8px;
+  align-items: baseline; flex-wrap: wrap; min-height: 28px; }
+.story-ev pre { margin-top: 6px; white-space: pre-wrap; word-break: break-word;
+  max-height: 320px; overflow: auto; font-size: 12px; }
+.story-final { border-left: 3px solid var(--ok); }
+.story-final pre { white-space: pre-wrap; word-break: break-word; }
 @media (max-width: 720px) {
   .packet-modal { width: 100vw; height: 100%; max-height: 100%; border-radius: 0; }
 }

@@ -195,6 +195,118 @@ def test_submit_finalizes_moves_and_records(client):
     assert "already in Completed" in again.json()["detail"]
 
 
+def test_cli_finalized_application_completes_idempotently(client):
+    """`cc job-search finalize` marks the record applied but cannot write the
+    cockpit's event-log board. The subsequent cockpit submit/drag must complete
+    the card WITHOUT a second submission or duplicate email."""
+    from command_center.job_search.finalize import finalize_application
+
+    app_id = _prepared_card(tmp_path=client[2])
+    _, tc, tmp_path = client
+    finalize_application(app_id, root=tmp_path, env={})
+    resp = tc.post(
+        "/api/domain/job_application/card/job-review-me/packet/submit",
+        json={"confirm": True})
+    assert resp.status_code == 200, resp.json()
+    side = resp.json()["side_effect"]
+    assert side["already_submitted"] is True
+    assert side["email"]["status"] == "skipped"       # no duplicate record email
+    assert resp.json()["card"]["status"] == "Completed"
+    # applied_at from the original finalize survived (not overwritten)
+    record = yaml.safe_load(
+        (tmp_path / "applications_active" / app_id / "application.yml")
+        .read_text(encoding="utf-8"))
+    assert record["status"] == "applied"
+
+
+def test_blocked_drag_leaves_card_and_events_untouched_after_reorder(client):
+    """Finalize now runs BEFORE the governed event: a blocked completion must
+    leave the event log unchanged and the card in its original lane."""
+    _, tc, tmp_path = client
+    _prepared_card(tmp_path, card_id="job-blocked-drag")
+    tc.post("/api/domain/job_application/card/job-blocked-drag/packet/request-changes",
+            json={"notes": "hold on", "regenerate": False})
+    events_before = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    resp = tc.post("/api/domain/job_application/move",
+                   json={"card_id": "job-blocked-drag", "status": "Completed"})
+    assert resp.status_code == 409
+    assert (tmp_path / "events.jsonl").read_text(encoding="utf-8") == events_before
+    card = tc.get("/api/domain/job_application/cards").json()["cards"]
+    me = next(c for c in card if c["card_id"] == "job-blocked-drag")
+    assert me["status"] == "Needs Geoff"
+
+
+def test_story_lists_moments_in_linear_order(client, monkeypatch):
+    """The Story view: notes, edits, and agent attempts appear as ordered
+    moments with the long content attached as expandable detail."""
+    mod, tc, tmp_path = client
+    _prepared_card(tmp_path)
+    from command_center.job_search import application_memory
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(
+        application_memory, "generate_materials",
+        lambda inputs, bank, *, trace_path, trace_step, **kw: _fake_generated())
+    tc.post("/api/domain/job_application/card/job-review-me/packet/request-changes",
+            json={"notes": "tighten the summary"})
+    body = tc.get("/api/domain/job_application/card/job-review-me/packet").json()
+    story = body["story"]
+    assert story, "story must not be empty after a review round"
+    kinds = [s["kind"] for s in story]
+    assert "note" in kinds
+    titles = " | ".join(s["title"] for s in story)
+    assert "review changes requested" in titles
+    assert "materials regenerated" in titles
+    # linear order: timestamps never go backwards
+    stamps = [s["ts"] for s in story if s["ts"]]
+    assert stamps == sorted(stamps)
+
+
+def test_packet_file_edit_saves_and_records_manual_edit(client):
+    _, tc, tmp_path = client
+    app_id = _prepared_card(tmp_path)
+    resp = tc.put(
+        "/api/domain/job_application/card/job-review-me/packet/file",
+        json={"file": "resume", "content": "# Geoffrey Hadfield\nGeoff's own rewrite"})
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["status"] == "saved"
+    assert "Geoff's own rewrite" in body["packet"]["files"]["resume"]
+    # provenance: the edit is a story moment and recorded on the record
+    assert body["packet"]["record"]["generation"]["manual_edits"][0]["file"] == "resume"
+    assert any("manual edit" in s["title"] for s in body["packet"]["story"])
+    app_dir = tmp_path / "applications_active" / app_id
+    assert "Geoff's own rewrite" in (app_dir / "generated_resume.md").read_text(encoding="utf-8")
+    # guardrails: unknown file and empty content are refused
+    assert tc.put("/api/domain/job_application/card/job-review-me/packet/file",
+                  json={"file": "application", "content": "x"}).status_code == 400
+    assert tc.put("/api/domain/job_application/card/job-review-me/packet/file",
+                  json={"file": "resume", "content": "   "}).status_code == 400
+
+
+def test_regenerate_without_notes_records_no_review_note(client, monkeypatch):
+    _, tc, tmp_path = client
+    app_id = _prepared_card(tmp_path)
+    from command_center.job_search import application_memory
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(
+        application_memory, "generate_materials",
+        lambda inputs, bank, *, trace_path, trace_step, **kw: _fake_generated())
+    resp = tc.post(
+        "/api/domain/job_application/card/job-review-me/packet/request-changes",
+        json={"notes": "", "regenerate": True})
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["status"] == "regenerated"
+    assert body["packet"]["record"]["revision"] == 2
+    app_dir = tmp_path / "applications_active" / app_id
+    assert not (app_dir / "review_notes.md").exists()   # no phantom note
+    # and notes-less non-regenerate is refused
+    resp = tc.post(
+        "/api/domain/job_application/card/job-review-me/packet/request-changes",
+        json={"notes": "", "regenerate": False})
+    assert resp.status_code == 400
+
+
 def test_submit_requires_confirm(client):
     _, tc, tmp_path = client
     _prepared_card(tmp_path)

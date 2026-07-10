@@ -23,6 +23,7 @@ import json
 import os
 import re
 import socket
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -645,6 +646,7 @@ def _application_summary(card: dict) -> dict[str, Any]:
         "followups_exists": followups_path.is_file(),
         "communications_count": len(communications),
         "latest_communication": communications[-1] if communications else None,
+        "recent_communications": communications[-6:],
         "status": record.get("status"),
         "stage": record.get("stage"),
         "last_activity_at": record.get("last_activity_at"),
@@ -783,6 +785,14 @@ def _chat_prompt_for_card(
             f"- revision: {application.get('revision')}",
             f"- review_state: {application.get('review_state')}",
         ])
+        recent = application.get("recent_communications") or []
+        if recent:
+            lines.append("")
+            lines.append("MAIN MOMENTS SO FAR (newest last)")
+            for row in recent:
+                lines.append(
+                    f"- {row.get('ts', '?')}: [{row.get('type', 'note')}] "
+                    f"{row.get('summary', '')}")
     if steps:
         lines.append("")
         lines.append("PROGRESS CHECKLIST")
@@ -1111,19 +1121,6 @@ class JobSearchCategorySettingsIn(BaseModel):
     keywords: list[str] | None = None
 
 
-def _job_packet_validation(card: dict) -> dict:
-    """Read-only packet validation for a job card — the single submit gate."""
-    app_id = _required_job_application_id(card, "validate the packet")
-    from command_center.job_search.achievement_bank import ensure_bank
-    from command_center.job_search.application_memory import load_application
-    from command_center.job_search.packet_validation import validate_packet
-
-    _, root = _job_search_config_and_root()
-    app_dir, record = load_application(app_id, root=root)
-    bank = ensure_bank(root / "profile" / "achievement_bank.yml")
-    return validate_packet(app_dir, record, bank)
-
-
 def _validation_blockers_detail(validation: dict) -> str:
     failed = [
         f"{c['label']} ({c['detail']})"
@@ -1135,25 +1132,56 @@ def _validation_blockers_detail(validation: dict) -> str:
         + "; ".join(failed))
 
 
+# One completion at a time: two concurrent submits must not both finalize
+# (duplicate emails/evidence). The second caller sees applied_at set and takes
+# the idempotent path.
+_job_finalize_lock = threading.Lock()
+
+
 def _sync_completed_job_card(provider, card: dict) -> dict[str, Any]:
     """Finalize on completion: validate → mark submitted → email record →
     submission evidence. Both the Completed drag and the Approve & Submit
-    button land here, so there is exactly one finalize path."""
+    button land here BEFORE the governed event is emitted, so a blocked or
+    failed finalize never logs a Completed move it did not make. A record that
+    is already applied (e.g. finalized via `cc job-search finalize`) completes
+    idempotently: the card syncs without a second submission or email."""
     app_id = _required_job_application_id(card, "move to Completed")
+    from command_center.job_search.application_memory import load_application
     from command_center.job_search.finalize import (
         FinalizeBlocked,
         finalize_application,
     )
 
     _, root = _job_search_config_and_root()
-    try:
-        result = finalize_application(app_id, root=root)
-    except FinalizeBlocked as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=_validation_blockers_detail(exc.validation)) from exc
-    record = result["record"]
-    email = result["email"]
+    with _job_finalize_lock:
+        _, existing = load_application(app_id, root=root)
+        if existing.applied_at:
+            record = existing.model_dump(mode="json")
+            outcome: dict[str, Any] = {
+                "already_submitted": True,
+                "validation": None,
+                "email": {
+                    "status": "skipped",
+                    "detail": "already submitted; the record email was handled "
+                              "when the application was first finalized",
+                },
+                "submission_record_path": str(
+                    root / "applications_active" / app_id / "submission_record.json"),
+            }
+        else:
+            try:
+                result = finalize_application(app_id, root=root)
+            except FinalizeBlocked as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail=_validation_blockers_detail(exc.validation)) from exc
+            record = result["record"]
+            outcome = {
+                "already_submitted": False,
+                "validation": result["validation"],
+                "email": result["email"],
+                "submission_record_path": result["submission_record_path"],
+            }
     fields = _card_store_fields(card)
     fields.update({
         "application_status": record["status"],
@@ -1166,7 +1194,7 @@ def _sync_completed_job_card(provider, card: dict) -> dict[str, Any]:
         "review_state": record.get("review_state"),
         "revision": record.get("revision"),
         "generation_mode": str((record.get("generation") or {}).get("mode") or "unknown"),
-        "email_record_status": email.get("status"),
+        "email_record_status": outcome["email"].get("status"),
     })
     provider.upsert_card(str(card["card_id"]), fields)
     return {
@@ -1175,9 +1203,7 @@ def _sync_completed_job_card(provider, card: dict) -> dict[str, Any]:
         "application_stage": record["stage"],
         "applied_at": record["applied_at"],
         "next_action": (record.get("followup") or {}).get("next_action"),
-        "validation": result["validation"],
-        "email": email,
-        "submission_record_path": result["submission_record_path"],
+        **outcome,
     }
 
 
@@ -1253,23 +1279,17 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
     if previous == body.status:
         return {"status": "unchanged", "domain_id": domain_id, "card": card}
     action = _column_action(spec, body.status)
+    side_effect: dict[str, Any] | None = None
     if domain_id == "job_application" and body.status == "Completed":
-        _required_job_application_id(card, "move to Completed")
-        # Validate BEFORE the governed event so a blocked completion never
-        # logs a Completed move it did not make.
-        validation = _job_packet_validation(card)
-        if not validation["ok"]:
-            raise HTTPException(
-                status_code=409,
-                detail=_validation_blockers_detail(validation))
+        # Finalize BEFORE the governed event so a blocked or failed finalize
+        # never logs a Completed move it did not make (409 carries the failed
+        # validation checks; already-applied records complete idempotently).
+        side_effect = _sync_completed_job_card(provider, card)
     event = emit_event(
         provider.log, action=action, board_id=provider.board_id,
         card_id=body.card_id, source_surface="internal_ui",
         actor_type="human", status_before=previous, status_after=body.status)
-    side_effect: dict[str, Any] | None = None
-    if domain_id == "job_application" and body.status == "Completed":
-        side_effect = _sync_completed_job_card(provider, card)
-    elif (
+    if (
         domain_id == "job_application"
         and body.status in {"Selected by Geoff", "In Progress"}
         and _job_card_needs_packet(card)
@@ -1359,8 +1379,15 @@ _PACKET_FILES = (
 
 
 class PacketNotesIn(BaseModel):
-    notes: str
+    # notes may be empty when regenerate=true: "regenerate with the current
+    # writer" without adding a review note
+    notes: str = ""
     regenerate: bool = True
+
+
+class PacketFileIn(BaseModel):
+    file: str
+    content: str
 
 
 class PacketSubmitIn(BaseModel):
@@ -1388,12 +1415,24 @@ def _job_packet_response(spec: dict, card: dict) -> dict:
     from command_center.job_search.record_email import email_config_status
 
     _, root = _job_search_config_and_root()
-    app_dir, record = load_application(app_id, root=root)
+    try:
+        app_dir, record = load_application(app_id, root=root)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"application {app_id!r} has no application.yml on disk "
+                f"({exc}); the card references a packet that was purged or "
+                "never created — re-run material preparation")) from exc
     files: dict[str, str | None] = {}
     for key, filename in _PACKET_FILES:
         path = app_dir / filename
         files[key] = path.read_text(encoding="utf-8") if path.is_file() else None
-    files["job_description"] = read_job_description(app_dir) or None
+    try:
+        files["job_description"] = read_job_description(app_dir) or None
+    except (OSError, EOFError):
+        # corrupt/truncated gzip — validation reports it as a failed check
+        files["job_description"] = None
     bank = ensure_bank(root / "profile" / "achievement_bank.yml")
     submission_path = app_dir / "submission_record.json"
     return {
@@ -1404,12 +1443,82 @@ def _job_packet_response(spec: dict, card: dict) -> dict:
         "record": record.model_dump(mode="json"),
         "files": files,
         "agent_trace": read_trace(app_dir),
+        "story": _job_card_story(spec, card, app_id, app_dir),
         "validation": validate_packet(app_dir, record, bank),
         "email": email_config_status(),
         "submission_record": (
             json.loads(submission_path.read_text(encoding="utf-8"))
             if submission_path.is_file() else None),
     }
+
+
+def _job_card_story(spec: dict, card: dict, app_id: str, app_dir: Path) -> list[dict]:
+    """The card's full story in linear order — every main moment as one compact
+    row, with the long content (model output, submission evidence) attached as
+    expandable detail: governed board moves, agent generation attempts, notes,
+    manual edits, and the final submission record."""
+    from command_center.job_search.agent_writer import read_trace
+
+    entries: list[dict] = []
+    card_id = str(card.get("card_id"))
+    for e in EventLog(KANBAN_EVENT_LOG).read():
+        if e.board_id == spec.get("board_id") and e.card_id == card_id:
+            entries.append({
+                "ts": str(e.created_at or ""),
+                "kind": "board",
+                "title": _event_headline(e),
+                "summary": f"{e.actor_type or 'actor'} via {e.source_surface or 'surface'}",
+                "detail": None,
+            })
+    comms_path = app_dir / "communications.jsonl"
+    if comms_path.is_file():
+        for line in comms_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            entries.append({
+                "ts": str(row.get("ts") or ""),
+                "kind": "note",
+                "title": str(row.get("type") or "note").replace("_", " "),
+                "summary": str(row.get("summary") or ""),
+                "detail": None,
+            })
+    for t in read_trace(app_dir):
+        ok = t.get("ok")
+        claims = ", ".join(t.get("claim_ids") or [])
+        problems = "; ".join(str(p) for p in (t.get("problems") or []))
+        duration = t.get("duration_ms")
+        summary_bits = [f"model {t.get('model')}"]
+        if isinstance(duration, (int, float)):
+            summary_bits.append(f"{duration / 1000:.0f}s")
+        if claims:
+            summary_bits.append(f"claims: {claims}")
+        if t.get("error"):
+            summary_bits.append(f"error: {t.get('error')}")
+        elif problems:
+            summary_bits.append(f"problems: {problems}")
+        entries.append({
+            "ts": str(t.get("ts") or ""),
+            "kind": "agent",
+            "title": (str(t.get("step", "generate")).replace("_", " ")
+                      + f" — attempt {t.get('attempt')}"
+                      + ("" if ok else " (failed)")),
+            "summary": ", ".join(summary_bits),
+            "detail": t.get("response") or t.get("error"),
+        })
+    submission_path = app_dir / "submission_record.json"
+    if submission_path.is_file():
+        evidence = json.loads(submission_path.read_text(encoding="utf-8"))
+        email = evidence.get("email") or {}
+        entries.append({
+            "ts": str(evidence.get("finalized_at") or ""),
+            "kind": "submission",
+            "title": "application finalized and recorded",
+            "summary": f"email record: {email.get('status', 'unknown')}",
+            "detail": json.dumps(evidence, indent=2, ensure_ascii=False),
+        })
+    entries.sort(key=lambda r: r["ts"])
+    return entries
 
 
 @app.get("/api/domain/{domain_id}/card/{card_id}/packet")
@@ -1437,8 +1546,11 @@ def domain_card_packet_request_changes(
     card = _find_domain_card(provider, card_id)
     app_id = _required_job_application_id(card, "request packet changes")
     notes = body.notes.strip()
-    if not notes:
-        raise HTTPException(status_code=400, detail="notes text is required")
+    if not notes and not body.regenerate:
+        raise HTTPException(
+            status_code=400,
+            detail="notes text is required (or set regenerate=true for a "
+                   "plain regeneration with the current writer)")
 
     from command_center.job_search.agent_writer import AgentWriterError
     from command_center.job_search.application_memory import (
@@ -1448,7 +1560,8 @@ def domain_card_packet_request_changes(
     )
 
     _, root = _job_search_config_and_root()
-    request_changes(app_id, notes, root=root, source="cockpit_packet_review")
+    if notes:
+        request_changes(app_id, notes, root=root, source="cockpit_packet_review")
     regenerate_error: str | None = None
     if body.regenerate:
         try:
@@ -1481,6 +1594,72 @@ def domain_card_packet_request_changes(
     }
 
 
+_EDITABLE_PACKET_FILES = {
+    "resume": "generated_resume.md",
+    "cover_letter": "cover_letter.md",
+    "recruiter_message": "recruiter_message.md",
+    "answer_bank": "answer_bank.md",
+    "recruiter_notes": "recruiter_notes.md",
+}
+
+
+@app.put("/api/domain/{domain_id}/card/{card_id}/packet/file")
+def domain_card_packet_file(
+    domain_id: str, card_id: str, body: PacketFileIn,
+) -> dict:
+    """Geoff edits a material directly: the file is replaced, the edit is
+    recorded as a manual_edit moment in the story (communications + generation
+    provenance), and validation re-runs against the edited content."""
+    _require_chat()
+    spec = _require_job_domain(domain_id)
+    _require_domain_writable(spec)
+    provider = _board_store_provider(spec)
+    card = _find_domain_card(provider, card_id)
+    app_id = _required_job_application_id(card, "edit a packet file")
+    filename = _EDITABLE_PACKET_FILES.get(body.file)
+    if not filename:
+        raise HTTPException(
+            status_code=400,
+            detail=f"file {body.file!r} is not editable here; choose from "
+                   f"{sorted(_EDITABLE_PACKET_FILES)}")
+    content = body.content.rstrip()
+    if not content:
+        raise HTTPException(
+            status_code=400,
+            detail="content is required — an emptied material would fail "
+                   "packet validation; use request-changes to rewrite it")
+
+    from command_center.job_search.application_memory import (
+        append_note_text,
+        load_application,
+        save_application,
+    )
+
+    _, root = _job_search_config_and_root()
+    app_dir, record = load_application(app_id, root=root)
+    (app_dir / filename).write_text(content + "\n", encoding="utf-8")
+    generation = dict(record.generation)
+    edits = list(generation.get("manual_edits") or [])
+    edits.append({"file": body.file,
+                  "ts": datetime.now(UTC).isoformat()})
+    generation["manual_edits"] = edits
+    record.generation = generation
+    save_application(app_dir, record)
+    append_note_text(
+        app_id, "manual_edit",
+        f"Geoff edited {body.file} in the packet review modal.",
+        root=root, source="cockpit_packet_review")
+    return {
+        "status": "saved",
+        "file": body.file,
+        "domain_id": domain_id,
+        "card_id": card_id,
+        "application_id": app_id,
+        "packet": _job_packet_response(spec, _find_domain_card(provider, card_id)),
+        "progress": _domain_progress(spec, card_id),
+    }
+
+
 @app.post("/api/domain/{domain_id}/card/{card_id}/packet/submit")
 def domain_card_packet_submit(
     domain_id: str, card_id: str, body: PacketSubmitIn,
@@ -1503,16 +1682,14 @@ def domain_card_packet_submit(
         raise HTTPException(
             status_code=409, detail="card is already in Completed")
     _required_job_application_id(card, "submit the application")
-    validation = _job_packet_validation(card)
-    if not validation["ok"]:
-        raise HTTPException(
-            status_code=409, detail=_validation_blockers_detail(validation))
     action = _column_action(spec, "Completed")
+    # Finalize BEFORE the governed event (same invariant as the drag): a
+    # blocked finalize 409s here with the failed checks and no event is logged.
+    side_effect = _sync_completed_job_card(provider, card)
     event = emit_event(
         provider.log, action=action, board_id=provider.board_id,
         card_id=card_id, source_surface="internal_ui",
         actor_type="human", status_before=previous, status_after="Completed")
-    side_effect = _sync_completed_job_card(provider, card)
     return {
         "status": "submitted",
         "domain_id": domain_id,
@@ -1808,6 +1985,30 @@ def chat_runtime() -> dict:
     }
 
 
+def _transcript_storage() -> dict:
+    """What the server retains for chat: compact thread metadata always; full
+    per-turn transcripts (the GatewayCore flight recorder) when enabled."""
+    from command_center.channels.transcript import (
+        transcript_dir,
+        transcripts_enabled,
+        write_failure_count,
+    )
+
+    enabled = transcripts_enabled()
+    return {
+        "storage": ("server_metadata_plus_transcripts" if enabled
+                    else "server_metadata_only"),
+        "transcripts": {
+            "enabled": enabled,
+            "dir": str(transcript_dir()),
+            "endpoint": "/api/chat/threads/{conversation_id}/transcript",
+            # fail-open recording is silent by design; nonzero here means
+            # turns were dropped (disk/permissions) and the story has gaps
+            "write_failures": write_failure_count(),
+        },
+    }
+
+
 @app.get("/api/chat/threads")
 def chat_threads() -> dict:
     _require_chat()
@@ -1815,7 +2016,7 @@ def chat_threads() -> dict:
         "threads": _read_chat_threads(),
         "source": str(CHAT_THREADS_FILE),
         "writable": os.access(CHAT_THREADS_FILE.parent, os.W_OK),
-        "storage": "server_metadata_only",
+        **_transcript_storage(),
     }
 
 
@@ -1827,7 +2028,38 @@ def save_chat_thread(body: ChatThreadIn) -> dict:
         "thread": thread,
         "threads": _read_chat_threads(),
         "source": str(CHAT_THREADS_FILE),
-        "storage": "server_metadata_only",
+        **_transcript_storage(),
+    }
+
+
+@app.get("/api/chat/threads/{conversation_id}/transcript")
+def chat_thread_transcript(
+    conversation_id: str, limit: int = 100, offset: int = 0,
+) -> dict:
+    """The full story of one conversation, straight from the flight recorder:
+    every turn with its injected context blocks, FULL tool args/results, and
+    the final answer (the SSE stream truncates; this endpoint never does).
+    Pages from the newest end: default the last `limit` turns; `offset` skips
+    that many newest turns (page back through a long-running thread)."""
+    _require_chat()
+    from command_center.channels.transcript import (
+        read_transcript,
+        transcript_path,
+        transcripts_enabled,
+    )
+
+    all_turns = read_transcript(conversation_id)
+    end = max(0, len(all_turns) - max(0, offset))
+    start = max(0, end - max(1, limit))
+    turns = all_turns[start:end]
+    return {
+        "conversation_id": conversation_id,
+        "turns": turns,
+        "turn_count": len(turns),
+        "total_turns": len(all_turns),
+        "offset": offset,
+        "source": str(transcript_path(conversation_id)),
+        "recording_enabled": transcripts_enabled(),
     }
 
 

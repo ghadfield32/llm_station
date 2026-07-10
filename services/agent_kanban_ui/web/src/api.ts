@@ -297,6 +297,13 @@ export interface AgentTraceEntry {
 export interface EmailConfigStatus {
   configured: boolean; missing: string[]; to?: string | null;
 }
+export interface JobStoryEntry {
+  ts: string;
+  kind: "board" | "note" | "agent" | "submission" | string;
+  title: string;
+  summary: string;
+  detail?: string | null;
+}
 export interface JobPacket {
   domain_id: string;
   card_id: string;
@@ -305,6 +312,7 @@ export interface JobPacket {
   record: Record<string, unknown>;
   files: Record<string, string | null>;
   agent_trace: AgentTraceEntry[];
+  story: JobStoryEntry[];
   validation: PacketValidation;
   email: EmailConfigStatus;
   submission_record?: Record<string, unknown> | null;
@@ -325,6 +333,18 @@ export const requestPacketChanges = (
   postJSON<PacketChangesResult>(
     `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/packet/request-changes`,
     { notes, regenerate });
+export interface PacketFileResult {
+  status: string; file: string;
+  domain_id: string; card_id: string; application_id: string;
+  packet: JobPacket;
+  progress: DomainCardProgress;
+}
+export const updateJobPacketFile = (
+  id: string, cardId: string, file: string, content: string,
+) =>
+  postJSON<PacketFileResult>(
+    `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/packet/file`,
+    { file, content }, "PUT");
 export interface PacketSubmitResult {
   status: string;
   domain_id: string; card_id: string;
@@ -474,8 +494,43 @@ export interface ChatThreadsResponse {
   source: string;
   writable?: boolean;
   storage?: string;
+  transcripts?: { enabled: boolean; dir: string; endpoint: string };
 }
 export const fetchChatThreads = () => getJSON<ChatThreadsResponse>("/api/chat/threads");
+
+// The flight-recorder story of one conversation: per-turn context provenance,
+// FULL tool args/results (the SSE stream truncates; this never does), final answer.
+export interface TranscriptEvent {
+  type: string;          // "round" | "tool" | "tool_result"
+  ts?: string;
+  n?: number;
+  name?: string;
+  args?: string;
+  result?: string;
+}
+export interface TranscriptTurn {
+  ts: string;
+  conversation_id: string;
+  surface: string;
+  model_role: string;
+  user_text: string;
+  context_blocks: string[];
+  events: TranscriptEvent[];
+  final: string | null;
+  corrupt_line?: string;
+}
+export interface ChatTranscriptResponse {
+  conversation_id: string;
+  turns: TranscriptTurn[];
+  turn_count: number;
+  total_turns?: number;
+  offset?: number;
+  source: string;
+  recording_enabled: boolean;
+}
+export const fetchChatTranscript = (conversationId: string) =>
+  getJSON<ChatTranscriptResponse>(
+    `/api/chat/threads/${encodeURIComponent(conversationId)}/transcript`);
 
 async function postJSON<T>(path: string, body: unknown, method = "POST"): Promise<T> {
   const r = await fetch(path, {
