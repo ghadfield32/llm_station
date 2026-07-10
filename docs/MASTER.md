@@ -6,12 +6,57 @@
 > Deep-dive references for each section are listed in [§12](#12-doc-index-where-the-detail-lives).
 >
 > Last full revision: **2026-06-12**. Latest readiness update:
-> **2026-06-20**. Current source of truth is local `main` synced with
-> `origin/main` at `0ac008c`.
+> **2026-07-10**. Current source of truth is local
+> `feat/research-digest-intake-hygiene-main`, ahead of `main` with the
+> cockpit/chat/job-search work described below (commits `d8e593d` through
+> `7e6b367`, not yet merged).
 
 ---
 
-## Current readiness snapshot (2026-06-20)
+## Current readiness snapshot (2026-07-10)
+
+The **first-party cockpit** (`services/agent_kanban_ui`, optional Docker
+Compose profile `ui`) is the primary operator surface — see
+[reviews/2026-07-08-cockpit-decision.md](reviews/2026-07-08-cockpit-decision.md).
+AppFlowy stays an optional projection; the board-snapshot file it produces is
+now read directly by the typed domain boards (papers/repos/dags/books) so
+those lists show real counts instead of demo fixtures.
+
+**Chat** was evaluated and rebuilt this pass — full detail in §14's
+2026-07-09/10 entry and
+[reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md).
+Headline: GatewayCore + LiteLLM remains the only runtime; a first-party
+flight recorder makes every turn on every surface reviewable
+(`GET /api/chat/conversations` → any conversation → its full story, with
+click-through from any kanban card's Story tab to the exact moment); the
+previously-planned ORCA/OmniAgent/OxyGent specialist link-outs were removed
+in favor of the existing LiteLLM model-role dropdown (one gateway, switch by
+role, cloud providers stay behind the forbidden-provider scan on purpose).
+
+**Kanban board moves are now a one-step machine** — no domain card may skip
+a lane, forward or backward; the job-search pipeline is exactly Geoff's 3
+manual gates (select → agent-complete "Needs Geoff" → me-complete
+"Completed"), enforced server-side with a named-next-steps 409 on a skip
+attempt. Full detail in the rewritten §6.7.
+
+**Job-search materials are agent-written by default**, claim-checked against
+`achievement_bank.yml`, reviewable in a Packet Review modal with a linear
+Story tab, edit-in-place, and a request-changes/regenerate loop; finalize
+runs before the governed board event so a blocked submit never logs a move
+it didn't make. An **Application Materials Pipeline Standard v2** (ATS
+resume format, outreach doc, held-claims policy) is in active development
+and testing as of this snapshot — see the flagged note in §6.7; it is not
+yet committed.
+
+Everything above is live-probed on a rebuilt cockpit container and covered
+by regression tests (`tests/test_gateway_transcript.py`,
+`tests/test_agent_kanban_ui.py`, `tests/test_domain_surfaces.py`, and the
+`tests/job_search/` suite); `cc validate`, ruff, and the frontend
+`tsc`/`vite build` are clean at each commit in the range above.
+
+---
+
+### Prior readiness snapshot (2026-06-20) — Phase 0/1 bootstrap, kept for history
 
 Phase 0 source reconciliation is complete. Local `main` is clean, synced with
 `origin/main`, and the remote advertises only `main` plus `setup/github-ready`.
@@ -231,7 +276,7 @@ Access (on the do-not-build list by default).
 | **Proactive Runner** | Scheduled checks on already-done work. Holds no secrets; its strongest autonomous act is opening a gated mission. |
 | **Discord Gateway** | Discord ↔ LiteLLM (`chat`) ↔ the Growth OS action layer. Fail-fast without `DISCORD_BOT_TOKEN`. The `chat` role is qwen3 (instruct), **not** qwen3-coder — chat surfaces narrate before tool calls, and qwen3-coder's Ollama native parser drops those calls (see §14, 2026-06-13). |
 | Uptime Kuma + restic | Health monitoring and backups. |
-| *(optional profile `ui`)* **Agent Kanban UI / Cockpit** | First-party PWA cockpit over the Ledger, internal board store, AppFlowy projection, agent-call log, and GatewayCore chat. Primary nav is **All Boards** (typed domain boards) plus **Controls** (runtime APIs, board registry, job-search/profile settings). Chat uses GatewayCore + LiteLLM, keeps shared recent thread shortcuts by conversation id, and can expose optional ORCA/OmniAgent/OxyGent handoff links from env vars. Governed writes can move board cards and edit profile overrides; approve/kill stay in the signed Ledger endpoints and merge/deploy/submit remain structurally unavailable. Loopback + Tailscale; React/Vite SPA built + served single-container by a FastAPI backend. |
+| *(optional profile `ui`)* **Agent Kanban UI / Cockpit** | First-party PWA cockpit over the Ledger, internal board store, the AppFlowy board-snapshot projection, agent-call log, and GatewayCore chat. Primary nav sits at the **top** on mobile: **All Boards** (typed domain boards — jobs/posts/papers/repos/dags/books/upkeep/missions, live-sourced from `appflowy_board`/`board_store`/`ledger_missions`, never silent fixtures) plus **Controls** (runtime APIs, board registry, job-search/profile settings). Chat is **one gateway, one harness**: GatewayCore + LiteLLM, model switching is a role dropdown (no ORCA/OmniAgent/OxyGent specialist links — removed 2026-07-10), with an **All Chats** review index (`GET /api/chat/conversations`, every conversation across every surface, task-kind badges, delete-per-thread), a per-conversation **flight-recorder full story** (untruncated tool args/results + context provenance, paginated, click-through from any card's Story tab to the exact moment), and **scoped chats** anchored to any registered repo. Board moves are a **one-step machine** — cards advance/retreat one lane at a time, never a skip; jobs enforce Geoff's 3 manual gates (select → agent-complete "Needs Geoff" → me-complete "Completed"). Governed writes can move board cards and edit profile overrides; approve/kill stay in the signed Ledger endpoints and merge/deploy/submit remain structurally unavailable. Loopback + Tailscale; React/Vite SPA built + served single-container by a FastAPI backend. Decision record: [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md). |
 | *(optional profile)* Hermes | **Not adopted — evaluated 2026-06-13 → DEFER.** Hermes Agent is real now (v0.16.0, PyPI/official image); the old "phantom image" note is stale. An isolated spike (see change log + `evaluation/capability-assessment/hermes/DECISION.md`) found cross-session memory works but is just a local `MEMORY.md` (not beyond-stack) and self-improving skills did not auto-fire. LiteLLM + Ollama + the action layer serve its role; revisit only if autonomous skill self-improvement materializes. |
 
 ### The worker (4090 / currently the same workstation)
@@ -1112,27 +1157,75 @@ while keeping submission itself manual. Validated by
 schema-rejected, and `AutomationPolicy` sets `mvp_submit_disabled=True` on
 every branch including `bot_possible` — nothing is ever auto-submitted.
 
+**Geoff's 3 manual gates, enforced as a one-step machine** (2026-07-10 — the
+cockpit refuses any lane skip with a 409 naming the legal next step; see the
+`_JOB_TRANSITIONS` map in `services/agent_kanban_ui/app.py`):
+
 ```
-Daily DAG / manual suggest -> Suggested Jobs (score >= 70)
-Geoff reviews on phone/AppFlowy, drags good ones -> Selected by Geoff
-process-selected --apply -> In Progress -> Needs Geoff (always, for now)
-Geoff applies manually using the generated materials + checklist
-Geoff runs mark-submitted -> Completed -> 30-day rich memory starts
-Recruiter/interview activity -> Interviewing -> retention extends
+1. SELECT   Suggested Jobs -[Geoff drags]-> Selected by Geoff
+            (triggers packet prep automatically — Geoff never touches In Progress)
+2. AGENT COMPLETE   In Progress -[agent finishes]-> Needs Geoff
+            (agent-written resume/cover letter/outreach/answers, claim-checked)
+3. ME COMPLETE      Needs Geoff -[Geoff reviews + Approve & Submit]-> Completed
+            (validated submit -> mark_submitted -> email record -> evidence)
+
+Side branches (one step, either direction):
+  Suggested Jobs <-> Rejected / Skip
+  Needs Geoff <-> In Progress (send back for regeneration)
+  Completed -> Interviewing -> Closed / Archived
 ```
 
-Board columns: `Suggested Jobs → Selected by Geoff → In Progress → Needs
-Geoff / Completed → Interviewing → Rejected / Skip → Closed / Archived`.
-Every application gets claim-checked materials (resume/cover letter/recruiter
-message/answer bank, each bullet traced to an `achievement_bank.yml` ID and
-evidence file — see `RESUME_CLAIM_POLICY.md`), a fit score with a full
-KPI-style breakdown, and a rich data folder retained 30 days past last
-activity before compacting to a minimal archive ledger row. Hard-coded manual
+Every application gets **agent-written** materials by default
+(`agent_writer.py`, LiteLLM role `chat`): the full achievement bank + STAR
+stories + Geoff-voice master resume bank go in the prompt, every claim is
+checked against `achievement_bank.yml` IDs with a corrective retry on
+failure, and the complete prompt/response for every attempt is persisted to
+`agent_trace.jsonl` per application (never silent — a malformed model
+response raises `AgentWriterError` rather than emitting an unchecked
+packet; failures fall back to the template path, recorded as
+`generation.mode=template_fallback`). A fit score with a full KPI-style
+breakdown and a rich data folder are retained 30 days past last activity
+before compacting to a minimal archive ledger row. Hard-coded manual
 blockers (LinkedIn/Indeed/Workday/Greenhouse/Lever/Ashby portals, EEO/self-ID/
 sponsorship/salary questions) route to `Needs Geoff` — see
-`MANUAL_APPLICATION_RULES.md`. Implemented as the Airflow DAG
-`dags/job_search_daily.py` + the `job-search` CLI namespace
-(`src/command_center/job_search/`); full architecture in
+`MANUAL_APPLICATION_RULES.md`.
+
+**Review loop** (the cockpit Packet Review modal, opened from any Jobs
+card): Overview/Resume/Cover Letter/Answers/Recruiter Msg/Follow-ups/
+Checklist/JD/Agent Trace/**Story** tabs, direct edit-in-place on any
+material (recorded as a `manual_edit` story moment), `request-changes` +
+regenerate against accumulated review notes, and **Approve & Submit** —
+the same governed `Completed` move as a drag, gated on `packet_validation.py`
+(errors block, warnings surface). `finalize.py` runs **before** the governed
+event is emitted, so a blocked or duplicate finalize never logs a move it
+didn't make, and an already-`applied` record completes idempotently (no
+duplicate email). The submit gate keys on the durable `applied_at` field,
+not the mutable `status` (a later recruiter note can't re-arm a second
+submission). `record_email.py` always writes `submission_email.html`;
+real SMTP send needs `DISCOVERY_SMTP_HOST/USER/PASSWORD/FROM` +
+`JOB_SEARCH_EMAIL_TO` — unconfigured by default, so submissions are
+`recorded_only` until an operator sets those.
+
+The **Story tab** (`_job_card_story`) is the card's full linear history —
+governed board moves, every agent generation attempt (expandable to the
+full model output), manual edits, notes, and the final submission
+evidence — and every row deep-links into the cockpit Chat view's
+flight-recorder timeline at that exact moment (§4, "open in chat").
+
+*In active development, being tested now:* an **Application Materials
+Pipeline Standard v2** (`docs/job_search/application_materials_standard.md`)
+tightens the writer to an ATS-formatted resume + an 8-heading outreach
+document (replacing the recruiter-message blurb) + SDARL-format answers,
+adds a held-claims policy (`evidence_policy.yml` — claims that require
+Geoff's explicit evidence before the writer may use them) and new
+validation checks (`held_claims`, `contact_extractable`, `no_internal_ids`)
+that block a packet rather than let a policy-restricted claim or leaked
+internal detail reach a submission. Treat this as pre-production until it
+lands in a commit and the readiness snapshot above says so.
+
+Implemented as the Airflow DAG `dags/job_search_daily.py` + the
+`job-search` CLI namespace (`src/command_center/job_search/`); full
+architecture in
 [job_search/JOB_SEARCH_COMMAND_CENTER.md](job_search/JOB_SEARCH_COMMAND_CENTER.md)
 and the living operator FAQ in
 [job_search/READINESS_FAQ.md](job_search/READINESS_FAQ.md).
@@ -1520,7 +1613,8 @@ llm_station/
 │   │   ├── knowledge.py        OKF knowledge-bundle CLI (generate, validate)
 │   │   └── kanban_surface.py   agent-kanban digest + N/N gate (make kanban-digest / kanban-surface-validate)
 │   ├── channels/               CHAT TRANSPORTS — one authority, many surfaces
-│   │   ├── core.py             transport-agnostic GatewayCore.run_turn() (LiteLLM tool loop; re-injects board_state)
+│   │   ├── core.py             transport-agnostic GatewayCore.run_turn()/run_turn_events() (LiteLLM tool loop; re-injects board_state; both loops recorded)
+│   │   ├── transcript.py       FLIGHT RECORDER — TurnRecorder writes one JSONL/turn (full tool args/results, context provenance, usage, final) to generated/chat-transcripts/; fail-open + visible write-failure counter; conversation_id contextvar is the join key into agent_calls.jsonl and litellm_session_id
 │   │   ├── board_state.py      harness-owned live board re-injected each turn (Cline focus-chain; fail-loud)
 │   │   ├── discord.py · slack.py · telegram.py · whatsapp.py   thin per-platform adapters
 │   │   └── __main__.py         runner: configs/channels.yaml → launch enabled adapters
@@ -1551,8 +1645,11 @@ llm_station/
 │   └── job_search/              JOB-SEARCH COMMAND CENTER (draft/prepare/track; submission stays manual — §6.7)
 │       ├── scoring.py · automation_policy.py   fit score + KPI breakdown · automation-class + manual-blocker routing
 │       ├── board.py             job_search_pipeline board fields (apply_url, claude_review_url, score_explanation)
-│       ├── resume_selection.py · achievement_bank.py   claim-checked resume/cover-letter/answer-bank generation · tagged bullet bank + evidence traceability
-│       ├── application_memory.py · retention.py   active-application folder writer · 30-day memory → minimal archive ledger row
+│       ├── agent_writer.py      LiteLLM role `chat` writes materials (full achievement bank + STAR + Geoff-voice master bank in prompt); claim-ID validation with corrective retry; every prompt/output persisted to agent_trace.jsonl; malformed responses raise AgentWriterError (never silent)
+│       ├── resume_selection.py · achievement_bank.py   claim-checked resume/cover-letter/answer-bank generation (template fallback path) · tagged bullet bank + evidence traceability
+│       ├── packet_validation.py · finalize.py   the submit gate (errors block, warnings surface) · validate → mark_submitted → email record → submission_record.json evidence, run BEFORE the governed Completed event
+│       ├── record_email.py      always writes submission_email.html; real SMTP send via DISCOVERY_SMTP_*+JOB_SEARCH_EMAIL_TO (unconfigured by default → recorded_only)
+│       ├── application_memory.py · retention.py   active-application folder writer + request_changes/regenerate_materials review loop · 30-day memory → minimal archive ledger row
 │       └── profile_ingest.py · followups.py · interview_prep.py   inbox → achievement bank · follow-up packs · interview prep
 │
 ├── generated/                  DISPOSABLE rendered output — never hand-edited
@@ -1749,9 +1846,15 @@ copied from the betts_basketball forecasting pipeline (data-engineering,
 R2/fleet, modeling, serving); see the N/A note in §13.1. Not a spec this repo
 implements.
 
-**`reviews/` — archived, point-in-time (superseded; kept for history)**
+**`reviews/` — decision records (current) + archived point-in-time (superseded)**
 
-Autonomy/decision reviews (`autonomous-pipeline-gap-review-2026-06-16.md`,
+| Doc | What it holds |
+|---|---|
+| [reviews/2026-07-08-cockpit-decision.md](reviews/2026-07-08-cockpit-decision.md) | **current** — first-party cockpit (`agent_kanban_ui`) as primary; AppFlowy stays optional projection; Plane/AFFiNE/Vikunja/OxyGent/ORCA/OmniAgent are not the control plane |
+| [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md) | **current** — chat control/review decision: first-party flight recorder + cockpit timeline is primary, LiteLLM `store_prompts_in_spend_logs` is the cross-surface net, Open WebUI/LibreChat rejected (second-control-plane risk); config snippets + security boundaries |
+
+The rest of `reviews/` is archived, point-in-time (superseded; kept for
+history): autonomy/decision reviews (`autonomous-pipeline-gap-review-2026-06-16.md`,
 `agentic-process-improvements-2026-06-20.md`, `github-app-production-auth-review-2026-06-16.md`,
 `routing-performance-candidate-evaluation-2026-06-14.md`), pre-work audits
 (`improvement-loop-audit.md`), superseded assessments
@@ -1880,7 +1983,10 @@ first commit and reconstruct the record git now preserves.
   hidden bottom scrollbars, and viewport-contained bottom navigation; mobile
   browser checks cover All Boards, Controls, and Chat with no document-level
   horizontal overflow.
-- **External agent runtime review.** GatewayCore + LiteLLM remains the cockpit
+- **External agent runtime review** *(superseded 2026-07-10 — see the next
+  entry: the `*_CHAT_URL` specialist links described below were removed
+  entirely; kept here for the historical record of the evaluation)*.
+  GatewayCore + LiteLLM remains the cockpit
   runtime and write authority. ORCA
   (`https://arxiv.org/abs/2603.02438`) is the best first optional specialist
   for document-heavy job materials such as PDFs, resumes, screenshots, forms,
@@ -1893,6 +1999,97 @@ first commit and reconstruct the record git now preserves.
   The cockpit Chat panel exposes optional `*_CHAT_URL` handoff links and shared
   recent chat shortcuts backed by compact server metadata; governed writes stay
   in GatewayCore and the action layer.
+
+### 2026-07-09/10 — Chat flight recorder, chat-control decision, cockpit rework, job-search 3-gate flow
+
+**Chat: from "what did the agent do?" to a reviewable full story.**
+
+- **Flight recorder** (`src/command_center/channels/transcript.py`): every
+  GatewayCore turn — both the SSE loop and the non-streaming loop — writes
+  one JSONL line with FULL tool args/results, injected-context provenance,
+  per-completion token usage, and the final answer to
+  `generated/chat-transcripts/` (gitignored; fail-open with a visible
+  write-failure counter; `GATEWAY_TRANSCRIPTS=0` kill switch). Served via
+  paginated `GET /api/chat/threads/{id}/transcript`.
+- **One join key everywhere**: the recorder's `conversation_id` contextvar
+  tags `agent_calls.jsonl` rows (guarded import) and rides every LiteLLM
+  proxy call as `litellm_session_id=surface:conversation_id`, so transcripts,
+  the agent-call log, and LiteLLM's own Session Logs all index the same key.
+  `store_prompts_in_spend_logs: true` is grafted into the rendered proxy
+  config as a config-only cross-surface audit net.
+- **Chat-control decision** (4-dossier research → 3-judge panel → synthesis,
+  [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md)):
+  the first-party recorder + cockpit timeline is PRIMARY (56–59/70 across
+  judges); LiteLLM's built-in spend-log prompt storage is the cross-surface
+  NET; a dedicated observability layer (Arize Phoenix, single container)
+  stays optional/watch-list; **Open WebUI and LibreChat are REJECTED**
+  (25–28/70) as either control or review surface — both are blind to
+  non-app surfaces (Discord/SMS/CLI turns never touch them), lossy exactly
+  where the flight recorder matters (no slot for tool calls or context),
+  and ship approval-less in-process tool/MCP/agent execute layers that
+  constitute a second control plane.
+- **ORCA/OmniAgent/OxyGent specialist link-outs removed entirely**
+  (2026-07-10), replacing the previous day's "optional handoff links"
+  design. The one-gateway answer to "how do we switch models" is the
+  existing LiteLLM role dropdown — adding OpenAI/Anthropic/OpenRouter is a
+  `configs/models.yaml` + `.env` entry the picker sees immediately; cloud
+  providers stay gated by the forbidden-provider scan as a deliberate
+  operator decision, never an agent's.
+- **All Chats review index** (`GET /api/chat/conversations`): every
+  conversation the flight recorder has seen, across every surface, merged
+  with the shared thread shortcuts; each row carries a task-kind badge
+  (job/repo/paper/dag/chat, inferred from scoped conversation ids like
+  `job_application:job_x` or `repo:llm_station`) and a delete control
+  (`DELETE /api/chat/threads/{id}` clears that chat's thread + transcript
+  only — the governed kanban event log is a separate record and is never
+  touched). **New Scoped Chat** starts one stable `repo:<id>` thread per
+  registered repo (`configs/autonomy.yaml` `repo_manifests`).
+- **Story click-through**: any row in a card's Story tab
+  (`_job_card_story` — board moves, agent attempts, submission evidence)
+  now has "open in chat", landing the operator in that conversation's
+  full-story timeline scrolled and highlighted at that exact moment
+  (`data-ts` anchors).
+- **Mobile scroll trap fixed.** `scroll-snap-type` on the full-height board
+  containers (both the 720px and 640px CSS breakpoints — the bug existed in
+  two places) was hijacking vertical page scroll on iOS: every up/down
+  swipe started inside the horizontal snap scroller and never reached the
+  page. Snap now lives only on short strips (tabs/chips); board/list
+  scrolling works normally. The phone nav bar moved from the bottom to the
+  **top**.
+- **Real board data.** `paper`/`repo`/`dag`/`book` domains previously
+  rendered one fixture card each. A new `appflowy_board` domain source
+  (`services/agent_kanban_ui/app.py` `_appflowy_board_cards`) reads the
+  worker's `board-snapshot.json` read-only, with an honest `origin` +
+  snapshot timestamp + the board's real lanes — live counts: papers 225,
+  repos 60, dags 90. `library` was added to `channels/board_state.UI_BOARDS`
+  so Books fills on the next snapshot regenerate.
+- **network_health told the operator a healthy stack was down** — it
+  probed `localhost` from inside the cockpit container. Fixed to read
+  `LITELLM_BASE_URL`/`OLLAMA_API_BASE` (compose now sets both for the
+  cockpit); remaining AppFlowy/Airflow errors are real outages, not bugs.
+
+**Kanban: one-step-only, and the job pipeline is exactly 3 manual gates.**
+
+- Board-store domain cards now move **one lane at a time**, forward or
+  backward, never a skip — enforced server-side (`_allowed_transitions`,
+  409 on a skip naming the legal next steps) and reflected in the UI's
+  drag/Move-to targets. Jobs use the explicit `_JOB_TRANSITIONS` gate map
+  described in §6.7; other board_store domains use column adjacency.
+- Materials are agent-written by default (`agent_writer.py`, full
+  achievement bank + Geoff-voice master bank in the prompt, claim-ID
+  validated with a corrective retry, every attempt persisted to
+  `agent_trace.jsonl`); the Packet Review modal gained a **Story** tab
+  (linear board/agent/note/submission history) and direct edit-in-place;
+  `finalize.py` runs before the governed `Completed` event so a blocked
+  finalize never logs a move it didn't make, and the submit gate keys on
+  the durable `applied_at` field rather than mutable `status`. Full detail
+  in the rewritten §6.7 above.
+
+Live-probed on the rebuilt cockpit container throughout; 179+ tests added
+across the two days (transcript fidelity/durability/fail-open/join-key,
+domain-surface origin honesty, one-step transition enforcement, chat wall
+regressions); `cc validate`, ruff, and `tsc`/`vite build` clean at each
+commit (`d8e593d`, `c01baec`, `54b62d2`, `d416f93`, `0696a5a`, `7e6b367`).
 
 ### 2026-07-02 — Research intake productized + gateway/log hygiene + skills audit + card deps
 
