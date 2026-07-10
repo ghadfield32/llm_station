@@ -1,5 +1,33 @@
 schema_version: command-center.model-benchmarks.v1
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Benchmark methodology (the "deep enough" bar). Each role suite below scores QUALITY
+# on labeled cases (primary / hard-non-regression / supporting), but a single quality
+# number is not enough — production behavior is dominated by LATENCY-UNDER-LOAD, which a
+# Twitter-style "tokens/sec" hides. The standard this suite is held to:
+#
+#   1. tokens/sec ALONE is a fake metric — it conflates RAG-extraction with code-gen and
+#      ignores request rate. Report it only as a SUPPORTING signal, never a promotion gate.
+#   2. Latency is THREE numbers, not one: TTFT (time-to-first-token), ITL (inter-token
+#      latency), TTLT (time-to-last-token). Ollama exposes the inputs directly in /api/generate
+#      timings: TTFT ≈ load_duration + prompt_eval_duration; ITL ≈ eval_duration / eval_count;
+#      TTLT ≈ total_duration. (Wiring these as supporting metrics is the top runtime-metric
+#      next-step — see docs/MASTER.md 6.5; until wired, median_latency_ms + tokens_per_second
+#      remain the recorded runtime signals.)
+#   3. Min latency (one request at a time) is not the operating point — find the request rate
+#      where p90 latency still meets the SLO. Predict it with the "three-nineties" rule:
+#      p90 TTLT ≈ p90 TTFT + (p90 ITL × output_tokens).
+#
+# "DEEP ENOUGH" ACCEPTANCE BAR for a role suite to gate a promotion (else it is context only):
+#   - ≥ 8 labeled cases per role (today several are 2-3 — pilot-grade, not promotion-grade);
+#   - execution-based or judged scoring for coder/judge roles (substring checks are a floor,
+#     not the bar — EvalPlus/HumanEval+ is the planned coder runner);
+#   - per-tag scoring decoupled so co-tagged metrics can diverge;
+#   - StatisticalPlan.require_significance = true with a pre-registered MDE for model promotions.
+# Vendor/leaderboard numbers (Aider, LiveBench, Artificial Analysis) are DISCOVERY signals only;
+# the promotion number always comes from the repo's own local A/B on this machine.
+# ─────────────────────────────────────────────────────────────────────────────
+
 defaults:
   timeout_seconds: 120
   temperature: 0

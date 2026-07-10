@@ -184,9 +184,23 @@ models-rollback:  ## Revert canary for ROLE=
 	@$(PY) -m command_center.registry.render
 	@$(COMPOSE) restart litellm && echo "rolled back $(ROLE)"
 
-model-scout:  ## Propose model candidates from configured sources. Never edits configs.
+model-scout:  ## Propose model candidates + watchlist (GLM/Kimi) from configured sources. Never edits configs.
 	@$(PY) -m command_center.registry.model_scout --output generated/model-scout-report.md --feed-output generated/model-scout-feed.json || true
 	@echo "review generated/model-scout-report.md; daily scan feed is generated/model-scout-feed.json"
+
+model-scout-scan:  ## ONE-STEP bridge: discover models (scout) THEN feed them into the self-improvement scan. APPLY=1 drafts Proposed cards.
+	@$(PY) -m command_center.registry.model_scout --output generated/model-scout-report.md --feed-output generated/model-scout-feed.json || true
+	@$(PY) -m command_center.cli.improvement scan $(if $(APPLY),--apply,) --feeds generated/model-scout-feed.json $(if $(SHOW),--show-report,)
+	@echo "scout -> scan bridge done (frontier_watch = track-as-context; pull_to_verify = propose pull; canary/promote stay human-only)"
+
+frontier-router-dry-run:  ## Preview a frontier-router call's cost + policy (NO live egress). MODEL= PROVIDER= IN= OUT= TASK=
+	@$(PY) -m command_center.cli.frontier_router dry-run --model $(or $(MODEL),glm-5.2) $(if $(PROVIDER),--provider $(PROVIDER),) --input-tokens $(or $(IN),120000) --output-tokens $(or $(OUT),8000) --task-class $(or $(TASK),frontier_reference_eval)
+
+frontier-router-price-audit:  ## Flag stale frontier-router provider prices (never overwrites). TODAY=YYYY-MM-DD optional.
+	@$(PY) -m command_center.cli.frontier_router price-audit $(if $(TODAY),--today $(TODAY),)
+
+frontier-router-egress-check:  ## Forbidden-providers check in EGRESS mode (permits budgeted router keys; local lane stays strict).
+	@$(PY) -m command_center.cli.check_forbidden_providers --allow-frontier-router-egress
 
 model-fit:  ## Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
 	@$(PY) -m command_center.cli.model_fit $(if $(CTX),--ctx $(CTX),) $(if $(MODEL),--model $(MODEL),) $(if $(ENV),--env $(ENV),) $(if $(VRAM),--vram-gb $(VRAM),)

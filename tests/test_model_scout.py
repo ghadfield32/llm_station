@@ -65,8 +65,11 @@ def _write_curated(path, payload):
 
 
 def test_fetcher_keys_match_known_sources():
-    # the dispatch table and the validation set must not drift apart
-    assert set(scout.FETCHERS) == scout.KNOWN_SOURCES
+    # FETCHERS covers the per-candidate sources; model-watchlist is a known source that runs
+    # on its OWN track (gather_watchlist), so it is intentionally not a fetcher. The dispatch
+    # table plus the watchlist source must exactly reconstruct the validated known set.
+    assert set(scout.FETCHERS) | {scout.WATCHLIST_SOURCE} == scout.KNOWN_SOURCES
+    assert scout.WATCHLIST_SOURCE not in scout.FETCHERS
 
 
 def test_annotate_fit_without_budget_is_na():
@@ -225,3 +228,126 @@ def test_curated_openweight_config_rejects_wrong_schema_version():
 
     with pytest.raises(ValueError, match="schema_version"):
         CuratedModelScoutConfig.model_validate(payload)
+
+
+# ---- watchlist: tracking un-pulled frontier / pull-to-verify models -----------
+
+def _watchlist_payload(*, tier="frontier_watch", params=744.0, roles=None, family="glm",
+                       release="GLM-5.2", quant="Q4_K_M", ollama_tag=None,
+                       ollama_local=False):
+    rec = {
+        "record_id": f"{release}-test".lower(),
+        "tier": tier,
+        "model_family": family,
+        "release_id": release,
+        "source_model_url": "https://example.test/model",
+        "parameter_count_b": params,
+        "reference_quant": quant,
+        "license": "MIT",
+        "open_weight_evidence": "example open-weight evidence",
+        "source_url": "https://example.test/card",
+        "retrieval_timestamp": "2026-06-20",
+    }
+    if roles is not None:
+        rec["candidate_roles"] = roles
+    if ollama_tag:
+        rec["ollama_tag"] = ollama_tag
+        rec["ollama_local"] = ollama_local
+    return {"schema_version": "command-center.model-scout-watchlist.v1", "records": [rec]}
+
+
+def _write_watchlist(path, payload):
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+
+
+def test_watchlist_frontier_is_hard_no_on_both_budgets(tmp_path, monkeypatch):
+    # GLM-5.2-class (744B) is a hard NO on 24GB AND 16GB via the weights-only lower bound,
+    # WITHOUT being installed — the whole point of the watchlist.
+    path = tmp_path / "watchlist.yaml"
+    _write_watchlist(path, _watchlist_payload(params=744.0))
+    monkeypatch.setattr(scout, "WATCHLIST", path)
+    reg = _registry(["model-watchlist"])
+    rows = scout.fetch_watchlist(reg, installed=set(), budget_24gb=24.0, budget_16gb=16.0)
+    assert len(rows) == 1 and rows[0]["tier"] == "frontier_watch"
+    assert "NO @ 24GB" in rows[0]["fit_24gb"]
+    assert "NO @ 16GB" in rows[0]["fit_16gb"]
+
+
+def test_watchlist_verified_artifact_drives_named_target_verdicts(tmp_path, monkeypatch):
+    # With a verified 238GB artifact, GLM-5.2 is does_not_fit on 24GB AND 16GB, but
+    # ram_only_frontier_experiment on a 256GB-class machine — the exact lane the user wants.
+    path = tmp_path / "watchlist.yaml"
+    payload = _watchlist_payload(params=744.0)
+    payload["records"][0]["local_artifact"] = {
+        "type": "gguf", "provider": "unsloth",
+        "smallest_verified_size_gb": 238, "quant": "dynamic-2bit"}
+    _write_watchlist(path, payload)
+    monkeypatch.setattr(scout, "WATCHLIST", path)
+    reg = _registry(["model-watchlist"])
+    rows = scout.fetch_watchlist(reg, installed=set(), budget_24gb=24.0, budget_16gb=16.0)
+    rt = rows[0]["runnable_targets"]
+    assert rt["cc_worker_4090_24gb"] == "does_not_fit"
+    assert rt["laptop_5080_16gb"] == "does_not_fit"
+    assert rt["ram_256gb_class"] == "ram_only_frontier_experiment"
+    assert rt["footprint_source"] == "verified_artifact"
+    assert rows[0]["smallest_verified_size_gb"] == 238
+    assert "verified dynamic-2bit artifact ~238GB" in rows[0]["fit_24gb"]
+
+
+def test_watchlist_pull_to_verify_rejects_unknown_role(tmp_path, monkeypatch):
+    path = tmp_path / "watchlist.yaml"
+    _write_watchlist(path, _watchlist_payload(
+        tier="pull_to_verify", params=21.0, roles=["nonexistent-role"]))
+    monkeypatch.setattr(scout, "WATCHLIST", path)
+    reg = _registry(["model-watchlist"])
+    with pytest.raises(RuntimeError, match="unknown"):
+        scout.fetch_watchlist(reg, installed=set(), budget_24gb=24.0, budget_16gb=16.0)
+
+
+def test_watchlist_pull_to_verify_unknown_fit_when_weights_clear_floor(tmp_path, monkeypatch):
+    path = tmp_path / "watchlist.yaml"
+    _write_watchlist(path, _watchlist_payload(
+        tier="pull_to_verify", params=14.0, roles=["planner"]))
+    monkeypatch.setattr(scout, "WATCHLIST", path)
+    reg = _registry(["model-watchlist"])
+    rows = scout.fetch_watchlist(reg, installed=set(), budget_24gb=24.0, budget_16gb=16.0)
+    assert "unknown - pull to verify" in rows[0]["fit_24gb"]
+    assert "FITS" not in rows[0]["fit_24gb"]   # never a fabricated positive from the bound
+
+
+def test_watchlist_feed_record_tier_mapping():
+    recs = scout.watchlist_feed_records([
+        {"tier": "frontier_watch", "model": "GLM-5.2", "model_family": "glm",
+         "release_id": "GLM-5.2", "ollama_local": False, "open_weight_evidence": "e",
+         "license": "MIT", "parameter_count_b": 744.0, "active_param_count_b": 40.0,
+         "is_moe": True, "context_length": 1048576, "ollama_tag": None,
+         "candidate_roles": [], "fit_24gb": "NO", "fit_16gb": "NO",
+         "source_url": "u", "source_model_url": "m", "retrieval_timestamp": "2026-06-20",
+         "notes": "n"},
+        {"tier": "pull_to_verify", "model": "gpt-oss-20b", "model_family": "gpt-oss",
+         "release_id": "gpt-oss-20b", "ollama_local": True, "open_weight_evidence": "e",
+         "license": "Apache-2.0", "parameter_count_b": 21.0, "active_param_count_b": 3.6,
+         "is_moe": True, "context_length": 131072, "ollama_tag": "gpt-oss:20b",
+         "candidate_roles": ["planner"], "fit_24gb": "unknown", "fit_16gb": "unknown",
+         "source_url": "u", "source_model_url": "m", "retrieval_timestamp": "2026-06-20",
+         "notes": "n"},
+    ])
+    assert [r["record_type"] for r in recs] == ["frontier_watch", "model_pull_candidate"]
+
+
+def test_gather_watchlist_absent_source_is_noop():
+    reg = _registry(["aider-polyglot"])
+    records, errors = scout.gather_watchlist(reg, offline=True, installed=set())
+    assert records == [] and errors == []
+
+
+def test_scan_feed_records_offline_includes_watchlist_frontier():
+    # Integration check of the DAG bridge against the REAL configs/model-scout-watchlist.yaml:
+    # offline, the model feed still surfaces frontier models (GLM-5.2) by name + a pull
+    # candidate. This is what makes the scheduled DAG able to "check on GLM/Kimi when found".
+    recs = scout.scan_feed_records(offline=True)
+    types = {r["record_type"] for r in recs}
+    models = {r["model"] for r in recs}
+    assert "frontier_watch" in types
+    assert "GLM-5.2" in models
+    assert any(r["record_type"] == "model_pull_candidate" for r in recs)

@@ -1,0 +1,37 @@
+schema_version: command-center.model-serving-benchmarks.v1
+
+# SERVING evaluation — distinct from the QUALITY suites in model-benchmarks.yaml.
+# quality_eval != serving_eval: a model can be the smartest and still lose if it is
+# unusably slow for the Command Center workflow. Each scenario is a realistic workload
+# (input/output token sizes) with a latency SLO; the harness sweeps request rates and reports
+# the OPERATING POINT = the highest sustainable rate where p90 stays under SLO. Raw tokens/sec
+# is never a promotion gate. Latency is THREE numbers: TTFT, ITL, TTLT (see serving_slo.py,
+# serving_benchmark.py, docs/model-serving-benchmarks.md).
+
+scenarios:
+  repo_triage:        # short triage/classify turns — latency-sensitive
+    input_tokens_p50: 3000
+    input_tokens_p90: 12000
+    output_tokens_p50: 700
+    output_tokens_p90: 2500
+    slo_p90_ttft_seconds: 4
+    slo_p90_ttlt_seconds: 90
+
+  code_patch:         # a coding mission turn — moderate in, larger out
+    input_tokens_p50: 8000
+    input_tokens_p90: 30000
+    output_tokens_p50: 1500
+    output_tokens_p90: 6000
+    slo_p90_ttft_seconds: 8
+    slo_p90_ttlt_seconds: 180
+
+  long_repo_reader:   # long-context repo reasoning — prompt-processing dominated
+    input_tokens_p50: 40000
+    input_tokens_p90: 120000
+    output_tokens_p50: 1200
+    output_tokens_p90: 4000
+    slo_p90_ttft_seconds: 20
+    slo_p90_ttlt_seconds: 240
+
+# Request-rate sweep: single-request baseline -> low -> medium -> saturation -> failure.
+concurrency_sweep: [1, 2, 4, 8, 16]

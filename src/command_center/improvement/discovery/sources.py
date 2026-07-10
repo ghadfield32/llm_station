@@ -46,6 +46,10 @@ _MODEL_SCOUT_EVIDENCE_FIELDS = (
 _MODEL_SCOUT_LOCAL_FIELDS = (
     "ollama_tag", "digest", "quant", "native_context", "parameter_size", "vram_fit",
 )
+# A pull-to-verify card targets THIS (a propose-only marker), not the live harness — you
+# cannot benchmark a model that isn't installed. Once pulled + curated it returns as a
+# runnable model_scout_candidate targeting command_center.improvement.live_model_benchmark.
+MODEL_PULL_TARGET_REF = "command_center.improvement.model_pull_proposal"
 
 
 def _present(value) -> bool:
@@ -304,8 +308,13 @@ class ModelRegistryScanner(FeedScanner):
         super().__init__(name, Pillar.UPDATED_METRICS, fetch)
 
     def _classify(self, record: dict) -> Finding | None:
-        if record.get("record_type") == "model_scout_candidate":
+        rtype = record.get("record_type")
+        if rtype == "model_scout_candidate":
             return self._classify_model_scout(record)
+        if rtype == "frontier_watch":
+            return self._classify_frontier_watch(record)
+        if rtype == "model_pull_candidate":
+            return self._classify_model_pull(record)
         cand, inc = float(record["candidate"]), float(record["incumbent"])
         better = cand > inc if record.get("direction", "increase") == "increase" else cand < inc
         if not better:
@@ -379,6 +388,10 @@ class ModelRegistryScanner(FeedScanner):
                 "model": model,
                 "metric": metric,
                 "score": score,
+                # Resolved live-A/B parameters (role/suite/incumbent/candidate/endpoint/context)
+                # when the scout could bind them — this is what lets the drafted card be RUNNABLE
+                # rather than an inert shell. None for an unresolved candidate.
+                "model_benchmark": record.get("model_benchmark"),
                 "candidate_roles": [str(role) for role in roles],
                 "source_url": record.get("source_url"),
                 "license": record.get("license"),
@@ -405,6 +418,76 @@ class ModelRegistryScanner(FeedScanner):
                 "missing_evidence_fields": missing_evidence,
                 "missing_local_fields": missing_local,
             })
+
+
+    def _classify_frontier_watch(self, record: dict) -> Finding | None:
+        """A real open-weight FLAGSHIP that does NOT fit this hardware (GLM-5.2, Kimi K2, ...).
+        Track-as-context only: a low-priority DOCUMENTATION note, NEVER a local benchmark — the
+        live harness is Ollama-only and these models are 5-25x too large. This is how the daily
+        scan "checks on" frontier models by name without ever pretending it can run them."""
+        if record.get("open_weight") is not True:
+            return None
+        model = str(record["model"])
+        family = record.get("model_family", "?")
+        params = record.get("parameter_count_b")
+        fit24, fit16 = record.get("fit_24gb"), record.get("fit_16gb")
+        return Finding(
+            pillar=Pillar.UPDATED_METRICS, source=self.name,
+            title=f"frontier-watch: {model} (track-as-context)"[:80],
+            claim=(f"{model} ({family}, ~{params}B) is open-weight but does not fit this "
+                   f"hardware (24GB: {fit24}; 16GB: {fit16}); track as context, do not "
+                   "benchmark locally"),
+            evidence=(f"{self.name}: frontier_watch {model}; license={record.get('license')}; "
+                      f"fit_24gb={fit24}; fit_16gb={fit16}; "
+                      f"source={record.get('source_model_url')}"),
+            confidence=0.6, impact=0.15, ease=0.2, reach=1.0, effort=1.0,
+            time_criticality=0.0, voi_value=0.15, voi_prob=0.3, cost=1.0,
+            suggested_target_type=TargetType.DOCUMENTATION,
+            target_ref=f"discovery/updated_metrics/frontier-watch/{family}",
+            suggested_risk=RiskTier.L1,
+            unknowns="whether local hardware or a small-enough quant ever makes this runnable",
+            detail={"record_type": "frontier_watch", "tier": "frontier_watch", "model": model,
+                    "parameter_count_b": params, "active_param_count_b":
+                    record.get("active_param_count_b"), "is_moe": record.get("is_moe"),
+                    "fit_24gb": fit24, "fit_16gb": fit16, "license": record.get("license"),
+                    "source_model_url": record.get("source_model_url"),
+                    "notes": record.get("notes")})
+
+    def _classify_model_pull(self, record: dict) -> Finding | None:
+        """A plausibly-fitting open-weight model we have NOT pulled (e.g. gpt-oss-20b).
+        Propose-only: draft a "pull then benchmark" card for the declared role. It targets a
+        PULL-PROPOSAL ref — NOT the live harness — because you cannot benchmark a model that is
+        not installed; once pulled and added to curated-openweight it returns as a runnable
+        model_scout_candidate. Never auto-pulls."""
+        if record.get("open_weight") is not True:
+            return None
+        model = str(record["model"])
+        tag = record.get("ollama_tag")
+        roles = record.get("candidate_roles")
+        if not isinstance(roles, list) or not roles:
+            raise RuntimeError(f"model_pull_candidate {model!r} must declare candidate_roles")
+        fit24 = record.get("fit_24gb")
+        return Finding(
+            pillar=Pillar.UPDATED_METRICS, source=self.name,
+            title=f"pull-to-verify: {model} for {','.join(roles)}"[:80],
+            claim=(f"{model} (tag {tag}) plausibly fits (24GB: {fit24}); pull it and run the "
+                   f"{roles[0]} benchmark A/B vs the incumbent before any routing change"),
+            evidence=(f"{self.name}: model_pull_candidate {model}; tag={tag}; "
+                      f"roles={','.join(str(r) for r in roles)}; fit_24gb={fit24}; "
+                      f"fit_16gb={record.get('fit_16gb')}; license={record.get('license')}; "
+                      f"source={record.get('source_model_url')}"),
+            confidence=0.55, impact=0.5, ease=0.3, reach=float(len(roles)), effort=2.0,
+            time_criticality=0.0, voi_value=0.5, voi_prob=0.5, cost=2.0,
+            suggested_target_type=TargetType.MODEL,
+            target_ref=MODEL_PULL_TARGET_REF,
+            suggested_risk=RiskTier.L2,
+            unknowns="whether it fits at the needed context and beats the incumbent locally",
+            detail={"record_type": "model_pull_candidate", "tier": "pull_to_verify",
+                    "model": model, "ollama_tag": tag,
+                    "candidate_roles": [str(r) for r in roles], "fit_24gb": fit24,
+                    "fit_16gb": record.get("fit_16gb"), "license": record.get("license"),
+                    "source_model_url": record.get("source_model_url"),
+                    "requires_pull": True, "notes": record.get("notes")})
 
 
 class DependencyScanner(FeedScanner):
