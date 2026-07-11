@@ -309,6 +309,87 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   all 3 changed/new files (mypy doesn't apply — `services/` is outside
   `[tool.mypy] files = ["src"]`). Full repo suite green, run alone with no
   concurrent file edits.
+- AGENT SESSIONS UI DONE 07-11 (Commit 2, FakeHarness cockpit interface —
+  frontend-only, no backend changes): `api.ts` gained typed
+  `AgentHarnessOption`/`AgentSessionRecord`/`AgentEvent` contracts + client
+  functions for the full lifecycle (create/get/send/events/approve/interrupt/
+  resume/close) plus `streamAgentEvents` — native browser `EventSource`
+  rather than a manual fetch-reader (unlike `streamChat`'s POST-body stream,
+  this is a plain GET, so `EventSource` gets `Last-Event-ID` reconnect for
+  free and silently ignores heartbeat comment lines with no special-casing).
+  `App.tsx`'s chat target changed from a bare `target` string to a real
+  discriminated union (`ChatTarget = {kind:"gateway"} | {kind:"agent",
+  harnessId} | {kind:"external", name}`) via `decodeChatTarget` — every one
+  of the ~15 existing `target === "GatewayCore"`-style comparisons in
+  `ChatView` now switches on `.kind` instead. A new "Agent Sessions" optgroup
+  in the existing agent/target `<select>` lists live harnesses from
+  `fetchAgentHarnesses()`; Fake only appears when the BACKEND included it
+  (`KANBAN_UI_FAKE_AGENT_ENABLED` — no separate frontend dev flag needed,
+  the backend is the single source of truth), Codex/Claude always render as
+  disabled options carrying their real `NotBuiltHarness` blocker text as the
+  tooltip (never a generic "unavailable").
+- NEW `AgentSessionPanel` + `AgentEventCard` components: session creation
+  form (repo/mode — `permission_profile` hardcoded `read_only`, workspace
+  write-mode explicitly out of scope) when no session exists yet; once one
+  does, a dedicated per-event-type renderer (never inferring tool activity
+  from prose — matches the backend's own "an agent session's tool surface is
+  much bigger, don't trust it implicitly" discipline), a derived pending-
+  approvals list (any `approval_required` without a later matching
+  `approval_resolved` in the event log) with approve/deny buttons, and
+  interrupt/resume/close controls gated on real session status.
+- REFRESH RECOVERY DONE 07-11: agent-session metadata (`agentSessionId`,
+  `agentHarnessId`, `agentRepoId`, `agentMode`, `agentPermissionProfile`,
+  `agentLastSeenSequence`) was added to the LOCAL `ChatThread` type only —
+  deliberately never sent through `persistThread`/`saveChatThread`
+  (GatewayCore's flight-recorder thread store), matching the "structurally
+  separate execution path" rule everywhere else in this subsystem. A new
+  small `activeThread` localStorage pointer (conversationId + target)
+  restores the last-open thread/lane across a real browser reload; on mount,
+  `AgentSessionPanel` re-verifies a persisted session against the real
+  worker (`fetchAgentSession`), replays full history
+  (`fetchAgentEvents(id, 0)`), then resumes the live stream from the last
+  real sequence — never trusts the persisted state blindly.
+- VERIFIED 07-11: `npm run build` (`tsc && vite build`) clean with ZERO type
+  errors on the first attempt despite the ~550-line diff across a
+  discriminated-union refactor of ~15 call sites — no backend changes in this
+  commit, so `tests/test_agent_kanban_ui.py` (47) + `test_agent_kanban_ui_
+  agent_sessions.py` (19) re-run unchanged/green, full repo suite green
+  (run alone, no concurrent edits). Docker build caught a REAL verification
+  gap on the first attempt: a `docker build` from the wrong `cwd` (the Bash
+  tool's cwd had silently drifted back to the main checkout — the same
+  recurring gotcha from earlier this session) produced an image that
+  "succeeded" entirely from BuildKit cache and contained NONE of the new
+  frontend code; caught by grepping the built JS bundle for a known new
+  string ("Agent Sessions") and finding nothing, not by trusting a green
+  `docker build` exit code. Rebuilt from the correct worktree path — the web
+  build step genuinely re-ran this time, and the built bundle was confirmed
+  to contain the new UI strings and `agent_worker_client.py` before deleting
+  the test image.
+- 20-ITEM ACCEPTANCE GATE RUN 07-11 (live, not mocked): a real `cc
+  agent-worker`-equivalent process (real FakeHarness, real in-memory
+  SessionStore, real uvicorn on a real socket) driven end-to-end through the
+  cockpit's real `app.py` routes — disabled-mode 503, unreachable-worker 502,
+  token-redaction across 3 endpoints, Fake-Agent gating both directions,
+  Codex/Claude's concrete blocker text, full session lifecycle (create ->
+  get -> send [202, non-blocking] -> ordered events -> "write ..." producing
+  a real `approval_required` -> approve -> `approval_resolved` -> replay
+  rejected 409 -> interrupt -> blocked-until-resume 409 -> resume -> message
+  accepted again -> SSE reconnect via `Last-Event-ID` mid-stream delivering
+  only the gap (the real `_agent_event_frames` generator against the real
+  worker, not a stub) -> close -> further message rejected 400), GatewayCore
+  never constructed anywhere in the run (every response checked for a
+  surfaced 500 from the `_get_core` guard), and a real heartbeat firing on
+  an idle stream against the real worker. 20/20 passed. A first attempt at
+  running the cockpit itself as a second real uvicorn subprocess (rather than
+  `TestClient`) was abandoned after proving flaky to orchestrate from this
+  shell on Windows (silent startup failures with no readable error) — same
+  production code path either way (`AgentWorkerClient` makes genuine HTTP
+  calls to the real worker process regardless), so `TestClient`-over-a-real-
+  worker was used instead, matching the pytest suite's own proven-reliable
+  pattern. Scratch script, not committed.
+- NEXT: Commit 2 is code-complete and verified; real Codex/Claude adapters,
+  worktree write mode, mission executor routing, and OpenRouter agent
+  provider profiles remain explicitly out of scope (Phase 2/3+, not started).
 - NEXT: the cockpit's `/api/agent-sessions/*` proxy+SSE endpoints (talking to
   this worker over `host.docker.internal:8791`, matching the existing Ollama/
   AppFlowy pattern in docker-compose.yml) and the Agent Sessions UI — still

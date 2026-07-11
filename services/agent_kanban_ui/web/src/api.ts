@@ -690,6 +690,137 @@ export const fetchChatTranscript = (conversationId: string, limit?: number) =>
     `/api/chat/threads/${encodeURIComponent(conversationId)}/transcript`
     + (limit ? `?limit=${limit}` : ""));
 
+// Agent Sessions (Claude Agent / Codex Agent, via the cockpit's proxy to the
+// host `cc agent-worker` — see agent_worker_client.py). Structurally separate
+// from GatewayCore chat above: never routed through streamChat/`/api/chat/*`,
+// never entering GatewayCore.dispatch. See WORKLOG.md "Agent-session chat
+// integration" for why that boundary is load-bearing (a frontier model once
+// leaked a tool_calls field into local dispatch when GatewayCore trusted a
+// field it never offered — an agent session's tool surface is much bigger,
+// so nothing here treats a harness's output as pre-validated either).
+export interface AgentHarnessOption {
+  harness_id: string;
+  label: string;
+  production: boolean;
+  available: boolean;
+  detail: string;
+  supported_modes: string[];
+}
+export const fetchAgentHarnesses = () => getJSON<AgentHarnessOption[]>("/api/agent-harnesses");
+
+export interface AgentSessionRecord {
+  session_id: string;
+  conversation_id: string;
+  harness: string;
+  provider_profile: string;
+  model: string | null;
+  external_session_id: string | null;
+  repo_id: string;
+  workspace_path: string | null;
+  worktree_path: string | null;
+  branch: string | null;
+  base_branch: string | null;
+  permission_profile: string;
+  worker_id: string | null;
+  status: string;   // starting | active | idle | interrupted | failed | closed
+  created_at: string;
+  updated_at: string;
+  last_event_sequence: number;
+  cost_usd: number;
+}
+export interface AgentSessionCreate {
+  harness_id: string;
+  conversation_id: string;
+  repo_id: string;
+  mode: string;
+  provider_profile?: string;
+  model?: string | null;
+  permission_profile?: string;
+}
+export const createAgentSession = (body: AgentSessionCreate) =>
+  postJSON<AgentSessionRecord>("/api/agent-sessions", body);
+export const fetchAgentSession = (sessionId: string) =>
+  getJSON<AgentSessionRecord>(`/api/agent-sessions/${encodeURIComponent(sessionId)}`);
+
+export interface AgentMessageAck { session_id: string; status: string; }
+export const sendAgentMessage = (sessionId: string, prompt: string) =>
+  postJSON<AgentMessageAck>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/messages`, { prompt });
+
+// Same 16-type vocabulary as events.py's EventType — kept as `string` (not a
+// union literal) so an unrecognized future event type degrades to the
+// generic renderer instead of a TypeScript build break.
+export interface AgentEvent {
+  type: string;
+  sequence: number | null;
+  ts: string | null;
+  payload: Record<string, unknown>;
+}
+export const fetchAgentEvents = (sessionId: string, afterSequence = 0) =>
+  getJSON<AgentEvent[]>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/events`
+    + `?after_sequence=${afterSequence}`);
+
+export interface AgentApprovalAck { session_id: string; approval_id: string; }
+export const resolveAgentApproval = (
+  sessionId: string, approvalId: string, approved: boolean, reason = "",
+) =>
+  postJSON<AgentApprovalAck>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/approvals/`
+    + encodeURIComponent(approvalId),
+    { approved, reason });
+
+export interface AgentStatusAck { session_id: string; status: string; }
+export const interruptAgentSession = (sessionId: string) =>
+  postJSON<AgentStatusAck>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/interrupt`, {});
+export const resumeAgentSession = (sessionId: string) =>
+  postJSON<AgentStatusAck>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/resume`, {});
+export async function closeAgentSession(sessionId: string): Promise<AgentStatusAck> {
+  const r = await fetch(`/api/agent-sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({ detail: r.statusText }));
+    throw new Error(d.detail ?? `close failed (${r.status})`);
+  }
+  return r.json() as Promise<AgentStatusAck>;
+}
+
+// Browser-facing agent-session SSE. Native EventSource (not a manual fetch
+// reader like streamChat above) — a plain GET stream gets Last-Event-ID
+// reconnect for free from the browser, and comment-only heartbeat lines
+// (`: heartbeat`) are ignored automatically without any special-casing here.
+// `transport_error` frames are a DISTINCT callback, never forwarded through
+// onEvent — a worker/transport failure must never be rendered as if it were
+// a real AgentEvent (matches the backend's own framing discipline).
+export function streamAgentEvents(
+  sessionId: string,
+  afterSequence: number,
+  onEvent: (e: AgentEvent) => void,
+  onTransportError: (detail: string) => void,
+): () => void {
+  const es = new EventSource(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/events/stream`
+    + `?after_sequence=${afterSequence}`);
+  es.addEventListener("agent_event", (raw) => {
+    try { onEvent(JSON.parse((raw as MessageEvent).data) as AgentEvent); }
+    catch (e) { onTransportError(`malformed event from stream: ${String(e)}`); }
+  });
+  es.addEventListener("transport_error", (raw) => {
+    try {
+      const body = JSON.parse((raw as MessageEvent).data) as { detail?: string };
+      onTransportError(body.detail ?? "agent worker transport error");
+    } catch {
+      onTransportError("agent worker transport error");
+    }
+  });
+  // EventSource retries transparently on a dropped connection (with
+  // Last-Event-ID) — nothing to surface here; the caller's own transport
+  // error / status polling covers a genuinely dead session.
+  return () => es.close();
+}
+
 async function postJSON<T>(path: string, body: unknown, method = "POST"): Promise<T> {
   const r = await fetch(path, {
     method, headers: { "Content-Type": "application/json" },
