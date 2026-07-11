@@ -44,9 +44,30 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   network/SDK/subprocess needed to pass), the forbidden-provider cross-check reads the
   real FORBIDDEN_KEYS/ROUTER_LANE_KEYS constants so it fails loudly if that policy ever
   changes instead of silently drifting, a read-only guarantee test.
-- NEXT: Phase 1 (protocol + fake harness, still zero real SDK calls) is unblocked and
-  low-risk. Phase 2 (real Claude Agent SDK calls) is blocked on the forbidden-provider
-  policy decision above.
+- DECIDED 07-11 (Geoff): add a new, separately-gated egress flag for ANTHROPIC_API_KEY/
+  OPENAI_API_KEY scoped ONLY to the agent-session subsystem (mirrors
+  --allow-frontier-router-egress; never touches the local LiteLLM lane) — not designed/
+  built yet, needed before Phase 2. Continue to Phase 1 now.
+- PHASE 1 DONE 07-11: `src/command_center/agent_sessions/` — `events.py` (normalized
+  AgentEvent, 16-type vocabulary, deliberately distinct from GatewayCore's chat event
+  shape), `protocol.py` (runtime_checkable AgentHarness Protocol: probe/start_session/
+  send/resolve_approval/interrupt/resume/close), `store.py` (in-memory SessionStore —
+  store owns sequence/ts assignment, never trusts a harness-supplied sequence;
+  events_since(id, after_sequence) is the reconnect primitive), `fake_harness.py`
+  (deterministic FakeHarness — no SDK/subprocess/network; probe() reports itself
+  honestly as a test double). No FastAPI endpoints yet (still Phase 4) and no real
+  Claude/Codex adapter (Phase 2/3) — this is protocol-level only, by design.
+- TESTS 07-11: tests/test_agent_sessions.py (13) — full lifecycle (start -> send ->
+  approval required/resolved -> interrupt -> resume -> close), sequence numbers
+  monotonic+gapless, events_since reconnect returns exactly the gap (no dupes/misses),
+  unknown-session raises loud, mismatched-session approval rejected, FakeHarness
+  satisfies the Protocol via isinstance. mypy + ruff clean; full non-job-search suite
+  green.
+- NEXT: design the agent-session egress-gate flag (the decided-but-not-built item
+  above), then Phase 2 (real Claude Agent SDK, read-only mode only, hash-before/after
+  repo mutation test) — gate on that egress flag existing. Codex Phase 3 may not need
+  it at all (reused CLI session) — verify that assumption with a real SDK call before
+  relying on it, not just the preflight's static finding.
 
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro
