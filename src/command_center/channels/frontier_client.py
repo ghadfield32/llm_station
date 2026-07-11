@@ -233,12 +233,34 @@ async def frontier_chat_completion(
     return msg
 
 
+def _last_benchmark_summary() -> dict[str, dict]:
+    """The most recent `make frontier-router-benchmark LIVE=1` result, keyed by
+    model_id — real measured latency/pass-rate/cost from the last run, or {} if
+    none has run yet. Never fabricated: a missing/corrupt report file just
+    means no measured-results badge in the picker, not a guessed number."""
+    path = ROOT / "generated" / "frontier-benchmark-report.json"
+    if not path.is_file():
+        return {}
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if report.get("mode") != "live":
+        return {}
+    from ..improvement.frontier_benchmark import summarize
+    try:
+        return summarize(report)
+    except Exception:
+        return {}
+
+
 def available_frontier_models() -> list[dict]:
     """What the cockpit can offer in the model picker: every configured model id with
     its cheapest eligible price signal for a representative turn, whether the lane is
-    enabled, and whether a key is present — read-only, no egress. Config/env errors
-    degrade to an empty list (the picker just shows no frontier options), never a
-    broken chat view."""
+    enabled, whether a key is present, and — when `make frontier-router-benchmark
+    LIVE=1` has been run — the last REAL measured latency/pass-rate/cost from that
+    run. Read-only, no egress. Config/env errors degrade to an empty list (the
+    picker just shows no frontier options), never a broken chat view."""
     try:
         providers_cfg = load_providers()
         budgets_cfg = load_budgets()
@@ -246,6 +268,7 @@ def available_frontier_models() -> list[dict]:
         return []
     policy = budgets_cfg.default
     from ..improvement.router_cost import cheapest_eligible
+    measured = _last_benchmark_summary()
     out: list[dict] = []
     live_env = _env()
     for model_id, model in providers_cfg.models.items():
@@ -253,7 +276,7 @@ def available_frontier_models() -> list[dict]:
         provider_name = pick.provider if pick else model.router_candidates[0].provider
         provider_cfg = providers_cfg.providers.get(provider_name)
         key_present = bool(provider_cfg and live_env.get(provider_cfg.secret_env))
-        out.append({
+        row = {
             "model_id": model_id,
             "provider": provider_name,
             "estimated_cost_per_turn_usd": pick.estimated_cost_usd if pick else None,
@@ -261,5 +284,7 @@ def available_frontier_models() -> list[dict]:
             "lane_enabled": policy.enabled,
             "key_present": key_present,
             "selectable": policy.enabled and key_present,
-        })
+            "measured": measured.get(model_id),
+        }
+        out.append(row)
     return sorted(out, key=lambda r: r["model_id"])

@@ -813,39 +813,58 @@ def _job_progress_steps(card: dict, events: list[dict], application: dict) -> li
 
 
 def _chat_prompt_for_card(
-    domain_id: str,
+    spec: dict,
     card: dict,
     steps: list[dict],
     events: list[dict],
     application: dict,
 ) -> str:
+    domain_id = spec.get("domain_id", "domain")
+    domain_title = spec.get("title") or domain_id
     title = (
-        card.get("company")
-        or card.get("title")
+        card.get("title")
+        or card.get("company")
         or card.get("task")
+        or card.get("action")
+        or card.get("repo_id")
+        or card.get("dag_id")
         or card.get("card_id")
     )
     role = card.get("role_title") or ""
     lines = [
-        "Use the DOMAIN CARD CONTEXT below as the authoritative context for this turn.",
+        f"Use the {domain_title} CARD CONTEXT below as the authoritative context for "
+        "this turn — it is real state pulled live from the cockpit, not a guess.",
         "Do not look for this card in mission_intake or todos unless I explicitly ask; "
         "domain cards may not exist on those generic boards.",
         "Help Geoff understand what happened so far, where this card is now, and the "
-        "next safe action. Do not claim an application was submitted unless the "
-        "application status is applied or the board lane is Completed.",
+        "next safe action.",
+    ]
+    if domain_id == "job_application":
+        lines.append(
+            "Do not claim an application was submitted unless the application status "
+            "is applied or the board lane is Completed."
+        )
+    lines.extend([
         "",
-        "DOMAIN CARD CONTEXT",
-        f"- domain_id: {domain_id}",
+        "CARD CONTEXT",
+        f"- domain: {domain_id} ({domain_title})",
         f"- card_id: {card.get('card_id')}",
         f"- title: {title} {role}".strip(),
         f"- status: {card.get('status')}",
-        f"- fit_score: {card.get('fit_score')}",
-        f"- automation_class: {card.get('automation_class')}",
-        f"- manual_reason: {card.get('manual_reason')}",
-        f"- next_action: {card.get('next_action')}",
-        f"- apply_url: {card.get('apply_url')}",
-        f"- materials_path: {card.get('materials_path')}",
-    ]
+    ])
+    # every field this domain actually defines (summary + drawer), so a repo card
+    # shows repo fields and a paper card shows paper fields instead of the
+    # job-application-shaped fields printing as "None" on unrelated domains
+    seen_fields = {"card_id", "status"}
+    for field in [*spec.get("summary_fields", []), *spec.get("drawer_fields", [])]:
+        name = field.get("name")
+        if not name or name in seen_fields:
+            continue
+        seen_fields.add(name)
+        value = card.get(name)
+        if value in (None, "", [], {}):
+            continue
+        lines.append(f"- {field.get('label', name)}: {value}")
     if application:
         lines.extend([
             "",
@@ -888,9 +907,9 @@ def _chat_prompt_for_card(
     lines.extend([
         "",
         "Answer with:",
-        "1. What happened so far.",
+        "1. What happened so far, using the card context and events above.",
         "2. What is blocking or current.",
-        "3. The next safe action Geoff or Codex should take.",
+        "3. The next safe action Geoff (or an executor started from a mission) should take.",
     ])
     return "\n".join(lines)
 
@@ -935,8 +954,7 @@ def _domain_progress(spec: dict, card_id: str) -> dict:
         "steps": steps,
         "events": events,
         "application": application,
-        "chat_prompt": _chat_prompt_for_card(
-            spec.get("domain_id", "domain"), card, steps, events, application),
+        "chat_prompt": _chat_prompt_for_card(spec, card, steps, events, application),
     }
 
 
@@ -2265,6 +2283,97 @@ def _registered_repos() -> list[dict]:
         return []
 
 
+def _repo_chat_context(repo_id: str) -> dict:
+    """Full context for a repo-scoped chat: the registered manifest, a live
+    (read-only) repo-verify pass, and any Ledger missions already running
+    against this repo. Verify/missions failures degrade to a partial payload
+    with the failure named — a Ledger outage or an unresolved local-path env
+    var should never turn into a broken chat entry point."""
+    data = _read_yaml_file(CONFIGS_DIR / "autonomy.yaml")
+    manifest = next(
+        (r for r in (data.get("repo_manifests") or []) if r.get("repo_id") == repo_id),
+        None,
+    )
+    if manifest is None:
+        raise HTTPException(status_code=404, detail=f"repo {repo_id!r} is not registered")
+    try:
+        from command_center.channels.core import env as gateway_env
+        from command_center.cli.repo_registry import run_repo_verify
+        verify = run_repo_verify(
+            repo_id=repo_id, env=gateway_env(),
+            config_path=CONFIGS_DIR / "autonomy.yaml", root=CONFIGS_DIR.parent)
+    except Exception as exc:
+        verify = {"status": "unknown", "blockers": [f"verify_failed: {exc}"]}
+    recent_missions: list[dict] = []
+    try:
+        data_missions = missions()
+        recent_missions = [
+            {"id": c.get("id"), "action": c.get("action"), "status": col["name"],
+             "risk": c.get("risk"), "created_at": c.get("created_at")}
+            for col in data_missions["columns"] for c in col["cards"]
+            if c.get("repo") == repo_id
+        ][-5:]
+    except Exception as exc:
+        recent_missions = [{"unavailable": str(exc)}]
+    return {
+        "repo_id": repo_id,
+        "manifest": manifest,
+        "verify": verify,
+        "recent_missions": recent_missions,
+    }
+
+
+def _chat_prompt_for_repo(context: dict) -> str:
+    manifest = context["manifest"]
+    verify = context.get("verify") or {}
+    recent_missions = [m for m in context.get("recent_missions") or [] if "unavailable" not in m]
+    lines = [
+        "Use the REPO CONTEXT below as the authoritative context for this turn — "
+        "it is read live from configs/autonomy.yaml plus a live, read-only "
+        "repo-verify pass, not a guess.",
+        "",
+        "REPO CONTEXT",
+        f"- repo_id: {manifest.get('repo_id')}",
+        f"- remote_url: {manifest.get('remote_url')}",
+        f"- default_branch: {manifest.get('default_branch')}",
+        f"- branch_write_policy: {manifest.get('branch_write_policy')}",
+        f"- execution_mode: {manifest.get('execution_mode')}",
+        f"- risk_ceiling: {manifest.get('risk_ceiling')}",
+        f"- kanban_board_id: {manifest.get('kanban_board_id')}",
+        f"- ci_commands: {', '.join(manifest.get('ci_commands') or []) or 'none declared'}",
+        f"- autonomous_edits_enabled: {manifest.get('autonomous_edits_enabled')}",
+        f"- autonomy_gate_status: {verify.get('status', 'unknown')}",
+    ]
+    blockers = verify.get("blockers") or manifest.get("blockers") or []
+    lines.append(f"- open blockers: {', '.join(blockers) if blockers else 'none'}")
+    if recent_missions:
+        lines.append("")
+        lines.append("RECENT MISSIONS AGAINST THIS REPO")
+        for m in recent_missions:
+            lines.append(
+                f"- {m.get('created_at', '?')}: [{m.get('status')}] "
+                f"{m.get('action')} (risk={m.get('risk')})"
+            )
+    lines.extend([
+        "",
+        "Answer with:",
+        "1. What this repo is set up for and what's actually enabled right now.",
+        "2. Anything blocking autonomous edits, if that's relevant to what I'm asking.",
+        "3. The next safe action.",
+    ])
+    return "\n".join(lines)
+
+
+@app.get("/api/chat/repo-context/{repo_id}")
+def chat_repo_context(repo_id: str) -> dict:
+    """Rich repo-scoped chat-starter context — the deep-context counterpart to
+    domain card progress prompts, for the "registered repo" chat entry point."""
+    _require_chat()
+    context = _repo_chat_context(repo_id)
+    context["chat_prompt"] = _chat_prompt_for_repo(context)
+    return context
+
+
 @app.get("/api/chat/runtime")
 def chat_runtime() -> dict:
     """What the cockpit chat actually uses: ONE harness (GatewayCore), TWO lanes.
@@ -2325,6 +2434,58 @@ def chat_runtime() -> dict:
             "in the flight recorder and are browsable under All chats."
         ),
     }
+
+
+class RepoRegisterIn(BaseModel):
+    repo_id: str
+    local_path: str
+    remote_url: str
+    kanban_board: str
+    apply: bool = False
+
+
+def _require_repo_registry_writable() -> None:
+    """Same discipline as the domain-schema editor: chat alone previews a
+    registration (writes nothing); committing it to configs/autonomy.yaml
+    additionally requires the operator's KANBAN_UI_DOMAIN_CONFIG_WRITES=1 opt-in
+    and a writable file."""
+    _require_chat()
+    if not DOMAIN_CONFIG_WRITES:
+        raise HTTPException(
+            status_code=503,
+            detail="repo registry writes disabled; set KANBAN_UI_DOMAIN_CONFIG_WRITES=1")
+    path = CONFIGS_DIR / "autonomy.yaml"
+    if not os.access(path, os.W_OK):
+        raise HTTPException(status_code=503, detail=f"autonomy config is not writable: {path}")
+
+
+@app.post("/api/repos/register")
+def register_repo(body: RepoRegisterIn) -> dict:
+    """Register a new work repo from the cockpit — mirrors `cc repo-register`.
+    apply=false (the default) only validates and previews the manifest block,
+    writing nothing; apply=true commits it to configs/autonomy.yaml and
+    requires the same write-gate as the domain-schema editor. A committed
+    manifest always starts with autonomous_edits_enabled=false — `cc
+    repo-verify` / `cc repo-enable-autonomy` remain separate, human-run gates,
+    never flipped by this endpoint."""
+    _require_chat()
+    if body.apply:
+        _require_repo_registry_writable()
+    from command_center.cli.repo_registry import run_repo_register
+    try:
+        result = run_repo_register(
+            repo_id=body.repo_id.strip(),
+            local_path=body.local_path.strip(),
+            remote_url=body.remote_url.strip(),
+            kanban_board=body.kanban_board.strip(),
+            apply=body.apply,
+            config_path=CONFIGS_DIR / "autonomy.yaml",
+            root=CONFIGS_DIR.parent,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400, detail=f"repo registration failed: {exc}") from exc
+    return result
 
 
 def _transcript_storage() -> dict:

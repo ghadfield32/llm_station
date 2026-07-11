@@ -253,8 +253,10 @@ def run_repo_register(
         return {"status": "blocked",
                 "blockers": [f"kanban_board_not_registered_{kanban_board}"],
                 "next": "register the board first with cc kanban-register"}
-    # store the local path as an env reference so no absolute path is committed
-    env_name = f"{repo_id.upper()}_LOCAL_PATH"
+    # store the local path as an env reference so no absolute path is committed;
+    # sanitize to a valid POSIX env var name (repo ids may contain hyphens/dots,
+    # which `.env`/shell cannot use in a variable name)
+    env_name = f"{re.sub(r'[^A-Za-z0-9_]', '_', repo_id.upper())}_LOCAL_PATH"
     manifest = build_repo_manifest_block(
         repo_id=repo_id, remote_url=remote_url,
         local_path_ref=f"env:{env_name}", kanban_board_id=kanban_board,

@@ -2,7 +2,7 @@ import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "re
 import {
   addDomainCardNote,
   Activity, AppFlowyBoard, BoardCard, BoardData, BoardSnapshot, ChatEvent,
-  BoardRegistry,
+  BoardRegistry, BoardRegistryBoard,
   ChatRuntime, DomainActions, DomainCard, DomainCardDetail, DomainCardProgress,
   DomainCards, DomainSchema, DomainSpec,
   FieldSpec, JobProfileControls,
@@ -16,6 +16,7 @@ import {
   fetchJobPacket, JobPacket, JobStoryEntry, PacketValidation, AgentTraceEntry,
   requestPacketChanges, submitJobApplication, updateJobPacketFile,
   fetchDomainSchema, fetchJobProfileControls, fetchMetrics, fetchMission, fetchMissions, fetchModels,
+  fetchRepoChatContext, registerRepo, RepoRegisterResult,
   fetchRuntimeDebug, fetchStatus, moveDomainCard, postAction, RuntimeDebug, streamChat,
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
   StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
@@ -2332,8 +2333,6 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   const [jobBoardMode, setJobBoardMode] = useState<JobBoardMode>("manual");
   const [packetFor, setPacketFor] = useState<{ spec: DomainSpec; card: DomainCard } | null>(null);
   const [drawerTick, setDrawerTick] = useState(0);
-  const topScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const boardScrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -2447,13 +2446,6 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
     if (allowed) return allowed;
     return boardColumns.filter((name) => name !== "Unstaged" && name !== status);
   };
-  function syncKanbanScroll(key: string, source: "top" | "board", left: number) {
-    const target = source === "top" ? boardScrollRefs.current[key] : topScrollRefs.current[key];
-    if (target && Math.abs(target.scrollLeft - left) > 1) target.scrollLeft = left;
-  }
-  function kanbanScrollWidth(columns: string[]) {
-    return Math.max(320, columns.length * 322);
-  }
   async function moveDomainCardTo(card: DomainCard, statusName: string) {
     if (!card || !canMove || statusName === "Unstaged") return;
     const id = cardId(card);
@@ -2590,7 +2582,6 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
         : boardColumns.length > 0 ? (
           <div className="domain-board-stack">
             {activeSections.map((section) => {
-              const boardKey = `${spec.domain_id}-${section.key}`;
               return (
                 <section className="domain-board-section" key={section.key}>
                   {isJobDomain && (
@@ -2602,15 +2593,8 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                       <span>{section.cards.length} cards</span>
                     </div>
                   )}
-                  <div className="domain-top-scroll"
-                    aria-label={`${section.title} lane scroll`}
-                    ref={(el) => { topScrollRefs.current[boardKey] = el; }}
-                    onScroll={(e) => syncKanbanScroll(boardKey, "top", e.currentTarget.scrollLeft)}>
-                    <div style={{ width: `${kanbanScrollWidth(boardColumns)}px` }} />
-                  </div>
-                  <div className="domain-kanban"
-                    ref={(el) => { boardScrollRefs.current[boardKey] = el; }}
-                    onScroll={(e) => syncKanbanScroll(boardKey, "board", e.currentTarget.scrollLeft)}>
+                  <HorizontalScroller className="domain-kanban"
+                    ariaLabel={`${section.title} lane scroll`}>
                     {boardColumns.map((name) => {
                       const colCards = cardsForColumn(section.cards, name);
                       return (
@@ -2641,7 +2625,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                         </div>
                       );
                     })}
-                  </div>
+                  </HorizontalScroller>
                 </section>
               );
             })}
@@ -3089,6 +3073,7 @@ function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation
             </div>
           )}
         </div>
+        <RegisterRepoCard />
       </div>
       <div className="metric diag-card">
         <div className="diag-head">Models + Runtime</div>
@@ -3136,6 +3121,105 @@ function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation
           {runtime.executors.map((e) => <Badge key={e.name} value={`${e.name} #${e.priority}`} />)}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Register a new work repo without leaving the cockpit — mirrors `cc
+// repo-register`. Collapsed by default so the repo list stays the focus;
+// "preview" always works (validates + shows the manifest block, writes
+// nothing), "commit" needs the same KANBAN_UI_DOMAIN_CONFIG_WRITES=1 opt-in
+// as every other config editor in the cockpit and surfaces that requirement
+// as a plain error if it isn't set, rather than hiding the button.
+function RegisterRepoCard() {
+  const [open, setOpen] = useState(false);
+  const [boards, setBoards] = useState<BoardRegistryBoard[]>([]);
+  const [repoId, setRepoId] = useState("");
+  const [localPath, setLocalPath] = useState("");
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [board, setBoard] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<RepoRegisterResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    fetchBoardRegistry()
+      .then((r) => {
+        setBoards(r.boards);
+        setBoard((current) => current || r.boards[0]?.board_id || "");
+      })
+      .catch(() => {});
+  }, [open]);
+
+  const canSubmit = !!(repoId.trim() && localPath.trim() && remoteUrl.trim() && board);
+
+  async function run(apply: boolean) {
+    setBusy(true);
+    setErr(null);
+    try {
+      setResult(await registerRepo({
+        repo_id: repoId.trim(), local_path: localPath.trim(),
+        remote_url: remoteUrl.trim(), kanban_board: board, apply,
+      }));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button className="clear" onClick={() => setOpen(true)}>+ register a repo</button>
+    );
+  }
+  return (
+    <div className="settings-form">
+      <label>repo_id
+        <input value={repoId} onChange={(e) => setRepoId(e.target.value)}
+          placeholder="my-other-repo" />
+      </label>
+      <label>local path (kept out of git — stored as an env var name only)
+        <input value={localPath} onChange={(e) => setLocalPath(e.target.value)}
+          placeholder="C:\path\to\repo" />
+      </label>
+      <label>remote_url
+        <input value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)}
+          placeholder="https://github.com/owner/repo" />
+      </label>
+      <label>kanban board
+        <select className="select" value={board} onChange={(e) => setBoard(e.target.value)}>
+          {boards.length === 0 && <option value="">no boards registered yet</option>}
+          {boards.map((b) => <option key={b.board_id} value={b.board_id}>{b.board_id}</option>)}
+        </select>
+      </label>
+      <div className="preset-actions">
+        <button className="actbtn" disabled={busy || !canSubmit}
+          onClick={() => run(false)}>preview</button>
+        {result?.status === "validated_dry_run" && (
+          <button className="actbtn" disabled={busy}
+            title="commits the disabled manifest to configs/autonomy.yaml"
+            onClick={() => run(true)}>commit</button>
+        )}
+        <button className="clear" disabled={busy}
+          onClick={() => { setOpen(false); setResult(null); setErr(null); }}>close</button>
+      </div>
+      {err && <div className="error small">ERR {err}</div>}
+      {result && (
+        <div className="muted small">
+          <div>status: <b>{result.status}</b></div>
+          {!!result.blockers?.length && <div>blockers: {result.blockers.join(", ")}</div>}
+          {result.next && <div>next: {result.next}</div>}
+          {result.status === "registered" && (
+            <div>
+              Registered (disabled until verified). Set <code>{result.local_path_env}</code>
+              {"="}{result.local_path_runtime_value} in .env, then run{" "}
+              <code>cc repo-verify --repo-id {result.repo_id}</code>.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3515,9 +3599,20 @@ function ChatView({ roles, runtime, draft, onBack }: {
     setStory(null);
     setStoryError(null);
     setChatMode("live");
-    setInput(`Working on registered repo ${repo.repo_id}`
-      + (repo.remote_url ? ` (${repo.remote_url})` : "") + ". ");
+    // the chat is usable the instant it opens: a short placeholder goes in
+    // first, then the deep context (manifest + live verify + recent
+    // missions) swaps in once it loads — but only if the operator hasn't
+    // already started typing over it
+    const placeholder = `Working on registered repo ${repo.repo_id}`
+      + (repo.remote_url ? ` (${repo.remote_url})` : "") + ". ";
+    setInput(placeholder);
     void hydrateThread(id);
+    fetchRepoChatContext(repo.repo_id)
+      .then((ctx) => {
+        if (conversationIdRef.current !== id) return;   // user moved to another thread
+        setInput((prev) => (prev === placeholder ? ctx.chat_prompt : prev));
+      })
+      .catch(() => {});   // deep context is a nice-to-have; the placeholder already works
   }
 
   async function loadStory(id = conversationId, limit?: number) {
@@ -3598,7 +3693,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
                   <span className="muted small">model</span>
                   <select className="select" value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane — see the Chat Runtime panel.">
+                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Claude Code/Codex are agentic coding executors, launched from missions — never a chat model.">
                     <optgroup label="Local (free)">
                       {roles.map((r) => {
                         const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
@@ -3607,18 +3702,34 @@ function ChatView({ roles, runtime, draft, onBack }: {
                     </optgroup>
                     {(runtime?.frontier_models ?? []).length > 0 && (
                       <optgroup label="Frontier (paid, opt-in)">
-                        {(runtime?.frontier_models ?? []).map((f) => (
-                          <option key={f.model_id} value={`frontier:${f.model_id}`}
-                            disabled={!f.selectable}>
-                            {f.model_id}
-                            {f.estimated_cost_per_turn_usd != null
-                              ? ` — ~$${f.estimated_cost_per_turn_usd.toFixed(4)}/turn`
-                              : ""}
-                            {f.selectable ? "" : !f.lane_enabled ? " (lane disabled)" : " (no key)"}
-                          </option>
-                        ))}
+                        {(runtime?.frontier_models ?? []).map((f) => {
+                          const m = f.measured;
+                          const resultsBits: string[] = [];
+                          if (f.estimated_cost_per_turn_usd != null) {
+                            resultsBits.push(`~$${f.estimated_cost_per_turn_usd.toFixed(4)}/turn`);
+                          }
+                          if (m) {
+                            if (m.median_latency_ms != null) resultsBits.push(`${(m.median_latency_ms / 1000).toFixed(1)}s median`);
+                            if (m.pass_rate != null) resultsBits.push(`${Math.round(m.pass_rate * 100)}% suite pass`);
+                          }
+                          return (
+                            <option key={f.model_id} value={`frontier:${f.model_id}`}
+                              disabled={!f.selectable}>
+                              {f.model_id}
+                              {resultsBits.length ? ` — ${resultsBits.join(" · ")}` : ""}
+                              {f.selectable ? "" : !f.lane_enabled ? " (lane disabled)" : " (no key)"}
+                            </option>
+                          );
+                        })}
                       </optgroup>
                     )}
+                    <optgroup label="Executors — from missions, not here">
+                      {(runtime?.executors ?? []).map((e) => (
+                        <option key={e.name} value={`executor:${e.name}`} disabled>
+                          {e.name} ({e.family}) — start from a mission, not this dropdown
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                 </label>
               )}

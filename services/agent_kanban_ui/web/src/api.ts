@@ -533,6 +533,16 @@ export interface ChatRuntime {
 // The paid, opt-in escalation lane (GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6 today) —
 // read-only pricing/availability signal; `selectable` is false until an operator
 // sets budgets.default.enabled=true AND the provider key.
+// Real measured results from the last `make frontier-router-benchmark LIVE=1`
+// run (frontier_benchmark.summarize) — absent until that has been run once.
+export interface FrontierMeasuredResult {
+  cases_scored: number;
+  cases_blocked: number;
+  pass_rate: number | null;
+  median_latency_ms: number | null;
+  measured_cost_usd: number;
+  block_reasons: string[];
+}
 export interface FrontierModelOption {
   model_id: string;
   provider: string;
@@ -541,8 +551,40 @@ export interface FrontierModelOption {
   lane_enabled: boolean;
   key_present: boolean;
   selectable: boolean;
+  measured?: FrontierMeasuredResult | null;
 }
 export const fetchChatRuntime = () => getJSON<ChatRuntime>("/api/chat/runtime");
+
+// Deep-context counterpart to a domain card's chat_prompt, for the "registered
+// repo" chat entry point: the manifest, a live read-only repo-verify pass, and
+// recent Ledger missions against this repo, plus the assembled chat_prompt.
+export interface RepoChatContext {
+  repo_id: string;
+  manifest: Record<string, unknown>;
+  verify: { status?: string; blockers?: string[]; [k: string]: unknown };
+  recent_missions: Record<string, unknown>[];
+  chat_prompt: string;
+}
+export const fetchRepoChatContext = (repoId: string) =>
+  getJSON<RepoChatContext>(`/api/chat/repo-context/${encodeURIComponent(repoId)}`);
+
+// Register a new work repo (mirrors `cc repo-register`). apply=false only
+// validates + previews the manifest block; apply=true commits it to
+// configs/autonomy.yaml (requires KANBAN_UI_DOMAIN_CONFIG_WRITES=1). Either
+// way the manifest starts autonomous_edits_enabled=false.
+export interface RepoRegisterResult {
+  status: "validated_dry_run" | "registered" | "blocked";
+  repo_id?: string;
+  blockers?: string[];
+  next?: string;
+  manifest_block?: string;
+  local_path_env?: string;
+  local_path_runtime_value?: string;
+}
+export const registerRepo = (body: {
+  repo_id: string; local_path: string; remote_url: string;
+  kanban_board: string; apply: boolean;
+}) => postJSON<RepoRegisterResult>("/api/repos/register", body);
 
 // The review index: every conversation the flight recorder has seen, across
 // all surfaces, merged with the shared thread shortcuts.

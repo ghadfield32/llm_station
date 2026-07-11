@@ -6,14 +6,14 @@
 > Deep-dive references for each section are listed in [§12](#12-doc-index-where-the-detail-lives).
 >
 > Last full revision: **2026-06-12**. Latest readiness update:
-> **2026-07-10**. Current source of truth is local
+> **2026-07-11**. Current source of truth is local
 > `feat/research-digest-intake-hygiene-main`, ahead of `main` with the
 > cockpit/chat/job-search work described below (commits `d8e593d` through
 > `7e6b367`, not yet merged).
 
 ---
 
-## Current readiness snapshot (2026-07-10)
+## Current readiness snapshot (2026-07-11)
 
 The **first-party cockpit** (`services/agent_kanban_ui`, optional Docker
 Compose profile `ui`) is the primary operator surface — see
@@ -32,11 +32,14 @@ click-through from any kanban card's Story tab to the exact moment); the
 previously-planned ORCA/OmniAgent/OxyGent specialist link-outs were removed
 in favor of the existing LiteLLM model-role dropdown (one gateway, switch by
 role, cloud providers stay behind the forbidden-provider scan on purpose).
-Claude Code and Codex CLI never appear in this picker — they are agentic
-coding **executors** (their own subscription/OAuth login, driving leased
-repo worktrees), not conversational chat models; `/api/chat/runtime`
-`executor_note` says so explicitly now, since this was a real point of
-operator confusion ("why don't I see Claude Code as a chat option").
+Claude Code and Codex CLI never appear as selectable options in this picker —
+they are agentic coding **executors** (their own subscription/OAuth login,
+driving leased repo worktrees), not conversational chat models. This was a
+real point of operator confusion ("why don't I see Claude Code as a chat
+option"), so as of 2026-07-11 the model `<select>` itself carries an
+always-visible, explicitly-disabled "Executors — from missions, not here"
+optgroup naming both — not just the `/api/chat/runtime` `executor_note` in a
+side panel that's easy to miss on mobile.
 
 **A second, opt-in lane now exists: the frontier-router backup lane**
 (§5.4, §14 2026-07-10 entry) — GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6 via
@@ -49,7 +52,19 @@ without the lane being reconciled); Geoff enabled it 2026-07-10
 frontier turn carries **no tools and no board/memory context** — plain
 conversation only, by design, so nothing repo-specific reaches a paid API.
 Real measured results and the honest caveat on the correctness KPI are in
-§14.
+§14; those measured numbers (median latency, suite pass rate) now also show
+inline in the chat model dropdown itself, not just the side panel.
+
+**Chat prompts are domain-aware and repo-scoped chat has real context now**
+(§14 2026-07-11 entry). Opening chat from any domain card renders that
+domain's own fields (a repo card shows repo fields, a paper card shows paper
+fields) instead of job-application-shaped fields printing as `None`; opening
+a scoped chat for a registered repo pulls the live manifest, a read-only
+`repo-verify` pass, and recent missions into the starter prompt. New repos
+can be registered from the cockpit itself (Chat → New Scoped Chat →
+"register a repo") instead of only via `cc repo-register`. The mobile "All
+Boards" scroller was re-diagnosed and actually fixed this time (the earlier
+scroll-snap CSS never reached the live DOM element).
 
 **Kanban board moves are now a one-step machine** — no domain card may skip
 a lane, forward or backward; the job-search pipeline is exactly Geoff's 3
@@ -2318,6 +2333,88 @@ across the two days (transcript fidelity/durability/fail-open/join-key,
 domain-surface origin honesty, one-step transition enforcement, chat wall
 regressions); `cc validate`, ruff, and `tsc`/`vite build` clean at each
 commit (`d8e593d`, `c01baec`, `54b62d2`, `d416f93`, `0696a5a`, `7e6b367`).
+
+### 2026-07-11 — Chat prompt depth, repo-scoped chat + registration UI, mobile scroll, dropdown KPI/executor visibility
+
+Follow-up pass on the chat surface and the mobile "All Boards" scroller, prompted
+directly by operator use: the auto-filled chat prompt was too shallow outside
+job-search cards, registering a new repo required the CLI, mobile kanban
+scrolling was still rough despite an earlier scroll-snap attempt, and the
+frontier/executor picker changes from the prior entry needed real measured
+numbers and in-dropdown visibility rather than a side-panel-only note.
+
+- **Chat prompts are now domain-aware, not job-application-shaped.**
+  `_chat_prompt_for_card` (`services/agent_kanban_ui/app.py`) used to hardcode
+  job fields (`fit_score`, `apply_url`, `materials_path`, …) for every domain —
+  a paper/repo/dag/book card's "open in chat" prompt printed those as literal
+  `None` lines, which is exactly what read as shallow/context-free. It now
+  takes the domain's own `spec` and renders each domain's actual
+  `summary_fields`/`drawer_fields` (from `configs/domain_surfaces.yaml`) with
+  real values only; the job-only APPLICATION MEMORY block and submission
+  caveat still fire, but only when `application` data exists.
+- **A new repo-scoped chat context.** `startRepoChat()`'s prompt was a single
+  templated sentence ("Working on registered repo X"). New endpoint
+  `GET /api/chat/repo-context/{repo_id}` (`_repo_chat_context` +
+  `_chat_prompt_for_repo`) assembles the manifest fields from
+  `configs/autonomy.yaml`, a live **read-only** `repo-verify` pass (reusing
+  `cli.repo_registry.run_repo_verify`), and the last 5 Ledger missions against
+  that repo, into one prompt. The chat input is never blocked on this fetch —
+  the old one-line placeholder is set synchronously so the box is usable the
+  instant the thread opens, then swapped for the rich prompt only if the
+  operator hasn't already started typing over it (`prev === placeholder`
+  guard). Verified all four chat entry points (new/thread-reopen/card-scoped/
+  repo-scoped) set input synchronously; only the send button — never the input
+  box — disables while a turn is in flight.
+- **Register a repo from the cockpit.** New `POST /api/repos/register`
+  (mirrors `cc repo-register`) plus a `RegisterRepoCard` form in the Chat
+  view's "New Scoped Chat" panel. `apply=false` (default) only validates and
+  previews the manifest block — no write, no gate beyond chat being enabled;
+  `apply=true` commits to `configs/autonomy.yaml` and requires the same
+  `KANBAN_UI_DOMAIN_CONFIG_WRITES=1` opt-in as every other config editor in
+  the cockpit. A committed manifest always starts
+  `autonomous_edits_enabled=false` — `cc repo-verify`/`cc repo-enable-
+  autonomy` remain separate, human-run steps, never flipped by this endpoint.
+  Live-probing this surfaced a real pre-existing bug in `cli/repo_registry.py`:
+  the local-path env-var name was built as `f"{repo_id.upper()}_LOCAL_PATH"`
+  with no sanitization, so a hyphenated repo id (a common real naming
+  convention — this repo's own two registered repos happen to use
+  underscores, which is why it went unnoticed) produced an invalid POSIX env
+  var name that could never actually be set in `.env`/shell. Fixed to
+  sanitize non-`[A-Za-z0-9_]` characters to `_` before uppercasing.
+- **Mobile "All Boards" scroll, actually fixed this time.** The earlier
+  scroll-snap CSS pass targeted `.domain-kanban.scrollframe-content`, but the
+  live DOM element was a hand-rolled `.domain-top-scroll` + `.domain-kanban`
+  pair with its own `topScrollRefs`/`syncKanbanScroll` — it never carried the
+  `scrollframe-content` class the CSS rules keyed on, so the fix silently
+  never applied. Swapped the "All Boards" kanban lane onto the same
+  `HorizontalScroller` component (`ResizeObserver`-driven width, `syncing`
+  mutex ref) already used correctly elsewhere in the cockpit, and deleted the
+  now-dead manual scroller code/CSS.
+- **Model dropdown gained real KPI results and explicit executor visibility.**
+  The "Frontier (paid, opt-in)" optgroup now reads `frontier_models[].measured`
+  (new `_last_benchmark_summary()` in `frontier_client.py`, parsing
+  `generated/frontier-benchmark-report.json` from the last `make
+  frontier-router-benchmark LIVE=1` run) and shows median latency + suite pass
+  rate inline with the existing cost estimate — real measured numbers, absent
+  until that benchmark has actually run once, never fabricated. A new,
+  always-visible "Executors — from missions, not here" optgroup lists
+  Claude Code / Codex CLI as explicitly disabled options directly in the
+  dropdown (previously this explanation only lived in a side-panel card,
+  easy to miss especially on mobile) — the direct answer to "why don't Claude
+  Code/Codex show up as chat options."
+
+Validation: `npx tsc --noEmit` clean, `npm run build` clean, `uv run ruff
+check` clean, 7 new/updated cockpit backend tests (domain-aware prompt
+shape, job-application prompt regression, repo-context endpoint incl. the
+chat-wall gate, repo-register dry-run/blocked/write-gate/committed-manifest
+cases, the env-var sanitize regression) all green, `frontier_client`/
+`frontier_router_eval` suites still green, `check_forbidden_providers
+--allow-frontier-router-egress` clean. Rebuilt and live-probed the
+`agent-kanban-ui` container end to end: `/api/chat/repo-context/llm_station`
+returns the assembled prompt with a real (container-scoped) verify pass,
+`/api/repos/register` previews correctly with the sanitized env name, and
+`/api/chat/runtime` confirms `frontier_models`/`executors`/`repos` all reach
+the picker.
 
 ### 2026-07-10 (later) — Frontier-router chat lane: the top-3 pick, wired, tested, and real money spent to prove it
 

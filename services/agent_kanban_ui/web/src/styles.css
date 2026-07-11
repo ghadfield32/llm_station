@@ -602,16 +602,6 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   flex: 0 0 auto; color: var(--muted); font-size: 12px; border: 1px solid var(--border);
   border-radius: 999px; padding: 3px 8px; background: var(--col);
 }
-.domain-top-scroll {
-  overflow-x: auto; overflow-y: hidden; height: 16px; max-width: 100%;
-  margin: 2px 0 6px; border: 1px solid var(--border); border-radius: 8px;
-  background: var(--col); scrollbar-color: var(--accent) var(--col);
-  scrollbar-width: thin;
-}
-.domain-top-scroll::-webkit-scrollbar { height: 10px; }
-.domain-top-scroll::-webkit-scrollbar-track { background: var(--col); border-radius: 999px; }
-.domain-top-scroll::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 999px; }
-.domain-top-scroll > div { height: 1px; }
 .domain-column {
   flex: 0 0 310px; background: var(--col);
   border: 1px solid var(--border); border-radius: 10px; min-width: 0;
@@ -992,7 +982,6 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   .job-board-controls.scrollframe-content .tab { flex: 0 0 auto; }
   .job-workflow-help { grid-template-columns: 1fr; }
   .domain-board-section-head { flex-direction: column; gap: 6px; }
-  .domain-top-scroll { margin-left: -12px; margin-right: -12px; border-radius: 0; }
   .chat-runtime { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr; }
   .settings-form-grid { grid-template-columns: 1fr 1fr; }

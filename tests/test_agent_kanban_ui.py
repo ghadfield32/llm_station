@@ -789,3 +789,139 @@ def test_activity_feed_returns_recent_calls_newest_first(client, monkeypatch):
     out = tc.get("/api/activity").json()["calls"]
     assert out[0]["tool"] == "stage_card" and out[0]["ok"] is False   # newest first
     assert out[1]["tool"] == "list_cards"
+
+
+def test_chat_prompt_for_card_is_domain_aware_not_job_shaped(client):
+    """A non-job domain (repo) must render ITS OWN fields with real values,
+    never the job_application-shaped fields (fit_score/apply_url/materials_path)
+    printing as 'None' on an unrelated card."""
+    mod, _ = client
+    repo_spec = next(
+        d for d in yaml.safe_load(
+            (ROOT / "configs" / "domain_surfaces.yaml").read_text(encoding="utf-8")
+        )["domains"] if d["domain_id"] == "repo")
+    card = {
+        "card_id": "repo-1", "status": "Using", "repo_id": "cool-repo",
+        "language": "Python", "why": "does something useful",
+        "url": "https://github.com/x/cool-repo",
+    }
+    prompt = mod._chat_prompt_for_card(repo_spec, card, [], [], {})
+    assert "fit_score" not in prompt
+    assert "materials_path" not in prompt
+    assert "apply_url" not in prompt
+    assert "Repo: cool-repo" in prompt
+    assert "Why it matters: does something useful" in prompt
+    assert "APPLICATION MEMORY" not in prompt
+
+
+def test_chat_prompt_for_card_job_application_keeps_application_memory(client):
+    mod, _ = client
+    job_spec = next(
+        d for d in yaml.safe_load(
+            (ROOT / "configs" / "domain_surfaces.yaml").read_text(encoding="utf-8")
+        )["domains"] if d["domain_id"] == "job_application")
+    card = {"card_id": "job-1", "status": "In Progress", "company": "Acme",
+            "role_title": "Engineer", "fit_score": 8, "apply_url": "https://x"}
+    application = {"exists": True, "application_id": "job-1", "status": "drafted"}
+    prompt = mod._chat_prompt_for_card(job_spec, card, [], [], application)
+    assert "APPLICATION MEMORY" in prompt
+    assert "Do not claim an application was submitted" in prompt
+    assert "Company: Acme" in prompt
+
+
+def _real_autonomy_configs(tmp_path):
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    for name in ("autonomy.yaml", "kanban_boards.yaml"):
+        (configs / name).write_text(
+            (ROOT / "configs" / name).read_text(encoding="utf-8"), encoding="utf-8")
+    return configs
+
+
+def test_repo_chat_context_endpoint(client, monkeypatch, tmp_path):
+    mod, tc = client
+    monkeypatch.setattr(mod, "CONFIGS_DIR", _real_autonomy_configs(tmp_path))
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod.httpx, "get",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("ledger down")))
+
+    assert tc.get("/api/chat/repo-context/no-such-repo").status_code == 404
+
+    r = tc.get("/api/chat/repo-context/llm_station")
+    assert r.status_code == 200, r.json()
+    body = r.json()
+    assert body["manifest"]["repo_id"] == "llm_station"
+    assert body["verify"]["status"] in ("pass", "blocked")
+    assert body["recent_missions"] and "unavailable" in body["recent_missions"][0]
+    assert "repo_id: llm_station" in body["chat_prompt"]
+    assert "autonomy_gate_status" in body["chat_prompt"]
+
+
+def test_repo_chat_context_stays_behind_the_chat_wall(client):
+    _, tc = client
+    assert tc.get("/api/chat/repo-context/llm_station").status_code == 503
+
+
+def test_register_repo_dry_run_never_writes(client, monkeypatch, tmp_path):
+    mod, tc = client
+    configs = _real_autonomy_configs(tmp_path)
+    before = (configs / "autonomy.yaml").read_text(encoding="utf-8")
+    monkeypatch.setattr(mod, "CONFIGS_DIR", configs)
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)   # DOMAIN_CONFIG_WRITES left False
+
+    r = tc.post("/api/repos/register", json={
+        "repo_id": "totally-new-test-repo", "local_path": "/tmp/wherever",
+        "remote_url": "https://github.com/x/totally-new-test-repo",
+        "kanban_board": "llm_station_command_center", "apply": False,
+    })
+    assert r.status_code == 200, r.json()
+    body = r.json()
+    assert body["status"] == "validated_dry_run"
+    assert "manifest_block" in body
+    # hyphenated repo ids (a common real-world naming convention) must still
+    # produce a valid POSIX env var name — .env/shell cannot use hyphens
+    assert body["local_path_env"] == "TOTALLY_NEW_TEST_REPO_LOCAL_PATH"
+    assert (configs / "autonomy.yaml").read_text(encoding="utf-8") == before   # no write
+
+    already = tc.post("/api/repos/register", json={
+        "repo_id": "llm_station", "local_path": "/tmp/x", "remote_url": "https://x",
+        "kanban_board": "llm_station_command_center", "apply": False,
+    })
+    assert already.json()["status"] == "blocked"
+    assert "repo_id_already_registered_llm_station" in already.json()["blockers"]
+
+
+def test_register_repo_apply_requires_write_gate(client, monkeypatch, tmp_path):
+    mod, tc = client
+    configs = _real_autonomy_configs(tmp_path)
+    monkeypatch.setattr(mod, "CONFIGS_DIR", configs)
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", False)
+    r = tc.post("/api/repos/register", json={
+        "repo_id": "totally-new-test-repo", "local_path": "/tmp/wherever",
+        "remote_url": "https://github.com/x/totally-new-test-repo",
+        "kanban_board": "llm_station_command_center", "apply": True,
+    })
+    assert r.status_code == 503
+    assert "KANBAN_UI_DOMAIN_CONFIG_WRITES" in r.json()["detail"]
+
+
+def test_register_repo_apply_writes_disabled_manifest(client, monkeypatch, tmp_path):
+    mod, tc = client
+    configs = _real_autonomy_configs(tmp_path)
+    monkeypatch.setattr(mod, "CONFIGS_DIR", configs)
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
+    r = tc.post("/api/repos/register", json={
+        "repo_id": "totally-new-test-repo", "local_path": "/tmp/wherever",
+        "remote_url": "https://github.com/x/totally-new-test-repo",
+        "kanban_board": "llm_station_command_center", "apply": True,
+    })
+    assert r.status_code == 200, r.json()
+    body = r.json()
+    assert body["status"] == "registered"
+    saved = yaml.safe_load((configs / "autonomy.yaml").read_text(encoding="utf-8"))
+    manifest = next(
+        m for m in saved["repo_manifests"] if m["repo_id"] == "totally-new-test-repo")
+    assert manifest["autonomous_edits_enabled"] is False
+    assert manifest["blockers"] == ["repo_autonomy_not_yet_verified"]
