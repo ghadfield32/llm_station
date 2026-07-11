@@ -76,6 +76,58 @@ def test_completion_routes_to_frontier_client_not_litellm(monkeypatch):
     assert calls[0]["model_id"] == "glm-5.2"
 
 
+def test_frontier_system_prompt_carries_no_tool_vocabulary(monkeypatch):
+    """build_system's local variant deliberately enumerates every verb (e.g.
+    project_status("betts_basketball")) so a LOCAL model — which gets a
+    matching tools schema — actually uses its abilities. A frontier turn gets
+    no schema, so that same prose only invites it to guess. Regression guard
+    for the 2026-07-11 incident: this must stay tools-free."""
+    gw = _frontier_gateway(monkeypatch)
+    assert "project_status" not in gw.system
+    assert "add_mission_card" not in gw.system
+    assert "NO tools" in gw.system
+
+    local_cfg = core.GatewayConfig(surface="Test", model="chat",
+                                   litellm_base="http://x", litellm_key="")
+    monkeypatch.setattr(core, "load_agent_surface_config",
+                        lambda: AgentSurfaceConfig(
+                            schema_version="test",
+                            board_state=BoardStateKnobs(enabled=False)))
+    local_gw = core.GatewayCore(local_cfg)
+    assert "project_status" in local_gw.system
+
+
+def test_frontier_response_with_tool_calls_is_never_dispatched(monkeypatch):
+    """Regression test for the 2026-07-11 incident: deepseek-v4-pro returned a
+    real, structured tool_calls entry for project_status even though
+    frontier_chat_completion never sent a `tools` field in the request (see
+    frontier_client.py body construction — no tools key, ever). GatewayCore
+    must refuse to dispatch a tool_calls field it never offered, regardless of
+    which provider or backend produced it."""
+    gw = _frontier_gateway(monkeypatch, board_enabled=False)
+    dispatched = []
+    gw.dispatch["project_status"] = lambda **kw: dispatched.append(kw) or "should not run"
+
+    async def fake_frontier_that_leaks_a_tool_call(
+            *, model_id, conversation_id, messages, http,
+            task_class="cockpit_chat_manual_select", output_tokens_estimate=2000):
+        return {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "call_1", "type": "function",
+                            "function": {"name": "project_status",
+                                        "arguments": '{"project_name": "betts_basketball"}'}}],
+            "_usage": {"prompt_tokens": 760, "completion_tokens": 67},
+        }
+
+    monkeypatch.setattr("command_center.channels.frontier_client.frontier_chat_completion",
+                        fake_frontier_that_leaks_a_tool_call)
+    reply = asyncio.run(gw.run_turn("c1", "go over this jobs setup"))
+
+    assert dispatched == []                          # the tool never actually ran
+    assert "gateway safety stop" in reply
+    assert "project_status" in reply
+
+
 def test_run_turn_end_to_end_no_tools_no_board(tmp_path, monkeypatch):
     monkeypatch.setenv("GATEWAY_TRANSCRIPT_DIR", str(tmp_path))
     gw = _frontier_gateway(monkeypatch, board_enabled=True)

@@ -138,11 +138,36 @@ def _wire_kanban_events(dispatch: dict[str, Callable[..., Any]],
                                   board_id=st["board_id"], log=log)
 
 
-def build_system(surface: str) -> str:
-    """The operator brief + the rules of the wall, identical across surfaces (only
-    the surface name varies). It enumerates every capability tier on purpose: a
-    model only uses the abilities its prompt tells it it has, so under-describing
-    the tool layer is why a capable bot acts helpless."""
+def build_system(surface: str, *, tools_available: bool = True) -> str:
+    """The operator brief + the rules of the wall, identical across LOCAL surfaces
+    (only the surface name varies). It enumerates every capability tier on
+    purpose: a model only uses the abilities its prompt tells it it has, so
+    under-describing the tool layer is why a capable bot acts helpless.
+
+    tools_available=False is for frontier turns only. A frontier provider is
+    NEVER given a tools schema (see frontier_client.py) — describing the verb
+    catalogue in prose to a model with no matching schema only invites it to
+    guess at calling something. Observed 2026-07-11: deepseek-v4-pro read the
+    full brief below (including the project_status("betts_basketball") worked
+    example) and emitted a real, structured tool_calls entry for it with a
+    guessed argument name, even though frontier_chat_completion never sent a
+    `tools` field in the request — its serving stack appears to auto-parse
+    native tool-call syntax from output text regardless of what the request
+    declared. GatewayCore._completion refuses to dispatch that (see
+    _frontier_tool_call_diagnostic); this prompt variant is the complementary
+    fix that stops inviting the attempt in the first place."""
+    if not tools_available:
+        return f"""You are the Growth OS gateway on {surface}, talking through the paid \
+frontier-router lane. Today is {date.today().isoformat()}.
+This is PLAIN CONVERSATION ONLY. You have NO tools, NO board access, and NO \
+ability to see or change anything in AppFlowy, the kanban boards, or either \
+repo (betts_basketball / command-center) — none of that reaches this lane, by \
+design. If asked to look something up, check a status, or take an action, say \
+plainly that this frontier chat cannot do that and suggest switching to a \
+local chat role for real board/tool access. Do not attempt to call a function \
+or emit tool-call-shaped output (e.g. "**Calling:** `name`") — you were not \
+given a tools schema, nothing will execute it, and doing so anyway misleads \
+whoever reads your answer. Be concise."""
     return f"""You are the Growth OS gateway on {surface}. Today is {date.today().isoformat()}.
 You operate the user's AppFlowy workspace and drive work on the betts_basketball
 and command-center repos through a verified tool layer. The live board is injected
@@ -259,7 +284,7 @@ class GatewayCore:
         # A frontier turn is plain conversation: no tools, no board/memory context
         # travels to the paid provider. See channels/frontier_client.py docstring.
         self.is_frontier = bool(cfg.frontier_model_id)
-        self.system = build_system(cfg.surface)
+        self.system = build_system(cfg.surface, tools_available=not self.is_frontier)
         self.tools, self.dispatch = load_tool_layer(cfg.surface)
         # Live kanban sync: funnel every governed card/todo verb (this surface
         # included) through the kanban event log so the internal UI + AppFlowy
@@ -287,6 +312,34 @@ class GatewayCore:
     async def aclose(self) -> None:
         await self.http.aclose()
 
+    def _frontier_tool_call_diagnostic(self, msg: dict) -> str | None:
+        """A frontier response must never carry tool_calls — frontier_client
+        never sends a `tools` field in the request (see frontier_chat_completion),
+        so GatewayCore never offered, scoped, or validated anything the model
+        could call. If tool_calls shows up anyway (observed 2026-07-11:
+        deepseek-v4-pro emitted a real, structured call for project_status with
+        a guessed argument name after reading the tool vocabulary in the shared
+        system prompt — its serving stack appears to auto-parse native
+        tool-call syntax from output text regardless of the request), it must
+        never be dispatched: this harness would be letting an unvetted
+        third-party response trigger a real local function call. Returns an
+        operator-facing diagnostic naming exactly what was attempted, or None
+        when the response is clean."""
+        calls = msg.get("tool_calls")
+        if not calls:
+            return None
+        names = [c.get("function", {}).get("name", "?") for c in calls]
+        print(f"[gateway] frontier model {self.cfg.frontier_model_id!r} emitted "
+              f"unsolicited tool_calls {names!r} — refusing to dispatch "
+              f"(frontier turns are never offered tools)", file=sys.stderr)
+        return (f"gateway safety stop: the frontier model tried to call "
+                f"{names!r} directly. Frontier turns never receive a tools "
+                f"schema or board/memory context, so nothing was executed — "
+                f"this is provider-side behavior (its serving stack appears "
+                f"to emit tool-call syntax on its own), not a bug in those "
+                f"tools. Switch to a local chat role for real board/tool "
+                f"access.")
+
     async def _completion(self, messages: list, with_tools: bool) -> dict:
         if self.is_frontier:
             # Live paid-API path — every gate (lane enabled, redaction, key,
@@ -294,9 +347,14 @@ class GatewayCore:
             # this never touches LiteLLM and never attaches tools.
             from .frontier_client import frontier_chat_completion
             conversation = transcript_conversation.get() or "frontier"
-            return await frontier_chat_completion(
+            msg = await frontier_chat_completion(
                 model_id=self.cfg.frontier_model_id, conversation_id=conversation,
                 messages=messages, http=self.http)
+            diag = self._frontier_tool_call_diagnostic(msg)
+            if diag is not None:
+                msg["tool_calls"] = None
+                msg["content"] = diag
+            return msg
         headers = {"Authorization": f"Bearer {self.cfg.litellm_key}"} \
             if self.cfg.litellm_key else {}
         body: dict[str, Any] = {"model": self.cfg.model, "messages": messages}

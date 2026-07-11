@@ -5,6 +5,32 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Frontier-router chat lane — untrusted tool_calls dispatch
+- BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro
+  (frontier lane, no `tools` ever sent — verified in frontier_client.py body) returned a
+  structured tool_calls entry for project_status(project_name=...) anyway; GatewayCore's
+  `calls = msg.get("tool_calls") or []` trusted it unconditionally and dispatched a REAL local
+  function call (TypeError, since the guessed kwarg was wrong). Round 2 then hallucinated 4 more
+  "successful" tool calls in plain text that never ran — a second, distinct honesty bug.
+- ROOT CAUSE: (1) build_system() sends the full verb catalogue in prose to every surface,
+  frontier included, priming a model with no tools schema to try calling things; (2)
+  GatewayCore._completion never checked is_frontier before trusting msg["tool_calls"] — the
+  "zero tools" guarantee was enforced on the request, never on the response.
+- FIX 07-11: `core.py` — build_system(surface, tools_available=bool) now sends a short,
+  tools-free prompt when False (frontier only); GatewayCore.__init__ wires
+  tools_available=not self.is_frontier. New `_frontier_tool_call_diagnostic()` hard-blocks
+  dispatch in `_completion`'s frontier branch — any tool_calls in a frontier response gets
+  neutralized + replaced with an operator-facing "gateway safety stop" message (same pattern as
+  the existing qwen3-coder `_leak_diagnostic`), never silently dispatched, never silently dropped.
+- TESTS 07-11: tests/test_gateway_frontier.py +2 — frontier system prompt carries no tool
+  vocabulary (regression), a reconstructed leaked tool_calls response is never dispatched and
+  produces the safety-stop message. Full non-job-search suite green.
+- OPEN: the round-1/round-2 inconsistency (same prose pattern, only round 1 got auto-parsed into
+  tool_calls) suggests OpenRouter routes deepseek-v4-pro to different backing infra per call —
+  non-deterministic, can't be relied on to "not happen." Not yet verified whether sending
+  `tool_choice: "none"` would suppress it provider-side (would need a live paid smoke-test);
+  the harness-side block above does not depend on that working.
+
 ## Kanban emission = default sync path
 - WHY 06-20: live-sync engine merged (#19) but emission was opt-in (KANBAN_EMIT_EVENTS=1).
   North-star wants it as the STANDARD path for every governed kanban write.
