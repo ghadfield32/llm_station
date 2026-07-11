@@ -270,3 +270,80 @@ def test_discover_live_postings_records_invalid_jobicy_tag_and_continues(tmp_pat
 def test_jobicy_payload_must_have_jobs_list():
     with pytest.raises(RuntimeError, match="jobs list"):
         parse_jobicy_jobs({"unexpected": []})
+
+
+def test_get_json_retries_on_429_then_succeeds(monkeypatch):
+    """The daily discovery fires one request per keyword tag; a 429 must be
+    waited-out and retried (honoring Retry-After), not aborted."""
+    from command_center.job_search import live_sources as ls
+
+    calls = {"n": 0}
+
+    class _Resp:
+        def __init__(self, code, data=None, headers=None):
+            self.status_code = code
+            self._data = data or {}
+            self.headers = headers or {}
+            self.text = ""
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError("x", request=None, response=self)
+
+        def json(self):
+            return self._data
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _Resp(429, headers={"Retry-After": "0"})
+            return _Resp(200, {"jobs": []})
+
+    monkeypatch.setattr(ls.httpx, "Client", _Client)
+    monkeypatch.setattr(ls.time, "sleep", lambda *a: None)
+    out = ls._get_json("http://x")
+    assert calls["n"] == 2          # retried once after the 429
+    assert out == {"jobs": []}
+
+
+def test_get_json_raises_after_persistent_429(monkeypatch):
+    from command_center.job_search import live_sources as ls
+
+    class _Resp:
+        status_code = 429
+        headers = {"Retry-After": "0"}
+        text = ""
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("x", request=None, response=self)
+
+        def json(self):
+            return {}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None):
+            return _Resp()
+
+    monkeypatch.setattr(ls.httpx, "Client", _Client)
+    monkeypatch.setattr(ls.time, "sleep", lambda *a: None)
+    with pytest.raises(httpx.HTTPStatusError):
+        ls._get_json("http://x", max_retries=3)

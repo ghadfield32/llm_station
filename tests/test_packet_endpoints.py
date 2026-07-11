@@ -313,6 +313,93 @@ def test_settings_menu_answers_categories_and_dag(client, monkeypatch):
     assert "quant_researcher" not in {c["id"] for c in body["job_categories"]}
 
 
+def test_manual_action_detail_presents_answered_as_handled(client):
+    """The disability-as-blocker bug: an auto-answered question must read as
+    HANDLED in the manual step, never as a reason the card is stuck."""
+    mod, _, _ = client
+    bot = mod._manual_action_detail({
+        "automation_class": "bot_possible", "manual_reason": "No blocking questions",
+        "auto_answered": "disability; veteran"})
+    assert bot.startswith("Bot-ready")
+    assert "Auto-answered from your standing answers: disability; veteran" in bot
+    # the answered questions are NOT phrased as blockers
+    assert "block" not in bot.split("Auto-answered")[1]
+
+    manual = mod._manual_action_detail({
+        "automation_class": "manual_required",
+        "manual_reason": "manual portal: Greenhouse",
+        "auto_answered": "disability"})
+    assert "Needs you: manual portal: Greenhouse" in manual
+    assert "Auto-answered from your standing answers: disability" in manual
+
+
+def test_bulk_select_moves_all_bot_suggested_to_selected(client, monkeypatch):
+    """'Add all': every bot-possible card in Suggested Jobs moves to Selected by
+    Geoff in one call, each a governed event; other classes are left alone."""
+    mod, tc, tmp_path = client
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
+    from command_center.boards.command_center_provider import (
+        CommandCenterBoardProvider)
+    from command_center.kanban_sync import EventLog
+    provider = CommandCenterBoardProvider(
+        board_id="job_search_pipeline_internal",
+        event_log=EventLog(tmp_path / "events.jsonl"),
+        store_dir=tmp_path / "boards")
+    for i, cls in enumerate(["bot_possible", "bot_possible", "manual_required"]):
+        provider.upsert_card(
+            f"sugg-{i}",
+            {"company": f"Co{i}", "role_title": "DS", "job_key": f"jk{i}",
+             "automation_class": cls},
+            status="Suggested Jobs")
+
+    resp = tc.post("/api/job-search/bulk-select",
+                   json={"automation_class": "bot_possible",
+                         "target": "Selected by Geoff"})
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["moved_count"] == 2                 # only the two bot cards
+    cards = {c["card_id"]: c for c in
+             tc.get("/api/domain/job_application/cards").json()["cards"]}
+    assert cards["sugg-0"]["status"] == "Selected by Geoff"
+    assert cards["sugg-1"]["status"] == "Selected by Geoff"
+    assert cards["sugg-2"]["status"] == "Suggested Jobs"   # manual untouched
+
+
+def test_bulk_select_rejects_illegal_target(client, monkeypatch):
+    mod, tc, tmp_path = client
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
+    resp = tc.post("/api/job-search/bulk-select",
+                   json={"automation_class": "bot_possible",
+                         "target": "Completed"})   # not a legal step from Suggested
+    assert resp.status_code == 400
+    assert "not a legal next lane" in resp.json()["detail"]
+
+
+def test_reclassify_endpoint_resorts_and_updates_cards(client, monkeypatch):
+    """The Re-sort button: re-runs classification for every prepared card and
+    pushes the fresh automation_class onto the board so the Bot/Manual split
+    updates."""
+    _, tc, tmp_path = client
+    _prepared_card(tmp_path)
+    from command_center.job_search import automation_policy
+    # a standing answer now covers whatever the fixture posting asks
+    monkeypatch.setattr(automation_policy, "load_standing_answers",
+                        lambda base: [
+                            {"topic": "disability", "answer": "No",
+                             "covers": ["disability", "veteran",
+                                        "work authorization", "sponsorship"]}])
+    resp = tc.post("/api/job-search/reclassify")
+    assert resp.status_code == 200, resp.json()
+    body = resp.json()
+    assert body["status"] == "reclassified"
+    assert body["cards_scanned"] >= 1
+    # the card's automation_class field is refreshed on the board
+    cards = tc.get("/api/domain/job_application/cards").json()["cards"]
+    me = next(c for c in cards if c["card_id"] == "job-review-me")
+    assert me["automation_class"] in {
+        "bot_possible", "manual_required", "prepare_only"}
+
+
 def test_story_and_packet_show_application_answers(client):
     """The answers used on the application are a first-class story moment and
     an editable packet file."""

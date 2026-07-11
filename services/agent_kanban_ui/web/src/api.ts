@@ -460,6 +460,18 @@ export interface ReclassifyResult {
 }
 export const reclassifyJobApplications = () =>
   postJSON<ReclassifyResult>("/api/job-search/reclassify", {});
+export interface BulkSelectResult {
+  status: string;
+  automation_class: string;
+  target: string;
+  moved_count: number;
+  moved: { card_id: string; company: string; role_title: string }[];
+}
+export const bulkSelectSuggested = (
+  automation_class = "bot_possible", target = "Selected by Geoff",
+) =>
+  postJSON<BulkSelectResult>("/api/job-search/bulk-select",
+    { automation_class, target });
 export const updateJobSearchRuntime = (body: Partial<JobProfileControls["job_search"]>) =>
   postJSON<{
     status: string;

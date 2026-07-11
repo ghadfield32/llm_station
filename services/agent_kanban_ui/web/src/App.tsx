@@ -20,7 +20,7 @@ import {
   fetchRuntimeDebug, fetchStatus, moveDomainCard, postAction, RuntimeDebug, streamChat,
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
   StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
-  reclassifyJobApplications, ReclassifyResult,
+  reclassifyJobApplications, ReclassifyResult, bulkSelectSuggested,
 } from "./api";
 
 type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "chat";
@@ -114,18 +114,51 @@ function HorizontalScroller({ className, children, ariaLabel }: {
       window.removeEventListener("resize", syncWidth);
     };
   }, [syncWidth]);
+  // Touch devices scroll the content natively (buttery momentum). The dual
+  // top-scrollbar sync below WRITES scrollLeft on every scroll event, which
+  // interrupts iOS momentum and is the "super sticky" feel — so it is a
+  // POINTER-FINE (mouse/trackpad) affordance only. `coarse` is read once.
+  const coarse = useRef(
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      && window.matchMedia("(pointer: coarse)").matches);
   function syncFromTop() {
-    if (syncing.current || !topRef.current || !contentRef.current) return;
+    if (coarse.current || syncing.current || !topRef.current || !contentRef.current) return;
     syncing.current = true;
     contentRef.current.scrollLeft = topRef.current.scrollLeft;
     syncing.current = false;
   }
   function syncFromContent() {
-    if (syncing.current || !topRef.current || !contentRef.current) return;
+    if (coarse.current || syncing.current || !topRef.current || !contentRef.current) return;
     syncing.current = true;
     topRef.current.scrollLeft = contentRef.current.scrollLeft;
     syncing.current = false;
   }
+  // Mouse-wheel → horizontal scroll: a wide board (8 job lanes) or a long tab
+  // strip only scrolled via the scrollbar/trackpad before. A native
+  // non-passive listener is required to preventDefault; React's onWheel is
+  // passive. Vertical scrolling INSIDE a column body is respected until it
+  // hits its top/bottom edge, then the wheel moves the board sideways. Skipped
+  // on touch (native momentum handles it).
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || coarse.current) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth + 1) return;       // nothing to scroll
+      if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;    // already horizontal
+      const col = (e.target as HTMLElement).closest?.(
+        ".domain-column-body, .column-body") as HTMLElement | null;
+      if (col && col.scrollHeight > col.clientHeight + 1) {
+        const up = e.deltaY < 0;
+        const atTop = col.scrollTop <= 0;
+        const atBottom = col.scrollTop + col.clientHeight >= col.scrollHeight - 1;
+        if (!((atTop && up) || (atBottom && !up))) return;    // let the column scroll
+      }
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
   return (
     <div className="scrollframe">
       <div className="top-scrollbar" ref={topRef} onScroll={syncFromTop} aria-hidden="true">
@@ -607,20 +640,44 @@ function DocumentView({ text, kind = "doc" }: { text: string; kind?: string }) {
       bullets = [];
     }
   };
+  // everything above the first "## " section in a resume is the header block
+  // (name, contact lines, role headline) — grouped and centered like a real
+  // resume. headerCount tracks OUTPUT nodes, not line indices, so bullets or
+  // blank lines can't desync the split.
+  const firstSection = lines.findIndex((l) => l.trim().startsWith("## "));
+  const headerEndLine = kind === "resume" && firstSection > 0 ? firstSection : 0;
+  let headerCount = 0;
   lines.forEach((raw, idx) => {
     const line = raw.trimEnd();
     const t = line.trim();
     if (!t) { flush(); return; }
     if (t.startsWith("## ")) { flush(); out.push(<h4 key={key++} className="doc-h2">{renderInline(t.slice(3))}</h4>); return; }
-    if (t.startsWith("# ")) { flush(); out.push(<h3 key={key++} className="doc-h1">{renderInline(t.slice(2))}</h3>); return; }
+    if (t.startsWith("# ")) {
+      flush(); out.push(<h3 key={key++} className="doc-name">{renderInline(t.slice(2))}</h3>);
+      if (idx < headerEndLine) headerCount = out.length;
+      return;
+    }
     if (/^[-*•]\s+/.test(t)) { bullets.push(t.replace(/^[-*•]\s+/, "")); return; }
     flush();
-    // the first two lines of a resume are the name-headline + contact block
-    const isHead = kind === "resume" && idx <= 3;
-    out.push(<p key={key++} className={isHead ? "doc-contact" : "doc-p"}>{renderInline(t)}</p>);
+    if (idx < headerEndLine) {
+      // contact lines carry an email / phone / URL; the role headline (often
+      // pipe-delimited too) has none of those, so classify by content
+      const isContact = /@|https?:|\.com|\.io|\d{3}[.\s-]?\d{3}/.test(t);
+      out.push(<p key={key++} className={isContact ? "doc-contact" : "doc-headline"}>
+        {renderInline(t)}</p>);
+      headerCount = out.length;
+      return;
+    }
+    out.push(<p key={key++} className="doc-p">{renderInline(t)}</p>);
   });
   flush();
-  return <div className={`document-view document-${kind}`}>{out}</div>;
+  return (
+    <div className={`document-view document-${kind}`}>
+      {headerCount > 0
+        ? <><div className="doc-header">{out.slice(0, headerCount)}</div>{out.slice(headerCount)}</>
+        : out}
+    </div>
+  );
 }
 
 function LinkedInBody({ text }: { text: string }) {
@@ -808,19 +865,15 @@ function DomainCardTile({
         </button>
       )}
       {moveTargets.length > 0 && (
-        <select className="touch-move domain-touch-move"
-          aria-label={`Move ${domainTitle(card, spec)} to lane`}
-          value=""
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            const target = e.target.value;
-            if (target) onMove?.(target);
-          }}>
-          <option value="">Move to...</option>
-          {moveTargets.map((s) => <option key={s}>{s}</option>)}
-        </select>
+        <div className="move-buttons" onPointerDown={(e) => e.stopPropagation()}>
+          {moveTargets.map((s, i) => (
+            <button key={s} className={`move-btn ${i === 0 ? "move-fwd" : "move-back"}`}
+              onClick={(e) => { e.stopPropagation(); onMove?.(s); }}
+              title={`Move to ${s}`}>
+              {i === 0 ? "→ " : ""}{s}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1917,16 +1970,26 @@ function StoryView({ story, onOpenAt }: {
 function PacketChecklist({ validation }: { validation: PacketValidation }) {
   return (
     <div className="packet-checks">
-      {validation.checks.map((c) => (
-        <div key={c.id}
-          className={`packet-check ${c.ok ? "packet-check-ok" : c.level === "error" ? "packet-check-fail" : "packet-check-warn"}`}>
-          <span className="packet-check-mark">{c.ok ? "✓" : c.level === "error" ? "✗" : "!"}</span>
-          <div>
-            <div>{c.label}</div>
-            <div className="muted small">{c.detail}</div>
+      {validation.checks.map((c) => {
+        // "not_already_submitted" failing means the app WAS submitted — that is
+        // a completed state, not a defect. Render it as a positive so a
+        // successful submission never looks like a red error.
+        const submitted = c.id === "not_already_submitted" && !c.ok;
+        const cls = submitted ? "packet-check-ok"
+          : c.ok ? "packet-check-ok"
+          : c.level === "error" ? "packet-check-fail" : "packet-check-warn";
+        const mark = submitted ? "✓" : c.ok ? "✓" : c.level === "error" ? "✗" : "!";
+        const label = submitted ? "Application submitted" : c.label;
+        return (
+          <div key={c.id} className={`packet-check ${cls}`}>
+            <span className="packet-check-mark">{mark}</span>
+            <div>
+              <div>{label}</div>
+              <div className="muted small">{c.detail}</div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -2077,6 +2140,14 @@ function PacketReviewModal({ spec, card, onClose, onChanged, onOpenChatAt }: {
               ))}
             </HorizontalScroller>
             {msg && <div className={msg.startsWith("ERR") ? "error" : "packet-msg"}>{msg}</div>}
+            {alreadyApplied && (
+              <div className="packet-submitted-banner">
+                ✓ Submitted{record.applied_at ? ` on ${valText(record.applied_at)}` : ""}
+                {" "}— this application is complete and the record is saved. The
+                validation list below shows it can&apos;t be re-submitted (that&apos;s
+                expected), not an error.
+              </div>
+            )}
             {tab === "overview" && (
               <div className="packet-overview">
                 <div className="packet-facts">
@@ -2469,6 +2540,17 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
     if (!card) return;
     await moveDomainCardTo(card, statusName);
   }
+  async function bulkAddBotJobs(count: number) {
+    if (!window.confirm(
+      `Move all ${count} bot-possible suggested job${count === 1 ? "" : "s"} to `
+      + "Selected by Geoff? They'll queue for packet preparation.")) return;
+    setToast(null);
+    try {
+      const r = await bulkSelectSuggested("bot_possible", "Selected by Geoff");
+      setToast(`added ${r.moved_count} bot job${r.moved_count === 1 ? "" : "s"} to Selected by Geoff`);
+      await load();
+    } catch (e) { setToast("ERR " + (e as Error).message); }
+  }
 
   return (
     <>
@@ -2584,15 +2666,30 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
             {activeSections.map((section) => {
               return (
                 <section className="domain-board-section" key={section.key}>
-                  {isJobDomain && (
-                    <div className="domain-board-section-head">
-                      <div>
-                        <h3>{section.title}</h3>
-                        <p>{section.hint}</p>
+                  {isJobDomain && (() => {
+                    // Bot Board: offer a one-click "add all" for the bot jobs
+                    // still sitting unselected in Suggested Jobs
+                    const botSuggested = section.key === "bot" && canMove
+                      ? section.cards.filter((c) => valText(c.status) === "Suggested Jobs").length
+                      : 0;
+                    return (
+                      <div className="domain-board-section-head">
+                        <div>
+                          <h3>{section.title}</h3>
+                          <p>{section.hint}</p>
+                        </div>
+                        <div className="section-head-actions">
+                          {botSuggested > 0 && (
+                            <button className="actbtn"
+                              onClick={() => void bulkAddBotJobs(botSuggested)}>
+                              + Add all {botSuggested} bot job{botSuggested === 1 ? "" : "s"}
+                            </button>
+                          )}
+                          <span>{section.cards.length} cards</span>
+                        </div>
                       </div>
-                      <span>{section.cards.length} cards</span>
-                    </div>
-                  )}
+                    );
+                  })()}
                   <HorizontalScroller className="domain-kanban"
                     ariaLabel={`${section.title} lane scroll`}>
                     {boardColumns.map((name) => {

@@ -24,15 +24,14 @@ def classify_automation(job: CanonicalJob, config: JobSearchConfig) -> Automatio
     auto_answered, uncovered = split_detected_phrases(
         text, config.automation.manual_phrases, answers)
     blockers.extend(f"manual phrase: {phrase}" for phrase in uncovered)
-    answered_note = (
-        f" {len(auto_answered)} detected question(s) have standing answers: "
-        + ", ".join(auto_answered) + "." if auto_answered else "")
 
+    # `reason` and `blockers` describe ONLY what stops automation. Auto-answered
+    # questions are NOT blockers — they travel on their own `auto_answered`
+    # field so the UI can present them as handled, never as a reason to stop.
     if blockers:
         return AutomationResult(
             value=AutomationClass.MANUAL_REQUIRED,
-            reason="Manual review required because blocker(s) were detected."
-                   + answered_note,
+            reason="Manual review required because blocker(s) were detected.",
             confidence=0.95,
             blockers=sorted(set(blockers)),
             auto_answered=auto_answered,
@@ -42,8 +41,7 @@ def classify_automation(job: CanonicalJob, config: JobSearchConfig) -> Automatio
     if "apply" not in text:
         return AutomationResult(
             value=AutomationClass.PREPARE_ONLY,
-            reason="No clear low-risk application workflow was detected."
-                   + answered_note,
+            reason="No clear low-risk application workflow was detected.",
             confidence=0.75,
             blockers=["unclear application workflow"],
             auto_answered=auto_answered,
@@ -53,7 +51,7 @@ def classify_automation(job: CanonicalJob, config: JobSearchConfig) -> Automatio
     return AutomationResult(
         value=AutomationClass.BOT_POSSIBLE,
         reason="No blocking questions; MVP still prepares only and does not "
-               "submit." + answered_note,
+               "submit.",
         confidence=0.88,
         blockers=[],
         auto_answered=auto_answered,

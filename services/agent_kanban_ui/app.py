@@ -2165,7 +2165,10 @@ def reclassify_job_applications() -> dict:
     Manual boards. Idempotent and repeatable — run it after editing answers or
     search rules so existing cards catch up. Applied cards are left untouched."""
     _require_chat()
-    from command_center.job_search.application_memory import reclassify_application
+    from command_center.job_search.application_memory import (
+        reclassify_application,
+        reclassify_suggestion,
+    )
 
     spec = _require_job_domain("job_application")
     provider = _board_store_provider(spec)
@@ -2177,15 +2180,23 @@ def reclassify_job_applications() -> dict:
               "skip": 0, "unclassified": 0}
     for card in provider.list_cards():
         app_id = str(card.get("application_id") or "").strip()
-        if not app_id:
-            counts["unclassified"] += 1
-            continue
-        try:
-            result = reclassify_application(app_id, root=root)
-        except FileNotFoundError:
-            errors.append({"card_id": card.get("card_id"), "application_id": app_id,
-                           "error": "no application on disk"})
-            continue
+        if app_id:
+            try:
+                result = reclassify_application(app_id, root=root)
+            except FileNotFoundError:
+                errors.append({"card_id": card.get("card_id"),
+                               "application_id": app_id,
+                               "error": "no application on disk"})
+                continue
+        else:
+            # SUGGESTED card (no packet): re-classify from the cached posting
+            # so cards published before the standing answers existed catch up.
+            job_key = str(card.get("job_key") or "").strip()
+            before = str(card.get("automation_class") or "unclassified")
+            result = reclassify_suggestion(job_key, before, root=root) if job_key else None
+            if result is None:
+                counts["unclassified"] += 1
+                continue
         after = result["after"]
         counts[after] = counts.get(after, 0) + 1
         # push the fresh class + reason onto the board card so the Bot/Manual
@@ -2199,7 +2210,7 @@ def reclassify_job_applications() -> dict:
         if result["changed"]:
             changes.append({
                 "card_id": card.get("card_id"),
-                "application_id": app_id,
+                "application_id": app_id or None,
                 "company": card.get("company"),
                 "role_title": card.get("role_title"),
                 "before": result["before"], "after": after,
@@ -2211,6 +2222,54 @@ def reclassify_job_applications() -> dict:
         "counts": counts,
         "changed": changes,
         "errors": errors,
+    }
+
+
+class BulkSelectIn(BaseModel):
+    # which automation class to bulk-select from Suggested Jobs
+    automation_class: str = "bot_possible"
+    target: str = "Selected by Geoff"
+
+
+@app.post("/api/job-search/bulk-select")
+def bulk_select_suggested(body: BulkSelectIn) -> dict:
+    """'Add all': move EVERY Suggested Jobs card of one automation class to the
+    next lane in one click, each as its own governed event. Default moves all
+    bot-possible suggestions to 'Selected by Geoff' so Geoff can queue the whole
+    bot board at once instead of one card at a time."""
+    _require_chat()
+    spec = _require_job_domain("job_application")
+    _require_domain_writable(spec)
+    provider = _board_store_provider(spec)
+    target = body.target
+    # the move must be a legal one-step transition from Suggested Jobs
+    if target not in _allowed_transitions(spec, "Suggested Jobs"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{target!r} is not a legal next lane from Suggested Jobs; "
+                   f"choose from {_allowed_transitions(spec, 'Suggested Jobs')}")
+    action = _column_action(spec, target)
+    moved: list[dict] = []
+    for card in provider.list_cards():
+        if (card.get("status") != "Suggested Jobs"
+                or str(card.get("automation_class")) != body.automation_class):
+            continue
+        card_id = str(card["card_id"])
+        event = emit_event(
+            provider.log, action=action, board_id=provider.board_id,
+            card_id=card_id, source_surface="internal_ui", actor_type="human",
+            status_before="Suggested Jobs", status_after=target)
+        fields = _card_store_fields(card)
+        provider.upsert_card(card_id, fields, status=target)
+        moved.append({"card_id": card_id, "company": card.get("company"),
+                      "role_title": card.get("role_title"),
+                      "event_id": event.event_id})
+    return {
+        "status": "bulk_selected",
+        "automation_class": body.automation_class,
+        "target": target,
+        "moved_count": len(moved),
+        "moved": moved,
     }
 
 

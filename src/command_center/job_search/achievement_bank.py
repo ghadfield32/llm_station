@@ -244,10 +244,10 @@ DEFAULT_ACHIEVEMENTS: list[dict] = [
         "role_families": ["sports_data_scientist", "applied_ml_data_scientist", "founder_operator_product_ai"],
         "tools": ["Python", "SQL", "Bayesian modeling", "clustering"],
         "domains": ["NBA", "basketball", "player valuation", "salary modeling", "roster construction", "forecasting"],
-        "metrics": ["28+ leagues represented in source pipeline"],
+        "metrics": ["10 leagues around the world represented in the source pipeline"],
         "bullet_versions": {
-            "sports_data_scientist": "Built an NBA player value forecasting system spanning multi-league data, Bayesian models, archetype clustering, age curves, and salary optimization.",
-            "applied_ml_data_scientist": "Developed player-value forecasting workflows combining multi-league features, uncertainty-aware modeling, and validation-oriented deployment planning.",
+            "sports_data_scientist": "Built an NBA player value forecasting system drawing on data from 10 leagues around the world, with Bayesian models, archetype clustering, age curves, and salary optimization.",
+            "applied_ml_data_scientist": "Developed player-value forecasting workflows combining features from 10 international leagues, uncertainty-aware modeling, and validation-oriented deployment planning.",
             "founder_operator_product_ai": "Translated NBA player value research into product-oriented decision workflows for roster construction and contract efficiency.",
         },
         "evidence_files": ["evidence/sports_projects.md", "evidence/world_model_sports.md"],
@@ -261,7 +261,7 @@ DEFAULT_ACHIEVEMENTS: list[dict] = [
             "that could handle player value and roster-construction questions across that variety "
             "rather than a single-league model. Action: in Python and SQL, I built Bayesian "
             "forecasting models combined with archetype clustering and explicit age-curve "
-            "modeling, drawing on a pipeline spanning 28+ leagues of source data, aimed at "
+            "modeling, drawing on a pipeline spanning 10 leagues around the world, aimed at "
             "salary/contract-efficiency and roster-construction questions. Result: the system "
             "produces player value forecasts and roster-construction scenarios that now feed "
             "directly into World Model Sports' product work."

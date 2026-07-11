@@ -336,6 +336,9 @@ class ApplicationRecord(Strict):
     automation_class: AutomationClass
     manual_required: bool
     manual_reason: str | None = None
+    # questions detected in the posting that Geoff's standing answers cover —
+    # handled, not blocking. Persisted so the card/story can show them as such.
+    auto_answered: list[str] = []
     resume_variant: str
     applied_at: str | None = None
     last_activity_at: str

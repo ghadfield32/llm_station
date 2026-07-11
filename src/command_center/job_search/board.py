@@ -1590,6 +1590,7 @@ def _process_selected_cards(
                 "materials_path": str(app_dir),
                 "next_action": record.followup.get("next_action"),
                 "manual_reason": record.manual_reason,
+                "auto_answered": "; ".join(record.auto_answered),
                 "automation_class": record.automation_class.value,
                 "resume_variant": record.resume_variant,
                 "last_seen_at": _now(),

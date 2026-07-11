@@ -33,6 +33,7 @@ from command_center.job_search.standing_answers import (
 from command_center.job_search.schemas import (
     ApplicationRecord,
     ApplicationSalary,
+    AutomationClass,
     AutomationResult,
     CanonicalJob,
     FitResult,
@@ -151,8 +152,11 @@ def create_prepared_application(
     app_dir = base / "applications_active" / app_id
     app_dir.mkdir(parents=True, exist_ok=True)
     retention_until = today + timedelta(days=cfg.retention.rich_application_cache_days)
+    # blockers describe what stops automation; auto-answered questions are
+    # handled and travel separately (never mixed into the reason). A card with
+    # no blockers is bot-ready — not "manual required".
     manual_reason = "; ".join(automation.blockers) if automation.blockers else (
-        "MVP submit path is disabled; Geoff must review and submit manually."
+        automation.reason
     )
     record = ApplicationRecord(
         application_id=app_id,
@@ -165,8 +169,9 @@ def create_prepared_application(
         status="prepared",
         stage="needs_geoff",
         automation_class=automation.value,
-        manual_required=True,
+        manual_required=automation.value != AutomationClass.BOT_POSSIBLE,
         manual_reason=manual_reason,
+        auto_answered=list(automation.auto_answered),
         resume_variant=selection.resume_variant,
         applied_at=None,
         last_activity_at=today.isoformat(),
@@ -377,6 +382,106 @@ def load_application(app_id: str, *, root: Path | None = None) -> tuple[Path, Ap
 
 def save_application(app_dir: Path, record: ApplicationRecord) -> None:
     _write_yaml(app_dir / "application.yml", record.model_dump(mode="json"))
+
+
+def _rebuild_canonical_job(app_dir: Path, record: ApplicationRecord) -> CanonicalJob:
+    """A minimal CanonicalJob from the stored record + JD — enough for
+    classify_automation and the answers renderer to re-run without re-fetching
+    the posting."""
+    from datetime import datetime, timezone
+    return CanonicalJob(
+        job_key=app_dir.name,
+        company=record.company, role_title=record.role_title,
+        normalized_company=record.company.lower(),
+        normalized_role=record.role_title.lower(),
+        location="Remote", portal=record.portal or "unknown",
+        apply_url=record.apply_url,
+        description_text=read_job_description(app_dir),
+        salary_min=record.salary.min, salary_max=record.salary.max,
+        currency=record.salary.currency, salary_text=record.salary.notes,
+        last_seen_at=datetime.now(timezone.utc))
+
+
+def reclassify_application(
+    app_id: str, *, root: Path | None = None,
+) -> dict:
+    """Re-run automation classification for one prepared application against
+    the CURRENT rules (standing answers, manual phrases) and refresh its
+    application_answers.md. Returns what changed so the caller can re-sort the
+    board card. Applied applications are left untouched — a submitted record's
+    class is history, not a live decision."""
+    from command_center.job_search.automation_policy import classify_automation
+
+    cfg = load_config()
+    base = root or data_root(cfg)
+    app_dir, record = load_application(app_id, root=root)
+    before = str(record.automation_class.value if hasattr(
+        record.automation_class, "value") else record.automation_class)
+    if record.applied_at:
+        return {"application_id": app_id, "changed": False,
+                "before": before, "after": before, "skipped": "already_applied"}
+
+    job = _rebuild_canonical_job(app_dir, record)
+    automation = classify_automation(job, cfg)
+    after = automation.value.value
+
+    record.automation_class = automation.value
+    record.manual_required = automation.value != AutomationClass.BOT_POSSIBLE
+    record.manual_reason = (
+        "; ".join(automation.blockers) if automation.blockers
+        else automation.reason)
+    record.auto_answered = list(automation.auto_answered)
+    save_application(app_dir, record)
+
+    # keep the deterministic answers file in step with the re-detected questions
+    standing = load_standing_answers(base)
+    (app_dir / "application_answers.md").write_text(
+        render_application_answers(
+            standing, salary_max=record.salary.max,
+            salary_text=record.salary.notes, currency=record.salary.currency,
+            detected_phrases=automation.auto_answered),
+        encoding="utf-8")
+    record.materials.setdefault("application_answers", "application_answers.md")
+    save_application(app_dir, record)
+
+    return {
+        "application_id": app_id,
+        "changed": before != after,
+        "before": before, "after": after,
+        "blockers": automation.blockers,
+        "auto_answered": automation.auto_answered,
+        "manual_reason": record.manual_reason,
+    }
+
+
+def reclassify_suggestion(
+    job_key: str, before: str, *, root: Path | None = None,
+) -> dict | None:
+    """Re-classify a SUGGESTED job card (no packet yet) from its cached
+    suggestion JD. The suggestion cache stores the full posting text, but its
+    automation was computed at suggest time — so a card published before the
+    standing answers existed carries a stale class. Returns the new class (or
+    None when the cache is missing, so the caller leaves the card untouched)."""
+    from command_center.job_search.automation_policy import classify_automation
+
+    cfg = load_config()
+    base = root or data_root(cfg)
+    cache = base / "source_cache" / "suggestions" / f"{job_key}.json"
+    if not cache.is_file():
+        return None
+    data = json.loads(cache.read_text(encoding="utf-8"))
+    job = CanonicalJob.model_validate(data["job"])
+    automation = classify_automation(job, cfg)
+    after = automation.value.value
+    return {
+        "job_key": job_key,
+        "changed": before != after,
+        "before": before, "after": after,
+        "blockers": automation.blockers,
+        "auto_answered": automation.auto_answered,
+        "manual_reason": ("; ".join(automation.blockers) if automation.blockers
+                          else automation.reason),
+    }
 
 
 def mark_submitted(app_id: str, *, root: Path | None = None) -> ApplicationRecord:

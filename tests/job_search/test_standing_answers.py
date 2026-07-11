@@ -6,7 +6,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from command_center.job_search import automation_policy
-from command_center.job_search.config import load_config, merge_profile_settings
+from command_center.job_search.config import (
+    load_config,
+    merge_profile_settings,
+)
 from command_center.job_search.schemas import AutomationClass, CanonicalJob
 from command_center.job_search.standing_answers import (
     render_application_answers,
@@ -48,7 +51,10 @@ def test_covered_questions_auto_answer_instead_of_blocking(monkeypatch):
     assert result.blockers == []
     assert set(result.auto_answered) == {
         "disability", "veteran", "work authorization", "salary expectation"}
-    assert "standing answers" in result.reason
+    # auto-answered questions live ONLY on the structured field — never mixed
+    # into `reason` (which would make them read as blockers in the UI)
+    assert "disability" not in result.reason
+    assert "standing answers" not in result.reason
 
 
 def test_uncovered_questions_still_block(monkeypatch):
@@ -94,6 +100,111 @@ def test_salary_rule_falls_back_without_a_posted_range():
     assert "$120,000-$140,000" in text
     empty = render_application_answers([])
     assert "No standing answers on file" in empty
+
+
+def test_reclassify_flips_a_card_when_its_only_blocker_is_now_answered(
+        tmp_path, monkeypatch):
+    """A packet prepared while 'disability' still blocked should re-sort to
+    bot_possible once a standing answer covers it — the repeatable catch-up
+    for cards already on the board."""
+    from command_center.job_search.achievement_bank import ensure_bank
+    from command_center.job_search.application_memory import (
+        create_prepared_application,
+        load_application,
+        reclassify_application,
+    )
+    from command_center.job_search.automation_policy import classify_automation
+    from command_center.job_search.config import ensure_data_dirs, load_config
+    from command_center.job_search.resume_selection import select_resume
+    from command_center.job_search.scoring import normalize_job_from_text, score_job
+    from command_center.job_search.standing_answers import save_standing_answers
+
+    ensure_data_dirs(tmp_path)
+    cfg = load_config()
+    bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
+    job = normalize_job_from_text(
+        "Company: Acme\nRole: Data Scientist\n"
+        "Apply at https://acme.example/apply now.\n"
+        "Voluntary self-identification: please share disability status.")
+    # conftest pins the loader to [] → prepared as manual_required (disability)
+    app_dir = create_prepared_application(
+        job, score_job(job, bank, cfg), classify_automation(job, cfg),
+        select_resume(job, bank, cfg), root=tmp_path, bank=bank)
+    _, before = load_application(app_dir.name, root=tmp_path)
+    assert before.automation_class.value == "manual_required"
+
+    # now Geoff provides the standing answer and reclassifies
+    save_standing_answers(tmp_path, [
+        {"topic": "disability", "question": "Disability?", "answer": "No",
+         "covers": ["disability", "voluntary self identification"]}])
+    monkeypatch.setattr(automation_policy, "load_standing_answers",
+                        lambda base: [
+                            {"topic": "disability", "answer": "No",
+                             "covers": ["disability",
+                                        "voluntary self identification"]}])
+    result = reclassify_application(app_dir.name, root=tmp_path)
+    assert result["changed"] is True
+    assert result["before"] == "manual_required"
+    assert result["after"] == "bot_possible"
+    _, after = load_application(app_dir.name, root=tmp_path)
+    assert after.automation_class.value == "bot_possible"
+    assert after.manual_required is False
+
+
+def test_reclassify_suggestion_from_cached_jd(tmp_path, monkeypatch):
+    """A SUGGESTED card (no packet) reclassifies from its cached posting — so
+    cards published before the standing answers existed catch up. This is why
+    the Bot Board showed 0: 33 suggested cards were classified pre-answers."""
+    import json as _json
+    from command_center.job_search.application_memory import reclassify_suggestion
+    from command_center.job_search.config import ensure_data_dirs
+
+    ensure_data_dirs(tmp_path)
+    cache = tmp_path / "source_cache" / "suggestions"
+    cache.mkdir(parents=True, exist_ok=True)
+    job = _job("Apply now. Voluntary self-identification: disability status?")
+    (cache / "jk1.json").write_text(_json.dumps({
+        "job": _json.loads(job.model_dump_json())}), encoding="utf-8")
+
+    # disability is now covered → the suggested card should read bot_possible
+    monkeypatch.setattr(automation_policy, "load_standing_answers",
+                        lambda base: [{"topic": "disability", "answer": "No",
+                                       "covers": ["disability",
+                                                  "voluntary self identification"]}])
+    result = reclassify_suggestion("jk1", "manual_required", root=tmp_path)
+    assert result is not None
+    assert result["after"] == "bot_possible"
+    assert result["changed"] is True
+    # a missing cache file leaves the card untouched (returns None)
+    assert reclassify_suggestion("nope", "manual_required", root=tmp_path) is None
+
+
+def test_reclassify_leaves_applied_cards_untouched(tmp_path, monkeypatch):
+    from command_center.job_search.achievement_bank import ensure_bank
+    from command_center.job_search.application_memory import (
+        create_prepared_application,
+        mark_submitted,
+        reclassify_application,
+    )
+    from command_center.job_search.automation_policy import classify_automation
+    from command_center.job_search.config import ensure_data_dirs, load_config
+    from command_center.job_search.resume_selection import select_resume
+    from command_center.job_search.scoring import normalize_job_from_text, score_job
+
+    ensure_data_dirs(tmp_path)
+    cfg = load_config()
+    bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
+    job = normalize_job_from_text(
+        "Company: Acme\nRole: DS\nApply at https://acme.example/apply now.")
+    app_dir = create_prepared_application(
+        job, score_job(job, bank, cfg), classify_automation(job, cfg),
+        select_resume(job, bank, cfg), root=tmp_path, bank=bank)
+    monkeypatch.setattr("command_center.job_search.application_memory."
+                        "load_config", lambda: cfg)
+    mark_submitted(app_dir.name, root=tmp_path)
+    result = reclassify_application(app_dir.name, root=tmp_path)
+    assert result["changed"] is False
+    assert result["skipped"] == "already_applied"
 
 
 def test_profile_merge_adds_and_removes_categories():

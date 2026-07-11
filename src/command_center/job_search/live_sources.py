@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import re
+import time
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -17,6 +18,26 @@ LiveSource = Literal["jobicy", "remoteok", "remotive"]
 JOBICY_URL = "https://jobicy.com/api/v2/remote-jobs"
 REMOTEOK_URL = "https://remoteok.com/api"
 REMOTIVE_URL = "https://remotive.com/api/remote-jobs"
+
+_UA = {"User-Agent": "llm-station-job-search/1.0"}
+
+
+def _get_json(url: str, *, params: dict | None = None, timeout: float = 20.0,
+              max_retries: int = 3):
+    """GET that honors 429 rate limits — the discovery loop fires one request
+    per keyword tag, so a busy day WILL hit the limit. On 429 we wait the
+    server's Retry-After (bounded) and retry; other errors raise as before.
+    This handles the rate limit correctly rather than aborting the whole run."""
+    for attempt in range(1, max_retries + 1):
+        with httpx.Client(timeout=timeout, headers=_UA) as client:
+            response = client.get(url, params=params)
+        if response.status_code == 429 and attempt < max_retries:
+            retry_after = response.headers.get("Retry-After")
+            wait = float(retry_after) if (retry_after or "").isdigit() else 3.0
+            time.sleep(min(wait, 15.0))
+            continue
+        response.raise_for_status()
+        return response.json()
 
 
 @dataclass(frozen=True)
@@ -236,27 +257,19 @@ def fetch_jobicy(
         params["tag"] = tag
     if industry:
         params["industry"] = industry
-    with httpx.Client(timeout=timeout, headers={"User-Agent": "llm-station-job-search/1.0"}) as client:
-        response = client.get(JOBICY_URL, params=params)
-        response.raise_for_status()
-        return parse_jobicy_jobs(response.json())
+    return parse_jobicy_jobs(_get_json(JOBICY_URL, params=params, timeout=timeout))
 
 
 def fetch_remoteok(*, timeout: float = 20.0) -> tuple[list[LivePosting], list[dict[str, Any]]]:
-    with httpx.Client(timeout=timeout, headers={"User-Agent": "llm-station-job-search/1.0"}) as client:
-        response = client.get(REMOTEOK_URL)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            raise RuntimeError("RemoteOK payload is not a list")
-        return parse_remoteok_jobs(payload)
+    payload = _get_json(REMOTEOK_URL, timeout=timeout)
+    if not isinstance(payload, list):
+        raise RuntimeError("RemoteOK payload is not a list")
+    return parse_remoteok_jobs(payload)
 
 
 def fetch_remotive(search: str, *, timeout: float = 20.0) -> tuple[list[LivePosting], list[dict[str, Any]]]:
-    with httpx.Client(timeout=timeout, headers={"User-Agent": "llm-station-job-search/1.0"}) as client:
-        response = client.get(REMOTIVE_URL, params={"search": search})
-        response.raise_for_status()
-        return parse_remotive_jobs(response.json())
+    return parse_remotive_jobs(
+        _get_json(REMOTIVE_URL, params={"search": search}, timeout=timeout))
 
 
 def _jobicy_query_error(exc: httpx.HTTPStatusError) -> dict[str, Any]:
@@ -302,11 +315,15 @@ def discover_live_postings(
 
     for source in sources:
         if source == "jobicy":
-            for tag in tag_list:
+            for i, tag in enumerate(tag_list):
+                if i:
+                    time.sleep(0.4)   # polite throttle between tag requests
                 try:
                     postings, source_skipped = fetch_jobicy(tag, count=count)
                 except httpx.HTTPStatusError as exc:
-                    if exc.response.status_code not in {400, 404}:
+                    # 400/404 = a bad tag (skip it); 429 = still rate-limited
+                    # after retries (skip this tag, keep the run going)
+                    if exc.response.status_code not in {400, 404, 429}:
                         raise
                     error = _jobicy_query_error(exc)
                     source_rows.append({

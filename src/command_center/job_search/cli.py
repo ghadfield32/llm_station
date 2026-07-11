@@ -317,6 +317,49 @@ def cmd_process_selected(args) -> int:
     )
 
 
+def cmd_daily(args) -> int:
+    """The full daily pipeline in one command — the same sequence the Airflow
+    DAG runs, so a host scheduler (Windows Task / cron) can drive the job
+    search WITHOUT an Airflow deployment: discover live postings across every
+    configured job-category keyword, publish the balanced board, and (unless
+    --no-process) prepare the Geoff-selected cards. Prints one JSON summary."""
+    from command_center.job_search.config import load_config
+    from command_center.job_search.live_sources import discover_live_postings
+
+    cfg = load_config()
+    # search terms derive from the ADJUSTABLE job categories (same source the
+    # DAG uses) so editing a category's keywords changes what daily looks for
+    keywords = sorted({kw for c in cfg.job_categories for kw in c.keywords})
+    jobicy_tags = sorted({kw.lower().replace(" ", "-") for kw in keywords})
+    summary: dict = {"operation": "daily", "keywords": keywords}
+
+    runs = [
+        discover_live_postings(sources=["jobicy"], tags=jobicy_tags,
+                               count=args.count, write=True),
+        discover_live_postings(sources=["remotive"], tags=keywords,
+                               count=args.count, write=True),
+        discover_live_postings(sources=["remoteok"], tags=[],
+                               count=args.count, write=True),
+    ]
+    seen: set[str] = set()
+    for run in runs:
+        for path in run["posting_paths"]:
+            if path in seen:
+                continue
+            seen.add(path)
+            _suggest_from_file(Path(path), write=True)
+    summary["postings_found"] = sum(r["postings_found"] for r in runs)
+    summary["suggestions_written"] = len(seen)
+
+    summary["publish"] = publish_suggestions(
+        backend=args.backend, apply=args.apply, exclude_sources=("fixture",))
+    if not args.no_process:
+        summary["process"] = process_selected(
+            backend=args.backend, apply=args.apply, executor=args.executor)
+    print(json.dumps(summary, indent=2, default=str))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cc job-search")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -430,6 +473,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
     p.add_argument("--executor", choices=["auto", "claude", "codex"], default="auto")
     p.set_defaults(func=cmd_process_selected)
+
+    p = sub.add_parser(
+        "daily",
+        help="Full daily pipeline (discover -> publish -> process) for a host "
+             "scheduler; no Airflow needed. Use --apply to write.")
+    p.add_argument("--apply", action="store_true")
+    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="internal")
+    p.add_argument("--executor", choices=["auto", "claude", "codex"], default="codex")
+    p.add_argument("--count", type=int, default=100)
+    p.add_argument("--no-process", action="store_true",
+                   help="discover + publish only; leave selection/prep to Geoff")
+    p.set_defaults(func=cmd_daily)
     return parser
 
 
