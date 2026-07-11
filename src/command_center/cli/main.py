@@ -367,6 +367,8 @@ COMMANDS: dict[str, tuple] = {
                          "install/verify the local pre-push merge guard (local_pre_push_and_human_merge posture)"),
     "repo-loop-proof": (lambda a: pym("command_center.cli.repo_loop_proof", *a),
                         "generic bounded-loop proof for any repo (trivial PR -> required checks -> no merge)"),
+    "agent-preflight": (lambda a: pym("command_center.cli.agent_preflight", *a),
+                       "Phase 0 evidence probe for Claude Agent SDK / Codex SDK (--harness all|claude|codex; read-only)"),
     "memory-add": (lambda a: pym("command_center.cli.memory_ops", "add", *a),
                    "add a durable memory (pending until --approved-by; secrets rejected)"),
     "memory-review": (lambda a: pym("command_center.cli.memory_ops", "review", *a),

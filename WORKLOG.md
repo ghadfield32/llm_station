@@ -5,6 +5,49 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Agent-session chat integration (Claude Agent / Codex Agent)
+- DECISION 07-11: Claude/Codex will be agent-session harnesses (own SDK, own auth, own
+  worktree), never GatewayCore model aliases — no `/chat/completions`-shaped call, no
+  entry into GatewayCore.dispatch. Confirmed correct by the frontier tool_calls incident
+  above: even a small, explicitly-tool-less integration leaked real local execution the
+  moment the harness trusted a field it never offered.
+- PLAN 07-11: 8 phases (protocol+fake harness -> Claude read-only -> Codex read-only -> UI
+  -> worktrees -> OpenRouter provider profiles -> mission integration -> parallel agents).
+  Full doc in-conversation; this log tracks what's actually landed, not the whole plan.
+- PHASE 0 DONE 07-11: `cc agent-preflight --harness all` (`cli/agent_preflight.py`) —
+  evidence-only, zero routing change, zero writes, zero network calls. Real findings on
+  this host (verified, not guessed):
+    - `claude` CLI installed (npm, 1.0.119); `claude_agent_sdk` Python package NOT
+      installed (`pip install claude-agent-sdk`, verified real via code.claude.com docs).
+      ANTHROPIC_API_KEY not set.
+    - `codex` CLI installed (0.125.0); `openai_codex` Python package NOT installed
+      (`pip install openai-codex`, verified real via raw PyPI JSON — author=OpenAI).
+      OPENAI_API_KEY not set, but a real `codex login` session already exists
+      (~/.codex/auth.json) — openai-codex's SDK documents reusing that session
+      automatically (`login_chatgpt`/`login_chatgpt_device_code`/`login_api_key` all
+      supported), so Codex may not need OPENAI_API_KEY at all.
+    - **check_forbidden_providers.py's FORBIDDEN_KEYS has ANTHROPIC_API_KEY and
+      OPENAI_API_KEY in it, and neither is ever exemptable by
+      --allow-frontier-router-egress (only OPENROUTER_API_KEY/ZAI_API_KEY can be) —
+      verified by reading the source, not paraphrased.** Anthropic's own Agent SDK docs
+      explicitly forbid OAuth/claude.ai-login passthrough for third-party products
+      ("use the API key authentication methods... instead"), so a Claude Agent harness
+      structurally REQUIRES ANTHROPIC_API_KEY and WILL fail `cc validate` today with no
+      existing flag that helps. This is a real, unresolved policy fork — not something
+      Phase 2 can code its way around; needs an explicit operator decision (new
+      `--allow-agent-session-egress`-style gate, or something else).
+    - PyPI naming trap found while verifying: `codex-sdk` on PyPI is Cleanlab's unrelated
+      product ("refer to cleanlab-codex instead") — NOT OpenAI's. The real package is
+      `openai-codex`. A preflight that assumed the "obvious" name would have silently
+      installed the wrong package.
+- TESTS 07-11: tests/test_agent_preflight.py (14) — every probe hermetic (no real
+  network/SDK/subprocess needed to pass), the forbidden-provider cross-check reads the
+  real FORBIDDEN_KEYS/ROUTER_LANE_KEYS constants so it fails loudly if that policy ever
+  changes instead of silently drifting, a read-only guarantee test.
+- NEXT: Phase 1 (protocol + fake harness, still zero real SDK calls) is unblocked and
+  low-risk. Phase 2 (real Claude Agent SDK calls) is blocked on the forbidden-provider
+  policy decision above.
+
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro
   (frontier lane, no `tools` ever sent — verified in frontier_client.py body) returned a
