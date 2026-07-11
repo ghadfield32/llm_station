@@ -63,11 +63,32 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   unknown-session raises loud, mismatched-session approval rejected, FakeHarness
   satisfies the Protocol via isinstance. mypy + ruff clean; full non-job-search suite
   green.
-- NEXT: design the agent-session egress-gate flag (the decided-but-not-built item
-  above), then Phase 2 (real Claude Agent SDK, read-only mode only, hash-before/after
-  repo mutation test) — gate on that egress flag existing. Codex Phase 3 may not need
-  it at all (reused CLI session) — verify that assumption with a real SDK call before
-  relying on it, not just the preflight's static finding.
+- CORRECTED 07-11: an incoming plan claimed the connected GitHub repo didn't recognize
+  8d4b775/650ab35 (history "still begins with 0e7ffa4"). Verified via `git branch -vv`:
+  false — that's `origin/main`'s state (irrelevant; this work was never on main). The
+  actual branch `feat/research-digest-intake-hygiene-main` already tracked
+  `origin/feat/research-digest-intake-hygiene-main`, just 6 commits ahead. Fixed with a
+  plain `git push` (no new worktree/branch needed) — pushed clean, 0 ahead now.
+- EGRESS GATE DONE 07-11 (`check_forbidden_providers.py`): `AGENT_SESSION_KEYS =
+  {ANTHROPIC_API_KEY, OPENAI_API_KEY}` + `agent_session_egress_ready()` +
+  `--allow-agent-session-egress`, mirroring `frontier_egress_ready()`/
+  `--allow-frontier-router-egress` exactly but fully independent — neither flag ever
+  exempts the other's keys (4 tests prove this both directions), and
+  check_models_yaml/check_litellm_config (the local LiteLLM lane) stay unconditional
+  regardless of either flag (dedicated test mocks them and asserts they still ran).
+  Gated by new `configs/agent-session-budgets.yaml` (`default.enabled: false`,
+  per-harness `codex_agent`/`claude_agent` toggles — enabled:true with every harness
+  off is correctly treated as NOT ready). `make agent-session-egress-check` mirrors
+  `frontier-router-egress-check`. Live-smoke-tested against real repo state: correctly
+  FAILs today (budgets file disabled by default) — exactly as designed, no key exempted
+  by default. 8 new tests in test_forbidden_providers_egress.py; full suite green.
+- NEXT (Phase 2, not started — explicitly deferred this session, real infra/quota
+  consequences): flip `configs/agent-session-budgets.yaml` for the chosen harness,
+  install `openai-codex`/`claude-agent-sdk` in a dedicated optional-deps group (pin a
+  real version, not floating), build the real read-only adapter(s), prove no repo
+  mutation via hash-before/after. Codex may not need the new egress flag at all if it
+  authenticates via the existing `codex login` session instead of OPENAI_API_KEY —
+  verify that with a real SDK call before relying on the preflight's static finding.
 
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro
