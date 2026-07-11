@@ -128,6 +128,65 @@ def test_list_agent_sessions_filters_by_status(ledger):
     assert {s["session_id"] for s in all_sessions} == {s1, s2}
 
 
+def test_approval_created_pending_and_resolved(ledger):
+    client, _, _ = ledger
+    session_id = _create(client).json()["session_id"]
+    r = client.post(f"/agent-session/{session_id}/approval",
+                    json={"action": "write foo.py"})
+    assert r.status_code == 200
+    approval_id = r.json()["approval_id"]
+    assert approval_id.startswith("APR-")
+    assert r.json()["status"] == "pending"
+    assert r.json()["approved"] is None
+
+    g = client.get(f"/agent-session/approval/{approval_id}")
+    assert g.status_code == 200 and g.json()["status"] == "pending"
+
+    res = client.post(f"/agent-session/{session_id}/approval/{approval_id}/resolve",
+                      json={"approved": True, "reason": "looks fine"})
+    assert res.status_code == 200
+    assert res.json()["status"] == "resolved"
+    assert res.json()["approved"] is True
+    assert res.json()["reason"] == "looks fine"
+
+
+def test_approval_replay_is_rejected(ledger):
+    client, _, _ = ledger
+    session_id = _create(client).json()["session_id"]
+    approval_id = client.post(f"/agent-session/{session_id}/approval",
+                              json={"action": "write foo.py"}).json()["approval_id"]
+    client.post(f"/agent-session/{session_id}/approval/{approval_id}/resolve",
+               json={"approved": True})
+    replay = client.post(f"/agent-session/{session_id}/approval/{approval_id}/resolve",
+                         json={"approved": False})
+    assert replay.status_code == 409
+
+
+def test_approval_cannot_be_resolved_from_another_session(ledger):
+    client, _, _ = ledger
+    s1 = _create(client, conversation_id="c1").json()["session_id"]
+    s2 = _create(client, conversation_id="c2").json()["session_id"]
+    approval_id = client.post(f"/agent-session/{s1}/approval",
+                              json={"action": "write foo.py"}).json()["approval_id"]
+    r = client.post(f"/agent-session/{s2}/approval/{approval_id}/resolve",
+                    json={"approved": True})
+    assert r.status_code == 403
+
+
+def test_approval_for_unknown_session_404s(ledger):
+    client, _, _ = ledger
+    assert client.post("/agent-session/AS-nope/approval",
+                       json={"action": "x"}).status_code == 404
+
+
+def test_unknown_approval_404s(ledger):
+    client, _, _ = ledger
+    session_id = _create(client).json()["session_id"]
+    assert client.get("/agent-session/approval/APR-nope").status_code == 404
+    assert client.post(f"/agent-session/{session_id}/approval/APR-nope/resolve",
+                       json={"approved": True}).status_code == 404
+
+
 def test_restart_recovery_survives_a_new_app_instance_on_the_same_db(tmp_path):
     """The actual production concern: the worker process restarts, opens a NEW
     Ledger app instance against the SAME db file, and every session/event must

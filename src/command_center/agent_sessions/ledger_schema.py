@@ -23,6 +23,13 @@ Design:
                             transactionally, so a vendor-supplied ordering is never
                             trusted (see GatewayCore's frontier tool_calls incident
                             for why that distinction is load-bearing).
+  * agent_session_approvals — one row per approval request. The Ledger generates
+                            approval_id (never caller-supplied, same reasoning as
+                            session_id) and owns resolution state: an approval
+                            belongs to exactly one session, resolves exactly once
+                            (replay is rejected), and survives a harness/worker
+                            restart — see fake_harness.py, which used to keep
+                            this in a local dict a restart would silently drop.
 """
 from __future__ import annotations
 
@@ -60,6 +67,18 @@ CREATE TABLE IF NOT EXISTS agent_session_events (
     type       TEXT,
     payload    TEXT,
     PRIMARY KEY (session_id, sequence),
+    FOREIGN KEY(session_id) REFERENCES agent_sessions(session_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_approvals (
+    approval_id  TEXT PRIMARY KEY,
+    session_id    TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    resolved_at   TEXT,
+    approved      INTEGER,
+    reason        TEXT,
     FOREIGN KEY(session_id) REFERENCES agent_sessions(session_id)
 );
 

@@ -38,7 +38,8 @@ def test_ledger_service_ddl_matches_canonical():
 
 def test_all_agent_session_tables_present_in_service():
     service = _extract_service_ddl()
-    for table in ("agent_sessions", "agent_session_events", "schema_migrations"):
+    for table in ("agent_sessions", "agent_session_events",
+                  "agent_session_approvals", "schema_migrations"):
         assert f"CREATE TABLE IF NOT EXISTS {table}" in service
 
 

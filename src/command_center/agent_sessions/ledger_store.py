@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import httpx
 
-from .store import SessionRecord
+from .store import ApprovalRecord, SessionRecord
 
 _SESSION_FIELDS = (
     "session_id", "conversation_id", "harness", "provider_profile", "model",
@@ -23,10 +23,18 @@ _SESSION_FIELDS = (
     "branch", "base_branch", "permission_profile", "worker_id", "status",
     "created_at", "updated_at", "last_event_sequence", "cost_usd",
 )
+_APPROVAL_FIELDS = (
+    "approval_id", "session_id", "action", "status", "requested_at",
+    "resolved_at", "approved", "reason",
+)
 
 
 def _record_from_dict(data: dict) -> SessionRecord:
     return SessionRecord(**{k: data[k] for k in _SESSION_FIELDS})
+
+
+def _approval_from_dict(data: dict) -> ApprovalRecord:
+    return ApprovalRecord(**{k: data[k] for k in _APPROVAL_FIELDS})
 
 
 class LedgerSessionStore:
@@ -77,3 +85,26 @@ class LedgerSessionStore:
         r = self._client.post(f"/agent-session/{session_id}/status",
                               json={"status": status})
         self._raise_for_status(r, not_found_msg=f"no such agent session: {session_id!r}")
+
+    def create_approval(self, session_id: str, action: str) -> ApprovalRecord:
+        r = self._client.post(f"/agent-session/{session_id}/approval",
+                              json={"action": action})
+        self._raise_for_status(r, not_found_msg=f"no such agent session: {session_id!r}")
+        return _approval_from_dict(r.json())
+
+    def get_approval(self, approval_id: str) -> ApprovalRecord:
+        r = self._client.get(f"/agent-session/approval/{approval_id}")
+        self._raise_for_status(r, not_found_msg=f"no such approval: {approval_id!r}")
+        return _approval_from_dict(r.json())
+
+    def resolve_approval(self, session_id: str, approval_id: str, *,
+                         approved: bool, reason: str = "") -> ApprovalRecord:
+        r = self._client.post(
+            f"/agent-session/{session_id}/approval/{approval_id}/resolve",
+            json={"approved": approved, "reason": reason})
+        if r.status_code == 404:
+            raise KeyError(f"no such approval: {approval_id!r}")
+        if r.status_code in (403, 409):
+            raise ValueError(r.json().get("detail", r.text))
+        r.raise_for_status()
+        return _approval_from_dict(r.json())

@@ -16,12 +16,16 @@ from .store import SessionStore
 
 
 class FakeHarness:
+    """Holds NO session-scoped state of its own — interrupted/active status and
+    pending approvals both live in the store, so a FakeHarness instance recreated
+    after a restart (or a fresh one pointed at the same durable store) behaves
+    identically to the original. This is deliberate: it's the same recovery
+    contract a real Claude/Codex adapter must satisfy."""
+
     name = "fake"
 
     def __init__(self, store: SessionStore) -> None:
         self.store = store
-        self._interrupted: set[str] = set()
-        self._pending_approvals: dict[str, str] = {}   # approval_id -> session_id
 
     async def probe(self) -> HarnessProbe:
         return HarnessProbe(
@@ -40,19 +44,18 @@ class FakeHarness:
         return record.session_id
 
     async def send(self, session_id: str, prompt: str) -> AsyncIterator[AgentEvent]:
-        if session_id in self._interrupted:
+        if self.store.get(session_id).status == "interrupted":
             yield self.store.append_event(
                 session_id,
                 AgentEvent("session_failed", {"reason": "session was interrupted"}))
             return
         if prompt.strip().lower().startswith("write "):
             # deterministically exercises the approval path without any real tool
-            approval_id = f"{session_id}-approval-{len(self._pending_approvals) + 1}"
-            self._pending_approvals[approval_id] = session_id
+            approval = self.store.create_approval(session_id, action=prompt)
             yield self.store.append_event(
                 session_id,
                 AgentEvent("approval_required",
-                          {"approval_id": approval_id, "action": prompt}))
+                          {"approval_id": approval.approval_id, "action": prompt}))
             return
         yield self.store.append_event(
             session_id, AgentEvent("assistant_message",
@@ -60,26 +63,21 @@ class FakeHarness:
         yield self.store.append_event(session_id, AgentEvent("session_idle", {}))
 
     async def resolve_approval(self, session_id: str, decision: ApprovalDecision) -> None:
-        owner = self._pending_approvals.get(decision.approval_id)
-        if owner != session_id:
-            raise ValueError(
-                f"approval {decision.approval_id!r} does not belong to session "
-                f"{session_id!r} (owner: {owner!r})")
-        del self._pending_approvals[decision.approval_id]
+        approval = self.store.resolve_approval(
+            session_id, decision.approval_id,
+            approved=decision.approved, reason=decision.reason)
         self.store.append_event(
             session_id,
             AgentEvent("approval_resolved",
-                      {"approval_id": decision.approval_id,
-                       "approved": decision.approved, "reason": decision.reason}))
+                      {"approval_id": approval.approval_id,
+                       "approved": approval.approved, "reason": approval.reason}))
 
     async def interrupt(self, session_id: str) -> None:
-        self._interrupted.add(session_id)
         self.store.append_event(session_id,
                                 AgentEvent("session_failed", {"reason": "interrupted"}))
         self.store.set_status(session_id, "interrupted")
 
     async def resume(self, session_id: str) -> None:
-        self._interrupted.discard(session_id)
         self.store.set_status(session_id, "active")
         self.store.append_event(session_id,
                                 AgentEvent("session_started", {"resumed": True}))

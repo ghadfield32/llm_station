@@ -125,12 +125,49 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   ruff clean on every changed file; full suite (including job_search — this worktree
   has none of the concurrent session's uncommitted files) green in this clean
   worktree.
-- NEXT: harness registry + AgentSessionService (business logic layer, still zero real
-  SDK), then the host worker (`cc agent-worker`, token-authed, localhost-only) and the
-  cockpit's `/api/agent-sessions/*` proxy+SSE endpoints + UI — the rest of Milestone 1,
-  still entirely FakeHarness-backed, still zero paid/authenticated calls. Real Codex/
-  Claude adapters remain explicitly out of scope until that vertical slice works
-  end-to-end and a human decides to proceed.
+- DURABLE APPROVALS DONE 07-11 (Milestone 1, part 2, prerequisite before registry/
+  service): `FakeHarness._pending_approvals` was still an in-memory dict a restart
+  would silently drop — moved into the store as a proper `ApprovalRecord`
+  (approval_id/session_id/action/status/requested_at/resolved_at/approved/reason),
+  same durability contract as sessions/events. New `agent_session_approvals` Ledger
+  table (mirrored + drift-tested like the other two) + 3 endpoints (create/get/
+  resolve) — resolve is session-bound and one-use (replay returns 409, wrong-session
+  returns 403) — matches `create_session`, the server (not the caller) generates
+  `approval_id`. `SessionStore`/`LedgerSessionStore` both gained
+  `create_approval`/`get_approval`/`resolve_approval`; `FakeHarness` now holds NO
+  session-scoped state of its own at all (interrupted status reads `store.get(...)
+  .status` instead of a local set too) — a fresh FakeHarness instance pointed at the
+  same store behaves identically to the original, which is exactly the recovery
+  contract a real adapter must satisfy later.
+- REGISTRY + SERVICE DONE 07-11 (rest of Milestone 1, still zero real SDK):
+  `registry.py` — `HarnessRegistry`/`HarnessDescriptor`, `default_registry(store)`
+  wires `fake` (production=False) + `codex_agent`/`claude_agent` as `NotBuiltHarness`
+  placeholders whose `probe()` reports an exact, specific blocker (never a generic
+  "unavailable") without importing any SDK — verified by a test that `openai_codex`/
+  `claude_agent_sdk` never enter `sys.modules` just from listing harnesses.
+  `service.py` — `AgentSessionService` is the sole lifecycle owner (start/send/
+  events/approve/interrupt/resume/close/list_harnesses); `_active_harnesses` is an
+  explicit PROCESS-LOCAL cache only, never trusted as the source of truth — every
+  method reconstructs a harness from the registry when the cache is empty, so a
+  restarted service serves a FakeHarness session identically (proved with a real
+  test: brand-new service, fresh store client, fresh in-process cache, same Ledger
+  db — recovers full history AND the session is still live/usable, sequence
+  continues correctly). New `SessionStoreProtocol` (mirrors `AgentHarness`'s
+  `runtime_checkable` pattern) lets the service accept either backend without
+  hardcoding a type. Also added a structural guardrail test:
+  `issubclass(GatewayCore, AgentHarness)` is False — the two execution systems
+  cannot be confused even by accident.
+- TESTS 07-11: test_agent_session_approvals.py (11, parameterized across both
+  backends incl. pending-approval-survives-restart), test_agent_session_registry.py
+  (8), test_agent_session_service.py (16, parameterized across both backends incl.
+  service-level restart recovery + the GatewayCore guardrail). 71 agent-session
+  tests total now pass together; mypy + ruff clean on all 9 package files; full repo
+  suite green in the clean worktree.
+- NEXT: the host worker (`cc agent-worker`, token-authed, localhost-only — port/
+  token/lifecycle design not yet decided) and the cockpit's `/api/agent-sessions/*`
+  proxy+SSE endpoints + UI — still entirely FakeHarness-backed, still zero paid/
+  authenticated calls. Real Codex/Claude adapters remain explicitly out of scope
+  until that vertical slice works end-to-end and a human decides to proceed.
 
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro

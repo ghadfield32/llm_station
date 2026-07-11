@@ -29,6 +29,11 @@ class SessionStart:
     conversation_id: str
     repo_id: str
     mode: str                          # "analysis" | "workspace" | "mission"
+    # Which registered harness to start (registry.py key, e.g. "fake",
+    # "codex_agent"). A specific AgentHarness instance's own start_session()
+    # doesn't need to inspect this — it already knows who it is — but
+    # AgentSessionService needs it to pick the right harness in the first place.
+    harness_id: str = "fake"
     provider_profile: str = "default"
     model: str | None = None
     permission_profile: str = "read_only"

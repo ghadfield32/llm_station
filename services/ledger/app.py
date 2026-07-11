@@ -166,6 +166,18 @@ CREATE TABLE IF NOT EXISTS agent_session_events (
     FOREIGN KEY(session_id) REFERENCES agent_sessions(session_id)
 );
 
+CREATE TABLE IF NOT EXISTS agent_session_approvals (
+    approval_id  TEXT PRIMARY KEY,
+    session_id    TEXT NOT NULL,
+    action        TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    requested_at TEXT NOT NULL,
+    resolved_at   TEXT,
+    approved      INTEGER,
+    reason        TEXT,
+    FOREIGN KEY(session_id) REFERENCES agent_sessions(session_id)
+);
+
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,
     applied_at TEXT
@@ -810,6 +822,76 @@ def set_agent_session_status(sid: str, body: AgentSessionStatusIn):
                   (body.status, now, sid))
         c.commit()
     return {"session_id": sid, "status": body.status}
+
+
+class AgentSessionApprovalIn(BaseModel):
+    action: str
+
+
+class AgentSessionApprovalResolveIn(BaseModel):
+    approved: bool
+    reason: str = ""
+
+
+def _approval_row_to_dict(row) -> dict:
+    d = dict(row)
+    d["approved"] = bool(d["approved"]) if d["approved"] is not None else None
+    return d
+
+
+@app.post("/agent-session/{sid}/approval")
+def create_agent_session_approval(sid: str, body: AgentSessionApprovalIn):
+    with closing(_db()) as c:
+        if not c.execute("SELECT 1 FROM agent_sessions WHERE session_id=?",
+                         (sid,)).fetchone():
+            raise HTTPException(404, "agent session not found")
+        approval_id = "APR-" + secrets.token_hex(4)
+        now = _now()
+        c.execute(
+            "INSERT INTO agent_session_approvals (approval_id, session_id, action, "
+            "status, requested_at, resolved_at, approved, reason) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (approval_id, sid, body.action, "pending", now, None, None, ""))
+        c.commit()
+        row = c.execute("SELECT * FROM agent_session_approvals WHERE approval_id=?",
+                        (approval_id,)).fetchone()
+    return _approval_row_to_dict(row)
+
+
+@app.get("/agent-session/approval/{aid}")
+def get_agent_session_approval(aid: str):
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM agent_session_approvals WHERE approval_id=?",
+                        (aid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "approval not found")
+    return _approval_row_to_dict(row)
+
+
+@app.post("/agent-session/{sid}/approval/{aid}/resolve")
+def resolve_agent_session_approval(sid: str, aid: str, body: AgentSessionApprovalResolveIn):
+    """One-use, session-bound: an approval belonging to a different session, or one
+    already resolved, is rejected rather than silently re-applied (replay)."""
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM agent_session_approvals WHERE approval_id=?",
+                        (aid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "approval not found")
+        if row["session_id"] != sid:
+            raise HTTPException(
+                403, f"approval {aid!r} does not belong to session {sid!r}")
+        if row["status"] == "resolved":
+            raise HTTPException(
+                409, f"approval {aid!r} was already resolved — replay rejected")
+        now = _now()
+        c.execute(
+            "UPDATE agent_session_approvals SET status=?, resolved_at=?, approved=?, "
+            "reason=? WHERE approval_id=?",
+            ("resolved", now, 1 if body.approved else 0, body.reason, aid))
+        c.commit()
+        resolved = c.execute("SELECT * FROM agent_session_approvals WHERE approval_id=?",
+                             (aid,)).fetchone()
+    return _approval_row_to_dict(resolved)
 
 
 if __name__ == "__main__":
