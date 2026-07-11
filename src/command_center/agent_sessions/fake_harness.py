@@ -40,7 +40,14 @@ class FakeHarness:
             model=request.model, permission_profile=request.permission_profile)
         self.store.append_event(
             record.session_id, AgentEvent("session_started", {"mode": request.mode}))
-        self.store.set_status(record.session_id, "active")
+        # "idle" = ready, no turn in progress. "active" is reserved EXCLUSIVELY
+        # for "a background task is genuinely running this session right now"
+        # (set only by the worker's task wrapper — see worker_app.py). Keeping
+        # these distinct is what makes restart reconciliation unambiguous: any
+        # session found "active" at worker startup is, by definition, orphaned
+        # (a fresh process's task registry is always empty), never a session
+        # that's merely ready and waiting.
+        self.store.set_status(record.session_id, "idle")
         return record.session_id
 
     async def send(self, session_id: str, prompt: str) -> AsyncIterator[AgentEvent]:
@@ -78,7 +85,7 @@ class FakeHarness:
         self.store.set_status(session_id, "interrupted")
 
     async def resume(self, session_id: str) -> None:
-        self.store.set_status(session_id, "active")
+        self.store.set_status(session_id, "idle")   # ready, not "a task is running"
         self.store.append_event(session_id,
                                 AgentEvent("session_started", {"resumed": True}))
 

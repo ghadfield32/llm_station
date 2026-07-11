@@ -64,6 +64,12 @@ class LedgerSessionStore:
         self._raise_for_status(r, not_found_msg=f"no such agent session: {session_id!r}")
         return _record_from_dict(r.json())
 
+    def list_sessions(self, status: str | None = None) -> list[SessionRecord]:
+        params = {"status": status} if status is not None else {}
+        r = self._client.get("/agent-sessions", params=params)
+        r.raise_for_status()
+        return [_record_from_dict(row) for row in r.json()]
+
     def append_event(self, session_id: str, event):
         r = self._client.post(f"/agent-session/{session_id}/event",
                               json={"type": event.type, "payload": event.payload})

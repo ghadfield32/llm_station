@@ -46,7 +46,7 @@ def test_full_lifecycle_against_the_real_ledger_backend(ledger_backed_harness):
     assert session_id.startswith("AS-")   # Ledger-assigned id, not agent-session-N
 
     record = store.get(session_id)
-    assert record.status == "active"
+    assert record.status == "idle"
     assert record.conversation_id == "c1"
 
     events = asyncio.run(_drain(fh.send(session_id, "explain this repo")))
@@ -87,7 +87,7 @@ def test_interrupt_and_resume_against_ledger(ledger_backed_harness):
     assert store.get(session_id).status == "interrupted"
 
     asyncio.run(fh.resume(session_id))
-    assert store.get(session_id).status == "active"
+    assert store.get(session_id).status == "idle"
     events = asyncio.run(_drain(fh.send(session_id, "back")))
     assert events[0].type == "assistant_message"
 

@@ -46,7 +46,7 @@ def test_start_session_creates_record_and_session_started_event():
     session_id = asyncio.run(fh.start_session(request))
 
     record = store.get(session_id)
-    assert record.status == "active"
+    assert record.status == "idle"   # ready, not "a task is running" — see fake_harness.py
     assert record.conversation_id == "c1"
     assert record.repo_id == "llm_station"
     assert record.harness == "fake"
@@ -150,7 +150,7 @@ def test_resume_after_interrupt_reactivates_session():
     asyncio.run(fh.interrupt(session_id))
     asyncio.run(fh.resume(session_id))
 
-    assert store.get(session_id).status == "active"
+    assert store.get(session_id).status == "idle"
     events = asyncio.run(_drain(fh.send(session_id, "back online")))
     assert events[0].type == "assistant_message"
 

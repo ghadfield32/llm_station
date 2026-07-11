@@ -194,6 +194,55 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   in an unrelated experiment-registry test caused by editing WORKLOG.md while
   pytest was mid-run in the same worktree; reran untouched and it passed clean,
   confirming it wasn't a real regression).
+- ASYNC EXECUTION CORRECTION 07-11 (before the cockpit proxy, as required): the
+  worker's `POST /messages` originally drained the harness's full async
+  generator and returned every event in one JSON response — fine for
+  FakeHarness's instant completion, wrong for a real multi-minute Codex/Claude
+  turn (the HTTP call would block for the whole turn, with no way to
+  interrupt). Now: `POST /messages` validates the session (404/400/409 —
+  closed / interrupted-or-failed requiring `/resume` first / already has an
+  active turn), schedules a background `asyncio.Task`, returns 202
+  immediately. A process-local `active_runs: {session_id: Task}` dict is the
+  ONLY source of truth for "is a turn genuinely running" — this forced a real
+  fix to the status vocabulary: `start_session()`/`resume()` now set `"idle"`
+  (ready, no task running), not `"active"` — `"active"` is set EXCLUSIVELY by
+  the worker's task wrapper while a turn is genuinely in flight, and back to
+  `"idle"`/`"failed"`/`"interrupted"` when it ends. This distinction is what
+  makes restart reconciliation unambiguous: a fresh worker process's
+  `active_runs` is always empty, so ANY session still reading `"active"` at
+  startup is, by definition, orphaned — `_reconcile_orphaned_sessions()` marks
+  it `failed` with an honest reason before serving any request. New
+  `list_sessions(status=...)` on `SessionStoreProtocol`/both backends (the
+  Ledger endpoint already existed from the durable-store milestone; only the
+  client method was missing). `/interrupt` now cancels the real task if one
+  exists; `/close` cancels-and-awaits before setting the final `closed` status
+  so the two writes can't race.
+- REAL BUG FOUND VIA TESTING 07-11: `starlette.testclient.TestClient` bridges
+  sync test code to the async app via a portal running in its own thread — a
+  task spawned with `asyncio.create_task()` during one `.post()` call was
+  empirically found NOT to reliably survive to a LATER `.post()` call on that
+  same portal (it came back cancelled/"interrupted" even with a thread-safe
+  `threading.Event` gate, ruling out a naive cross-thread-signal explanation).
+  This is a `TestClient`-specific artifact of its per-call task-group
+  boundary, not a bug in the worker — a real uvicorn process has no such
+  boundary. Confirmed by rewriting the concurrency test on
+  `httpx.AsyncClient(transport=ASGITransport(...))` with everything on ONE
+  event loop (no thread/portal at all): passes cleanly. Lesson for future
+  agent-session tests: anything that needs a background task to survive
+  across multiple separate HTTP calls must use the single-event-loop
+  AsyncClient pattern, not TestClient.
+- TESTS 07-11: test_agent_worker.py grew to 15 (was 11) — concurrent-turn 409
+  (via a controllable `_SlowHarness` gated on an `asyncio.Event`, the only way
+  to make the race deterministic instead of hoping FakeHarness stays "slow
+  enough"), message-to-interrupted-session 409 until `/resume`,
+  message-to-closed-session 400, and a dedicated worker-restart-reconciliation
+  test (force a session to `"active"` with no backing task, build a second
+  `build_app()` against the same store, confirm it's marked `failed` with the
+  exact reason). `build_app()` gained an optional `registry` parameter
+  specifically so tests can inject a controllable non-FakeHarness harness
+  without touching production wiring. 100 agent-session tests total; mypy+ruff
+  clean; full repo suite green (confirmed undisturbed this time — no file
+  edits while pytest was running).
 - NEXT: the cockpit's `/api/agent-sessions/*` proxy+SSE endpoints (talking to
   this worker over `host.docker.internal:8791`, matching the existing Ollama/
   AppFlowy pattern in docker-compose.yml) and the Agent Sessions UI — still

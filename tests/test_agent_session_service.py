@@ -78,7 +78,7 @@ def test_full_lifecycle_through_the_service(service):
     record = asyncio.run(service.start_session(SessionStart(
         conversation_id="c1", repo_id="llm_station", mode="analysis",
         harness_id="fake")))
-    assert record.status == "active"
+    assert record.status == "idle"
 
     events = asyncio.run(_drain(service.send_message(record.session_id, "hello")))
     assert [e.type for e in events] == ["assistant_message", "session_idle"]
@@ -90,7 +90,7 @@ def test_full_lifecycle_through_the_service(service):
     asyncio.run(service.interrupt(record.session_id))
     assert service.get_session(record.session_id).status == "interrupted"
     asyncio.run(service.resume(record.session_id))
-    assert service.get_session(record.session_id).status == "active"
+    assert service.get_session(record.session_id).status == "idle"
 
     asyncio.run(service.close(record.session_id))
     assert service.get_session(record.session_id).status == "closed"

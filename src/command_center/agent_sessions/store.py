@@ -85,6 +85,12 @@ class SessionStore:
             raise KeyError(f"no such agent session: {session_id!r}")
         return self._sessions[session_id]
 
+    def list_sessions(self, status: str | None = None) -> list[SessionRecord]:
+        records = list(self._sessions.values())
+        if status is not None:
+            records = [r for r in records if r.status == status]
+        return records
+
     def append_event(self, session_id: str, event: AgentEvent) -> AgentEvent:
         """Assigns sequence/ts here (never trust a harness-supplied sequence — the
         store is the single serialization point per session)."""
@@ -157,6 +163,8 @@ class SessionStoreProtocol(Protocol):
                        permission_profile: str = "read_only") -> SessionRecord: ...
 
     def get(self, session_id: str) -> SessionRecord: ...
+
+    def list_sessions(self, status: str | None = None) -> list[SessionRecord]: ...
 
     def append_event(self, session_id: str, event: AgentEvent) -> AgentEvent: ...
 
