@@ -89,6 +89,48 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   mutation via hash-before/after. Codex may not need the new egress flag at all if it
   authenticates via the existing `codex login` session instead of OPENAI_API_KEY —
   verify that with a real SDK call before relying on the preflight's static finding.
+- STACKED BRANCH 07-11: PR #32 (`feat/research-digest-intake-hygiene-main` -> main)
+  verified real via `gh pr view` — its title/body genuinely only describe research-
+  digest/log-hygiene/skills/card-deps, not any cockpit/frontier/job-search/agent-
+  session work landed on the branch since. Rather than keep growing that PR, new work
+  moves to a stacked worktree/branch (`C:\tmp\cc-agent-runtime`,
+  `feat/agent-session-runtime`, based on `origin/feat/research-digest-intake-hygiene-
+  main`) — this and every entry below is committed there, not on the main branch.
+- DURABLE STORE DONE 07-11 (Milestone 1, part 1): investigated Ledger first, as
+  required, before building anything new — real verdict: Ledger IS in-repo
+  (`services/ledger/app.py`, SQLite, durable) with an established extension pattern
+  already proven for the experiment registry (mirrored DDL + drift test, since the
+  container can't import command_center). Reused that exact pattern instead of a
+  second database: new `agent_sessions`/`agent_session_events` tables
+  (`src/command_center/agent_sessions/ledger_schema.py`, mirrored into
+  `services/ledger/app.py` as `AGENT_SESSION_SCHEMA_SQL`, drift-tested) + 6 new Ledger
+  endpoints (`POST /agent-session`, `GET /agent-sessions`, `GET|POST /agent-session/
+  {sid}[/event|/events|/status]`) — the Ledger, not the caller, assigns event sequence
+  numbers transactionally with the insert (same "never trust a vendor-supplied
+  ordering" discipline as store.py). New `LedgerSessionStore`
+  (`agent_sessions/ledger_store.py`) is a SYNC drop-in for the Phase-1 in-memory
+  `SessionStore` — same 5-method surface, so FakeHarness needs zero changes to run
+  against either backend. Proved this for real: `FakeHarness(LedgerSessionStore(...))`
+  runs the exact same lifecycle assertions (start/send/approval/interrupt/resume,
+  events_since reconnect, unknown-session KeyError) against a REAL Ledger app
+  instance, not a mock. A real bug caught by adding a payload round-trip test before
+  trusting the endpoint: the events-list endpoint was returning the payload column as
+  a double-encoded JSON string instead of a real object — fixed to decode server-side,
+  matching how `get_experiment` already avoids the same trap.
+- TESTS 07-11: test_agent_session_ledger_schema.py (3, drift-detection, mirrors
+  test_ledger_experiment_schema.py), test_agent_session_ledger_rest.py (8, incl. a
+  real restart-recovery test — a second app instance opened against the same db file
+  recovers every session/event and continues sequences correctly, not resetting),
+  test_agent_sessions_ledger_store.py (5, cross-backend FakeHarness parity). mypy +
+  ruff clean on every changed file; full suite (including job_search — this worktree
+  has none of the concurrent session's uncommitted files) green in this clean
+  worktree.
+- NEXT: harness registry + AgentSessionService (business logic layer, still zero real
+  SDK), then the host worker (`cc agent-worker`, token-authed, localhost-only) and the
+  cockpit's `/api/agent-sessions/*` proxy+SSE endpoints + UI — the rest of Milestone 1,
+  still entirely FakeHarness-backed, still zero paid/authenticated calls. Real Codex/
+  Claude adapters remain explicitly out of scope until that vertical slice works
+  end-to-end and a human decides to proceed.
 
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro

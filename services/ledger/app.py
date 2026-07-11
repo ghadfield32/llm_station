@@ -129,6 +129,50 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
+# Agent-session schema. MIRROR of the canonical source of truth in
+# src/command_center/agent_sessions/ledger_schema.py (SCHEMA_SQL). This container
+# cannot import the command_center package, so the DDL is duplicated here and kept
+# honest by tests/test_agent_session_ledger_schema.py, which fails on any drift.
+# These tables EXTEND the same ledger.db — they do not create a second database.
+AGENT_SESSION_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    session_id          TEXT PRIMARY KEY,
+    conversation_id     TEXT,
+    harness              TEXT,
+    provider_profile    TEXT,
+    model                TEXT,
+    external_session_id TEXT,
+    repo_id              TEXT,
+    workspace_path       TEXT,
+    worktree_path        TEXT,
+    branch                TEXT,
+    base_branch          TEXT,
+    permission_profile   TEXT,
+    worker_id            TEXT,
+    status                TEXT,
+    created_at           TEXT,
+    updated_at           TEXT,
+    last_event_sequence  INTEGER DEFAULT 0,
+    cost_usd              REAL DEFAULT 0.0
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_events (
+    session_id TEXT,
+    sequence   INTEGER,
+    ts         TEXT,
+    type       TEXT,
+    payload    TEXT,
+    PRIMARY KEY (session_id, sequence),
+    FOREIGN KEY(session_id) REFERENCES agent_sessions(session_id)
+);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    TEXT PRIMARY KEY,
+    applied_at TEXT
+);
+"""
+
+
 # Experiment lifecycle edges + the human-only wall, mirrored from
 # command_center.improvement.lifecycle. The Ledger enforces the structural walls
 # even on its REST surface: entering Canary/Promoted requires a valid human HMAC
@@ -155,6 +199,9 @@ def init_db():
         c.executescript(EXPERIMENT_SCHEMA_SQL)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("improvement.v1", _now()))
+        c.executescript(AGENT_SESSION_SCHEMA_SQL)
+        c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+                  "VALUES (?, ?)", ("agent_sessions.v1", _now()))
         c.executescript("""
         CREATE TABLE IF NOT EXISTS missions (
             id TEXT PRIMARY KEY,
@@ -638,6 +685,131 @@ def set_experiment_status(eid: str, body: ExpStatusIn):
                    json.dumps({"from": current, "to": body.status})))
         c.commit()
     return {"experiment_id": eid, "status": body.status}
+
+
+# ---- Agent sessions (Claude Agent / Codex Agent / FakeHarness durability) --------
+# The Ledger — not the harness — assigns event sequence numbers, transactionally
+# with the insert, so a vendor-supplied ordering is never trusted (see
+# src/command_center/agent_sessions/store.py SessionStore for the in-memory sibling
+# these endpoints back). session_id is server-generated, same pattern as mission ids.
+
+class AgentSessionIn(BaseModel):
+    harness: str
+    conversation_id: str
+    repo_id: str
+    provider_profile: str = "default"
+    model: Optional[str] = None
+    permission_profile: str = "read_only"
+
+
+class AgentSessionEventIn(BaseModel):
+    type: str
+    payload: dict = Field(default_factory=dict)
+
+
+class AgentSessionStatusIn(BaseModel):
+    status: str
+
+
+def _agent_session_row_to_dict(row) -> dict:
+    return dict(row)
+
+
+@app.post("/agent-session")
+def create_agent_session(body: AgentSessionIn):
+    session_id = "AS-" + secrets.token_hex(4)
+    now = _now()
+    with closing(_db()) as c:
+        c.execute(
+            "INSERT INTO agent_sessions (session_id, conversation_id, harness, "
+            "provider_profile, model, external_session_id, repo_id, "
+            "workspace_path, worktree_path, branch, base_branch, "
+            "permission_profile, worker_id, status, created_at, updated_at, "
+            "last_event_sequence, cost_usd) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (session_id, body.conversation_id, body.harness, body.provider_profile,
+             body.model, None, body.repo_id, None, None, None, None,
+             body.permission_profile, None, "starting", now, now, 0, 0.0))
+        c.commit()
+        row = c.execute("SELECT * FROM agent_sessions WHERE session_id=?",
+                        (session_id,)).fetchone()
+    return _agent_session_row_to_dict(row)
+
+
+@app.get("/agent-sessions")
+def list_agent_sessions(status: Optional[str] = None):
+    q = "SELECT * FROM agent_sessions"
+    args: tuple = ()
+    if status:
+        q += " WHERE status=?"
+        args = (status,)
+    q += " ORDER BY created_at DESC LIMIT 200"
+    with closing(_db()) as c:
+        return [dict(r) for r in c.execute(q, args).fetchall()]
+
+
+@app.get("/agent-session/{sid}")
+def get_agent_session(sid: str):
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM agent_sessions WHERE session_id=?", (sid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "agent session not found")
+    return _agent_session_row_to_dict(row)
+
+
+@app.post("/agent-session/{sid}/event")
+def append_agent_session_event(sid: str, body: AgentSessionEventIn):
+    """Assigns `sequence` here, inside the same transaction as the insert — two
+    events for the same session can never race to the same sequence number
+    (SQLite's default single-writer semantics make this safe without app-level
+    locking)."""
+    with closing(_db()) as c:
+        if not c.execute("SELECT 1 FROM agent_sessions WHERE session_id=?",
+                         (sid,)).fetchone():
+            raise HTTPException(404, "agent session not found")
+        next_seq = c.execute(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_session_events "
+            "WHERE session_id=?", (sid,)).fetchone()[0]
+        now = _now()
+        c.execute(
+            "INSERT INTO agent_session_events (session_id, sequence, ts, type, "
+            "payload) VALUES (?,?,?,?,?)",
+            (sid, next_seq, now, body.type, json.dumps(body.payload)))
+        c.execute(
+            "UPDATE agent_sessions SET last_event_sequence=?, updated_at=? "
+            "WHERE session_id=?", (next_seq, now, sid))
+        c.commit()
+    return {"session_id": sid, "sequence": next_seq, "ts": now}
+
+
+@app.get("/agent-session/{sid}/events")
+def list_agent_session_events(sid: str, after_sequence: int = 0):
+    """The reconnect primitive: a client that last saw `after_sequence` gets
+    exactly the gap — no duplicates, no misses."""
+    with closing(_db()) as c:
+        if not c.execute("SELECT 1 FROM agent_sessions WHERE session_id=?",
+                         (sid,)).fetchone():
+            raise HTTPException(404, "agent session not found")
+        rows = c.execute(
+            "SELECT session_id, sequence, ts, type, payload FROM agent_session_events "
+            "WHERE session_id=? AND sequence>? ORDER BY sequence", (sid, after_sequence)
+        ).fetchall()
+    # decode payload here so the client gets a real nested object, not a
+    # double-encoded string (matches get_experiment's convention of never
+    # handing back a raw payload TEXT column as-is)
+    return [{**dict(r), "payload": json.loads(r["payload"])} for r in rows]
+
+
+@app.post("/agent-session/{sid}/status")
+def set_agent_session_status(sid: str, body: AgentSessionStatusIn):
+    with closing(_db()) as c:
+        if not c.execute("SELECT 1 FROM agent_sessions WHERE session_id=?",
+                         (sid,)).fetchone():
+            raise HTTPException(404, "agent session not found")
+        now = _now()
+        c.execute("UPDATE agent_sessions SET status=?, updated_at=? WHERE session_id=?",
+                  (body.status, now, sid))
+        c.commit()
+    return {"session_id": sid, "status": body.status}
 
 
 if __name__ == "__main__":
