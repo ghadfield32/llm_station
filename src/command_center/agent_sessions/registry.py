@@ -10,7 +10,7 @@ from typing import Callable, NoReturn
 
 from .fake_harness import FakeHarness
 from .protocol import AgentHarness, ApprovalDecision, HarnessProbe, SessionStart
-from .store import SessionStore
+from .store import SessionStoreProtocol
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,7 @@ class NotBuiltHarness:
         self._refuse()
 
 
-def default_registry(store: SessionStore) -> HarnessRegistry:
+def default_registry(store: SessionStoreProtocol) -> HarnessRegistry:
     """The registry every current caller (tests, and later the host worker) should
     actually use: FakeHarness wired to the given durable store, plus honest
     not-built placeholders for the two real harnesses. Swapping in a real Codex/

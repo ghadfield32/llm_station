@@ -163,11 +163,43 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   service-level restart recovery + the GatewayCore guardrail). 71 agent-session
   tests total now pass together; mypy + ruff clean on all 9 package files; full repo
   suite green in the clean worktree.
-- NEXT: the host worker (`cc agent-worker`, token-authed, localhost-only — port/
-  token/lifecycle design not yet decided) and the cockpit's `/api/agent-sessions/*`
-  proxy+SSE endpoints + UI — still entirely FakeHarness-backed, still zero paid/
-  authenticated calls. Real Codex/Claude adapters remain explicitly out of scope
-  until that vertical slice works end-to-end and a human decides to proceed.
+- HOST WORKER DONE 07-11 (`cc agent-worker`, `agent_sessions/worker_app.py` +
+  `cli/agent_worker.py`): standalone FastAPI+uvicorn process, binds 127.0.0.1 by
+  default (`--host`/`AGENT_WORKER_HOST` to override), port 8791 by default
+  (`AGENT_WORKER_PORT`). `build_app()` requires BOTH `AGENT_WORKER_TOKEN` and
+  `LEDGER_BASE_URL` and refuses to start without them — no silently-generated
+  token, no silent in-memory-store fallback if Ledger isn't configured (a worker
+  that silently degraded to non-durable storage would undo the entire durable-
+  store milestone). Every `/api/*` route requires `Authorization: Bearer
+  <token>` (401 otherwise); `/health` is deliberately unauthed for basic
+  liveness probing. Exposes the exact 8-route surface from the plan
+  (`GET /api/agent-harnesses`, `POST /api/agent-sessions`, `GET/POST` per-
+  session routes for messages/events/approvals/interrupt/resume, `DELETE` to
+  close) as a thin, fully-tested wrapper around `AgentSessionService` — store-
+  layer `KeyError`/`ValueError`/`RuntimeError` map to 404/409/400 respectively,
+  never swallowed into a fabricated 200. Plain JSON GET for `/events` (not SSE)
+  — this is the internal worker-to-cockpit hop, not the browser-facing one; SSE
+  is scoped to the cockpit's own proxy layer, next.
+- TESTS 07-11: test_agent_worker.py (11) — full lifecycle over real HTTP calls
+  (not direct service calls), token auth enforced on every /api/* route and
+  bypassed on /health, unknown-harness 404 / unavailable-harness 400 with the
+  exact blocker text, approval replay 409, unknown-session 404 on every route,
+  and both no-token/no-ledger-url startup refusals. A real mypy catch while
+  wiring this in: `registry.py`/`fake_harness.py` still typed their store
+  parameter as the concrete `SessionStore` instead of the new
+  `SessionStoreProtocol`, which would have silently broken passing a
+  `LedgerSessionStore` through — fixed before it became a runtime bug. 96
+  agent-session tests total; mypy+ruff clean on all 11 package files; full repo
+  suite green (confirmed twice — the first full-suite run hit a one-off flake
+  in an unrelated experiment-registry test caused by editing WORKLOG.md while
+  pytest was mid-run in the same worktree; reran untouched and it passed clean,
+  confirming it wasn't a real regression).
+- NEXT: the cockpit's `/api/agent-sessions/*` proxy+SSE endpoints (talking to
+  this worker over `host.docker.internal:8791`, matching the existing Ollama/
+  AppFlowy pattern in docker-compose.yml) and the Agent Sessions UI — still
+  entirely FakeHarness-backed, still zero paid/authenticated calls. Real Codex/
+  Claude adapters remain explicitly out of scope until that vertical slice
+  works end-to-end and a human decides to proceed.
 
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro

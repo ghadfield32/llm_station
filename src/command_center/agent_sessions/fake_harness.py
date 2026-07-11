@@ -12,7 +12,7 @@ from typing import AsyncIterator
 
 from .events import AgentEvent
 from .protocol import ApprovalDecision, HarnessProbe, SessionStart
-from .store import SessionStore
+from .store import SessionStoreProtocol
 
 
 class FakeHarness:
@@ -24,7 +24,7 @@ class FakeHarness:
 
     name = "fake"
 
-    def __init__(self, store: SessionStore) -> None:
+    def __init__(self, store: SessionStoreProtocol) -> None:
         self.store = store
 
     async def probe(self) -> HarnessProbe:
