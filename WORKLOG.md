@@ -243,6 +243,72 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   without touching production wiring. 100 agent-session tests total; mypy+ruff
   clean; full repo suite green (confirmed undisturbed this time — no file
   edits while pytest was running).
+- COCKPIT PROXY + SSE DONE 07-11 (Commit 1 of the two-commit cockpit plan): new
+  `services/agent_kanban_ui/agent_worker_client.py` — the cockpit's ONLY path
+  to the host worker (owns base URL/token/timeouts; sync httpx.Client, matching
+  the service's existing convention, since FastAPI runs plain `def` routes in a
+  threadpool). `app.py` gained `AGENT_SESSIONS_ENABLED`/`FAKE_AGENT_ENABLED`/
+  `AGENT_WORKER_URL`/`AGENT_WORKER_TOKEN` (all default off/unset, matching
+  `CHAT_ENABLED`'s gating pattern), the full 8-route proxy surface (harnesses/
+  create/get/messages[202]/events/approvals/interrupt/resume/close) mapping
+  worker `AgentWorkerUnavailable` -> 502 and worker 4xx/error bodies -> the
+  same status+detail (never swallowed into a fabricated 200), Fake Agent
+  filtered out of `/api/agent-harnesses` and 403'd on create unless
+  `FAKE_AGENT_ENABLED`, and `agent_worker` added to `/api/status` +
+  `/api/debug/runtime` probes (token deliberately never included in either).
+  Every agent-session route is a straight proxy — none of them ever construct
+  or call GatewayCore (a dedicated test monkeypatches `_get_core` to raise if
+  called, hits 4 agent routes, asserts clean).
+- TWO REAL INFRA GAPS CAUGHT BEFORE THEY SHIPPED: (1) `Dockerfile` only
+  explicitly `COPY`s `app.py`, not sibling modules — would have silently
+  broken the container build the moment `agent_worker_client.py` existed;
+  fixed with an explicit second `COPY` line. (2) the test harness loads
+  `app.py` via `importlib.util.spec_from_file_location`, which does NOT add
+  the file's own directory to `sys.path` — a plain `import
+  agent_worker_client` would fail under pytest despite working fine under
+  real `uvicorn app:app`; fixed with an explicit `sys.path.insert(0,
+  str(Path(__file__).resolve().parent))` guard at the top of `app.py`, ahead
+  of the import, so both loaders agree.
+- SSE FRAMING DONE 07-11: `GET /api/agent-sessions/{id}/events/stream` mirrors
+  the existing `/api/events/kanban` convention exactly — `id: <sequence>\n
+  event: agent_event\ndata: {...}\n\n`, `Last-Event-ID` header wins over
+  `?after_sequence` (extracted into a standalone `_resolve_sse_checkpoint()`,
+  clamped non-negative), a `: heartbeat\n\n` comment line every
+  `_AGENT_EVENT_HEARTBEAT_SECONDS` (15s) of no new events, and worker
+  transport/4xx failures surfaced as a distinct `event: transport_error` frame
+  — never persisted as a fabricated `AgentEvent`. The actual polling loop is
+  `_agent_event_frames(client, session_id, checkpoint, is_disconnected)`, a
+  standalone generator taking disconnect-checking as an injectable async
+  callable; the route itself is a 2-line wrapper.
+- REAL TEST-INFRA BUG FOUND VIA TESTING 07-11 (second time this arc): driving
+  a genuinely long-lived SSE generator through `TestClient.stream(...)` hung
+  the entire pytest process indefinitely — even with an early `break` after
+  the assertions passed and exiting the `with` block, the surrounding process
+  never returned. Reproduced twice, each requiring a hard kill of the
+  background test run. Root-caused as the same class of `TestClient` portal/
+  lifecycle limitation as the async-execution-correction entry above (a
+  different symptom, same underlying cause: TestClient's sync/async bridging
+  does not behave like a real ASGI server for anything long-lived). Fixed the
+  same way: bypass TestClient entirely for this logic. `_agent_event_frames`
+  and `_resolve_sse_checkpoint` are tested by calling them directly via
+  `asyncio.run()` with a bounded fake `is_disconnected` (`_disconnect_after(n)`
+  — False for n calls, then True), never through HTTP. Lesson reinforced:
+  TestClient is unreliable for anything that spans multiple calls or runs
+  indefinitely; test the underlying async logic directly instead.
+- TESTS 07-11: `tests/test_agent_kanban_ui_agent_sessions.py` (19) — disabled-
+  by-default 503, worker-unreachable 502, worker 404/409/400 preserved
+  verbatim, 202 on message accept, token never appears in any response body
+  (harnesses/debug-runtime/status, checked via `.text` substring), Fake Agent
+  filtered/blocked/visible correctly across 4 tests, GatewayCore-never-
+  constructed across 4 routes, `_resolve_sse_checkpoint` header-wins/query-
+  fallback/non-numeric-fallback/never-negative (4 assertions), ordered SSE
+  events, reconnect-from-checkpoint with no duplicates, worker-unavailable and
+  worker-4xx both becoming `transport_error` (never an `agent_event`), and
+  heartbeat firing with zero real events emitted. Pre-existing
+  `tests/test_agent_kanban_ui.py` (47) still green unchanged. ruff clean on
+  all 3 changed/new files (mypy doesn't apply — `services/` is outside
+  `[tool.mypy] files = ["src"]`). Full repo suite green, run alone with no
+  concurrent file edits.
 - NEXT: the cockpit's `/api/agent-sessions/*` proxy+SSE endpoints (talking to
   this worker over `host.docker.internal:8791`, matching the existing Ollama/
   AppFlowy pattern in docker-compose.yml) and the Agent Sessions UI — still

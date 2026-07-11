@@ -19,15 +19,25 @@ The built SPA (static assets) is mounted at / when present (single-container mod
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import socket
+import sys
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+
+# Guarantee co-located sibling modules (agent_worker_client.py) import cleanly
+# regardless of how app.py itself was loaded. `uvicorn app:app` gets this for
+# free (sys.path[0] = the script's own directory), but
+# `importlib.util.spec_from_file_location(...)` — how tests load this module —
+# does NOT add its directory to sys.path automatically.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -35,6 +45,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from agent_worker_client import AgentWorkerClient, AgentWorkerUnavailable
 from command_center.kanban.metrics import (
     compute_metrics, load_calls, log_path, recent_calls)
 from command_center.kanban_sync import EventLog, project_cards
@@ -47,6 +58,18 @@ from command_center.kanban_sync.events import emit_event, is_human_owned_status
 # governed verbs (which already refuse Approved).
 CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
 DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "1"
+# Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
+# GatewayCore chat — proxied to the host worker (cc agent-worker), never
+# constructed here, never sharing GatewayCore dispatch. OFF by default like
+# every other write-capable surface. FAKE_AGENT is a second, narrower gate on
+# top: even with agent sessions enabled, the FakeHarness dev/test double stays
+# hidden from the picker unless explicitly opted into — it must never look
+# like a real agent option in a normal deployment.
+AGENT_SESSIONS_ENABLED = os.environ.get("KANBAN_UI_AGENT_SESSIONS_ENABLED", "") == "1"
+FAKE_AGENT_ENABLED = os.environ.get("KANBAN_UI_FAKE_AGENT_ENABLED", "") == "1"
+AGENT_WORKER_URL = os.environ.get(
+    "AGENT_WORKER_URL", "http://host.docker.internal:8791").rstrip("/")
+AGENT_WORKER_TOKEN = os.environ.get("AGENT_WORKER_TOKEN", "")
 # Governed write verbs the console may call directly (the action layer enforces the
 # wall; Approved is structurally refused inside them). No Ledger approve/kill here.
 ACTION_VERBS = frozenset({"stage_card", "block_card", "reject_card",
@@ -156,6 +179,8 @@ def status() -> dict:
         appflowy = os.environ.get("APPFLOWY_BASE_URL", "").rstrip("/")
         if appflowy:
             probe("appflowy", appflowy)
+    if AGENT_SESSIONS_ENABLED:
+        probe("agent_worker", f"{AGENT_WORKER_URL}/health")
     return {"hops": hops, "targets": targets}
 
 
@@ -168,11 +193,22 @@ def runtime_debug() -> dict:
     data, not as blank boards.
     """
     ledger_health_url = f"{LEDGER_BASE_URL}/health"
+    agent_worker_health_url = f"{AGENT_WORKER_URL}/health"
     return {
         "mode": {
             "chat_enabled": CHAT_ENABLED,
             "cwd": str(Path.cwd()),
             "startup_cwd": str(STARTUP_CWD),
+        },
+        # AGENT_WORKER_TOKEN is deliberately absent from this block (and from
+        # every other response this service returns) — see agent_worker_client.py.
+        "agent_sessions": {
+            "enabled": AGENT_SESSIONS_ENABLED,
+            "fake_agent_enabled": FAKE_AGENT_ENABLED,
+            "worker_url": AGENT_WORKER_URL,
+            "worker_token_configured": bool(AGENT_WORKER_TOKEN),
+            "health": (_http_probe(agent_worker_health_url)
+                      if AGENT_SESSIONS_ENABLED else None),
         },
         "ledger": {
             "base_url": LEDGER_BASE_URL,
@@ -1111,6 +1147,51 @@ def _require_chat() -> None:
             status_code=503,
             detail="chat/writes not enabled in this deployment "
                    "(set KANBAN_UI_CHAT_ENABLED=1 + mount growth-os/.env)")
+
+
+_agent_worker_client: AgentWorkerClient | None = None
+
+
+def _get_agent_worker_client() -> AgentWorkerClient:
+    """Lazily constructed so a deployment with agent sessions OFF never needs
+    AGENT_WORKER_TOKEN configured at all — matches _get_core's lazy pattern
+    for the chat lane."""
+    global _agent_worker_client
+    if _agent_worker_client is None:
+        if not AGENT_WORKER_TOKEN:
+            raise HTTPException(
+                status_code=503,
+                detail="AGENT_WORKER_TOKEN is not configured for this cockpit "
+                       "(agent sessions cannot authenticate to the worker)")
+        _agent_worker_client = AgentWorkerClient(AGENT_WORKER_URL, AGENT_WORKER_TOKEN)
+    return _agent_worker_client
+
+
+def _require_agent_sessions() -> AgentWorkerClient:
+    if not AGENT_SESSIONS_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="agent sessions not enabled in this deployment "
+                   "(set KANBAN_UI_AGENT_SESSIONS_ENABLED=1)")
+    return _get_agent_worker_client()
+
+
+def _call_worker(fn, *args: object, **kwargs: object):
+    """Call an AgentWorkerClient method, translating a transport failure to
+    502 and preserving whatever real status/detail the worker itself
+    responded with (404/409/400 mean the same thing here as on the worker —
+    never collapsed into a generic 500)."""
+    try:
+        r = fn(*args, **kwargs)
+    except AgentWorkerUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if r.status_code >= 400:
+        try:
+            detail = r.json().get("detail", r.text)
+        except Exception:
+            detail = r.text
+        raise HTTPException(status_code=r.status_code, detail=detail)
+    return r.json()
 
 
 class ChatIn(BaseModel):
@@ -2812,6 +2893,174 @@ async def chat_stream(body: ChatIn) -> StreamingResponse:
             yield f"data: {json.dumps(ev, default=str)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# ── Agent sessions (Claude Agent / Codex Agent) — proxied to the host worker ──
+# A SEPARATE execution path from the chat lane above: no GatewayCore object is
+# ever constructed here, no agent message is ever forwarded to /api/chat/stream,
+# and the worker's own event vocabulary (session_started/tool_requested/
+# approval_required/...) is relayed as-is, never translated into a fabricated
+# chat turn. See WORKLOG.md "Agent-session chat integration" for the full
+# design; this is the cockpit-side half of "Browser -> Cockpit proxy -> Host
+# worker -> AgentSessionService -> harness".
+
+class AgentSessionCreateIn(BaseModel):
+    harness_id: str = "fake"
+    conversation_id: str
+    repo_id: str
+    mode: str
+    provider_profile: str = "default"
+    model: str | None = None
+    permission_profile: str = "read_only"
+
+
+class AgentMessageIn(BaseModel):
+    prompt: str
+
+
+class AgentApprovalIn(BaseModel):
+    approved: bool
+    reason: str = ""
+
+
+@app.get("/api/agent-harnesses")
+def agent_harnesses() -> list:
+    client = _require_agent_sessions()
+    harnesses = _call_worker(client.list_harnesses)
+    if not FAKE_AGENT_ENABLED:
+        harnesses = [h for h in harnesses if h.get("harness_id") != "fake"]
+    return harnesses
+
+
+@app.post("/api/agent-sessions")
+def create_agent_session(body: AgentSessionCreateIn) -> dict:
+    client = _require_agent_sessions()
+    if body.harness_id == "fake" and not FAKE_AGENT_ENABLED:
+        raise HTTPException(
+            status_code=403,
+            detail="Fake Agent is disabled in this deployment (set "
+                   "KANBAN_UI_FAKE_AGENT_ENABLED=1 for development use)")
+    return _call_worker(client.create_session, body.model_dump())
+
+
+@app.get("/api/agent-sessions/{session_id}")
+def get_agent_session(session_id: str) -> dict:
+    client = _require_agent_sessions()
+    return _call_worker(client.get_session, session_id)
+
+
+@app.post("/api/agent-sessions/{session_id}/messages", status_code=202)
+def send_agent_message(session_id: str, body: AgentMessageIn) -> dict:
+    """202 Accepted — the worker runs the turn as a background task and this
+    call returns immediately (see worker_app.py's async execution-model
+    correction). The browser gets the resulting events over the SSE stream
+    below, not from this response body."""
+    client = _require_agent_sessions()
+    return _call_worker(client.send_message, session_id, body.prompt)
+
+
+@app.get("/api/agent-sessions/{session_id}/events")
+def get_agent_events(session_id: str, after_sequence: int = 0) -> list:
+    client = _require_agent_sessions()
+    return _call_worker(client.get_events, session_id, after_sequence)
+
+
+@app.post("/api/agent-sessions/{session_id}/approvals/{approval_id}")
+def resolve_agent_approval(session_id: str, approval_id: str,
+                          body: AgentApprovalIn) -> dict:
+    client = _require_agent_sessions()
+    return _call_worker(client.resolve_approval, session_id, approval_id,
+                        approved=body.approved, reason=body.reason)
+
+
+@app.post("/api/agent-sessions/{session_id}/interrupt")
+def interrupt_agent_session(session_id: str) -> dict:
+    client = _require_agent_sessions()
+    return _call_worker(client.interrupt, session_id)
+
+
+@app.post("/api/agent-sessions/{session_id}/resume")
+def resume_agent_session(session_id: str) -> dict:
+    client = _require_agent_sessions()
+    return _call_worker(client.resume, session_id)
+
+
+@app.delete("/api/agent-sessions/{session_id}")
+def close_agent_session(session_id: str) -> dict:
+    client = _require_agent_sessions()
+    return _call_worker(client.close_session, session_id)
+
+
+_AGENT_EVENT_POLL_SECONDS = 0.5
+_AGENT_EVENT_HEARTBEAT_SECONDS = 15.0
+
+
+async def _agent_event_frames(client, session_id: str, checkpoint: int, is_disconnected):
+    """The actual SSE generator, factored out from the route so tests can drive
+    it with a controllable `is_disconnected` callable (an async 0-arg callable
+    returning bool, matching Starlette's Request.is_disconnected) instead of
+    depending on TestClient's real disconnect detection — empirically found
+    unreliable for a genuinely long-lived streaming generator (the same class
+    of TestClient portal/lifecycle limitation the worker's own concurrency
+    test hit; see WORKLOG.md "Agent-session chat integration").
+
+    Uses `sequence` as the SSE event id, same convention as /api/events/kanban,
+    so the browser's native EventSource reconnect (Last-Event-ID) resumes
+    exactly where it left off with no duplicates and no gaps. A worker
+    transport failure or error response is sent as a DISTINCT
+    `transport_error` SSE event — it is never persisted as an AgentEvent and
+    never fabricated into assistant text; the browser decides how to react."""
+    last_heartbeat = time.monotonic()
+    while True:
+        if await is_disconnected():
+            return
+        try:
+            r = await asyncio.to_thread(client.get_events, session_id, checkpoint)
+        except AgentWorkerUnavailable as exc:
+            yield (f"event: transport_error\n"
+                  f"data: {json.dumps({'detail': str(exc)})}\n\n")
+            await asyncio.sleep(_AGENT_EVENT_POLL_SECONDS)
+            continue
+        if r.status_code >= 400:
+            try:
+                detail = r.json().get("detail", r.text)
+            except Exception:
+                detail = r.text
+            yield (f"event: transport_error\n"
+                  f"data: {json.dumps({'detail': detail, 'status_code': r.status_code})}\n\n")
+            await asyncio.sleep(_AGENT_EVENT_POLL_SECONDS)
+            continue
+        events = r.json()
+        for ev in events:
+            checkpoint = ev["sequence"]
+            yield f"id: {ev['sequence']}\nevent: agent_event\ndata: {json.dumps(ev)}\n\n"
+        now = time.monotonic()
+        if not events and now - last_heartbeat >= _AGENT_EVENT_HEARTBEAT_SECONDS:
+            yield ": heartbeat\n\n"
+            last_heartbeat = now
+        await asyncio.sleep(_AGENT_EVENT_POLL_SECONDS)
+
+
+def _resolve_sse_checkpoint(last_event_id_header: str | None, after_sequence: int) -> int:
+    """Last-Event-ID (the browser's native EventSource reconnect header) wins
+    over the ?after_sequence query param — same convention as
+    /api/events/kanban. Never negative, whichever source it came from."""
+    checkpoint = (int(last_event_id_header)
+                 if (last_event_id_header and last_event_id_header.lstrip("-").isdigit())
+                 else after_sequence)
+    return max(0, checkpoint)
+
+
+@app.get("/api/agent-sessions/{session_id}/events/stream")
+def stream_agent_events(session_id: str, request: Request,
+                        after_sequence: int = 0) -> StreamingResponse:
+    """Browser-facing SSE — see _agent_event_frames for the actual generator."""
+    client = _require_agent_sessions()
+    checkpoint = _resolve_sse_checkpoint(
+        request.headers.get("last-event-id"), after_sequence)
+    return StreamingResponse(
+        _agent_event_frames(client, session_id, checkpoint, request.is_disconnected),
+        media_type="text/event-stream")
 
 
 @app.post("/api/action")
