@@ -1,0 +1,68 @@
+schema_version: command-center.local-frontier-providers.v1
+
+# A THIRD chat lane — distinct from the local-only LiteLLM/Ollama gateway and the paid
+# frontier-router backup lane (configs/frontier-router-providers.yaml). Experimental,
+# loopback-only local engines too large for VRAM but small enough to disk-stream on this
+# machine: no API key required, no $ cost, no cloud egress. This file is PURE METADATA — it
+# executes nothing. `base_url_env` NAMES the env var holding the loopback/private base URL;
+# the actual value is validated at runtime by check_forbidden_providers.check_local_frontier_providers()
+# and by local_frontier_client (never a public hostname). OFF by default (`enabled: false`);
+# flipping it on is a deliberate operator decision made only after Phase 2's manual smoke
+# test (build the engine, download the model, start the server, verify /health + one real
+# chat completion) — see docs/MASTER.md "Local frontier lane (colibrì)".
+#
+# colibrì (github.com/JustVugg/colibri): a 10-day-old project (as of 2026-07-11) claiming to
+# run GLM-5.2 (744B MoE) on consumer hardware by keeping ~9.9GB of dense weights resident and
+# streaming the remaining ~370GB of routed experts from NVMe. Every published tok/s number is
+# self-reported by the maintainer with no independent reproduction found — see
+# expected_tokens_per_second.source below. Its OpenAI-compatible server explicitly rejects
+# tools, functions, non-text response_format, custom stops, logprobs, penalties, and seed.
+#
+# Phase 2 completed 2026-07-11: engine built + self-tested in WSL2 (32/32 teacher-forcing,
+# 20/20 greedy generation vs a PyTorch oracle — a real independent correctness check, not just
+# "it compiled"), real ~370GB weights downloaded, server smoke-tested (/health, authenticated
+# /v1/models, tools-request correctly rejected, ONE real chat completion against the actual
+# 744B model returned a coherent reply). Note: the downloaded MTP head files exactly match the
+# upstream-flagged "known int4, unusable" sizes (README issue #8) — MTP shows "active" in the
+# server log but speculative-decoding acceptance is expected near-zero; benchmark numbers below
+# reflect base (non-speculative) throughput. Enabled after the smoke test passed.
+enabled: true
+
+providers:
+  colibri:
+    base_url_env: LOCAL_FRONTIER_COLIBRI_BASE_URL   # e.g. http://127.0.0.1:8000/v1 (WSL2) or http://host.docker.internal:8000/v1 (from Docker)
+    api_key_env: LOCAL_FRONTIER_COLIBRI_API_KEY       # optional local bearer token, defense-in-depth only
+    api_style: openai_compatible
+
+models:
+  glm-5.2-colibri:
+    provider: colibri
+    context_tokens: 4096   # confirmed from the running server's own log: "[KV] context slots: 2 x 4096 token"
+    capabilities:
+      text: true
+      streaming: true
+      tools: false
+      json_mode: false
+      vision: false
+      audio: false
+    disk_footprint_gb: 370
+    expected_tokens_per_second:
+      low: 0.05
+      high: 1.06
+      source: "self-reported, github.com/JustVugg/colibri README (2026-07-01 - 2026-07-11) — NOT independently verified, NOT measured on this machine"
+    kv_slots: 2
+    max_queue: 2
+    # 900s proved too tight live 2026-07-12: colibri doesn't isolate KV cache by
+    # conversation_id (no cache_slot param sent — see known-limitations note below), so
+    # prefill cost grows across a session (observed 13 -> 163 tokens), and a smaller
+    # --ram budget (28GB, to avoid swap thrashing) lowers the per-layer expert cache,
+    # increasing cache-miss disk reads. A real request completed successfully
+    # server-side (200 OK, scheduler completed:1) just after this client-side timeout
+    # fired, so the client gave up moments before the answer arrived. 1800s gives real
+    # margin; re-tighten once cache_slot isolation is implemented (see below).
+    queue_timeout_seconds: 1800
+    # 40 tokens @ the measured 0.0563 tok/s (2026-07-11 make colibri-benchmark) ~= 710s, leaving
+    # real margin under queue_timeout_seconds. The schema default (200) would itself exceed the
+    # timeout at this throughput (~3550s) — this is not a generic value, it's fit to THIS
+    # model's own measured speed. Re-tune after any future re-benchmark.
+    max_output_tokens: 40

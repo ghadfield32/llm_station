@@ -138,14 +138,16 @@ def _wire_kanban_events(dispatch: dict[str, Callable[..., Any]],
                                   board_id=st["board_id"], log=log)
 
 
-def build_system(surface: str, *, tools_available: bool = True) -> str:
+def build_system(surface: str, *, tools_available: bool = True, lane: str = "frontier") -> str:
     """The operator brief + the rules of the wall, identical across LOCAL surfaces
     (only the surface name varies). It enumerates every capability tier on
     purpose: a model only uses the abilities its prompt tells it it has, so
     under-describing the tool layer is why a capable bot acts helpless.
 
-    tools_available=False is for frontier turns only. A frontier provider is
-    NEVER given a tools schema (see frontier_client.py) — describing the verb
+    tools_available=False is for frontier / local-frontier turns only (lane
+    distinguishes the two for wording — "paid" vs "local/free" — the safety
+    reasoning is identical). Neither kind of backend is EVER given a tools schema
+    (see frontier_client.py / local_frontier_client.py) — describing the verb
     catalogue in prose to a model with no matching schema only invites it to
     guess at calling something. Observed 2026-07-11: deepseek-v4-pro read the
     full brief below (including the project_status("betts_basketball") worked
@@ -154,20 +156,26 @@ def build_system(surface: str, *, tools_available: bool = True) -> str:
     `tools` field in the request — its serving stack appears to auto-parse
     native tool-call syntax from output text regardless of what the request
     declared. GatewayCore._completion refuses to dispatch that (see
-    _frontier_tool_call_diagnostic); this prompt variant is the complementary
-    fix that stops inviting the attempt in the first place."""
+    _no_tools_lane_tool_call_diagnostic); this prompt variant is the
+    complementary fix that stops inviting the attempt in the first place."""
     if not tools_available:
-        return f"""You are the Growth OS gateway on {surface}, talking through the paid \
-frontier-router lane. Today is {date.today().isoformat()}.
+        if lane == "local_frontier":
+            lane_desc = ("an experimental LOCAL frontier lane (a disk-streamed open-weight "
+                         "model running on this machine, e.g. colibrì) — free, but slow and "
+                         "text-only")
+        else:
+            lane_desc = "the paid frontier-router lane"
+        return f"""You are the Growth OS gateway on {surface}, talking through {lane_desc}. \
+Today is {date.today().isoformat()}.
 This is PLAIN CONVERSATION ONLY. You have NO tools, NO board access, and NO \
 ability to see or change anything in AppFlowy, the kanban boards, or either \
 repo (betts_basketball / command-center) — none of that reaches this lane, by \
 design. If asked to look something up, check a status, or take an action, say \
-plainly that this frontier chat cannot do that and suggest switching to a \
-local chat role for real board/tool access. Do not attempt to call a function \
-or emit tool-call-shaped output (e.g. "**Calling:** `name`") — you were not \
-given a tools schema, nothing will execute it, and doing so anyway misleads \
-whoever reads your answer. Be concise."""
+plainly that this chat cannot do that and suggest switching to a local chat \
+role for real board/tool access. Do not attempt to call a function or emit \
+tool-call-shaped output (e.g. "**Calling:** `name`") — you were not given a \
+tools schema, nothing will execute it, and doing so anyway misleads whoever \
+reads your answer. Be concise."""
     return f"""You are the Growth OS gateway on {surface}. Today is {date.today().isoformat()}.
 You operate the user's AppFlowy workspace and drive work on the betts_basketball
 and command-center repos through a verified tool layer. The live board is injected
@@ -246,6 +254,13 @@ class GatewayConfig:
     # e.g. "glm-5.2"). When set, _completion routes to frontier_client instead of
     # LiteLLM, and board/memory/tool context injection is skipped — see is_frontier.
     frontier_model_id: str | None = None
+    # Set only for a local-frontier turn (an id from local-frontier-providers.yaml,
+    # e.g. "glm-5.2-colibri" — an experimental loopback-only engine, colibrì today).
+    # When set, _completion routes to local_frontier_client instead of LiteLLM, and
+    # board/memory/tool context injection is skipped — same reasoning as is_frontier,
+    # but for "the backend can't use tools and is painfully slow" rather than "the
+    # backend is a paid third party." Mutually exclusive with frontier_model_id.
+    local_frontier_model_id: str | None = None
     max_history: int = 12
     max_rounds: int = 6
     # Max model turns this gateway runs at once. Sized to the GPU tier's real
@@ -258,7 +273,11 @@ class GatewayConfig:
 
     @classmethod
     def build(cls, *, surface: str, model: str, frontier_model_id: str | None = None,
+              local_frontier_model_id: str | None = None,
               max_history: int = 12, max_rounds: int = 6) -> "GatewayConfig":
+        if frontier_model_id and local_frontier_model_id:
+            raise ValueError(
+                "frontier_model_id and local_frontier_model_id are mutually exclusive lanes")
         e = env()
         concurrency = e.get("GATEWAY_MAX_CONCURRENCY") or e.get("OLLAMA_NUM_PARALLEL") or "1"
         return cls(
@@ -268,6 +287,7 @@ class GatewayConfig:
             # the proxy enforces auth; a virtual key wins, else the master key
             litellm_key=e.get("LITELLM_API_KEY") or e.get("LITELLM_MASTER_KEY", ""),
             frontier_model_id=frontier_model_id,
+            local_frontier_model_id=local_frontier_model_id,
             max_history=max_history,
             max_rounds=max_rounds,
             max_concurrency=max(1, int(concurrency)),
@@ -284,7 +304,15 @@ class GatewayCore:
         # A frontier turn is plain conversation: no tools, no board/memory context
         # travels to the paid provider. See channels/frontier_client.py docstring.
         self.is_frontier = bool(cfg.frontier_model_id)
-        self.system = build_system(cfg.surface, tools_available=not self.is_frontier)
+        # A local-frontier turn (colibrì today) gets the same treatment for a different
+        # reason: the engine rejects tool schemas outright and is extremely slow, so a
+        # smaller prompt matters even though nothing leaves the machine. See
+        # channels/local_frontier_client.py docstring.
+        self.is_local_frontier = bool(cfg.local_frontier_model_id)
+        self.no_tools_lane = self.is_frontier or self.is_local_frontier
+        self.system = build_system(
+            cfg.surface, tools_available=not self.no_tools_lane,
+            lane="local_frontier" if self.is_local_frontier else "frontier")
         self.tools, self.dispatch = load_tool_layer(cfg.surface)
         # Live kanban sync: funnel every governed card/todo verb (this surface
         # included) through the kanban event log so the internal UI + AppFlowy
@@ -312,33 +340,31 @@ class GatewayCore:
     async def aclose(self) -> None:
         await self.http.aclose()
 
-    def _frontier_tool_call_diagnostic(self, msg: dict) -> str | None:
-        """A frontier response must never carry tool_calls — frontier_client
-        never sends a `tools` field in the request (see frontier_chat_completion),
-        so GatewayCore never offered, scoped, or validated anything the model
-        could call. If tool_calls shows up anyway (observed 2026-07-11:
-        deepseek-v4-pro emitted a real, structured call for project_status with
-        a guessed argument name after reading the tool vocabulary in the shared
-        system prompt — its serving stack appears to auto-parse native
-        tool-call syntax from output text regardless of the request), it must
-        never be dispatched: this harness would be letting an unvetted
-        third-party response trigger a real local function call. Returns an
-        operator-facing diagnostic naming exactly what was attempted, or None
-        when the response is clean."""
+    def _no_tools_lane_tool_call_diagnostic(self, msg: dict) -> str | None:
+        """Neither a frontier-router response nor a local-frontier response must ever carry
+        tool_calls — neither client sends a `tools` field in the request (see
+        frontier_chat_completion / local_frontier_chat_completion), so GatewayCore never
+        offered, scoped, or validated anything the model could call. If tool_calls shows up
+        anyway (observed 2026-07-11: deepseek-v4-pro emitted a real, structured call for
+        project_status with a guessed argument name after reading the tool vocabulary in the
+        shared system prompt — its serving stack appears to auto-parse native tool-call syntax
+        from output text regardless of the request), it must never be dispatched: this harness
+        would be letting an unvetted response trigger a real local function call. Returns an
+        operator-facing diagnostic naming exactly what was attempted, or None when clean."""
         calls = msg.get("tool_calls")
         if not calls:
             return None
         names = [c.get("function", {}).get("name", "?") for c in calls]
-        print(f"[gateway] frontier model {self.cfg.frontier_model_id!r} emitted "
-              f"unsolicited tool_calls {names!r} — refusing to dispatch "
-              f"(frontier turns are never offered tools)", file=sys.stderr)
-        return (f"gateway safety stop: the frontier model tried to call "
-                f"{names!r} directly. Frontier turns never receive a tools "
-                f"schema or board/memory context, so nothing was executed — "
-                f"this is provider-side behavior (its serving stack appears "
-                f"to emit tool-call syntax on its own), not a bug in those "
-                f"tools. Switch to a local chat role for real board/tool "
-                f"access.")
+        model_id = self.cfg.frontier_model_id or self.cfg.local_frontier_model_id
+        lane = "frontier" if self.is_frontier else "local-frontier"
+        print(f"[gateway] {lane} model {model_id!r} emitted unsolicited tool_calls "
+              f"{names!r} — refusing to dispatch ({lane} turns are never offered tools)",
+              file=sys.stderr)
+        return (f"gateway safety stop: the {lane} model tried to call {names!r} directly. "
+                f"{lane.capitalize()} turns never receive a tools schema or board/memory "
+                f"context, so nothing was executed — this is provider-side behavior (its "
+                f"serving stack appears to emit tool-call syntax on its own), not a bug in "
+                f"those tools. Switch to a local chat role for real board/tool access.")
 
     async def _completion(self, messages: list, with_tools: bool) -> dict:
         if self.is_frontier:
@@ -350,7 +376,21 @@ class GatewayCore:
             msg = await frontier_chat_completion(
                 model_id=self.cfg.frontier_model_id, conversation_id=conversation,
                 messages=messages, http=self.http)
-            diag = self._frontier_tool_call_diagnostic(msg)
+            diag = self._no_tools_lane_tool_call_diagnostic(msg)
+            if diag is not None:
+                msg["tool_calls"] = None
+                msg["content"] = diag
+            return msg
+        if self.is_local_frontier:
+            # Live loopback path — every gate (lane enabled, base URL set, host allowlist)
+            # lives in local_frontier_client; this never touches LiteLLM and never attaches
+            # tools. No budget/cost gating here — there is no $ cost, only a wall-clock one.
+            from .local_frontier_client import local_frontier_chat_completion
+            conversation = transcript_conversation.get() or "local-frontier"
+            msg = await local_frontier_chat_completion(
+                model_id=self.cfg.local_frontier_model_id, conversation_id=conversation,
+                messages=messages, http=self.http)
+            diag = self._no_tools_lane_tool_call_diagnostic(msg)
             if diag is not None:
                 msg["tool_calls"] = None
                 msg["content"] = diag
@@ -419,17 +459,19 @@ class GatewayCore:
 
     @property
     def _inject_context(self) -> bool:
-        """Board/growthos-memory re-injection is a LOCAL-lane feature. A frontier
-        turn's messages leave the machine for a paid provider, so board state and
-        durable memory are never attached — see channels/frontier_client.py."""
-        return self.board_knobs.enabled and not self.is_frontier
+        """Board/growthos-memory re-injection is a local-OLLAMA-lane feature. A frontier
+        turn's messages leave the machine for a paid provider (see
+        channels/frontier_client.py); a local-frontier turn stays on this machine but is
+        tool-blind and painfully slow, so a smaller prompt matters just as much — see
+        channels/local_frontier_client.py. Neither lane gets board/memory context."""
+        return self.board_knobs.enabled and not self.no_tools_lane
 
     def _memory_messages(self, query: str) -> list[dict]:
         """Durable cross-conversation memory relevant to `query`, re-injected like the
         board (never stored in history). Empty list when memory is disabled, there is
-        nothing to recall, or this is a frontier turn (see _inject_context).
+        nothing to recall, or this is a frontier/local-frontier turn (see _inject_context).
         collect_memory_state is fail-loud: it renders an ERROR line, never raises."""
-        if self.is_frontier:
+        if self.no_tools_lane:
             return []
         from growthos.memory import collect_memory_state
         block = collect_memory_state(query, self.memory_cfg)

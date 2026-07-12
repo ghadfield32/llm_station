@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -14,6 +17,36 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 FORBIDDEN_KEYS = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"}
 FORBIDDEN_MODEL_FRAGMENTS = ("openai/", "anthropic/", "openrouter/", "gpt-", "claude-")
+
+# Hosts a local-frontier base URL (configs/local-frontier-providers.yaml) may resolve to.
+# This is NOT a cloud-egress concern (no key involved) — it's a "never point this at a public
+# host" invariant for the local-only, loopback-only lane. Checked unconditionally, no
+# --allow-*-egress flag needed, since local-frontier engines never leave this machine by design.
+_LOCAL_FRONTIER_HOST_RE = re.compile(r"^(localhost|host\.docker\.internal)$", re.IGNORECASE)
+_TAILSCALE_HOST_RE = re.compile(r"\.ts\.net$", re.IGNORECASE)
+LOCAL_FRONTIER_BASE_URL_ENVS = ("LOCAL_FRONTIER_COLIBRI_BASE_URL",)
+
+
+def assert_local_frontier_host_allowed(base_url: str) -> None:
+    """Raises ValueError if `base_url` is not loopback / host.docker.internal / RFC1918
+    private / a Tailscale (.ts.net) address. Called both by the forbidden-providers scan
+    (static check against .env/process env) and by local_frontier_client at call time
+    (defense in depth — the env var could change between a scan and a live call)."""
+    host = urlparse(base_url).hostname or ""
+    if _LOCAL_FRONTIER_HOST_RE.match(host) or _TAILSCALE_HOST_RE.search(host):
+        return
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        raise ValueError(
+            f"local-frontier base URL {base_url!r} host {host!r} is not loopback/private/"
+            "host.docker.internal/Tailscale — refusing to point a local-frontier lane at a "
+            "hostname that isn't verifiably local")
+    if not (ip.is_loopback or ip.is_private):
+        raise ValueError(
+            f"local-frontier base URL {base_url!r} resolves to a non-private IP {ip} — "
+            "local-frontier engines must stay loopback/private-LAN only")
+
 
 # Keys that belong ONLY to the separate, budgeted frontier-router backup lane. They stay
 # forbidden by default; they are permitted ONLY under explicit `--allow-frontier-router-egress`
@@ -79,6 +112,21 @@ def dotenv_keys(path: Path) -> set[str]:
     return keys
 
 
+def dotenv_kv(path: Path) -> dict[str, str]:
+    """Like dotenv_keys but returns values too — needed to validate a NAMED env var's actual
+    value (e.g. a local-frontier base URL), not just whether the key exists."""
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip()
+    return values
+
+
 def check_env_files(errors: list[str], forbidden: set[str]) -> None:
     for rel in (".env", ".env.example"):
         keys = dotenv_keys(ROOT / rel)
@@ -139,6 +187,23 @@ def check_litellm_config(errors: list[str]) -> None:
             errors.append(f"generated alias '{name}' does not use OLLAMA_API_BASE")
 
 
+def check_local_frontier_providers(errors: list[str]) -> None:
+    """Fails if a configured local-frontier base URL resolves to anything but loopback/
+    private/host.docker.internal/Tailscale. Runs UNCONDITIONALLY — no --allow-*-egress flag,
+    because this isn't a cloud-egress gate (there's no key involved and nothing bills money);
+    it's a "never point the local-frontier lane at a public host" invariant that never relaxes,
+    same as check_models_yaml/check_litellm_config for the local Ollama lane."""
+    live_env = {**dotenv_kv(ROOT / ".env"), **os.environ}
+    for env_name in LOCAL_FRONTIER_BASE_URL_ENVS:
+        base_url = live_env.get(env_name)
+        if not base_url:
+            continue
+        try:
+            assert_local_frontier_host_allowed(base_url)
+        except ValueError as exc:
+            errors.append(str(exc))
+
+
 def main(allow_router_egress: bool = False, allow_agent_session_egress: bool = False) -> int:
     errors: list[str] = []
     forbidden = set(FORBIDDEN_KEYS)
@@ -167,6 +232,9 @@ def main(allow_router_egress: bool = False, allow_agent_session_egress: bool = F
     # The LOCAL lane is cloud-free in EVERY mode — never relaxed by either egress flag.
     check_models_yaml(errors)
     check_litellm_config(errors)
+    # Not a cloud-egress gate (no key, nothing bills) — a "never point local-frontier at a
+    # public host" invariant, so it runs unconditionally too, same as the two checks above.
+    check_local_frontier_providers(errors)
 
     if errors:
         for error in errors:
