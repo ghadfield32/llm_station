@@ -559,6 +559,33 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   assertions moved to claude_agent, which genuinely still is one). Full repo
   suite green; ruff clean; mypy clean across all 14 touched agent-session +
   preflight files.
+- LIVE COCKPIT ACCEPTANCE 07-12 (Codex enablement gate — the real "is it
+  usable in the interface" proof, done through the ISOLATED deployment-proof
+  project, never production): `scripts/run_agent_deployment_proof.ps1`
+  brought up `cc-agent-runtime-proof-{ledger,agent-kanban-ui}` on ports
+  8092/8788 with a dedicated `cc-agent-runtime-proof_ledger_data` volume
+  (post-create check confirmed no `llm_station-*` container touched; the
+  production stack + `llm_station_ledger_data` stayed up 13h untouched
+  throughout, verified before AND after). Host worker started against the
+  proof ledger; the deployed cockpit CONTAINER reached it via
+  `host.docker.internal:8791` and reported `codex_agent available: true`
+  (authenticated as the real account, `interactive_approvals: false`). A
+  real read-only Codex session driven entirely through the cockpit's HTTP
+  proxy (browser-equivalent: cockpit → worker → SDK → real `codex login`)
+  passed 14/14: create→idle with a real external thread id, a real streamed
+  response (Codex ran 5 real read-only shell commands, all surfaced as
+  structured `command_started`/`command_finished` events), NO duplicate
+  assistant_message for an already-streamed item (Fix C proven LIVE),
+  model+selection-reason recorded, session recovery (GET + list by
+  conversation_id), follow-up reusing the SAME external thread, interrupt,
+  close, and ZERO repo mutation (git HEAD/branch/status byte-identical
+  before+after). Fresh `cc agent-preflight --harness codex --live --repo
+  llm_station` also reports `overall: PASS` now (Fix A complete). Acceptance
+  driver was a throwaway script — durable coverage is the 38 unit tests.
+  A real robustness bug surfaced and was fixed during this proof: Docker's
+  `./.env` bind-mount creates an empty `.env` DIRECTORY in a checkout with no
+  real .env, which crashed the worker script's dotenv loader (fixed with
+  `Test-Path -PathType Leaf`).
 - STILL OUT OF SCOPE (explicit): Claude read-only adapter, writable/worktree
   mode, mission executor routing, cross-agent review, OpenRouter agent
   provider profiles — all gated behind the Codex read-only slice merging
