@@ -1009,12 +1009,41 @@ through the cockpit, each compared against the 0.0549 tok/s acceptance-gate base
   directly rather than trusting it by analogy): **0.0151 tok/s — ~3.6x slower**. Confirms the
   `g_direct` comment's claim empirically on this specific machine, not just by reading the
   source. Reverted.
-- **Conclusion: both tested "obvious" optimizations regressed performance.** The
-  maintainer-chosen defaults (MTP on, `O_DIRECT` off) plus the one change already proven
-  necessary here (`--ram 28`, avoiding swap thrashing) represent the practical performance
-  ceiling found so far without deeper engine-level work (a RAM sweep above 28 and a genuine
-  `iobench`-informed cache-sizing pass remain untested, lower-priority given the two negative
-  results above and the real risk of repeating the swap-thrashing regression).
+- **`--topp 0.7`** (adaptive expert top-p — colibrì's own README cites a real, measured "1.6×
+  end-to-end speedup" and "30-40% less disk" from this exact flag on a comparable low-RAM
+  machine; verified that specific claim against the primary source, not just the reviewer's
+  paraphrase, before testing): **0.0427 tok/s — ~22% slower**, and — more importantly than the
+  speed number — the reply came back genuinely incoherent and truncated ("Understood... please
+  provide the following: [...] You are a helpful, skilled, and knowledgeable assistant. I have
+  no"), hallucinating text that isn't part of the actual system prompt. Unlike `MTP=0`/`DIRECT=1`
+  (pure speed regressions, replies stayed coherent), this is a speed-AND-quality regression on
+  this specific run. Matches the README's own caveat that this flag changes which experts are
+  retained — it is a genuine tradeoff knob, not a free win, and on this one real sample the
+  trade didn't pay off in either dimension. A single run is not conclusive (the README's own
+  1.6× figure came from a different machine and, per the methodology gap noted below, likely
+  multiple repetitions) — treat this as a real data point arguing for caution, not a final
+  verdict on `--topp` in general. Reverted.
+- **Conclusion: three tested "obvious" optimizations, three regressions.** `MTP=0`, `DIRECT=1`,
+  and `--topp 0.7` all made a real, measured request slower (and in `--topp`'s case, less
+  coherent too). The maintainer-chosen defaults (MTP on, `O_DIRECT` off, adaptive top-p off)
+  plus the one change already proven necessary here (`--ram 28`, avoiding swap thrashing)
+  represent the practical performance ceiling found so far without deeper engine-level work.
+  Remaining candidates identified but not yet tested, roughly in descending priority: pulling
+  colibrì's upstream changes (13 commits behind as of 2026-07-12, including two real perf
+  commits — `03d9a29` opt-in NVMe/matmul I/O overlap, `704ed49` hot OpenMP thread pool across
+  tiny expert matmuls — a genuine engine-code change, not a runtime-flag guess, and the most
+  promising remaining lever); `PILOT=1` (router-lookahead prefetch, README-labeled
+  experimental); a proper multi-repetition cold/warm A/B methodology (today's tests were each a
+  single real sample under uncontrolled machine conditions — real evidence, but not
+  statistically tight); a RAM sweep above 28 (real risk of repeating the swap-thrashing
+  regression, only worth it in an isolated run with other workloads stopped).
+- **Compact system prompt, implemented 2026-07-12**: `build_system`'s `local_frontier` variant
+  was reusing the paid frontier lane's ~700-character prompt with only the lane description
+  swapped. Colibrì-class engines are genuinely disk/compute-bound, so system-prompt token count
+  is a real, measured cost here (219 prompt tokens for an 8-word user message before this fix).
+  Gave `local_frontier` its own dedicated ~240-character template carrying the same two safety
+  properties (no tools, never claim an action happened) in far fewer tokens — confirmed live:
+  the next real request measured 67 prompt tokens for the same 8-word message.
 
 What is done (legacy detail):
 
