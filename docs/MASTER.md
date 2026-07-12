@@ -581,13 +581,29 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
   "subscription (not $-metered)" / "cost unknown", never $0.00), a stale badge,
   and a collector-health table. 15 tests; `tsc && vite build` clean.
 
+- **Phase 3.2 — Claude usage is now WIRED + the selector has model/effort
+  pickers + badges** (PR #37, `KANBAN_UI_USAGE_CLAUDE`). Runtime-discovered
+  **model + reasoning-effort pickers** (Codex live `client.models()` incl.
+  supported efforts; Claude validated alias catalogs) flow through a new
+  `GET /api/agent-harnesses/{id}/models`; effort is threaded end-to-end and
+  pinned per session (Claude `--effort` / SDK `options.effort` / Codex
+  `model_reasoning_effort`). `/api/agent-harnesses` is enriched with
+  `usage_summary` + `models_endpoint`, and the picker renders a live
+  availability/limit **badge**. The cockpit SSE generator now **tees live
+  `rate_limit` events into the durable usage store** (two Claude lanes kept
+  distinct — `claude_code_local` ≠ `claude_agent` — fixing a real
+  misattribution). Real bug fixed: the Claude collector's hardcoded
+  runtime_id. Operator runbook: `docs/runbooks/agent-sessions-activation.md`.
+
 **What is NOT built yet:** every collector except Codex; the Usage & Limits
-UI's remaining depth (selector quota badges on the model/agent pickers,
-historical charts, reset timelines, routing-evidence panel); SSE live push
-(`/api/model-usage/events/stream`); the reconciliation + routing-decisions
-routes; and enriching `/api/chat/runtime` + `/api/agent-harnesses` with a
-`usage_summary`. The core surface (overview, per-runtime detail, limits,
-alerts, top-drivers, collector-health, refresh) is live behind the flag.
+UI's remaining depth (historical charts, reset timelines, routing-evidence
+panel, top-driver *UI*); SSE live push (`/api/model-usage/events/stream`); the
+reconciliation + routing-decisions routes; a WORKER-side Claude usage feed (the
+current SSE tee only captures usage while a browser stream is open — a headless
+session isn't captured yet); and per-model/per-effort usage attribution on
+samples. The core surface (overview, per-runtime detail, limits, alerts,
+top-drivers, collector-health, refresh) + model/effort pickers + selector
+badges + the Claude rate_limit tee are live behind the flags.
 
 ### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
 
