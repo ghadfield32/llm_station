@@ -10,6 +10,7 @@ from typing import Protocol, runtime_checkable
 
 from .schemas import (
     AvailabilityEvent,
+    CollectionState,
     LimitSnapshot,
     RoutingDecision,
     UsageAlert,
@@ -83,3 +84,15 @@ class UsageStoreProtocol(Protocol):
     def list_alerts(self, runtime_id: str | None = None) -> list[UsageAlert]: ...
 
     def list_runtime_ids(self) -> list[str]: ...
+
+    def get_collection_state(self, collector_id: str) -> CollectionState | None:
+        """A collector's durable checkpoint, or None if it never ran."""
+        ...
+
+    def set_collection_state(self, state: CollectionState) -> CollectionState: ...
+
+    def prune_samples(self, before_iso: str) -> int:
+        """Delete detailed samples observed strictly before `before_iso`
+        (retention). Returns the count removed. Never touches routing
+        decisions/alerts (the evidence behind a decision is kept)."""
+        ...

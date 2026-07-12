@@ -14,14 +14,17 @@ from __future__ import annotations
 from .alerts import AlertThresholds, alert_for_availability, alerts_for_limit
 from .protocol import CollectorProtocol, CollectorResult, UsageStoreProtocol
 from .schemas import (
+    _ADDITIVE_SAMPLE_KINDS,
     Attribution,
     AvailabilityState,
     RuntimeUsageStatus,
+    SampleKind,
     UsageAlert,
     UsageSample,
     UsageSource,
     age_seconds,
     now_iso,
+    summarize_cost,
 )
 
 
@@ -103,21 +106,36 @@ class UsageService:
         return [self.runtime_status(rid) for rid in self.store.list_runtime_ids()]
 
     def _roll_usage(self, runtime_id: str, after_iso: str | None = None) -> UsageSample | None:
-        samples = self.store.samples_since(runtime_id, after_iso)
-        if not samples:
+        """Cockpit-ATTRIBUTED roll-up — sums ONLY additive REQUEST_DELTA
+        samples, so the same activity observed by several collectors (a
+        session_total, a provider_window_total, a ccusage reconciliation
+        observation) is never triple-counted. Provider-wide totals live in
+        the limit snapshots / a separate query, not here. Cost is summed
+        honestly (None stays None, subscription activity is not $0.00)."""
+        additive = [s for s in self.store.samples_since(runtime_id, after_iso)
+                    if s.sample_kind in _ADDITIVE_SAMPLE_KINDS]
+        if not additive:
             return None
         agg = UsageSample(
             sample_id=f"ROLLUP-{runtime_id}", runtime_id=runtime_id,
-            source=UsageSource.PROVIDER_DERIVED, observed_at=samples[-1].observed_at,
-            ingested_at=now_iso(), source_hash="", attribution=Attribution())
-        for s in samples:
+            source=UsageSource.PROVIDER_DERIVED, observed_at=additive[-1].observed_at,
+            ingested_at=now_iso(), source_hash="",
+            sample_kind=SampleKind.SESSION_TOTAL, attribution=Attribution())
+        for s in additive:
             agg.input_tokens += s.input_tokens
             agg.cached_input_tokens += s.cached_input_tokens
             agg.output_tokens += s.output_tokens
+            agg.reasoning_tokens += s.reasoning_tokens
             agg.total_tokens += s.total_tokens
             agg.calls += s.calls
             agg.sessions += s.sessions
             agg.tool_calls += s.tool_calls
             agg.duration_ms += s.duration_ms
-            agg.cost_usd = round(agg.cost_usd + s.cost_usd, 6)
+            agg.repository_scans += s.repository_scans
+            agg.test_runs += s.test_runs
+            agg.retries += s.retries
+            agg.failed_calls += s.failed_calls
+            agg.worker_restarts += s.worker_restarts
+            agg.session_resumes += s.session_resumes
+        agg.cost_usd, agg.cost_source = summarize_cost(additive)
         return agg

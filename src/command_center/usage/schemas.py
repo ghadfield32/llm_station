@@ -98,6 +98,37 @@ class LimitScope(str, Enum):
     INTERNAL_BUDGET = "internal_budget"
 
 
+class CostSource(str, Enum):
+    """WHERE a cost figure came from — so a MISSING dollar value is never shown
+    as $0.00. Subscription Codex/Claude sessions genuinely expose token
+    activity WITHOUT a per-session dollar charge; that is
+    `subscription_not_metered`, not zero. `cost_usd = None` + one of these is
+    the honest representation."""
+    PROVIDER_REPORTED = "provider_reported"          # a real provider dollar charge
+    ESTIMATED = "estimated"                          # our router_cost math
+    SUBSCRIPTION_NOT_METERED = "subscription_not_metered"  # activity under a plan, no $ per session
+    UNKNOWN = "unknown"                              # we simply don't know
+    MIXED = "mixed"                                  # a roll-up spanning >1 of the above
+
+
+class SampleKind(str, Enum):
+    """What KIND of usage measurement this is — the guard against double-
+    counting. Only REQUEST_DELTA is ADDITIVE (safe to sum). The others are
+    snapshots/totals from a provider or a reconciler and must NOT be summed
+    into the cockpit-attributed total (see service.py's roll-up); they are
+    separate authoritative views."""
+    REQUEST_DELTA = "request_delta"                  # one request's incremental usage (additive)
+    SESSION_TOTAL = "session_total"                  # a session's running total (a snapshot)
+    PROVIDER_WINDOW_TOTAL = "provider_window_total"  # provider's total for a quota window
+    PROVIDER_LIFETIME_TOTAL = "provider_lifetime_total"
+    DAILY_BUCKET = "daily_bucket"                    # provider's per-day bucket
+    RECONCILIATION_OBSERVATION = "reconciliation_observation"  # ccusage etc. — evidence only
+
+
+# the ONLY additive sample kind — summing anything else double-counts
+_ADDITIVE_SAMPLE_KINDS = frozenset({SampleKind.REQUEST_DELTA})
+
+
 class AlertKind(str, Enum):
     USAGE_UPDATED = "usage_updated"
     LIMIT_UPDATED = "limit_updated"
@@ -144,30 +175,47 @@ def compute_source_hash(*parts: Any) -> str:
 # ── the four records ────────────────────────────────────────────────────────
 @dataclass
 class UsageSample:
-    """One observed usage measurement for a runtime over a window. Cost is an
-    ESTIMATE unless cost_source says otherwise (mirrors router_cost's
-    "actuals never silently overwrite estimates" discipline)."""
+    """One observed usage measurement for a runtime. `sample_kind` says whether
+    it is additive (REQUEST_DELTA) or a snapshot/total that must NOT be summed
+    (see service.py). `cost_usd` is None when there is no dollar figure —
+    NEVER 0.0 as a stand-in — and `cost_source` says why. The driver_* fields
+    feed the "what used the most?" explanation from recorded fact."""
     sample_id: str
     runtime_id: str                    # "codex_agent" | "claude_agent" | "openrouter:deepseek..." | "ollama:qwen3:30b"
     source: UsageSource
     observed_at: str                   # when the SOURCE observed it
     ingested_at: str                   # when WE stored it
     source_hash: str                   # idempotency key
+    sample_kind: SampleKind = SampleKind.REQUEST_DELTA
     input_tokens: int = 0
     cached_input_tokens: int = 0
     output_tokens: int = 0
+    reasoning_tokens: int = 0
     total_tokens: int = 0
     calls: int = 0
     sessions: int = 0
     tool_calls: int = 0
     duration_ms: int = 0
-    cost_usd: float = 0.0
-    cost_source: str = "estimate"      # estimate | provider_reported
+    cost_usd: float | None = None      # None = no dollar figure (see cost_source), NOT $0.00
+    cost_source: CostSource = CostSource.UNKNOWN
+    # cost/window bounds — a provider window/daily bucket carries these
+    window_start: str | None = None
+    window_end: str | None = None
+    aggregation_key: str | None = None  # groups snapshots of the SAME window across polls
+    # driver facts for "what used the most?" — recorded, never guessed
+    repository_scans: int = 0
+    test_runs: int = 0
+    retries: int = 0
+    failed_calls: int = 0
+    worker_restarts: int = 0
+    session_resumes: int = 0
     attribution: Attribution = field(default_factory=Attribution)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["source"] = self.source.value
+        d["sample_kind"] = self.sample_kind.value
+        d["cost_source"] = self.cost_source.value
         return d
 
 
@@ -264,6 +312,46 @@ class RoutingDecision:
     limit_snapshot_ids: list[str] = field(default_factory=list)
     availability_at_selection: str | None = None    # AvailabilityState value
     budget_state_at_selection: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def summarize_cost(samples: list["UsageSample"]) -> tuple[float | None, CostSource]:
+    """Honest cost roll-up: sums ONLY the samples that carry a real dollar
+    figure. If none do, returns (None, ...) — never 0.0 as a stand-in.
+    cost_source is PROVIDER_REPORTED/ESTIMATED when uniform, MIXED when both
+    appear, SUBSCRIPTION_NOT_METERED when the only signal is subscription
+    activity, else UNKNOWN."""
+    priced = [s for s in samples if s.cost_usd is not None]
+    if not priced:
+        if any(s.cost_source == CostSource.SUBSCRIPTION_NOT_METERED for s in samples):
+            return None, CostSource.SUBSCRIPTION_NOT_METERED
+        return None, CostSource.UNKNOWN
+    total = round(sum(s.cost_usd for s in priced if s.cost_usd is not None), 6)
+    sources = {s.cost_source for s in priced}
+    if sources == {CostSource.PROVIDER_REPORTED}:
+        return total, CostSource.PROVIDER_REPORTED
+    if sources == {CostSource.ESTIMATED}:
+        return total, CostSource.ESTIMATED
+    return total, CostSource.MIXED
+
+
+@dataclass
+class CollectionState:
+    """Durable per-collector checkpoint — prevents duplicate range re-imports
+    and makes a collector's failures visible. A collector reads this before
+    polling (resume from last_cursor) and writes it after (advance cursor /
+    record error + backoff)."""
+    collector_id: str
+    updated_at: str
+    last_success_at: str | None = None
+    last_cursor: str | None = None
+    last_source_record_id: str | None = None
+    last_error: str | None = None
+    consecutive_failures: int = 0
+    next_eligible_at: str | None = None
+    auth_state: str = "unknown"        # ok | authentication_required | unknown
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from .schemas import (
     AvailabilityEvent,
+    CollectionState,
     LimitSnapshot,
     RoutingDecision,
     UsageAlert,
@@ -55,6 +56,7 @@ class UsageStore:
         self._availability: dict[str, AvailabilityEvent] = {}
         self._alerts: dict[str, UsageAlert] = {}
         self._routing: list[RoutingDecision] = []
+        self._collection_state: dict[str, CollectionState] = {}
         # idempotency indexes: source_hash -> stored id
         self._sample_hashes: dict[str, str] = {}
         self._limit_hashes: dict[str, str] = {}
@@ -122,3 +124,19 @@ class UsageStore:
         ids |= {lim.runtime_id for lim in self._limits.values()}
         ids |= {e.runtime_id for e in self._availability.values()}
         return sorted(ids)
+
+    def get_collection_state(self, collector_id: str) -> CollectionState | None:
+        return self._collection_state.get(collector_id)
+
+    def set_collection_state(self, state: CollectionState) -> CollectionState:
+        self._collection_state[state.collector_id] = state
+        return state
+
+    def prune_samples(self, before_iso: str) -> int:
+        cutoff = _parse_iso(before_iso)
+        to_drop = [sid for sid, s in self._samples.items()
+                   if _parse_iso(s.observed_at) < cutoff]
+        for sid in to_drop:
+            s = self._samples.pop(sid)
+            self._sample_hashes.pop(s.source_hash, None)
+        return len(to_drop)

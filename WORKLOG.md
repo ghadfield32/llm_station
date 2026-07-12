@@ -6,6 +6,37 @@ liners. Newest notes at the top of each topic. Full design lives in
 this is the fast "has this been done?" index. Dates are when the line was written.
 
 ## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
+- PHASE 1.1 HARDENING DONE 07-12 (same branch, extends PR #34, before any
+  real provider collector is trusted): four correctness fixes over the raw
+  foundation. (A) UNKNOWN COST IS NEVER $0.00 — `UsageSample.cost_usd` is now
+  nullable and `cost_source` is a real enum (provider_reported / estimated /
+  subscription_not_metered / unknown / mixed); subscription Codex/Claude
+  activity is `subscription_not_metered` with cost None, shown as "dollar
+  cost unavailable", never zero. `summarize_cost()` rolls cost honestly
+  (None stays None). (B) NO CROSS-COLLECTOR DOUBLE-COUNTING — new `SampleKind`
+  (request_delta / session_total / provider_window_total /
+  provider_lifetime_total / daily_bucket / reconciliation_observation); ONLY
+  request_delta is additive, so the roll-up sums just those — the same
+  activity seen as a request_delta AND a provider_window_total AND a ccusage
+  reconciliation_observation counts ONCE, not 3x (provider totals are a
+  separate authoritative view). Added window_start/end + aggregation_key. (C)
+  ATTRIBUTION DRIVER FACTS on UsageSample (reasoning_tokens, repository_scans,
+  test_runs, retries, failed_calls, worker_restarts, session_resumes) so
+  "what used the most?" is answered from recorded fact. (D) COLLECTOR
+  CHECKPOINTS — new `model_usage_collection_state` table + CollectionState
+  (last_cursor/last_success_at/consecutive_failures/next_eligible_at/
+  auth_state) so a real collector resumes instead of re-importing a range and
+  its failures are visible; plus 7 DDL indexes (runtime/observed, mission,
+  repo, user, session, bucket) and a retention policy
+  (`UsageRetention`: request_sample_days 90 / keep_aggregates_days 730 /
+  keep_alerts_and_routing_indefinitely — the evidence behind a routing
+  decision is NEVER pruned) with a `prune_samples()` store method +
+  /model-usage/prune endpoint. Same usage.v1 (unmerged, so the DDL is still
+  being finalized in place — additive columns, no ALTER needed) — canonical
+  DDL + byte-mirror updated together, drift test still green. +12 tests
+  (test_usage_hardening.py + cross-backend collection-state/prune/hardening-
+  field round-trips) = 50 usage tests; ruff+mypy clean; make validate PASS;
+  full repo suite green.
 - PHASE 1 FOUNDATION DONE 07-12 (branch `feat/unified-runtime-usage`, stacked
   on `feat/agent-session-runtime`): one SHARED usage layer across every chat
   model AND coding agent, NOT a second control plane. Keeps four concepts

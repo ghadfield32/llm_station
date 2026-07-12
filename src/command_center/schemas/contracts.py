@@ -512,6 +512,24 @@ class UsageAlertChannels(Strict):
     email_digest: bool = True
 
 
+class UsageRetention(Strict):
+    # Detailed per-request samples are the biggest table; keep them a bounded
+    # window. Aggregates/alerts/routing decisions are cheap + evidential, so
+    # they're kept far longer / indefinitely — the evidence behind a routing
+    # decision is NEVER pruned.
+    request_sample_days: int = Field(default=90, gt=0)
+    keep_aggregates_days: int = Field(default=730, gt=0)
+    keep_alerts_and_routing_indefinitely: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.keep_aggregates_days < self.request_sample_days:
+            raise ValueError(
+                "keep_aggregates_days must be >= request_sample_days "
+                "(aggregates outlive the detailed samples they summarize)")
+        return self
+
+
 class UsageMonitoringConfig(Strict):
     schema_version: str
     enabled: bool = True
@@ -519,6 +537,7 @@ class UsageMonitoringConfig(Strict):
     polling: UsagePolling = Field(default_factory=UsagePolling)
     routing: UsageRouting = Field(default_factory=UsageRouting)
     alerts: UsageAlertChannels = Field(default_factory=UsageAlertChannels)
+    retention: UsageRetention = Field(default_factory=UsageRetention)
 
     @model_validator(mode="after")
     def _checks(self):

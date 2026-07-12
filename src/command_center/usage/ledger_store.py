@@ -16,15 +16,18 @@ import json
 import httpx
 
 from .schemas import (
+    AlertKind,
     Attribution,
     AvailabilityEvent,
     AvailabilityState,
+    CollectionState,
+    CostSource,
     LimitScope,
     LimitSnapshot,
     LimitState,
     RoutingDecision,
+    SampleKind,
     UsageAlert,
-    AlertKind,
     UsageSample,
     UsageSource,
 )
@@ -33,17 +36,23 @@ from .store import select_latest_availability, select_latest_limits
 _ATTR_FIELDS = (
     "tenant_id", "workspace_id", "user_id", "conversation_id", "agent_session_id",
     "mission_id", "repo_id", "provider_request_id", "source_record_id")
+_SAMPLE_INT_FIELDS = (
+    "input_tokens", "cached_input_tokens", "output_tokens", "reasoning_tokens",
+    "total_tokens", "calls", "sessions", "tool_calls", "duration_ms",
+    "repository_scans", "test_runs", "retries", "failed_calls", "worker_restarts",
+    "session_resumes")
 
 
 def _sample_to_row(s: UsageSample) -> dict:
     row = {
         "sample_id": s.sample_id, "runtime_id": s.runtime_id, "source": s.source.value,
         "observed_at": s.observed_at, "ingested_at": s.ingested_at,
-        "source_hash": s.source_hash, "input_tokens": s.input_tokens,
-        "cached_input_tokens": s.cached_input_tokens, "output_tokens": s.output_tokens,
-        "total_tokens": s.total_tokens, "calls": s.calls, "sessions": s.sessions,
-        "tool_calls": s.tool_calls, "duration_ms": s.duration_ms, "cost_usd": s.cost_usd,
-        "cost_source": s.cost_source}
+        "source_hash": s.source_hash, "sample_kind": s.sample_kind.value,
+        "cost_usd": s.cost_usd, "cost_source": s.cost_source.value,
+        "window_start": s.window_start, "window_end": s.window_end,
+        "aggregation_key": s.aggregation_key}
+    for f in _SAMPLE_INT_FIELDS:
+        row[f] = getattr(s, f)
     for f in _ATTR_FIELDS:
         row[f] = getattr(s.attribution, f)
     return row
@@ -51,15 +60,16 @@ def _sample_to_row(s: UsageSample) -> dict:
 
 def _row_to_sample(d: dict) -> UsageSample:
     attribution = Attribution(**{f: d.get(f) for f in _ATTR_FIELDS})
+    ints = {f: d.get(f, 0) or 0 for f in _SAMPLE_INT_FIELDS}
     return UsageSample(
         sample_id=d["sample_id"], runtime_id=d["runtime_id"],
         source=UsageSource(d["source"]), observed_at=d["observed_at"],
         ingested_at=d["ingested_at"], source_hash=d["source_hash"],
-        input_tokens=d["input_tokens"], cached_input_tokens=d["cached_input_tokens"],
-        output_tokens=d["output_tokens"], total_tokens=d["total_tokens"],
-        calls=d["calls"], sessions=d["sessions"], tool_calls=d["tool_calls"],
-        duration_ms=d["duration_ms"], cost_usd=d["cost_usd"],
-        cost_source=d["cost_source"], attribution=attribution)
+        sample_kind=SampleKind(d.get("sample_kind") or "request_delta"),
+        cost_usd=d.get("cost_usd"),
+        cost_source=CostSource(d.get("cost_source") or "unknown"),
+        window_start=d.get("window_start"), window_end=d.get("window_end"),
+        aggregation_key=d.get("aggregation_key"), attribution=attribution, **ints)
 
 
 def _row_to_limit(d: dict) -> LimitSnapshot:
@@ -175,3 +185,28 @@ class LedgerUsageStore:
         r = self._client.get("/model-usage/runtimes")
         r.raise_for_status()
         return list(r.json())
+
+    def get_collection_state(self, collector_id: str) -> CollectionState | None:
+        r = self._client.get(f"/model-usage/collection-state/{collector_id}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        d = r.json()
+        return CollectionState(
+            collector_id=d["collector_id"], updated_at=d["updated_at"],
+            last_success_at=d.get("last_success_at"), last_cursor=d.get("last_cursor"),
+            last_source_record_id=d.get("last_source_record_id"),
+            last_error=d.get("last_error"),
+            consecutive_failures=d.get("consecutive_failures", 0) or 0,
+            next_eligible_at=d.get("next_eligible_at"),
+            auth_state=d.get("auth_state") or "unknown")
+
+    def set_collection_state(self, state: CollectionState) -> CollectionState:
+        r = self._client.post("/model-usage/collection-state", json=state.to_dict())
+        r.raise_for_status()
+        return state
+
+    def prune_samples(self, before_iso: str) -> int:
+        r = self._client.post("/model-usage/prune", json={"before": before_iso})
+        r.raise_for_status()
+        return int(r.json()["removed"])

@@ -54,3 +54,15 @@ def test_extra_keys_are_forbidden():
     bad = {**_BASE, "surprise": 1}
     with pytest.raises(ValueError):
         UsageMonitoringConfig.model_validate(bad)
+
+
+def test_retention_defaults_and_aggregates_outlive_samples():
+    cfg = UsageMonitoringConfig.model_validate(_BASE)   # no retention block -> defaults
+    assert cfg.retention.request_sample_days == 90
+    assert cfg.retention.keep_alerts_and_routing_indefinitely is True
+
+
+def test_retention_aggregates_shorter_than_samples_rejected():
+    bad = {**_BASE, "retention": {"request_sample_days": 90, "keep_aggregates_days": 30}}
+    with pytest.raises(ValueError, match="keep_aggregates_days must be >="):
+        UsageMonitoringConfig.model_validate(bad)

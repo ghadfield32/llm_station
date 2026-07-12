@@ -38,16 +38,27 @@ CREATE TABLE IF NOT EXISTS model_usage_samples (
     observed_at         TEXT NOT NULL,
     ingested_at         TEXT NOT NULL,
     source_hash         TEXT NOT NULL UNIQUE,
+    sample_kind         TEXT NOT NULL DEFAULT 'request_delta',
     input_tokens        INTEGER DEFAULT 0,
     cached_input_tokens INTEGER DEFAULT 0,
     output_tokens       INTEGER DEFAULT 0,
+    reasoning_tokens    INTEGER DEFAULT 0,
     total_tokens        INTEGER DEFAULT 0,
     calls               INTEGER DEFAULT 0,
     sessions            INTEGER DEFAULT 0,
     tool_calls          INTEGER DEFAULT 0,
     duration_ms         INTEGER DEFAULT 0,
-    cost_usd            REAL DEFAULT 0.0,
+    cost_usd            REAL,
     cost_source         TEXT,
+    window_start        TEXT,
+    window_end          TEXT,
+    aggregation_key     TEXT,
+    repository_scans    INTEGER DEFAULT 0,
+    test_runs           INTEGER DEFAULT 0,
+    retries             INTEGER DEFAULT 0,
+    failed_calls        INTEGER DEFAULT 0,
+    worker_restarts     INTEGER DEFAULT 0,
+    session_resumes     INTEGER DEFAULT 0,
     tenant_id           TEXT,
     workspace_id        TEXT,
     user_id             TEXT,
@@ -117,6 +128,33 @@ CREATE TABLE IF NOT EXISTS model_routing_decisions (
     availability_at_selection   TEXT,
     budget_state_at_selection   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS model_usage_collection_state (
+    collector_id          TEXT PRIMARY KEY,
+    updated_at            TEXT NOT NULL,
+    last_success_at       TEXT,
+    last_cursor           TEXT,
+    last_source_record_id TEXT,
+    last_error            TEXT,
+    consecutive_failures  INTEGER DEFAULT 0,
+    next_eligible_at      TEXT,
+    auth_state            TEXT DEFAULT 'unknown'
+);
+
+CREATE INDEX IF NOT EXISTS ix_usage_samples_runtime_observed
+    ON model_usage_samples (runtime_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_mission
+    ON model_usage_samples (mission_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_repo
+    ON model_usage_samples (repo_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_user
+    ON model_usage_samples (user_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_session
+    ON model_usage_samples (agent_session_id);
+CREATE INDEX IF NOT EXISTS ix_limit_snapshots_runtime_bucket_observed
+    ON model_limit_snapshots (runtime_id, bucket_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_availability_runtime_observed
+    ON model_availability_events (runtime_id, observed_at);
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,

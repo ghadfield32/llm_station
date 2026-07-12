@@ -36,3 +36,13 @@ alerts:
   chat_notification: true
   ledger: true
   email_digest: true
+
+# Retention: detailed per-request samples are the biggest table and kept a
+# bounded window; aggregates outlive them; alerts + routing decisions are
+# evidential and kept indefinitely (the evidence behind a routing decision is
+# NEVER pruned). Enforcement is a scheduled prune (later phase); this is the
+# policy the pruner reads.
+retention:
+  request_sample_days: 90
+  keep_aggregates_days: 730
+  keep_alerts_and_routing_indefinitely: true

@@ -198,16 +198,27 @@ CREATE TABLE IF NOT EXISTS model_usage_samples (
     observed_at         TEXT NOT NULL,
     ingested_at         TEXT NOT NULL,
     source_hash         TEXT NOT NULL UNIQUE,
+    sample_kind         TEXT NOT NULL DEFAULT 'request_delta',
     input_tokens        INTEGER DEFAULT 0,
     cached_input_tokens INTEGER DEFAULT 0,
     output_tokens       INTEGER DEFAULT 0,
+    reasoning_tokens    INTEGER DEFAULT 0,
     total_tokens        INTEGER DEFAULT 0,
     calls               INTEGER DEFAULT 0,
     sessions            INTEGER DEFAULT 0,
     tool_calls          INTEGER DEFAULT 0,
     duration_ms         INTEGER DEFAULT 0,
-    cost_usd            REAL DEFAULT 0.0,
+    cost_usd            REAL,
     cost_source         TEXT,
+    window_start        TEXT,
+    window_end          TEXT,
+    aggregation_key     TEXT,
+    repository_scans    INTEGER DEFAULT 0,
+    test_runs           INTEGER DEFAULT 0,
+    retries             INTEGER DEFAULT 0,
+    failed_calls        INTEGER DEFAULT 0,
+    worker_restarts     INTEGER DEFAULT 0,
+    session_resumes     INTEGER DEFAULT 0,
     tenant_id           TEXT,
     workspace_id        TEXT,
     user_id             TEXT,
@@ -277,6 +288,33 @@ CREATE TABLE IF NOT EXISTS model_routing_decisions (
     availability_at_selection   TEXT,
     budget_state_at_selection   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS model_usage_collection_state (
+    collector_id          TEXT PRIMARY KEY,
+    updated_at            TEXT NOT NULL,
+    last_success_at       TEXT,
+    last_cursor           TEXT,
+    last_source_record_id TEXT,
+    last_error            TEXT,
+    consecutive_failures  INTEGER DEFAULT 0,
+    next_eligible_at      TEXT,
+    auth_state            TEXT DEFAULT 'unknown'
+);
+
+CREATE INDEX IF NOT EXISTS ix_usage_samples_runtime_observed
+    ON model_usage_samples (runtime_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_mission
+    ON model_usage_samples (mission_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_repo
+    ON model_usage_samples (repo_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_user
+    ON model_usage_samples (user_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_session
+    ON model_usage_samples (agent_session_id);
+CREATE INDEX IF NOT EXISTS ix_limit_snapshots_runtime_bucket_observed
+    ON model_limit_snapshots (runtime_id, bucket_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_availability_runtime_observed
+    ON model_availability_events (runtime_id, observed_at);
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version    TEXT PRIMARY KEY,
@@ -1052,10 +1090,17 @@ def resolve_agent_session_approval(sid: str, aid: str, body: AgentSessionApprova
 
 _USAGE_SAMPLE_COLS = (
     "sample_id", "runtime_id", "source", "observed_at", "ingested_at", "source_hash",
-    "input_tokens", "cached_input_tokens", "output_tokens", "total_tokens", "calls",
-    "sessions", "tool_calls", "duration_ms", "cost_usd", "cost_source", "tenant_id",
-    "workspace_id", "user_id", "conversation_id", "agent_session_id", "mission_id",
-    "repo_id", "provider_request_id", "source_record_id")
+    "sample_kind", "input_tokens", "cached_input_tokens", "output_tokens",
+    "reasoning_tokens", "total_tokens", "calls", "sessions", "tool_calls",
+    "duration_ms", "cost_usd", "cost_source", "window_start", "window_end",
+    "aggregation_key", "repository_scans", "test_runs", "retries", "failed_calls",
+    "worker_restarts", "session_resumes", "tenant_id", "workspace_id", "user_id",
+    "conversation_id", "agent_session_id", "mission_id", "repo_id",
+    "provider_request_id", "source_record_id")
+_COLLECTION_STATE_COLS = (
+    "collector_id", "updated_at", "last_success_at", "last_cursor",
+    "last_source_record_id", "last_error", "consecutive_failures", "next_eligible_at",
+    "auth_state")
 _LIMIT_COLS = (
     "snapshot_id", "runtime_id", "bucket_id", "scope", "source", "state", "observed_at",
     "ingested_at", "source_hash", "label", "used_percent", "used_amount", "limit_amount",
@@ -1173,6 +1218,44 @@ def list_usage_runtimes():
             "UNION SELECT runtime_id FROM model_limit_snapshots "
             "UNION SELECT runtime_id FROM model_availability_events").fetchall()
     return sorted({r["runtime_id"] for r in rows})
+
+
+@app.get("/model-usage/collection-state/{collector_id}")
+def get_collection_state(collector_id: str):
+    """Durable collector checkpoint. 404 (not an error row) when a collector
+    has never run — the client treats that as "start fresh"."""
+    row = _fetch_one("model_usage_collection_state", "collector_id", collector_id)
+    if not row:
+        raise HTTPException(404, "collector state not found")
+    return row
+
+
+@app.post("/model-usage/collection-state")
+def set_collection_state(body: dict):
+    """Upsert a collector checkpoint (INSERT OR REPLACE — a collector writes
+    its full state each poll)."""
+    values = [body.get(c) for c in _COLLECTION_STATE_COLS]
+    placeholders = ", ".join("?" for _ in _COLLECTION_STATE_COLS)
+    with closing(_db()) as c:
+        c.execute(
+            f"INSERT OR REPLACE INTO model_usage_collection_state "
+            f"({', '.join(_COLLECTION_STATE_COLS)}) VALUES ({placeholders})", values)
+        c.commit()
+    return _fetch_one("model_usage_collection_state", "collector_id",
+                      body["collector_id"])
+
+
+@app.post("/model-usage/prune")
+def prune_usage_samples(body: dict):
+    """Retention: delete detailed samples observed strictly before `before`.
+    Never touches routing decisions or alerts (the evidence behind a decision
+    is kept)."""
+    with closing(_db()) as c:
+        cur = c.execute("DELETE FROM model_usage_samples WHERE observed_at < ?",
+                        (body["before"],))
+        c.commit()
+        removed = cur.rowcount
+    return {"removed": removed}
 
 
 if __name__ == "__main__":

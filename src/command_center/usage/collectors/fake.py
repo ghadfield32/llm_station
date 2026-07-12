@@ -15,9 +15,11 @@ from ..protocol import CollectorResult
 from ..schemas import (
     AvailabilityEvent,
     AvailabilityState,
+    CostSource,
     LimitScope,
     LimitSnapshot,
     LimitState,
+    SampleKind,
     UsageSample,
     UsageSource,
     compute_source_hash,
@@ -70,10 +72,10 @@ class FakeCollector:
         sample = UsageSample(
             sample_id=f"US-{sample_hash[:12]}", runtime_id=rid,
             source=self.source, observed_at=obs, ingested_at=ingested,
-            source_hash=sample_hash, input_tokens=self._total_tokens,
-            output_tokens=0, total_tokens=self._total_tokens,
-            calls=1, sessions=1, cost_usd=self._cost_usd,
-            cost_source="estimate")
+            source_hash=sample_hash, sample_kind=SampleKind.REQUEST_DELTA,
+            input_tokens=self._total_tokens, output_tokens=0,
+            total_tokens=self._total_tokens, calls=1, sessions=1,
+            cost_usd=self._cost_usd, cost_source=CostSource.ESTIMATED)
 
         primary_hash = compute_source_hash("fake_limit", rid, "primary", obs)
         primary = LimitSnapshot(
