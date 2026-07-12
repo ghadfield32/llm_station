@@ -72,6 +72,15 @@ ignore = ["E702"]
 files = ["src"]
 python_version = "3.12"
 
+# openai-codex is an OPTIONAL, un-stubbed beta SDK (extra `agent-codex`); it is
+# imported lazily inside functions so the package works without it. mypy can't
+# resolve it in the default env, so treat its absence as a missing-import
+# (not a type error) everywhere it's referenced — the adapter, the preflight,
+# and the usage collector.
+[[tool.mypy.overrides]]
+module = ["openai_codex.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]

@@ -6,6 +6,36 @@ liners. Newest notes at the top of each topic. Full design lives in
 this is the fast "has this been done?" index. Dates are when the line was written.
 
 ## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
+- PHASE 2 — FIRST REAL PROVIDER COLLECTOR DONE 07-12 (branch
+  `feat/codex-usage-collector`, stacked on `feat/unified-runtime-usage`/PR #34):
+  `collectors/codex_app_server.py` turns the Codex app-server's account +
+  rate-limit surface into canonical schemas, source=PROVIDER_NATIVE (so it
+  DISPLACES any earlier estimate for the same bucket — proven by test). Every
+  field was verified by LIVE SDK introspection: rate limits come from the raw
+  RPC `account/rateLimits/read` (no named SDK wrapper) via the underlying
+  AsyncCodexClient.request(...), returning a RateLimitSnapshot with
+  `primary`/`secondary` RateLimitWindow(used_percent, resets_at EPOCH,
+  window_duration_mins) + plan_type + rate_limit_reached_type. Maps each
+  window to a PROVIDER-scope LimitSnapshot (bucket_id primary/secondary,
+  epoch→ISO reset, window_seconds), derives an AvailabilityEvent from
+  rate_limit_reached_type / worst used_percent (available/near/limited/
+  exhausted). Emits LIMITS + AVAILABILITY ONLY — per-turn TOKEN usage is
+  already captured by the agent-session adapter's own `usage` events, so
+  re-emitting here would double-count (Phase 1.1 SampleKind). Never raises for
+  an expected provider condition: SDK-absent→UNAVAILABLE, auth/account
+  failure→AUTHENTICATION_REQUIRED, rateLimits/read failure→still AVAILABLE +
+  a warning (all as CollectorResult warnings + availability events).
+  `UsageService.run_collector_tracked()` wraps a collect() in a durable
+  CollectionState checkpoint (a genuine crash increments consecutive_failures
+  + records last_error; a clean run resets them; auth_state reflects an
+  AUTHENTICATION_REQUIRED availability). LIVE SMOKE PASSED against the real
+  prolite account (primary 0%/18000s, secondary 0%/604800s, provider_native,
+  collection_state auth=ok, 0 alerts). +10 hermetic tests (fake openai_codex
+  SDK in sys.modules — translation, availability derivation, all failure
+  modes, tracked success/failure state, provider_native beats a prior
+  estimate). Added a mypy override for the optional un-stubbed `openai_codex.*`
+  (also clears the pre-existing adapter/preflight import-not-found noise).
+  ruff clean; `mypy src/command_center/usage/` clean; full repo suite green.
 - PHASE 1.1 HARDENING DONE 07-12 (same branch, extends PR #34, before any
   real provider collector is trusted): four correctness fixes over the raw
   foundation. (A) UNKNOWN COST IS NEVER $0.00 — `UsageSample.cost_usd` is now
