@@ -157,16 +157,25 @@ def build_system(surface: str, *, tools_available: bool = True, lane: str = "fro
     native tool-call syntax from output text regardless of what the request
     declared. GatewayCore._completion refuses to dispatch that (see
     _no_tools_lane_tool_call_diagnostic); this prompt variant is the
-    complementary fix that stops inviting the attempt in the first place."""
+    complementary fix that stops inviting the attempt in the first place.
+
+    local_frontier gets its OWN, much shorter template (not just a substituted
+    lane_desc in the frontier template) — colibrì-class engines are genuinely
+    disk/compute-bound (measured 2026-07-12: 219 prompt tokens for an
+    8-word user message, almost entirely system-prompt overhead), so prefill
+    token count is a real, measured cost here in a way it isn't for the fast
+    paid frontier lane. Keeps the same two safety properties (no tools, never
+    claim an action happened) in far fewer tokens."""
     if not tools_available:
         if lane == "local_frontier":
-            lane_desc = ("an experimental LOCAL frontier lane (a disk-streamed open-weight "
-                         "model running on this machine, e.g. colibrì) — free, but slow and "
-                         "text-only")
-        else:
-            lane_desc = "the paid frontier-router lane"
-        return f"""You are the Growth OS gateway on {surface}, talking through {lane_desc}. \
-Today is {date.today().isoformat()}.
+            return (
+                "You are a private local AI assistant. You have no tools, no board "
+                "access, and no way to affect any external system. Never claim to "
+                "have taken an action or checked something live. Do not emit "
+                "tool-call syntax — nothing will run it. Be concise."
+            )
+        return f"""You are the Growth OS gateway on {surface}, talking through \
+the paid frontier-router lane. Today is {date.today().isoformat()}.
 This is PLAIN CONVERSATION ONLY. You have NO tools, NO board access, and NO \
 ability to see or change anything in AppFlowy, the kanban boards, or either \
 repo (betts_basketball / command-center) — none of that reaches this lane, by \

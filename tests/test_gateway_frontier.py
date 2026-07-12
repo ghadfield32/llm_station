@@ -164,12 +164,17 @@ def test_is_local_frontier_and_context_injection_off(monkeypatch):
 
 
 def test_local_frontier_system_prompt_carries_no_tool_vocabulary(monkeypatch):
+    """local_frontier gets its own deliberately SHORT template (not the verbose frontier one) —
+    colibrì-class engines are measurably disk/compute-bound, so system-prompt token count is a
+    real cost (measured 2026-07-12: 219 prompt tokens for an 8-word user message). Still must
+    carry both safety properties in far fewer tokens: no tools, never claim an action happened."""
     gw = _local_frontier_gateway(monkeypatch)
     assert "project_status" not in gw.system
     assert "add_mission_card" not in gw.system
-    assert "NO tools" in gw.system
-    assert "colibr" in gw.system.lower()   # local-frontier wording, not "paid frontier-router"
+    assert "no tools" in gw.system.lower()
+    assert "never claim" in gw.system.lower()
     assert "paid" not in gw.system.lower()
+    assert len(gw.system) < 300   # deliberately compact — regression guard against prompt bloat
 
 
 def test_local_frontier_completion_routes_to_local_client_not_litellm(monkeypatch):
