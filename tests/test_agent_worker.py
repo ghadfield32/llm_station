@@ -66,12 +66,15 @@ def test_api_routes_reject_wrong_token(client):
 
 
 def test_list_harnesses_reports_fake_and_placeholders(client):
+    # codex_agent is a real adapter now (see adapters/codex_agent.py) — its
+    # availability depends on the real environment, covered deterministically
+    # in test_codex_agent_adapter.py. claude_agent stays NotBuiltHarness.
     r = client.get("/api/agent-harnesses", headers=_auth())
     assert r.status_code == 200
     harnesses = {h["harness_id"]: h for h in r.json()}
     assert harnesses["fake"]["available"] is True
-    assert harnesses["codex_agent"]["available"] is False
-    assert "no real adapter built yet" in harnesses["codex_agent"]["detail"]
+    assert harnesses["claude_agent"]["available"] is False
+    assert "no real adapter built yet" in harnesses["claude_agent"]["detail"]
 
 
 def test_create_session_with_unknown_harness_404s(client):
@@ -83,10 +86,27 @@ def test_create_session_with_unknown_harness_404s(client):
 
 def test_create_session_with_unavailable_harness_400s_with_exact_blocker(client):
     r = client.post("/api/agent-sessions", headers=_auth(), json={
-        "harness_id": "codex_agent", "conversation_id": "c1",
+        "harness_id": "claude_agent", "conversation_id": "c1",
         "repo_id": "r", "mode": "analysis"})
     assert r.status_code == 400
     assert "no real adapter built yet" in r.json()["detail"]
+
+
+def test_list_sessions_filters_by_conversation_id_and_repo_id(client):
+    """Lets a caller (the cockpit) recover a durable session by
+    conversation_id/repo_id without relying exclusively on local browser
+    storage — see WORKLOG.md "Agent-session chat integration"."""
+    s1 = client.post("/api/agent-sessions", headers=_auth(), json={
+        "harness_id": "fake", "conversation_id": "conv-a",
+        "repo_id": "llm_station", "mode": "analysis"}).json()["session_id"]
+    client.post("/api/agent-sessions", headers=_auth(), json={
+        "harness_id": "fake", "conversation_id": "conv-b",
+        "repo_id": "betts_basketball", "mode": "analysis"})
+
+    r = client.get("/api/agent-sessions", headers=_auth(),
+                   params={"conversation_id": "conv-a"})
+    assert r.status_code == 200
+    assert [s["session_id"] for s in r.json()] == [s1]
 
 
 def test_full_lifecycle_over_real_http(client):

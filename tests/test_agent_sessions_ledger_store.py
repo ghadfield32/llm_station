@@ -99,3 +99,38 @@ def test_unknown_session_raises_key_error_same_as_in_memory_store(
         store.get("AS-does-not-exist")
     with pytest.raises(KeyError):
         store.events_since("AS-does-not-exist")
+
+
+def test_update_session_against_ledger(ledger_backed_harness):
+    """Written by a real harness adapter once it has real vendor identity
+    (external_session_id/worker_id/model/provider_profile/cost_usd) — see
+    adapters/codex_agent.py. Proves the durable round-trip against the real
+    Ledger backend, mirroring test_agent_sessions.py's in-memory version."""
+    store, fh = ledger_backed_harness
+    session_id = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="c1", repo_id="llm_station", mode="analysis")))
+
+    updated = store.update_session(
+        session_id, external_session_id="thread-xyz", model="gpt-5.5")
+    assert updated.external_session_id == "thread-xyz"
+    assert updated.model == "gpt-5.5"
+
+    # a fresh read (not the return value) proves it was actually persisted
+    assert store.get(session_id).external_session_id == "thread-xyz"
+
+    # a second, partial update leaves previously-set fields alone
+    store.update_session(session_id, cost_usd=0.0042)
+    record = store.get(session_id)
+    assert record.cost_usd == 0.0042
+    assert record.external_session_id == "thread-xyz"   # still there
+
+
+def test_list_sessions_filters_against_ledger(ledger_backed_harness):
+    store, fh = ledger_backed_harness
+    s1 = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="conv-a", repo_id="llm_station", mode="analysis")))
+    s2 = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="conv-b", repo_id="betts_basketball", mode="analysis")))
+
+    assert [r.session_id for r in store.list_sessions(conversation_id="conv-a")] == [s1]
+    assert [r.session_id for r in store.list_sessions(repo_id="betts_basketball")] == [s2]

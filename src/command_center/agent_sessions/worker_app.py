@@ -142,6 +142,15 @@ def build_app(*, store: SessionStoreProtocol | None = None,
     async def list_harnesses() -> list[dict]:
         return await service.list_harnesses()
 
+    @app.get("/api/agent-sessions", dependencies=[Depends(_authed)])
+    def list_sessions(conversation_id: str | None = None,
+                      repo_id: str | None = None) -> list[dict]:
+        """Lets a caller recover durable sessions by conversation_id/repo_id
+        without relying exclusively on local browser storage — see WORKLOG.md
+        "Agent-session chat integration"."""
+        return [r.__dict__ for r in
+                store.list_sessions(conversation_id=conversation_id, repo_id=repo_id)]
+
     @app.post("/api/agent-sessions", dependencies=[Depends(_authed)])
     async def create_session(body: SessionStartIn) -> dict:
         try:

@@ -149,6 +149,13 @@ health:  ## Check every service health endpoint
 	@for s in "litellm:4000/health/liveliness" "judge-gate:8088/health" "ledger:$(LEDGER_HOST_PORT)/health"; do \
 	  n=$${s%%:*}; p=$${s#*:}; printf "%-12s " $$n; curl -fsS http://localhost:$$p >/dev/null 2>&1 && echo OK || echo DOWN; done
 
+agent-worker-health:  ## Scripted deployment proof: host worker reachable directly AND from inside the deployed cockpit container via host.docker.internal.
+	@printf "%-28s " "host-worker (direct)"; curl -fsS http://127.0.0.1:$${AGENT_WORKER_PORT:-8791}/health >/dev/null 2>&1 && echo OK || echo "DOWN (start with: .\\scripts\\start_agent_worker.ps1 start)"
+	@printf "%-28s " "cockpit -> host-worker"; \
+	docker compose exec -T agent-kanban-ui python -c \
+	  "import httpx,sys; r=httpx.get('http://host.docker.internal:$${AGENT_WORKER_PORT:-8791}/health', timeout=5); sys.exit(0 if r.status_code==200 else 1)" \
+	  >/dev/null 2>&1 && echo OK || echo "DOWN (is the agent-kanban-ui container running? docker compose --profile ui up -d agent-kanban-ui)"
+
 models:  ## Validate+render, pull local tags, restart litellm
 	@$(MAKE) render
 	@for t in $$($(PY) -c "import yaml; print(' '.join(yaml.safe_load(open('configs/models.yaml')).get('local_whitelist',[])))"); do echo "ollama pull $$t"; OLLAMA_HOST=$(OLLAMA_HOST) ollama pull $$t || echo "(skip $$t)"; done

@@ -48,6 +48,13 @@ class AgentWorkerClient:
     def list_harnesses(self) -> httpx.Response:
         return self._request("GET", "/api/agent-harnesses")
 
+    def list_sessions(self, *, conversation_id: str | None = None,
+                      repo_id: str | None = None) -> httpx.Response:
+        params = {k: v for k, v in
+                 {"conversation_id": conversation_id, "repo_id": repo_id}.items()
+                 if v is not None}
+        return self._request("GET", "/api/agent-sessions", params=params)
+
     def create_session(self, body: dict) -> httpx.Response:
         return self._request("POST", "/api/agent-sessions", json=body)
 

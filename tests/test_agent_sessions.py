@@ -164,6 +164,35 @@ def test_close_marks_session_closed():
     assert store.events_since(session_id)[-1].type == "session_closed"
 
 
+def test_update_session_sets_only_supplied_fields():
+    store, fh = _harness()
+    session_id = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="c1", repo_id="r", mode="analysis")))
+
+    updated = store.update_session(
+        session_id, external_session_id="thread-xyz", model="gpt-5.5")
+    assert updated.external_session_id == "thread-xyz"
+    assert updated.model == "gpt-5.5"
+    assert updated.worker_id is None            # untouched field stays untouched
+
+    store.update_session(session_id, cost_usd=0.0042)
+    record = store.get(session_id)
+    assert record.cost_usd == 0.0042
+    assert record.external_session_id == "thread-xyz"   # still there from the first call
+
+
+def test_list_sessions_filters_by_conversation_id_and_repo_id():
+    store, fh = _harness()
+    s1 = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="conv-a", repo_id="llm_station", mode="analysis")))
+    s2 = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="conv-b", repo_id="betts_basketball", mode="analysis")))
+
+    assert [r.session_id for r in store.list_sessions(conversation_id="conv-a")] == [s1]
+    assert [r.session_id for r in store.list_sessions(repo_id="betts_basketball")] == [s2]
+    assert {r.session_id for r in store.list_sessions()} == {s1, s2}
+
+
 def test_agent_event_to_dict_round_trips_fields():
     ev = AgentEvent(type="usage", payload={"tokens": 10}, sequence=3, ts="2026-01-01T00:00:00Z")
     d = ev.to_dict()

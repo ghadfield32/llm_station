@@ -64,11 +64,31 @@ class LedgerSessionStore:
         self._raise_for_status(r, not_found_msg=f"no such agent session: {session_id!r}")
         return _record_from_dict(r.json())
 
-    def list_sessions(self, status: str | None = None) -> list[SessionRecord]:
-        params = {"status": status} if status is not None else {}
+    def list_sessions(self, status: str | None = None, *,
+                      conversation_id: str | None = None,
+                      repo_id: str | None = None) -> list[SessionRecord]:
+        params = {}
+        if status is not None:
+            params["status"] = status
+        if conversation_id is not None:
+            params["conversation_id"] = conversation_id
+        if repo_id is not None:
+            params["repo_id"] = repo_id
         r = self._client.get("/agent-sessions", params=params)
         r.raise_for_status()
         return [_record_from_dict(row) for row in r.json()]
+
+    def update_session(self, session_id: str, *, external_session_id: str | None = None,
+                       worker_id: str | None = None, model: str | None = None,
+                       provider_profile: str | None = None,
+                       cost_usd: float | None = None) -> SessionRecord:
+        body = {k: v for k, v in {
+            "external_session_id": external_session_id, "worker_id": worker_id,
+            "model": model, "provider_profile": provider_profile,
+            "cost_usd": cost_usd}.items() if v is not None}
+        r = self._client.post(f"/agent-session/{session_id}/fields", json=body)
+        self._raise_for_status(r, not_found_msg=f"no such agent session: {session_id!r}")
+        return _record_from_dict(r.json())
 
     def append_event(self, session_id: str, event):
         r = self._client.post(f"/agent-session/{session_id}/event",

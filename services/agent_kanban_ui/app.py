@@ -2932,6 +2932,17 @@ def agent_harnesses() -> list:
     return harnesses
 
 
+@app.get("/api/agent-sessions")
+def list_agent_sessions(conversation_id: str | None = None,
+                        repo_id: str | None = None) -> list:
+    """Recovers durable sessions by conversation_id/repo_id — lets the cockpit
+    (or another device) find an in-progress agent session without relying
+    exclusively on local browser storage."""
+    client = _require_agent_sessions()
+    return _call_worker(client.list_sessions, conversation_id=conversation_id,
+                        repo_id=repo_id)
+
+
 @app.post("/api/agent-sessions")
 def create_agent_session(body: AgentSessionCreateIn) -> dict:
     client = _require_agent_sessions()

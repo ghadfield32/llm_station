@@ -85,11 +85,39 @@ class SessionStore:
             raise KeyError(f"no such agent session: {session_id!r}")
         return self._sessions[session_id]
 
-    def list_sessions(self, status: str | None = None) -> list[SessionRecord]:
+    def list_sessions(self, status: str | None = None, *,
+                      conversation_id: str | None = None,
+                      repo_id: str | None = None) -> list[SessionRecord]:
         records = list(self._sessions.values())
         if status is not None:
             records = [r for r in records if r.status == status]
+        if conversation_id is not None:
+            records = [r for r in records if r.conversation_id == conversation_id]
+        if repo_id is not None:
+            records = [r for r in records if r.repo_id == repo_id]
         return records
+
+    def update_session(self, session_id: str, *, external_session_id: str | None = None,
+                       worker_id: str | None = None, model: str | None = None,
+                       provider_profile: str | None = None,
+                       cost_usd: float | None = None) -> SessionRecord:
+        """Written by a real harness adapter once it has real vendor identity/cost
+        (external_session_id/worker_id/model/provider_profile/cost_usd) — every
+        parameter optional, only supplied ones are updated. Mirrors the Ledger's
+        /agent-session/{sid}/fields endpoint exactly (see ledger_store.py)."""
+        record = self.get(session_id)
+        if external_session_id is not None:
+            record.external_session_id = external_session_id
+        if worker_id is not None:
+            record.worker_id = worker_id
+        if model is not None:
+            record.model = model
+        if provider_profile is not None:
+            record.provider_profile = provider_profile
+        if cost_usd is not None:
+            record.cost_usd = cost_usd
+        record.updated_at = _now_iso()
+        return record
 
     def append_event(self, session_id: str, event: AgentEvent) -> AgentEvent:
         """Assigns sequence/ts here (never trust a harness-supplied sequence — the
@@ -164,7 +192,14 @@ class SessionStoreProtocol(Protocol):
 
     def get(self, session_id: str) -> SessionRecord: ...
 
-    def list_sessions(self, status: str | None = None) -> list[SessionRecord]: ...
+    def list_sessions(self, status: str | None = None, *,
+                      conversation_id: str | None = None,
+                      repo_id: str | None = None) -> list[SessionRecord]: ...
+
+    def update_session(self, session_id: str, *, external_session_id: str | None = None,
+                       worker_id: str | None = None, model: str | None = None,
+                       provider_profile: str | None = None,
+                       cost_usd: float | None = None) -> SessionRecord: ...
 
     def append_event(self, session_id: str, event: AgentEvent) -> AgentEvent: ...
 

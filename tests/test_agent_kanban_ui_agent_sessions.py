@@ -65,6 +65,9 @@ class _FakeWorkerClient:
     def list_harnesses(self):
         return self._resp("list_harnesses")
 
+    def list_sessions(self, *, conversation_id=None, repo_id=None):
+        return self._resp("list_sessions", conversation_id, repo_id)
+
     def create_session(self, body):
         return self._resp("create_session", body)
 
@@ -156,6 +159,20 @@ def test_send_message_success_returns_202(client):
     r = tc.post("/api/agent-sessions/AS-1/messages", json={"prompt": "hi"})
     assert r.status_code == 202
     assert r.json()["status"] == "accepted"
+
+
+def test_list_sessions_proxies_query_params_through(client):
+    """Lets the cockpit (or another device) recover a durable session by
+    conversation_id/repo_id without relying exclusively on local browser
+    storage — see WORKLOG.md "Agent-session chat integration"."""
+    mod, tc = client
+    fake = _FakeWorkerClient({
+        "list_sessions": _FakeResponse(200, [{"session_id": "AS-1", "conversation_id": "c1"}])})
+    _inject(mod, fake)
+    r = tc.get("/api/agent-sessions", params={"conversation_id": "c1"})
+    assert r.status_code == 200
+    assert r.json() == [{"session_id": "AS-1", "conversation_id": "c1"}]
+    assert fake.calls == [("list_sessions", "c1", None)]
 
 
 # ── token never leaks ────────────────────────────────────────────────────────

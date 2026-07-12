@@ -128,6 +128,54 @@ def test_list_agent_sessions_filters_by_status(ledger):
     assert {s["session_id"] for s in all_sessions} == {s1, s2}
 
 
+def test_list_agent_sessions_filters_by_conversation_id_and_repo_id(ledger):
+    client, _, _ = ledger
+    s1 = _create(client, conversation_id="c1", repo_id="llm_station").json()["session_id"]
+    s2 = _create(client, conversation_id="c2", repo_id="betts_basketball").json()["session_id"]
+
+    by_conv = client.get("/agent-sessions", params={"conversation_id": "c1"}).json()
+    assert [s["session_id"] for s in by_conv] == [s1]
+
+    by_repo = client.get("/agent-sessions", params={"repo_id": "betts_basketball"}).json()
+    assert [s["session_id"] for s in by_repo] == [s2]
+
+    combined = client.get("/agent-sessions",
+                          params={"conversation_id": "c1", "repo_id": "llm_station"}).json()
+    assert [s["session_id"] for s in combined] == [s1]
+
+    no_match = client.get("/agent-sessions",
+                          params={"conversation_id": "c1", "repo_id": "betts_basketball"}).json()
+    assert no_match == []
+
+
+def test_update_fields_sets_only_supplied_fields(ledger):
+    client, _, _ = ledger
+    session_id = _create(client).json()["session_id"]
+
+    r = client.post(f"/agent-session/{session_id}/fields",
+                    json={"external_session_id": "thread-abc123", "model": "gpt-5.5"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["external_session_id"] == "thread-abc123"
+    assert body["model"] == "gpt-5.5"
+    assert body["worker_id"] is None            # untouched field stays untouched
+    assert body["provider_profile"] == "default"  # untouched field stays untouched
+
+    # a second, partial update leaves previously-set fields alone
+    r2 = client.post(f"/agent-session/{session_id}/fields", json={"cost_usd": 0.0042})
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert body2["cost_usd"] == 0.0042
+    assert body2["external_session_id"] == "thread-abc123"   # still there
+    assert body2["model"] == "gpt-5.5"                        # still there
+
+
+def test_update_fields_for_unknown_session_404s(ledger):
+    client, _, _ = ledger
+    r = client.post("/agent-session/AS-nope/fields", json={"model": "gpt-5.5"})
+    assert r.status_code == 404
+
+
 def test_approval_created_pending_and_resolved(ledger):
     client, _, _ = ledger
     session_id = _create(client).json()["session_id"]

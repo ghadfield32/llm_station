@@ -449,6 +449,33 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   `tmp_path`, which lives outside the worktree — the script correctly
   refused per its own "must be inside worktree" invariant; fixed by adding an
   `in_worktree_proof_env` fixture instead of weakening the script.
+- DURABLE SESSION METADATA DONE 07-11 (prerequisite for the real Codex
+  adapter, deliberately its own commit — no Codex-specific code in this
+  one): a real harness adapter has real vendor identity to persist
+  (`external_session_id`, `worker_id`, `model`, `provider_profile`,
+  `cost_usd`) that FakeHarness never needed. New `update_session()` on both
+  `SessionStore` and `LedgerSessionStore` — every parameter optional, only
+  supplied fields change, mirrored by a new Ledger `POST /agent-session/
+  {sid}/fields` endpoint (same partial-update discipline, 404 on an unknown
+  session). `list_sessions()` gained `conversation_id`/`repo_id` filters on
+  both backends plus the Ledger's `GET /agent-sessions` query params, so a
+  session can be found without already knowing its id — new worker route
+  `GET /api/agent-sessions` and matching cockpit proxy route expose this to
+  the browser (session discovery without relying exclusively on local
+  browser storage). No schema change (existing columns, new endpoint only),
+  so no drift test needed here.
+- TESTS 07-11: cross-backend parity proven the same way the original
+  durable-store milestone did — identical assertions run against BOTH the
+  in-memory store (`test_agent_sessions.py`) and a real Ledger instance
+  (`test_agent_sessions_ledger_store.py`), plus direct REST coverage
+  (`test_agent_session_ledger_rest.py`: partial-update semantics, 404 on
+  unknown session, filter combinations including a no-match case) and the
+  worker/cockpit HTTP surface (`test_agent_worker.py`,
+  `test_agent_kanban_ui_agent_sessions.py` — the latter needed a
+  `list_sessions` method added to the test suite's `_FakeWorkerClient`
+  stub). ruff clean; mypy clean on the `src/` files touched.
+
+## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro
   (frontier lane, no `tools` ever sent — verified in frontier_client.py body) returned a
   structured tool_calls entry for project_status(project_name=...) anyway; GatewayCore's

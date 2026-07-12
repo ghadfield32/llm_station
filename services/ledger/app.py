@@ -748,15 +748,25 @@ def create_agent_session(body: AgentSessionIn):
 
 
 @app.get("/agent-sessions")
-def list_agent_sessions(status: Optional[str] = None):
+def list_agent_sessions(status: Optional[str] = None, conversation_id: Optional[str] = None,
+                        repo_id: Optional[str] = None):
     q = "SELECT * FROM agent_sessions"
-    args: tuple = ()
+    conditions = []
+    args: list = []
     if status:
-        q += " WHERE status=?"
-        args = (status,)
+        conditions.append("status=?")
+        args.append(status)
+    if conversation_id:
+        conditions.append("conversation_id=?")
+        args.append(conversation_id)
+    if repo_id:
+        conditions.append("repo_id=?")
+        args.append(repo_id)
+    if conditions:
+        q += " WHERE " + " AND ".join(conditions)
     q += " ORDER BY created_at DESC LIMIT 200"
     with closing(_db()) as c:
-        return [dict(r) for r in c.execute(q, args).fetchall()]
+        return [dict(r) for r in c.execute(q, tuple(args)).fetchall()]
 
 
 @app.get("/agent-session/{sid}")
@@ -822,6 +832,39 @@ def set_agent_session_status(sid: str, body: AgentSessionStatusIn):
                   (body.status, now, sid))
         c.commit()
     return {"session_id": sid, "status": body.status}
+
+
+class AgentSessionFieldsIn(BaseModel):
+    # Written by a real harness adapter once it has real vendor identity/cost
+    # (see src/command_center/agent_sessions/adapters/) — every field optional,
+    # only supplied ones are updated; omitted fields are left untouched.
+    external_session_id: Optional[str] = None
+    worker_id: Optional[str] = None
+    model: Optional[str] = None
+    provider_profile: Optional[str] = None
+    cost_usd: Optional[float] = None
+
+
+_AGENT_SESSION_FIELD_COLUMNS = (
+    "external_session_id", "worker_id", "model", "provider_profile", "cost_usd")
+
+
+@app.post("/agent-session/{sid}/fields")
+def update_agent_session_fields(sid: str, body: AgentSessionFieldsIn):
+    updates = {k: v for k, v in body.model_dump().items()
+              if k in _AGENT_SESSION_FIELD_COLUMNS and v is not None}
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM agent_sessions WHERE session_id=?", (sid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "agent session not found")
+        if updates:
+            now = _now()
+            set_clause = ", ".join(f"{k}=?" for k in updates)
+            c.execute(f"UPDATE agent_sessions SET {set_clause}, updated_at=? WHERE session_id=?",
+                     (*updates.values(), now, sid))
+            c.commit()
+            row = c.execute("SELECT * FROM agent_sessions WHERE session_id=?", (sid,)).fetchone()
+    return _agent_session_row_to_dict(row)
 
 
 class AgentSessionApprovalIn(BaseModel):
