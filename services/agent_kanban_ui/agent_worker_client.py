@@ -48,6 +48,9 @@ class AgentWorkerClient:
     def list_harnesses(self) -> httpx.Response:
         return self._request("GET", "/api/agent-harnesses")
 
+    def list_models(self, harness_id: str) -> httpx.Response:
+        return self._request("GET", f"/api/agent-harnesses/{harness_id}/models")
+
     def list_sessions(self, *, conversation_id: str | None = None,
                       repo_id: str | None = None) -> httpx.Response:
         params = {k: v for k, v in

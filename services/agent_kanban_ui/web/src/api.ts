@@ -705,8 +705,30 @@ export interface AgentHarnessOption {
   available: boolean;
   detail: string;
   supported_modes: string[];
+  usage_summary?: UsageStatus;               // live availability/limits for a badge
+  models_endpoint?: string;
 }
 export const fetchAgentHarnesses = () => getJSON<AgentHarnessOption[]>("/api/agent-harnesses");
+
+// Runtime-discovered model + effort catalog for the picker (Codex live SDK
+// models incl. supported efforts; Claude validated aliases).
+export interface AgentModelOption {
+  id: string;
+  display_name: string;
+  is_default: boolean;
+  description?: string;
+  default_effort?: string | null;
+  supported_efforts: string[];
+  context_options: string[];
+  available: boolean;
+}
+export interface AgentModelCatalog {
+  harness_id: string;
+  models: AgentModelOption[];
+  error?: string;
+}
+export const fetchHarnessModels = (harnessId: string) =>
+  getJSON<AgentModelCatalog>(`/api/agent-harnesses/${encodeURIComponent(harnessId)}/models`);
 
 export interface AgentSessionRecord {
   session_id: string;
@@ -735,6 +757,8 @@ export interface AgentSessionCreate {
   mode: string;
   provider_profile?: string;
   model?: string | null;
+  effort?: string | null;
+  context_mode?: string | null;
   permission_profile?: string;
 }
 export const createAgentSession = (body: AgentSessionCreate) =>

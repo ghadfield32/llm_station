@@ -77,37 +77,42 @@ def _status_state(status: str | None) -> LimitState:
     return LimitState.UNKNOWN
 
 
-def _bucket_snapshot(*, bucket_id: str, status: str | None, utilization: float | None,
-                     resets_at: int | None, observed_at: str) -> LimitSnapshot:
+def _bucket_snapshot(*, runtime_id: str, bucket_id: str, status: str | None,
+                     utilization: float | None, resets_at: int | None,
+                     observed_at: str) -> LimitSnapshot:
     used = _used_percent(utilization)
     reset_iso = _epoch_to_iso(resets_at)
-    h = compute_source_hash("claude_limit", bucket_id, observed_at, status, used, reset_iso)
+    h = compute_source_hash("claude_limit", runtime_id, bucket_id, observed_at,
+                            status, used, reset_iso)
     return LimitSnapshot(
-        snapshot_id=f"LS-{h[:12]}", runtime_id=CLAUDE_RUNTIME_ID, bucket_id=bucket_id,
+        snapshot_id=f"LS-{h[:12]}", runtime_id=runtime_id, bucket_id=bucket_id,
         scope=LimitScope.PROVIDER, source=UsageSource.PROVIDER_NATIVE,
         state=_status_state(status), observed_at=observed_at, ingested_at=now_iso(),
         source_hash=h, label=_BUCKET_LABELS.get(bucket_id, bucket_id),
         used_percent=used, unit="percent", reset_at=reset_iso)
 
 
-def translate_rate_limit_info(info: Mapping[str, Any], observed_at: str) -> CollectorResult:
+def translate_rate_limit_info(info: Mapping[str, Any], observed_at: str,
+                              runtime_id: str = CLAUDE_RUNTIME_ID) -> CollectorResult:
     """Pure: one RateLimitInfo dict -> a PROVIDER_NATIVE LimitSnapshot for its
     bucket (plus a separate `overage` bucket when the info carries overage
     fields) + an AvailabilityEvent derived from `status` (rejected -> EXHAUSTED,
     allowed_warning -> NEAR_LIMIT, allowed -> AVAILABLE). A missing
     rate_limit_type still yields availability (the status is authoritative) but
-    no named bucket."""
+    no named bucket. `runtime_id` distinguishes the lanes: a claude_code_local
+    (CLI subscription) feed must attribute to "claude_code_local", NOT the API
+    lane's "claude_agent" — otherwise the two collide on one card."""
     status = info.get("status")
     bucket_type = info.get("rate_limit_type")
     limits: list[LimitSnapshot] = []
     if bucket_type:
         limits.append(_bucket_snapshot(
-            bucket_id=str(bucket_type), status=status,
+            runtime_id=runtime_id, bucket_id=str(bucket_type), status=status,
             utilization=info.get("utilization"), resets_at=info.get("resets_at"),
             observed_at=observed_at))
     if info.get("overage_status") is not None:
         limits.append(_bucket_snapshot(
-            bucket_id="overage", status=info.get("overage_status"),
+            runtime_id=runtime_id, bucket_id="overage", status=info.get("overage_status"),
             utilization=None, resets_at=info.get("overage_resets_at"),
             observed_at=observed_at))
 
@@ -124,9 +129,9 @@ def translate_rate_limit_info(info: Mapping[str, Any], observed_at: str) -> Coll
         state = AvailabilityState.UNKNOWN
         reason = f"unrecognized rate-limit status: {status!r}"
 
-    h = compute_source_hash("claude_avail", state.value, reason, observed_at)
+    h = compute_source_hash("claude_avail", runtime_id, state.value, reason, observed_at)
     avail = AvailabilityEvent(
-        event_id=f"AV-{h[:12]}", runtime_id=CLAUDE_RUNTIME_ID,
+        event_id=f"AV-{h[:12]}", runtime_id=runtime_id,
         source=UsageSource.PROVIDER_NATIVE, state=state, observed_at=observed_at,
         ingested_at=now_iso(), source_hash=h, reason=reason,
         detail={"rate_limit_type": bucket_type})
@@ -143,12 +148,16 @@ class ClaudeRateLimitCollector:
 
     source = UsageSource.PROVIDER_NATIVE
 
-    def __init__(self) -> None:
+    def __init__(self, runtime_id: str = CLAUDE_RUNTIME_ID) -> None:
+        # the lane this collector reports for: "claude_code_local" (CLI
+        # subscription, the default lane) or "claude_agent" (the API lane).
+        # Default preserves the original single-lane behaviour.
+        self._runtime_id = runtime_id
         self._latest: Mapping[str, Any] | None = None
         self._latest_at: str | None = None
 
     def runtime_ids(self) -> list[str]:
-        return [CLAUDE_RUNTIME_ID]
+        return [self._runtime_id]
 
     def feed(self, rate_limit_payload: Mapping[str, Any],
              observed_at: str | None = None) -> None:
@@ -161,13 +170,15 @@ class ClaudeRateLimitCollector:
     async def collect(self) -> CollectorResult:
         if self._latest is None:
             observed_at = now_iso()
-            h = compute_source_hash("claude_avail", "unknown", "no-event", observed_at)
+            h = compute_source_hash("claude_avail", self._runtime_id, "unknown",
+                                    "no-event", observed_at)
             return CollectorResult(
                 availability=[AvailabilityEvent(
-                    event_id=f"AV-{h[:12]}", runtime_id=CLAUDE_RUNTIME_ID,
+                    event_id=f"AV-{h[:12]}", runtime_id=self._runtime_id,
                     source=UsageSource.PROVIDER_NATIVE, state=AvailabilityState.UNKNOWN,
                     observed_at=observed_at, ingested_at=now_iso(), source_hash=h,
                     reason="no RateLimitEvent observed yet — Claude limits are "
                            "event-driven; state is unknown until a session emits one")],
-                warnings=["claude_agent: no rate-limit event observed yet"])
-        return translate_rate_limit_info(self._latest, self._latest_at or now_iso())
+                warnings=[f"{self._runtime_id}: no rate-limit event observed yet"])
+        return translate_rate_limit_info(self._latest, self._latest_at or now_iso(),
+                                         self._runtime_id)

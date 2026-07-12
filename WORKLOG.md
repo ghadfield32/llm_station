@@ -187,6 +187,42 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- COCKPIT PICKERS (runtime → model → effort) + 2 real-bug fixes 07-12 (branch
+  `feat/agent-cockpit-pickers`, stacked on `feat/claude-agent-readonly`).
+  Grounded by an ultracode workflow (5 investigators → adversarial verify →
+  synthesis) which confirmed the ROOT CAUSE the agents "don't show available":
+  availability is computed ONLY in the host worker's registry.probes(), reached
+  by a triple-env-gated cockpit proxy (KANBAN_UI_AGENT_SESSIONS_ENABLED +
+  AGENT_WORKER_TOKEN + AGENT_WORKER_URL) — and the deployed build predates the
+  real harnesses. On THIS host all probes are available=True (codex_agent,
+  claude_code_local); the gap is deployment/wiring, not adapters. Delivered:
+  (1) **model catalog, runtime-discovered** — `list_models()` on each adapter
+  (codex wraps the live `client.models()`, which I verified exposes
+  `default_reasoning_effort` + `supported_reasoning_efforts` per model; Claude
+  lanes return validated alias catalogs incl. opus/sonnet/haiku/fable + 1M
+  variants), `AgentSessionService.list_models()`, worker `GET /api/agent-
+  harnesses/{id}/models`, cockpit proxy + `AgentWorkerClient.list_models`.
+  (2) **effort end-to-end** — new `effort`/`context_mode` on SessionStart +
+  SessionStartIn + the cockpit AgentSessionCreateIn; per-session effort in all
+  three adapters (claude_code_local appends `--effort`; claude_agent sets the
+  SDK-native `options.effort`; codex bakes `model_reasoning_effort=<effort>`
+  into its per-session client's config_overrides — the client is per-session
+  because AgentSessionService builds a fresh harness per session). Recorded in
+  the session_started event (requested_effort). (3) **UI picker** — the
+  AgentSessionPanel setup gains model + effort `<select>`s (efforts filtered to
+  the selected model's supported set; disabled choices never silently
+  substituted), passed through createAgentSession. (4) **/api/agent-harnesses
+  enriched** with `usage_summary` (from cockpit_views) + `models_endpoint` so
+  the selector can badge a runtime's live availability/limits. TWO REAL BUGS
+  FIXED: the Claude collector hardcoded `runtime_id="claude_agent"` →
+  parametrized (default preserved) so a claude_code_local feed attributes to
+  the right lane (was silently misattributing the local subscription lane to
+  the API lane); and worker_app.py's stale "wires ONLY the FakeHarness"
+  docstring corrected. +8 picker tests; ruff+mypy clean; tsc+vite build clean;
+  full suite green. STILL wiring (next): the worker→ClaudeRateLimitCollector.
+  feed() path (open design choice: worker-side vs cockpit SSE tee), badge
+  rendering in the picker optgroup, and the deployment runbook to actually
+  bring worker+cockpit up (an operator step — never run proofs by hand).
 - CLAUDE CODE LOCAL (SUBSCRIPTION-LOGIN) ADAPTER DONE + LIVE-PROVEN 07-12 (same
   branch `feat/claude-agent-readonly`, extends PR #36). **The key correction to
   the SDK adapter below: this machine can run Claude with NO ANTHROPIC_API_KEY**

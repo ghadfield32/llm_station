@@ -6,10 +6,11 @@ Exposes /api/agent-sessions/* over plain HTTP, gated by a bearer token the
 cockpit is separately configured with; binds to localhost only by default (see
 cli/agent_worker.py, the `cc agent-worker` entry point).
 
-Currently wires ONLY the FakeHarness (registry.default_registry()) — no real
-Claude/Codex adapter exists yet (WORKLOG.md "Agent-session chat integration",
-Phase 2/3, not started). This worker's job right now is proving the transport,
-not running a real agent.
+Wires the full `registry.default_registry()` — fake plus the REAL adapters:
+`codex_agent` (ChatGPT-login), `claude_code_local` (Claude CLI subscription
+login, the default Claude lane), and `claude_agent` (Agent SDK + API key). Each
+harness's availability is computed live by its own probe() (registry.probes()),
+so the cockpit's harness selector reflects real, per-host auth state.
 """
 from __future__ import annotations
 
@@ -60,6 +61,8 @@ class SessionStartIn(BaseModel):
     mode: str
     provider_profile: str = "default"
     model: str | None = None
+    effort: str | None = None
+    context_mode: str | None = None
     permission_profile: str = "read_only"
 
 
@@ -158,6 +161,22 @@ def build_app(*, store: SessionStoreProtocol | None = None,
     @app.get("/api/agent-harnesses", dependencies=[Depends(_authed)])
     async def list_harnesses() -> list[dict]:
         return await service.list_harnesses()
+
+    @app.get("/api/agent-harnesses/{harness_id}/models",
+            dependencies=[Depends(_authed)])
+    async def list_models(harness_id: str) -> dict:
+        """Runtime-discovered model catalog for the harness selector (Codex live
+        SDK models incl. supported reasoning efforts; Claude validated aliases).
+        A discovery failure (e.g. the SDK login expired) surfaces as an empty
+        list + a reason, never a 500 that blanks the picker."""
+        try:
+            models = await service.list_models(harness_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except Exception as exc:
+            return {"harness_id": harness_id, "models": [],
+                    "error": f"model discovery failed: {exc!r}"}
+        return {"harness_id": harness_id, "models": models}
 
     @app.get("/api/agent-sessions", dependencies=[Depends(_authed)])
     def list_sessions(conversation_id: str | None = None,

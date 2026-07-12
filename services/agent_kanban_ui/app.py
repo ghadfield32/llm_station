@@ -2958,6 +2958,8 @@ class AgentSessionCreateIn(BaseModel):
     mode: str
     provider_profile: str = "default"
     model: str | None = None
+    effort: str | None = None
+    context_mode: str | None = None
     permission_profile: str = "read_only"
 
 
@@ -3044,7 +3046,28 @@ def agent_harnesses() -> list:
     harnesses = _call_worker(client.list_harnesses)
     if not FAKE_AGENT_ENABLED:
         harnesses = [h for h in harnesses if h.get("harness_id") != "fake"]
+    # enrich each harness with its live Usage & Limits status (availability +
+    # buckets + rolled usage) when the usage layer is enabled, so the picker can
+    # badge a runtime honestly (near-limit / exhausted / stale) — never a
+    # fabricated number. runtime_id == harness_id for agent lanes.
+    if USAGE_ENABLED:
+        from command_center.usage import cockpit_views as cv
+        statuses = {s["runtime_id"]: s for s in cv.usage_overview(_get_usage_service())}
+        for h in harnesses:
+            st = statuses.get(h.get("harness_id"))
+            if st is not None:
+                h["usage_summary"] = st
+        for h in harnesses:
+            h["models_endpoint"] = f"/api/agent-harnesses/{h.get('harness_id')}/models"
     return harnesses
+
+
+@app.get("/api/agent-harnesses/{harness_id}/models")
+def agent_harness_models(harness_id: str) -> dict:
+    """Runtime-discovered model+effort catalog for the picker (proxied to the
+    worker, which asks the live harness)."""
+    client = _require_agent_sessions()
+    return _call_worker(client.list_models, harness_id)
 
 
 @app.get("/api/agent-sessions")

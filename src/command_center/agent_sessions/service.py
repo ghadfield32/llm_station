@@ -39,6 +39,24 @@ class AgentSessionService:
     async def list_harnesses(self) -> list[dict]:
         return await self.registry.probes()
 
+    async def list_models(self, harness_id: str) -> list[dict]:
+        """Runtime-discovered model catalog for one harness — Codex from the
+        live SDK model list, Claude from a validated CLI/API alias catalog, and
+        an empty list for a harness that exposes none (e.g. the fake). A fresh
+        instance per call, same discipline as probes(). `list_models` is an
+        OPTIONAL harness method discovered via getattr, so no adapter is forced
+        to implement it (mirrors how `interactive_approvals`/`shutdown` are
+        optional)."""
+        import inspect
+        harness = self.registry.get(harness_id).factory()  # KeyError on unknown
+        fn = getattr(harness, "list_models", None)
+        if fn is None:
+            return []
+        result = fn()
+        if inspect.isawaitable(result):
+            result = await result
+        return list(result)
+
     async def start_session(self, request: SessionStart) -> SessionRecord:
         descriptor = self.registry.get(request.harness_id)
         if request.mode not in descriptor.supported_modes:
