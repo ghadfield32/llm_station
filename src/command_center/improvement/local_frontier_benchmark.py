@@ -174,7 +174,11 @@ def main() -> int:
         description="Run configs/model-benchmarks.yaml suites against the local-frontier "
                     "candidates (colibrì today) — dry-run (preview, default) or --live "
                     "(real calls, can take a long time).")
-    parser.add_argument("--suite", default="chat")
+    parser.add_argument(
+        "--suite", default="chat_text_only",
+        help="defaults to the text-only suite (the tool-call-shaped 'chat' suite scores 0% "
+             "against a lane that never gets a tools schema by design — pass --suite chat "
+             "explicitly to see that mismatch directly instead)")
     parser.add_argument("--candidates", nargs="*", default=None,
                         help="omit to use every model in local-frontier-providers.yaml")
     parser.add_argument("--live", action="store_true",

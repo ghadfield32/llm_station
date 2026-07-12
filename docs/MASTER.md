@@ -873,6 +873,17 @@ completed the same day):
   A genuine text-only suite (instruction adherence, reasoning, long-answer coherence — no tool
   expectations) is the natural next step before pass_rate means anything for this lane; until
   then, tokens/sec is the only KPI worth reading from `make colibri-benchmark` here.
+  **Built 2026-07-12**: `configs/model-benchmarks.yaml` suite `chat_text_only` (10 cases —
+  instruction adherence, missing-info abstention, factual extraction, contradiction detection,
+  multi-step reasoning, summarization, no invented tool execution, no false action claims,
+  simulated multi-turn consistency, and a ~475-token needle-in-haystack retrieval case) — no
+  `response_format: json` anywhere, matching every no-tools lane's `json_mode: false`
+  capability. `frontier_benchmark.py` and `local_frontier_benchmark.py` now both default to it
+  instead of the tool-shaped `chat` suite (still available via `--suite chat` for anyone who
+  wants to see the mismatch directly). Same `role: chat` as the original suite, so it's usable
+  by `live_model_benchmark.py`'s declared-experiment A/B path too if a future experiment wants a
+  genuine colibrì-vs-OpenRouter-vs-local-Qwen text-quality comparison — not wired up yet, only
+  the suite itself.
 - `context_tokens` corrected from an 8192 placeholder to the server's real logged value: 4096.
 - Found and fixed a real bug during the live smoke test: `local_frontier_client._health()` built
   `{base_url}/health` where `base_url` includes the conventional `/v1` suffix, but colibrì's
@@ -961,6 +972,22 @@ not a real turn through its own `/api/chat` — that gap is now closed):
     failure mode of bind-mounting `.env` into a container on this platform, not something to
     write into `.env` and trust blindly mid-session again without a stability check
     (`wc -l .env` a few times in a row with no writes in between) first.
+  - A second, unrelated environment surprise while building the text-only benchmark suite (see
+    below): `.venv/Lib/site-packages/__editable__.command_center-4.0.0.pth` — this repo's OWN
+    venv's editable-install pointer — was found pointing at `C:\tmp\cc-agent-runtime\src`, a
+    different worktree entirely (see the "Agent-session chat integration" work). Every plain
+    `python -m command_center.…` invocation was silently running against the WRONG checkout's
+    code (pytest was unaffected — it manipulates `sys.path` itself and correctly resolved this
+    repo throughout). Symptom: a brand-new module (`local_frontier_benchmark.py`, only present
+    here) raised `ModuleNotFoundError` even though it demonstrably existed on disk. Fixed by
+    correcting the `.pth` file's single line to point back at this repo's own `src/` (the venv
+    has no `pip` module installed inside it, so a normal `pip install -e .` re-run silently hits
+    the system Python instead of the venv — editing the `.pth` file directly is the fix that
+    actually reaches the venv). Root cause not confirmed (most likely an earlier `pip install
+    -e .` run from the other worktree while this same venv happened to be active), but worth
+    a periodic sanity check (`python -c "import command_center; print(command_center.__file__)"`
+    should print a path under **this** repo) if `python -m command_center...` commands ever
+    behave inexplicably again.
 
 **Performance-tuning experiments, 2026-07-12** (`--ram 28` + default engine settings, measured
 against the same `"Reply with exactly one short sentence."` prompt, real `/api/chat` calls

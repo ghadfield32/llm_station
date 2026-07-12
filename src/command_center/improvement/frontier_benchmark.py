@@ -176,7 +176,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Run configs/model-benchmarks.yaml suites against the frontier "
                     "candidates — dry-run (cost preview, default) or --live (real calls).")
-    parser.add_argument("--suite", default="chat")
+    parser.add_argument(
+        "--suite", default="chat_text_only",
+        help="defaults to the text-only suite (the tool-call-shaped 'chat' suite scores near-0% "
+             "against a lane that never gets a tools schema by design — pass --suite chat "
+             "explicitly to see that mismatch directly instead)")
     parser.add_argument("--candidates", nargs="*", default=DEFAULT_CANDIDATES)
     parser.add_argument("--live", action="store_true",
                         help="make real calls (spends money if the lane is enabled)")
