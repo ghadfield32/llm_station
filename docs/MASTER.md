@@ -87,8 +87,12 @@ runtimes with their own SDK/auth/worktree/execution state, architecturally
 separate from the chat lane (full detail: §4.5). Honest status as of this
 snapshot: the **Codex read-only runtime is real and proven** (pinned
 `openai-codex==0.1.0b3`, reuses the existing `codex login`, 14/14 live
-cockpit-acceptance turns, zero repo mutation; PR #33). **Claude Agent is still
-a planned runtime, not shipped.** A **unified Usage & Limits subsystem** (§4.6)
+cockpit-acceptance turns, zero repo mutation; PR #33). The **Claude read-only
+adapter is now built too** (pinned `claude-agent-sdk`, defense-in-depth
+read-only, "Claude Agent"/`ANTHROPIC_API_KEY` per Anthropic's embedding rules;
+PR #36) — hermetically tested against the live-introspected SDK, but its **live
+run is DEFERRED** pending `ANTHROPIC_API_KEY` + egress enablement (an operator
+decision). A **unified Usage & Limits subsystem** (§4.6)
 is built to lock the four concepts (usage / provider limits / availability /
 internal budget) apart so history is never shown as remaining quota — Phase 1
 foundation + Phase 1.1 hardening (PR #34) and the **first real provider
@@ -430,12 +434,30 @@ chain `feat/agent-session-runtime` → `feat/unified-runtime-usage` →
   proven by a hash-before/after harness. **14/14 live cockpit-acceptance turns
   passed against the real account, zero repo mutation.** PR #33 (marked ready,
   merge held).
+- **The real Claude read-only adapter** (`adapters/claude_agent.py`, pinned
+  `claude-agent-sdk==0.2.116`, optional extra `agent-claude`) — built to the
+  live-introspected SDK surface. Presented as **"Claude Agent"** (never "Claude
+  Code") and authenticated by **`ANTHROPIC_API_KEY`** (Anthropic forbids
+  claude.ai-login for embedded products) behind `--allow-agent-session-egress`.
+  Read-only is **defense-in-depth** — `allowed_tools={Read,Glob,Grep}` + a
+  `disallowed_tools` writelist + a deny-by-default `can_use_tool` gate (because
+  `allowed_tools` is a pre-approve list, not a strict allowlist) + isolated
+  `setting_sources=None` + empty mcp/plugins. Durable external session id +
+  `resume` on restart, message→AgentEvent translation, real interrupt, cost
+  capture. `RateLimitEvent`→a `rate_limit` event feeding the Claude collector
+  (§4.6). Registry now wires it (replacing the NotBuiltHarness placeholder). 26
+  hermetic tests. **Live acceptance is DEFERRED** — unlike Codex (which reused
+  an existing `codex login`), Claude needs `ANTHROPIC_API_KEY` + egress
+  enablement (an operator decision, still off), so it is built + hermetically
+  proven but not yet run end-to-end. PR #36.
 
 **What is NOT built yet** (honest gaps — see §4.8 for the ordered plan):
 
-- **Claude Agent is still a planned runtime, not a shipped one.** The SDK
-  primitives are right (`claude-agent-sdk`, restricted `allowed_tools`,
-  resumable `session_id`, structured `RateLimitEvent`), but no adapter exists.
+- **Claude Agent has no LIVE run yet** — the adapter is built + hermetically
+  tested, but a real end-to-end session awaits `ANTHROPIC_API_KEY` +
+  `--allow-agent-session-egress` (both an operator decision). The
+  worker→`ClaudeRateLimitCollector.feed()` wiring and cockpit selectability are
+  also still pending.
 - **Write-capable execution is unfinished.** Both agents are read-only today.
   Writable work stays gated behind leased worktrees, mission bindings, branch
   protection, test evidence, and independent review — none of that write path
@@ -524,11 +546,13 @@ resetsAt, credits, planType) plus the `account/rateLimits/updated` server
 notification as a refresh trigger. *(Note: this pinned app-server exposes no
 `account/usage/read` — token usage comes from per-thread `ThreadTokenUsage`
 events, handled by the adapter, not this collector.)* **Claude** → the SDK's
-structured `RateLimitEvent`
-(status allowed/allowed_warning/rejected; type five_hour / seven_day /
-seven_day_opus / seven_day_sonnet / overage) — record the SDK-emitted state,
-never infer subscription quota from token counts; show unknown/stale until a
-real event exists. **OpenRouter** → `GET /api/v1/key` (limit, limit_remaining,
+structured `RateLimitEvent` **(BUILT — `usage/collectors/claude_agent.py`,
+PR #36)**: status allowed/allowed_warning/rejected; type five_hour / seven_day /
+seven_day_opus / seven_day_sonnet / overage. Because it is EVENT-driven (not
+pollable), the collector is fed by the adapter's `rate_limit` events and its
+`collect()` returns an honest UNKNOWN until one is seen — it records the
+SDK-emitted state, never infers subscription quota from token counts.
+**OpenRouter** → `GET /api/v1/key` (limit, limit_remaining,
 limit_reset, usage_daily/weekly/monthly, byok_usage) — the authoritative
 remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs`
 (+ custom spend-log metadata for per-user/project/request attribution).

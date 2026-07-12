@@ -37,6 +37,15 @@ dev = [
 agent-codex = [
   "openai-codex==0.1.0b3",
 ]
+# Real Claude Agent harness (src/command_center/agent_sessions/adapters/claude_agent.py).
+# Pinned EXACTLY — same reasoning as agent-codex: the SDK drives a bundled `claude`
+# CLI whose event/type surface can shift between releases. Class/field surface
+# verified by live introspection of THIS version (see WORKLOG.md "Agent-session chat
+# integration", Claude adapter). Embedded-product auth is ANTHROPIC_API_KEY (Anthropic
+# forbids claude.ai-login for third-party products) behind --allow-agent-session-egress.
+agent-claude = [
+  "claude-agent-sdk==0.2.116",
+]
 
 # Console scripts are only exposed for commands that resolve their own paths and so work from
 # any directory. The config-pipeline commands read `configs/` relative to the repo root and are
@@ -72,13 +81,13 @@ ignore = ["E702"]
 files = ["src"]
 python_version = "3.12"
 
-# openai-codex is an OPTIONAL, un-stubbed beta SDK (extra `agent-codex`); it is
-# imported lazily inside functions so the package works without it. mypy can't
-# resolve it in the default env, so treat its absence as a missing-import
-# (not a type error) everywhere it's referenced — the adapter, the preflight,
-# and the usage collector.
+# openai-codex / claude-agent-sdk are OPTIONAL, un-stubbed SDKs (extras
+# `agent-codex` / `agent-claude`); both are imported lazily inside functions so
+# the package works without them. mypy can't resolve them in the default env, so
+# treat their absence as a missing-import (not a type error) everywhere they're
+# referenced — the adapters, the preflight, and the usage collectors.
 [[tool.mypy.overrides]]
-module = ["openai_codex.*"]
+module = ["openai_codex.*", "claude_agent_sdk.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

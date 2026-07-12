@@ -49,35 +49,41 @@ def test_probes_report_fake_as_available(registry):
     assert probes["fake"]["production"] is False
 
 
-def test_probes_report_unbuilt_harness_with_exact_blocker_not_generic(registry):
-    # codex_agent is a REAL adapter now (see adapters/codex_agent.py) — its
-    # probe() result depends on the real environment (SDK installed? real
-    # account authenticated?), which test_codex_agent_adapter.py covers
-    # deterministically via a fake SDK. claude_agent remains a genuine
-    # NotBuiltHarness placeholder, so it's the one this test can assert on
-    # unconditionally.
+def test_probes_report_real_harness_blocker_concretely_not_generic(registry):
+    # BOTH real adapters (codex_agent, claude_agent) now give an honest,
+    # environment-dependent probe. On a test host without the optional SDK/auth
+    # they are unavailable, but with a CONCRETE reason (missing SDK or missing
+    # key), never a generic "unavailable" — the load-bearing discipline. claude
+    # is asserted here because its blocker is deterministic (SDK not installed
+    # OR ANTHROPIC_API_KEY absent), unlike codex's live-account probe.
     probes = {p["harness_id"]: p for p in asyncio.run(registry.probes())}
     p = probes["claude_agent"]
     assert p["available"] is False
     assert p["detail"] != "unavailable"
     assert len(p["detail"]) > 20   # a real, specific reason, not a stub string
-    assert "no real adapter built yet" in p["detail"]
+    assert ("claude-agent-sdk" in p["detail"]) or ("ANTHROPIC_API_KEY" in p["detail"])
 
 
-def test_probing_unbuilt_claude_harness_never_imports_its_sdk(registry):
-    # codex_agent's probe() now legitimately imports openai_codex to give an
-    # honest availability answer (see codex_agent.py's _import_sdk) — that's
-    # expected, not a regression. claude_agent is still NotBuiltHarness, so
-    # it alone keeps the "never imports just from listing" guarantee.
+def test_constructing_claude_harness_never_imports_its_sdk(registry):
+    # The deferred-import guarantee: building the harness instance (factory())
+    # must NOT import claude_agent_sdk — only probe()/start_session do (see
+    # claude_agent.py's _import_sdk), so a deployment without the agent-claude
+    # extra can still construct/list harnesses without an import-time failure.
     sys.modules.pop("claude_agent_sdk", None)
-    asyncio.run(registry.probes())
+    registry.get("claude_agent").factory()
     assert "claude_agent_sdk" not in sys.modules
 
 
-def test_unbuilt_harness_refuses_every_lifecycle_method_not_just_probe(registry):
-    harness = registry.get("claude_agent").factory()
+def test_not_built_harness_refuses_every_lifecycle_method_not_just_probe():
+    # NotBuiltHarness is no longer wired for codex/claude (both are real now),
+    # but the CLASS is still the contract for any future harness_id — test it
+    # directly so the "probe() answers, everything else fails loud" guarantee
+    # stays covered.
     from command_center.agent_sessions.protocol import ApprovalDecision, SessionStart
+    from command_center.agent_sessions.registry import NotBuiltHarness
 
+    harness = NotBuiltHarness(harness_id="future_agent", blocker="not built yet")
+    assert asyncio.run(harness.probe()).available is False
     with pytest.raises(RuntimeError):
         asyncio.run(harness.start_session(
             SessionStart(conversation_id="c1", repo_id="r", mode="analysis")))

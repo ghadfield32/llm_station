@@ -124,12 +124,15 @@ def default_registry(store: SessionStoreProtocol) -> HarnessRegistry:
                 fromlist=["CodexAgentHarness"]).CodexAgentHarness(store)),
         HarnessDescriptor(
             harness_id="claude_agent", label="Claude Agent", production=True,
-            supported_modes=("analysis", "workspace"),
-            factory=lambda: NotBuiltHarness(
-                harness_id="claude_agent",
-                blocker="no real adapter built yet (see WORKLOG.md 'Agent-session "
-                        "chat integration', Phase 2) — requires the "
-                        "--allow-agent-session-egress policy decision plus "
-                        "ANTHROPIC_API_KEY before it can even be attempted; run "
-                        "`cc agent-preflight --harness claude` for current status")),
+            # analysis (read-only) only in this milestone — workspace/mission
+            # modes are refused by ClaudeAgentHarness.start_session itself.
+            supported_modes=("analysis",),
+            # Deferred import (see claude_agent.py's own _import_sdk): only
+            # imported when a Claude session is actually probed/started, so a
+            # deployment without the optional `agent-claude` extra can still
+            # import registry.py and list harnesses. probe() reports the real
+            # blocker (SDK missing / ANTHROPIC_API_KEY absent) honestly.
+            factory=lambda: __import__(
+                "command_center.agent_sessions.adapters.claude_agent",
+                fromlist=["ClaudeAgentHarness"]).ClaudeAgentHarness(store)),
     ])

@@ -19,3 +19,15 @@ codex_agent:
   preferred_model: gpt-5.5
   reasoning_effort: medium
   allow_sdk_default_fallback: true
+
+# Claude Agent (claude-agent-sdk). Unlike Codex there is NO live model-list RPC:
+# an explicit/preferred model is passed straight to the SDK, which rejects an
+# unknown one at connect time (surfaced as a real error, never swallowed). Leave
+# preferred_model unset to use the SDK's own default model.
+claude_agent:
+  preferred_model: null
+  # Optional per-session INTERNAL budget cap (ClaudeAgentOptions.max_budget_usd).
+  # This is OUR spend guard for the API-billed Claude Agent lane, kept strictly
+  # distinct from the provider's rate-limit quota (RateLimitEvent) — the usage
+  # subsystem never conflates internal budget with provider allowance.
+  max_budget_usd: null
