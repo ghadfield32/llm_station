@@ -1,0 +1,38 @@
+# Unified runtime Usage / Limits / Availability monitoring — governs how the
+# usage subsystem (src/command_center/usage/) polls PROVIDER-reported
+# usage/limits, when it alerts, and how those signals gate routing. This is
+# NOT a spend cap (see frontier-router-budgets.yaml / agent-session-budgets.yaml
+# for internal budgets); it's the monitoring + routing-gate policy.
+#
+# Validated by `make validate` (UsageMonitoringConfig in schemas/contracts.py).
+schema_version: command-center.usage-monitoring.v1
+enabled: true
+
+# Percent-of-window thresholds that raise warning / critical alerts. An alert
+# only fires when a provider actually REPORTS a used-percent — an UNKNOWN
+# bucket never alerts (you cannot warn on data you don't have).
+thresholds:
+  warning_percent: 75
+  critical_percent: 90
+
+# How often collectors refresh a runtime's usage/limits. Faster while a
+# session is active, slower when idle.
+polling:
+  active_session_seconds: 30
+  idle_seconds: 300
+
+# How limits/availability gate automatic executor routing. allow_silent_fallback
+# is structurally refused by the contract (KPI: silent fallbacks = 0) — every
+# executor rejection must be surfaced, never a silent substitution.
+routing:
+  block_when_exhausted: true
+  allow_silent_fallback: false
+  reserve_capacity_for_high_risk_missions: true
+
+# Where alerts are delivered (each fires ONCE per threshold/reset window —
+# dedup lives in the usage store, not here).
+alerts:
+  cockpit: true
+  chat_notification: true
+  ledger: true
+  email_digest: true
