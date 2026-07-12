@@ -23,11 +23,11 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 from ..schemas import contracts  # noqa: F401  (import-time contract registration)
+from .benchmark_scoring import score_case
 from .schema import ModelBenchmarksConfig
 
 SUITE_PATH = Path("configs/model-benchmarks.yaml")
@@ -43,41 +43,6 @@ DEFAULT_CANDIDATES = ["glm-5.2", "deepseek-v4-pro", "kimi-k2.6"]
 
 def _load_suites(path: Path = SUITE_PATH) -> ModelBenchmarksConfig:
     return ModelBenchmarksConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
-
-
-def _score_case(case, content: str) -> dict[str, Any]:
-    """Rule-based scoring against the case's OWN declared expectations — the same
-    checks the case author wrote for local incumbents, applied identically here. No
-    judge model, no fabricated quality number; a case either matches its declared
-    contract or it doesn't."""
-    ok = True
-    reasons: list[str] = []
-    parsed: dict | None = None
-    if case.response_format == "json":
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError:
-            ok = False
-            reasons.append("response is not valid JSON")
-        if parsed is not None:
-            for key in case.required_json_keys:
-                if key not in parsed:
-                    ok = False
-                    reasons.append(f"missing required key {key!r}")
-            for key, expected in case.expected_json_values.items():
-                if parsed.get(key) != expected:
-                    ok = False
-                    reasons.append(f"{key}={parsed.get(key)!r} != expected {expected!r}")
-    for needle in case.expected_contains:
-        if needle not in content:
-            ok = False
-            reasons.append(f"missing expected substring {needle!r}")
-    for needle in case.forbidden_contains:
-        if needle in content:
-            ok = False
-            reasons.append(f"contains forbidden substring {needle!r}")
-    return {"case_id": case.id, "ok": ok, "reasons": reasons, "safety": case.safety,
-            "metric_tags": case.metric_tags}
 
 
 def dry_run(suite_role: str, candidates: list[str]) -> dict:
@@ -137,7 +102,7 @@ async def run_live(suite_role: str, candidates: list[str]) -> dict:
                     continue
                 elapsed_ms = (time.monotonic() - t0) * 1000
                 content = str(msg.get("content") or "")
-                score = _score_case(case, content)
+                score = score_case(case, content)
                 usage = msg.get("_usage") or {}
                 score.update({
                     "blocked": False,

@@ -1089,19 +1089,25 @@ def _role_names() -> set[str]:
 
 
 _FRONTIER_PREFIX = "frontier:"
+_LOCAL_FRONTIER_PREFIX = "local-frontier:"
 
 
 def _get_core(model: str):
     """One GatewayCore per model role (cached) — the same loop Discord uses, so
     the in-app agent can chat AND drive the governed action verbs. A
     "frontier:<id>" model routes to the paid frontier-router lane instead of
-    LiteLLM — no tools, no board/memory context (see channels/frontier_client.py)."""
+    LiteLLM; a "local-frontier:<id>" model routes to the experimental loopback
+    lane instead — neither gets tools or board/memory context (see
+    channels/frontier_client.py / channels/local_frontier_client.py)."""
     if model not in _cores:
         from command_center.channels.core import GatewayConfig, GatewayCore
         frontier_id = (model[len(_FRONTIER_PREFIX):]
                        if model.startswith(_FRONTIER_PREFIX) else None)
+        local_frontier_id = (model[len(_LOCAL_FRONTIER_PREFIX):]
+                             if model.startswith(_LOCAL_FRONTIER_PREFIX) else None)
         _cores[model] = GatewayCore(GatewayConfig.build(
-            surface="app", model=model, frontier_model_id=frontier_id))
+            surface="app", model=model, frontier_model_id=frontier_id,
+            local_frontier_model_id=local_frontier_id))
     return _cores[model]
 
 
@@ -2435,14 +2441,19 @@ def chat_repo_context(repo_id: str) -> dict:
 
 @app.get("/api/chat/runtime")
 def chat_runtime() -> dict:
-    """What the cockpit chat actually uses: ONE harness (GatewayCore), TWO lanes.
+    """What the cockpit chat actually uses: ONE harness (GatewayCore), THREE lanes.
     LOCAL (default): every `roles` entry routes through the one LiteLLM gateway
     to Ollama — free, tool-integrated, board/memory-aware. FRONTIER (opt-in,
     paid): `frontier_models` lists the budgeted OpenRouter escalation lane
     (configs/frontier-router-{providers,budgets}.yaml) — plain conversation
     only (no tools, no board/memory context leaves the machine), selectable
     only once an operator sets budgets.default.enabled=true AND the provider
-    key. `executors` (Claude Code / Codex CLI) are a THIRD, distinct thing:
+    key. LOCAL FRONTIER (opt-in, experimental, free): `local_frontier_models`
+    lists loopback-only disk-streamed engines (colibrì today —
+    configs/local-frontier-providers.yaml) — same "no tools, no board/memory"
+    discipline as the paid frontier lane, but nothing leaves the machine and
+    there is no $ cost, only a (potentially very long) wall-clock one.
+    `executors` (Claude Code / Codex CLI) are a FOURTH, distinct thing:
     agentic coding harnesses that drive leased worktrees via their own
     subscription/OAuth login, not conversational chat models — they never
     appear in this picker. Chat-gated like every /api/chat* route."""
@@ -2450,6 +2461,7 @@ def chat_runtime() -> dict:
     lanes = models()
     chat_role = next((r for r in lanes["roles"] if r["role"] == "chat"), None)
     from command_center.channels.frontier_client import available_frontier_models
+    from command_center.channels.local_frontier_client import available_local_frontier_models
     return {
         "enabled": CHAT_ENABLED,
         "harness": "GatewayCore",
@@ -2475,6 +2487,18 @@ def chat_runtime() -> dict:
             "then run `make frontier-router-egress-check`. A frontier turn "
             "never carries tools, board state, or memory to the provider."
         ),
+        "local_frontier_models": available_local_frontier_models(),
+        "local_frontier_note": (
+            "Experimental, disabled-by-default LOCAL lane for open-weight models too "
+            "large for VRAM but small enough to disk-stream on this machine (colibrì / "
+            "GLM-5.2 744B today). Free, but self-reported at 0.05-1.06 tokens/sec — a "
+            "reply can take minutes. Never carries tools, board state, or memory (same "
+            "discipline as the frontier lane); the engine itself rejects tool schemas. "
+            "Off by default; enabling it means building the engine, downloading its "
+            "~370GB weights, starting its server, then flipping "
+            "configs/local-frontier-providers.yaml enabled: true — see docs/MASTER.md "
+            "\"Local frontier lane (colibrì)\"."
+        ),
         "stream_endpoint": "/api/chat/stream",
         "action_endpoint": "/api/action",
         "activity_endpoint": "/api/activity",
@@ -2486,6 +2510,9 @@ def chat_runtime() -> dict:
             "(forbidden-provider scan). The FRONTIER lane (frontier_models "
             "above) is the sanctioned path to a paid model — a separate, "
             "budgeted, redacted escalation, never a change to the local "
+            "lane's roles. The LOCAL FRONTIER lane (local_frontier_models "
+            "above) is a third, free-but-experimental option for models too "
+            "large for VRAM — loopback-only, never a change to the local "
             "lane's roles."
         ),
         "chat_memory_note": (
@@ -2767,6 +2794,25 @@ def _validated_model(model: str) -> str:
             raise HTTPException(
                 status_code=503,
                 detail=f"frontier model {frontier_id!r} is not enabled yet: {reason}")
+        return model
+    if model.startswith(_LOCAL_FRONTIER_PREFIX):
+        from command_center.channels.local_frontier_client import available_local_frontier_models
+        local_frontier_id = model[len(_LOCAL_FRONTIER_PREFIX):]
+        options = {r["model_id"]: r for r in available_local_frontier_models()}
+        row = options.get(local_frontier_id)
+        if row is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown local-frontier model {local_frontier_id!r}; pick from "
+                       f"{sorted(options)}")
+        if not row["selectable"]:
+            reason = ("the local-frontier lane is disabled "
+                      "(configs/local-frontier-providers.yaml enabled=false)"
+                      if not row["lane_enabled"] else
+                      f"server health check returned {row['health']!r} — is it running?")
+            raise HTTPException(
+                status_code=503,
+                detail=f"local-frontier model {local_frontier_id!r} is not ready: {reason}")
         return model
     roles = _role_names()
     if model not in roles:
