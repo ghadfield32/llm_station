@@ -13,7 +13,7 @@
 
 ---
 
-## Current readiness snapshot (2026-07-11)
+## Current readiness snapshot (2026-07-12)
 
 The **first-party cockpit** (`services/agent_kanban_ui`, optional Docker
 Compose profile `ui`) is the primary operator surface — see
@@ -81,11 +81,36 @@ resume format, outreach doc, held-claims policy) is in active development
 and testing as of this snapshot — see the flagged note in §6.7; it is not
 yet committed.
 
-Everything above is live-probed on a rebuilt cockpit container and covered
-by regression tests (`tests/test_gateway_transcript.py`,
-`tests/test_agent_kanban_ui.py`, `tests/test_domain_surfaces.py`, and the
-`tests/job_search/` suite); `cc validate`, ruff, and the frontend
-`tsc`/`vite build` are clean at each commit in the range above.
+**A separate agent lane now exists in a stacked worktree (not yet on `main`).**
+Claude Code and Codex are being built as **Agent Sessions** — real agentic
+runtimes with their own SDK/auth/worktree/execution state, architecturally
+separate from the chat lane (full detail: §4.5). Honest status as of this
+snapshot: the **Codex read-only runtime is real and proven** (pinned
+`openai-codex==0.1.0b3`, reuses the existing `codex login`, 14/14 live
+cockpit-acceptance turns, zero repo mutation; PR #33). **Claude Agent is still
+a planned runtime, not shipped.** A **unified Usage & Limits subsystem** (§4.6)
+is built to lock the four concepts (usage / provider limits / availability /
+internal budget) apart so history is never shown as remaining quota — Phase 1
+foundation + Phase 1.1 hardening (PR #34) and the **first real provider
+collector** (Codex app-server rate limits, `PROVIDER_NATIVE`, live-smoke passed;
+PR #35) have landed. The backend is deliberately **ahead of** the UI: the
+`/api/model-usage` routes and the Usage & Limits dashboard are the next surface,
+not yet live. The ordered plan to the full "pick either agent, see honest live
+quota, let the pipeline route them" end state — plus the wrapped
+`openai/codex-plugin-cc` bridge — is in §4.8. This whole chain is stacked
+behind PR #32 and is **not** merged to `main` yet, so it is **not** part of the
+live cockpit container below; its evidence is per-branch tests + live smokes,
+not the rebuilt-container probe.
+
+Everything above (excluding the stacked agent lane) is live-probed on a rebuilt
+cockpit container and covered by regression tests
+(`tests/test_gateway_transcript.py`, `tests/test_agent_kanban_ui.py`,
+`tests/test_domain_surfaces.py`, and the `tests/job_search/` suite);
+`cc validate`, ruff, and the frontend `tsc`/`vite build` are clean at each
+commit in the range above. The agent-lane branches carry their own green
+suites (`tests/test_agent_sessions*.py`, `tests/test_agent_preflight.py`,
+`tests/test_codex_usage_collector.py`, the `usage/` suites) with ruff + `mypy
+src/command_center/usage/` clean.
 
 ---
 
@@ -339,6 +364,234 @@ bridge; on demand/host: packages, import_books/dags, selftest.
    Ledger UI / a chat channel.
 2. **Merge**: GitHub PR — CODEOWNERS review + required checks. The bot can
    never merge.
+
+---
+
+### 4.5 The agent lane — Agent Sessions (Codex & Claude coding runtimes)
+
+**The one architectural rule for agents:** Claude Code and Codex are **not**
+chat models and never enter GatewayCore. They are agentic *runtimes* — their
+own SDK, tool loop, auth, filesystem/shell authority, resumable session state,
+and execution state. They live in a **separate lane** from the supervised
+`/chat/completions` chat surface. This split is not stylistic; it is the whole
+safety posture (Orca/Omnigent systems separate chat from agent harnesses for
+the same reason). The frontier tool_calls incident (§14, 2026-07-10/11) proved
+it empirically: even a small, explicitly *tool-less* integration crossed a
+dispatch boundary the moment the harness trusted a response field it never
+offered. Widening the ordinary chat surface to something with real shell/FS
+authority would be a bigger version of that same mistake. Anthropic's own
+Agent-SDK docs reinforce the boundary from the other side: third-party
+products must authenticate with an API key, **not** a claude.ai login, and
+should present the runtime as **"Claude Agent"** (not "Claude Code"). So the
+target is fixed:
+
+- **Chat lane** — supervised conversation over GatewayCore + LiteLLM + Ollama
+  (+ the opt-in OpenRouter frontier lane) with curated tools. Unchanged.
+- **Agent lane** — a separate authenticated worker path (host worker →
+  `AgentSessionService` → a Codex/Claude adapter → a leased repo checkout →
+  the Ledger) with durable state, explicit repo/worktree controls,
+  interrupt/resume, and a stronger trust boundary.
+
+**What is BUILT and proven** (stacked worktree `C:\tmp\cc-agent-runtime`, branch
+chain `feat/agent-session-runtime` → `feat/unified-runtime-usage` →
+`feat/codex-usage-collector`; the whole chain is stacked behind PR #32 and is
+**not yet on `main`**):
+
+- `cc agent-preflight` (`cli/agent_preflight.py`) — evidence-only readiness
+  probe (no routing change, no writes, no network). Verified real host facts,
+  incl. the PyPI naming trap (`openai-codex` is OpenAI's; `codex-sdk` is
+  Cleanlab's unrelated product). 14 hermetic tests.
+- **A separately-gated egress flag.** `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` are
+  forbidden by `check_forbidden_providers.py` and are **not** exemptable by the
+  frontier-router flag. A new, fully independent `--allow-agent-session-egress`
+  + `configs/agent-session-budgets.yaml` (default `enabled: false`,
+  per-harness toggles) gates the agent lane's keys only — it never touches the
+  local LiteLLM lane, and neither egress flag exempts the other's keys (proven
+  both directions). 8 tests.
+- **`src/command_center/agent_sessions/`** — normalized `AgentEvent` vocabulary
+  (deliberately distinct from the chat event shape), a `runtime_checkable`
+  `AgentHarness` Protocol (probe/start/send/resolve_approval/interrupt/
+  resume/close), an in-memory `SessionStore` (the *store* owns
+  monotonic/gapless sequence numbers — never trusts a harness value;
+  `events_since` is the reconnect primitive), a deterministic `FakeHarness`
+  test double, and durable **Ledger** persistence via the proven mirrored-DDL
+  pattern (`agent_sessions`/`agent_session_events`/`agent_session_approvals`
+  tables + REST, drift-tested, restart-recovery-tested). `LedgerSessionStore`
+  is a cross-backend drop-in for the in-memory store (same lifecycle
+  assertions pass against a real Ledger app instance).
+- **The real Codex read-only adapter** (`adapters/codex_agent.py`) — pinned
+  `openai-codex==0.1.0b3` (optional extra `agent-codex`), **reuses the existing
+  `codex login` session** (no `OPENAI_API_KEY` needed), dynamic model
+  validation, per-session `config_overrides` (so a newer global
+  `~/.codex/config.toml` can't break a call), persistent external thread IDs,
+  same-thread follow-ups, resume-after-restart, real interrupt, read-only
+  sandboxing, truthful approval semantics, and a **zero-mutation** discipline
+  proven by a hash-before/after harness. **14/14 live cockpit-acceptance turns
+  passed against the real account, zero repo mutation.** PR #33 (marked ready,
+  merge held).
+
+**What is NOT built yet** (honest gaps — see §4.8 for the ordered plan):
+
+- **Claude Agent is still a planned runtime, not a shipped one.** The SDK
+  primitives are right (`claude-agent-sdk`, restricted `allowed_tools`,
+  resumable `session_id`, structured `RateLimitEvent`), but no adapter exists.
+- **Write-capable execution is unfinished.** Both agents are read-only today.
+  Writable work stays gated behind leased worktrees, mission bindings, branch
+  protection, test evidence, and independent review — none of that write path
+  is wired yet. Codex is *closest* (its read-only runtime exists) but is not a
+  complete pipeline executor.
+- **Cockpit Agent-Sessions UI** beyond the acceptance harness, and the
+  automatic mission routing that would let the pipeline *choose* an agent.
+
+### 4.6 Unified Usage & Limits — one shared metering layer
+
+Not a second dashboard bolted on — a **mandatory shared subsystem**
+(`src/command_center/usage/`) across every chat model **and** every coding
+agent, and the prerequisite before any agent becomes eligible for automatic
+routing. It keeps **four concepts rigorously distinct** so historical usage is
+never shown as remaining provider quota:
+
+1. **Usage** — observed tokens / calls / sessions / cost / duration.
+2. **Provider limits** — provider-*reported* quota buckets + resets.
+3. **Availability** — installed / authed / busy / limited / exhausted /
+   unavailable / unknown.
+4. **Internal budget** — our own caps and routing rules.
+
+**Load-bearing invariants, each proven by a test** (reuse these when adding a
+collector): provider quota is **never** overwritten by an estimate
+(source-priority `PROVIDER_NATIVE > PROVIDER_DERIVED > RECONCILER > FAKE >
+ESTIMATE` — a *fresh* estimate loses to a *stale* provider value); UNKNOWN
+stays unknown and stale is visibly stale (never coerced to 0%); multiple
+provider buckets stay separate (never one flattened %); ingest is idempotent by
+`source_hash`; alerts dedup by `(runtime,subject,kind,threshold,reset)`;
+credentials / raw provider responses / raw ccusage logs never enter the Ledger;
+config structurally refuses `routing.allow_silent_fallback: true`.
+
+**BUILT + pushed:**
+
+- **Phase 1 foundation** (PR #34) — schemas, protocol, store (in-memory + the
+  shared `select_latest_*` source-priority selectors), alerts, attribution,
+  reconciliation, service (ingest → dedup-alert → roll-up), a deterministic
+  `FakeCollector`, durability via 5 Ledger tables (`usage.v1`, mirrored-DDL +
+  drift test), and `configs/usage-monitoring.yaml` (`UsageMonitoringConfig`,
+  in `CONFIG_CONTRACTS`, covered by `make validate`). Reuses
+  `improvement/router_cost.py` for cost math instead of rebuilding it.
+- **Phase 1.1 hardening** (same PR) — (a) **unknown cost is never $0.00**:
+  `cost_usd` is nullable and `CostSource` is a real enum; subscription
+  Codex/Claude activity is `subscription_not_metered`, shown as "cost
+  unavailable". (b) **No cross-collector double-counting**: `SampleKind` where
+  only `request_delta` is additive, so the same activity seen as a session
+  total AND a provider-window total AND a ccusage reconciliation counts once.
+  (c) Attribution **driver facts** (reasoning_tokens, repository_scans,
+  test_runs, retries, failed_calls, worker_restarts, session_resumes). (d)
+  Durable **collector checkpoints** (`model_usage_collection_state`) + DDL
+  indexes + a retention policy that never prunes the evidence behind a routing
+  decision. 50 usage tests.
+- **Phase 2 — the FIRST real provider collector** (PR #35, this branch):
+  `collectors/codex_app_server.py` reads Codex quota via the raw app-server RPC
+  `account/rateLimits/read` (the SDK exposes no named wrapper) off the
+  underlying `AsyncCodexClient`, maps the `primary`/`secondary` RateLimit
+  windows to `PROVIDER_NATIVE` limit snapshots (epoch→ISO reset, window
+  seconds), and derives availability from `rate_limit_reached_type` / worst
+  used-percent. Emits **limits + availability only** — per-turn tokens stay
+  with the adapter's own events so nothing double-counts. Degrades honestly
+  (SDK-absent → UNAVAILABLE, auth fail → AUTHENTICATION_REQUIRED, RPC fail →
+  still AVAILABLE + warning; never raises for an expected condition).
+  `UsageService.run_collector_tracked()` wraps it in a durable collector
+  checkpoint. **Live smoke passed** against the real prolite account; 10
+  hermetic tests + a mypy override for the optional un-stubbed `openai_codex.*`.
+
+**The authoritative provider sources each remaining collector must use** (so
+they are provider-native, not estimates): **Codex** → app-server
+`account/rateLimits/read` + `account/rateLimits/updated` + `account/usage/read`
+(usedPercent, windowDurationMins, resetsAt, multi-bucket `rateLimitsByLimitId`,
+planType). **Claude** → the SDK's structured `RateLimitEvent`
+(status allowed/allowed_warning/rejected; type five_hour / seven_day /
+seven_day_opus / seven_day_sonnet / overage) — record the SDK-emitted state,
+never infer subscription quota from token counts; show unknown/stale until a
+real event exists. **OpenRouter** → `GET /api/v1/key` (limit, limit_remaining,
+limit_reset, usage_daily/weekly/monthly, byok_usage) — the authoritative
+remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs`
+(+ custom spend-log metadata for per-user/project/request attribution).
+**Ollama** → health = availability only, never a fabricated quota. **ccusage**
+→ reconciler only (never a primary count).
+
+**What is NOT built yet:** every collector except Codex; the `/api/model-usage`
+(+ limits/alerts) cockpit routes; and the Usage & Limits **UI** itself
+(selector badges, overview cards, top-cost-drivers, reset timelines, alert
+center, routing-evidence panel). The backend is deliberately **ahead of** the
+UI — the interface becomes authoritative only after the semantics above are
+locked, which they now are.
+
+### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
+
+`openai/codex-plugin-cc` (latest release v1.0.6, 2026-07-08) runs Codex from
+*inside* Claude Code: `/codex:review`, `/codex:adversarial-review`,
+`/codex:rescue`, `/codex:transfer`, `/codex:status`, `/codex:result`,
+`/codex:cancel`, plus an optional review gate. It is genuinely useful for the
+plan-deeply-in-Claude / execute-or-second-pass-in-Codex / re-check-in-Claude
+loop. **But** its README is explicit that it uses the same local Codex CLI
+auth, runtime, config, and *current workspace* by default, and that its review
+gate can spin a long Claude/Codex loop that drains usage fast. That makes it an
+excellent **local operator convenience**, but the **wrong** thing to promote
+into an authoritative control plane: it writes local job files/logs, isn't
+bound to a leased worktree or our Ledger evidence model, and can't by itself
+satisfy reviewer-independence / approval / routing contracts.
+
+**Decision: adopt it, but only as a bridge adapter *under* the existing
+architecture.** The wrapper must bind every plugin-triggered task to an
+existing agent session + repo registration + worktree lease; record plugin job
+IDs as external job IDs in the Ledger (never copy raw local transcripts into
+durable storage); force **read-only by default**; allow write-capable
+`/codex:rescue` only with a valid mission approval + active worktree lease +
+branch/protected-path enforcement + a declared validation plan; and treat the
+plugin's review gate as an opt-in local helper, never the production
+merge/test/judge gate.
+
+### 4.8 Completion roadmap — the ordered path to "both agents, honest usage, pipeline routing"
+
+Finish the stack in the order the current design already points to (do **not**
+jump straight to "both agents are pipeline executors"):
+
+1. **Stabilize & merge the existing Codex path.** Resolve the PR stack
+   (#32 → #33 → #34 → #35) so the Codex read-only runtime + usage foundation +
+   Codex collector ship to `main` as a real cockpit option, not a stacked-branch
+   achievement. *(Merge decisions are Geoff's.)*
+2. **Lock the shared Usage/Limits semantics before the UI.** Done in Phase 1.1:
+   unknown-cost-≠-$0.00, no double-count, durable collector checkpoints +
+   indexes. This is what makes the later dashboard trustworthy rather than
+   merely attractive.
+3. **Ship the Usage & Limits cockpit surface.** `/api/model-usage`,
+   `/api/model-limits`, `/api/model-alerts` (+ related) routes and the
+   dashboard: selector badges, overview, top-drivers, reset timelines, alerts,
+   routing evidence — showing Codex buckets now, Claude buckets when that
+   adapter exists, OpenRouter per-key remaining credit, LiteLLM spend with
+   attribution, local-runtime health, and "what consumed the most?" from
+   recorded facts.
+4. **Build Claude Agent in parity with Codex** — but to Anthropic's embedding
+   rules, not by mirror-copying Codex: `claude-agent-sdk`, `ANTHROPIC_API_KEY`
+   auth (behind `--allow-agent-session-egress`), `allowed_tools` restricted to
+   Read/Glob/Grep for the read-only phase, constrained `setting_sources`,
+   capture `session_id`, resume via `ClaudeAgentOptions(resume=…)`; present it
+   as **"Claude Agent"**.
+5. **Add the Codex plugin bridge** (§4.7) — once both harnesses are first-class,
+   the plugin is an operator-efficiency layer, not a bootstrap hack.
+6. **Turn both agents into pipeline participants in stages** — read-only roles
+   first (investigator, failure analyst, PR/diff reviewer, independent evidence
+   checker) → then one explicitly-chosen agent executing in a **leased isolated
+   worktree** (no main-checkout writes, no merge authority) → then cross-harness
+   review for high-risk changes (one implements, the other reviews; deterministic
+   judges still mandatory; human merge still final) → only then may the router
+   choose `auto`, and every selection/rejection must persist its availability,
+   limit snapshots, budget state, selected model, and reason.
+
+**End state:** the cockpit lets a user pick **Codex Agent** or **Claude Agent**
+under Agent Sessions, see honest live availability/quota badges, open a session
+against a registered repo, continue/interrupt/resume it, and view structured
+events + usage evidence. The pipeline selects an agent for read-only
+investigation first, then leased-worktree execution, then evidence-based
+automatic routing — with the Codex plugin fitting in as a Claude-side
+convenience layer, never a competing control plane.
 
 ---
 
@@ -1830,7 +2083,10 @@ llm_station/
 │   ├── improvement.yaml        experiment definitions (worked set) + improvement-targets.yaml (per-target refs)
 │   ├── discovery.yaml          daily-scan knobs: ranking/triage/code-health/acceptance (DiscoveryConfig)
 │   ├── agent_surface.yaml      agent-kanban knobs: re-injection cadence/size, fuzzy addressing, tuning (AgentSurfaceConfig)
-│   └── job_search.yaml         job-search pipeline: ranking, automation classes, manual blockers (JobSearchConfig; auto_submit_enabled is schema-rejected)
+│   ├── job_search.yaml         job-search pipeline: ranking, automation classes, manual blockers (JobSearchConfig; auto_submit_enabled is schema-rejected)
+│   ├── agent-session-budgets.yaml  agent lane egress gate (default enabled:false; per-harness codex_agent/claude_agent toggles) — see §4.5
+│   ├── agent-session-models.yaml   per-harness runtime/model validation for Agent Sessions
+│   └── usage-monitoring.yaml   UsageMonitoringConfig (thresholds/polling/routing/alerts/retention; refuses allow_silent_fallback:true) — §4.6
 │
 ├── src/command_center/         INSTALLABLE PACKAGE (uv pip install -e .; run via `make`/`python -m`)
 │   ├── schemas/                PYDANTIC CONTRACTS that validate the YAML
@@ -1894,6 +2150,23 @@ llm_station/
 │       ├── record_email.py      always writes submission_email.html; real SMTP send via DISCOVERY_SMTP_*+JOB_SEARCH_EMAIL_TO (unconfigured by default → recorded_only)
 │       ├── application_memory.py · retention.py   active-application folder writer + request_changes/regenerate_materials review loop · 30-day memory → minimal archive ledger row
 │       └── profile_ingest.py · followups.py · interview_prep.py   inbox → achievement bank · follow-up packs · interview prep
+│   ├── agent_sessions/          AGENT LANE (§4.5) — Codex/Claude runtimes, SEPARATE from GatewayCore chat
+│   │   ├── events.py            normalized AgentEvent vocabulary (distinct from the chat event shape)
+│   │   ├── protocol.py          runtime_checkable AgentHarness Protocol (probe/start/send/resolve_approval/interrupt/resume/close)
+│   │   ├── store.py             in-memory SessionStore — store owns monotonic/gapless sequence; events_since = reconnect primitive
+│   │   ├── ledger_schema.py     canonical DDL (agent_sessions/_events/_approvals) mirrored into services/ledger, drift-tested
+│   │   ├── ledger_store.py      LedgerSessionStore — durable cross-backend drop-in for SessionStore
+│   │   ├── fake_harness.py      deterministic FakeHarness test double (no SDK/subprocess/network)
+│   │   ├── mutation_proof.py    hash-before/after guard proving read-only adapters never mutate the repo
+│   │   └── adapters/codex_agent.py   REAL Codex read-only adapter (openai-codex 0.1.0b3; reuses `codex login`); claude_agent.py = TODO
+│   ├── usage/                   UNIFIED USAGE & LIMITS (§4.6) — shared across chat models AND agents
+│   │   ├── schemas.py           4 concepts kept distinct + CostSource/SampleKind/CollectionState; source-priority enum
+│   │   ├── protocol.py          CollectorProtocol + UsageStoreProtocol
+│   │   ├── store.py · ledger_store.py   in-memory + Ledger-backed (usage.v1, mirrored DDL, drift-tested); shared select_latest_* selectors
+│   │   ├── service.py           ingest → source-priority → dedup-alert → roll-up; run_collector_tracked() durable checkpoints
+│   │   ├── alerts.py · attribution.py · reconciliation.py   dedup (never on UNKNOWN) · "what used the most?" from fact · cross-source mismatch
+│   │   ├── ledger_schema.py     canonical usage DDL + model_usage_collection_state + indexes/retention
+│   │   └── collectors/          fake.py (deterministic) · codex_app_server.py (REAL PROVIDER_NATIVE); Claude/OpenRouter/LiteLLM/Ollama/ccusage = TODO
 │
 ├── generated/                  DISPOSABLE rendered output — never hand-edited
 │   ├── litellm-config.yaml     rendered gateway config (only ollama_chat/... models)
@@ -2194,6 +2467,60 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-07-11/12 — The agent lane: Codex read-only runtime + unified Usage/Limits + first real collector
+
+Full architecture now in **§4.5–§4.8**. This is a **separate lane** from
+GatewayCore chat, built in a stacked worktree (`C:\tmp\cc-agent-runtime`) and
+**not yet merged to `main`** (stacked behind PR #32).
+
+- **Why a separate lane at all.** Claude Code and Codex are agentic runtimes
+  (own SDK/auth/shell-FS authority/resumable state), not chat models. The
+  frontier tool_calls incident (2026-07-10/11 entries) proved a tool-less chat
+  integration can still cross a dispatch boundary by trusting a response field;
+  giving the chat surface real shell/FS authority would be a bigger version of
+  that. Anthropic's Agent-SDK docs independently require API-key (not
+  claude.ai-login) auth for third-party products and the label "Claude Agent".
+- **Egress boundary extended, not loosened.** `ANTHROPIC_API_KEY`/
+  `OPENAI_API_KEY` stay forbidden by default; a new, fully independent
+  `--allow-agent-session-egress` + `configs/agent-session-budgets.yaml`
+  (default off) gates the agent lane's keys only, never the local LiteLLM lane,
+  and never cross-exempts the frontier flag (proven both directions).
+- **Agent Sessions foundation** (`src/command_center/agent_sessions/`):
+  normalized events, an `AgentHarness` Protocol, a store that owns
+  sequence numbers, durable Ledger persistence (agent_sessions/_events/
+  _approvals, mirrored-DDL + drift-tested + restart-recovery-tested), and a
+  deterministic FakeHarness. `cc agent-preflight` is evidence-only.
+- **Real Codex read-only adapter** (`adapters/codex_agent.py`, pinned
+  `openai-codex==0.1.0b3`, reuses the existing `codex login`): persistent
+  external thread IDs, same-thread follow-ups, resume-after-restart, real
+  interrupt, read-only sandbox, truthful approvals, zero-mutation discipline.
+  **14/14 live cockpit-acceptance turns, zero repo mutation.** PR #33 (ready,
+  merge held). **Claude adapter is still TODO.**
+- **Unified Usage & Limits** (`src/command_center/usage/`, PR #34): one shared
+  metering layer keeping usage / provider-limits / availability / internal-budget
+  distinct so history is never shown as remaining quota. Phase 1 foundation +
+  Phase 1.1 hardening (unknown-cost-≠-$0.00 via nullable cost + CostSource; no
+  cross-collector double-count via SampleKind; attribution driver facts; durable
+  collector checkpoints + indexes + retention). 50 usage tests, mirrored
+  `usage.v1` DDL, `configs/usage-monitoring.yaml` in `make validate`.
+- **First real provider collector** (`collectors/codex_app_server.py`, PR #35):
+  reads Codex quota via the raw app-server RPC `account/rateLimits/read`, maps
+  primary/secondary windows to `PROVIDER_NATIVE` limit snapshots + derives
+  availability; emits limits+availability only (tokens stay with adapter events
+  → no double-count); degrades honestly on SDK-absent/auth-fail/RPC-fail.
+  `run_collector_tracked()` adds durable checkpoints. **Live smoke passed**
+  (real prolite account); 10 hermetic tests; ruff + `mypy src/command_center/
+  usage/` clean; full repo suite green except one pre-existing WSL-`bash.EXE`
+  merge_guard flake (exit 127, unrelated, confirmed by stash-and-rerun).
+- **Not built yet** (ordered plan in §4.8): the remaining provider collectors
+  (Claude RateLimitEvent, OpenRouter `/api/v1/key`, LiteLLM `/spend/logs`,
+  Ollama health, ccusage reconciler); the `/api/model-usage` routes + Usage &
+  Limits dashboard (backend is deliberately ahead of the UI); the Claude
+  read-only adapter; write-capable leased-worktree execution; cross-harness
+  review; and evidence-based auto-routing. The `openai/codex-plugin-cc` bridge
+  (§4.7) is adopted only as a wrapped, Ledger/worktree-bound companion — never a
+  competing control plane.
 
 ### 2026-07-09 — Cockpit PWA mobile polish, All Boards nav, and editable job-search controls
 
