@@ -843,6 +843,69 @@ export const saveChatThread = (body: {
   model?: string;
 }) => postJSON<ChatThreadsResponse>("/api/chat/threads", body);
 
+// Usage & Limits — the shared metering layer across chat models AND agents.
+// Mirrors command_center.usage RuntimeUsageStatus.to_dict(); nullable fields are
+// honestly nullable (a missing cost is null, never 0, never a fake quota).
+export interface UsageLimit {
+  bucket_id: string;
+  scope: "provider" | "internal_budget";
+  source: string;
+  state: "ok" | "near_limit" | "exhausted" | "unknown";
+  label: string;
+  used_percent: number | null;
+  used_amount: number | null;
+  limit_amount: number | null;
+  remaining_amount: number | null;
+  unit: string;
+  window_seconds: number | null;
+  reset_at: string | null;
+  plan_type: string | null;
+  credits_remaining: number | null;
+  runtime_availability?: string;   // present on /api/model-limits rows
+  runtime_stale?: boolean;
+}
+export interface UsageRollup {
+  input_tokens: number;
+  cached_input_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  calls: number;
+  sessions: number;
+  tool_calls: number;
+  duration_ms: number;
+  cost_usd: number | null;
+  cost_source: string;
+}
+export interface UsageStatus {
+  runtime_id: string;
+  availability: string;
+  availability_reason: string;
+  availability_observed_at: string | null;
+  limits: UsageLimit[];
+  rolled_usage: UsageRollup | null;
+  stale: boolean;
+  generated_at: string;
+}
+export interface CollectorHealth {
+  collector_id: string;
+  never_ran: boolean;
+  auth_state: string;
+  consecutive_failures: number;
+  last_success_at?: string | null;
+  last_error?: string | null;
+  updated_at?: string;
+}
+export interface UsageRefreshResult {
+  collectors_run: number;
+  results: { collector_id: string; runtimes: string[]; alerts_fired: number }[];
+}
+export const fetchModelUsage = () => getJSON<UsageStatus[]>("/api/model-usage");
+export const fetchCollectorHealth = () =>
+  getJSON<CollectorHealth[]>("/api/model-usage/collector-health");
+export const refreshModelUsage = () =>
+  postJSON<UsageRefreshResult>("/api/model-usage/refresh", {});
+
 // Stream a chat turn (SSE over fetch): each event (round/tool/tool_result/final)
 // is delivered as it arrives. Errors are surfaced as an event, never swallowed.
 export async function streamChat(

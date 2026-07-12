@@ -67,6 +67,17 @@ DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "
 # like a real agent option in a normal deployment.
 AGENT_SESSIONS_ENABLED = os.environ.get("KANBAN_UI_AGENT_SESSIONS_ENABLED", "") == "1"
 FAKE_AGENT_ENABLED = os.environ.get("KANBAN_UI_FAKE_AGENT_ENABLED", "") == "1"
+# Usage & Limits surface (the shared metering layer across chat models AND
+# coding agents). Read-only. OFF by default like every other compute surface.
+# The store is in-process (command_center.usage is imported directly here, not
+# proxied), so with the flag on but nothing polled yet the page honestly shows
+# "no data / unknown" rather than fabricating quota. USAGE_CODEX registers the
+# real Codex rate-limit collector for the refresh endpoint (it degrades to
+# UNAVAILABLE if the SDK/login isn't present); USAGE_FAKE seeds the deterministic
+# FakeCollector for a dev/demo page — never both on in a real deployment.
+USAGE_ENABLED = os.environ.get("KANBAN_UI_USAGE_ENABLED", "") == "1"
+USAGE_CODEX = os.environ.get("KANBAN_UI_USAGE_CODEX", "") == "1"
+USAGE_FAKE = os.environ.get("KANBAN_UI_USAGE_FAKE", "") == "1"
 AGENT_WORKER_URL = os.environ.get(
     "AGENT_WORKER_URL", "http://host.docker.internal:8791").rstrip("/")
 AGENT_WORKER_TOKEN = os.environ.get("AGENT_WORKER_TOKEN", "")
@@ -1192,6 +1203,42 @@ def _call_worker(fn, *args: object, **kwargs: object):
             detail = r.text
         raise HTTPException(status_code=r.status_code, detail=detail)
     return r.json()
+
+
+# ── Usage & Limits (in-process; command_center.usage imported directly) ───────
+_usage_service = None   # type: ignore[var-annotated]  # UsageService | None
+_usage_collectors: list = []   # [(CollectorProtocol, collector_id), ...]
+
+
+def _get_usage_service():
+    """Lazy per-process UsageService over an in-memory store (mirrors
+    _get_agent_worker_client's lazy singleton). Registers the enabled
+    collectors ONCE so /api/model-usage/refresh and /collector-health agree on
+    the same set. Nothing is polled at construction — the page shows honest
+    UNKNOWN until a refresh runs."""
+    global _usage_service
+    if _usage_service is None:
+        from command_center.usage.service import UsageService
+        from command_center.usage.store import UsageStore
+        _usage_service = UsageService(UsageStore())
+        _usage_collectors.clear()
+        if USAGE_FAKE:
+            from command_center.usage.collectors.fake import FakeCollector
+            _usage_collectors.append((FakeCollector(), "fake"))
+        if USAGE_CODEX:
+            from command_center.usage.collectors.codex_app_server import (
+                CODEX_COLLECTOR_ID, CodexAppServerCollector)
+            _usage_collectors.append((CodexAppServerCollector(), CODEX_COLLECTOR_ID))
+    return _usage_service
+
+
+def _require_usage():
+    if not USAGE_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Usage & Limits not enabled in this deployment "
+                   "(set KANBAN_UI_USAGE_ENABLED=1)")
+    return _get_usage_service()
 
 
 class ChatIn(BaseModel):
@@ -2921,6 +2968,74 @@ class AgentMessageIn(BaseModel):
 class AgentApprovalIn(BaseModel):
     approved: bool
     reason: str = ""
+
+
+# ── Usage & Limits routes (read-only; in-process UsageService) ────────────────
+# NOTE: the literal /api/model-usage/* paths are declared BEFORE the
+# /api/model-usage/{runtime_id} catch-all so FastAPI's in-order matching does
+# not treat "collector-health"/"top-drivers"/"refresh" as a runtime_id.
+@app.get("/api/model-usage")
+def model_usage() -> list:
+    """One status row per runtime (availability + every live bucket + rolled
+    usage + honest staleness)."""
+    from command_center.usage import cockpit_views as cv
+    return cv.usage_overview(_require_usage())
+
+
+@app.get("/api/model-usage/collector-health")
+def model_usage_collector_health() -> list:
+    """Durable checkpoint per registered collector — polling cleanly / failing
+    (with the real error) / never ran."""
+    service = _require_usage()
+    from command_center.usage import cockpit_views as cv
+    return cv.collector_health(service, [cid for _, cid in _usage_collectors])
+
+
+@app.get("/api/model-usage/top-drivers")
+def model_usage_top_drivers(runtime_id: str, dimension: str = "mission",
+                            metric: str = "total_tokens", limit: int = 10) -> dict:
+    """"What used the most?" for a runtime, from recorded driver facts."""
+    service = _require_usage()
+    from command_center.usage import cockpit_views as cv
+    try:
+        return cv.top_drivers(service, runtime_id=runtime_id, dimension=dimension,
+                              metric=metric, limit=limit)
+    except ValueError as exc:            # unknown dimension/metric
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/model-usage/refresh")
+async def model_usage_refresh() -> dict:
+    """Run every registered collector once (durable tracked path). With no
+    collectors registered this is a no-op that honestly reports 0 — it never
+    fabricates data."""
+    service = _require_usage()
+    from command_center.usage import cockpit_views as cv
+    return await cv.refresh(service, _usage_collectors)
+
+
+@app.get("/api/model-usage/{runtime_id}")
+def model_usage_runtime(runtime_id: str) -> dict:
+    """Full status for one runtime (UNKNOWN + no buckets if never observed —
+    never an error, never fabricated)."""
+    from command_center.usage import cockpit_views as cv
+    return cv.runtime_detail(_require_usage(), runtime_id)
+
+
+@app.get("/api/model-limits")
+def model_limits() -> list:
+    """Every live limit bucket across all runtimes, each tagged with its
+    runtime's availability + staleness. Provider quota and internal budget stay
+    distinct rows (scope), never merged."""
+    from command_center.usage import cockpit_views as cv
+    return cv.limits_overview(_require_usage())
+
+
+@app.get("/api/model-alerts")
+def model_alerts(runtime_id: str | None = None) -> list:
+    """Deduplicated usage/limit/availability alerts."""
+    from command_center.usage import cockpit_views as cv
+    return cv.alerts_view(_require_usage(), runtime_id)
 
 
 @app.get("/api/agent-harnesses")

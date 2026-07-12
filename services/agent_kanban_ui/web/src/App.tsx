@@ -25,15 +25,18 @@ import {
   closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
   fetchAgentSession, interruptAgentSession, resolveAgentApproval,
   resumeAgentSession, sendAgentMessage, streamAgentEvents,
+  UsageStatus, UsageLimit, CollectorHealth,
+  fetchModelUsage, fetchCollectorHealth, refreshModelUsage,
 } from "./api";
 
-type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "chat";
+type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat";
 const NAV: { id: View; label: string }[] = [
   { id: "domains", label: "All Boards" },
   { id: "settings", label: "Controls" },
   { id: "router", label: "Router" },
   { id: "diagnostics", label: "Status" },
   { id: "observability", label: "Metrics" },
+  { id: "usage", label: "Usage & Limits" },
   { id: "activity", label: "Activity" },
 ];
 const VIEW_IDS: ReadonlySet<string> = new Set([
@@ -398,6 +401,148 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
     <div className="metric" title={hint}>
       <div className="metric-value">{value}</div>
       <div className="metric-label">{label}</div>
+    </div>
+  );
+}
+
+// ---- Usage & Limits view --------------------------------------------------
+// Self-contained (fetches on mount + manual refresh) so a deployment with the
+// feature OFF never 503-spams the global 5s poll. Renders the four concepts
+// kept distinct: availability, provider limits, internal budget, and observed
+// usage — with UNKNOWN/stale surfaced and a missing dollar cost shown as such,
+// never as $0.00.
+const AVAIL_CLASS: Record<string, string> = {
+  available: "ok", near_limit: "warn", busy: "warn", limited: "bad",
+  exhausted: "bad", authentication_required: "bad", unavailable: "muted",
+  unknown: "muted",
+};
+function fmtInt(n: number): string { return n.toLocaleString(); }
+function fmtReset(iso: string | null): string {
+  if (!iso) return "—";
+  const ms = new Date(iso).getTime() - Date.now();
+  if (Number.isNaN(ms)) return iso;
+  if (ms <= 0) return "due";
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `in ${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `in ${h}h ${m % 60}m`;
+  return `in ${Math.floor(h / 24)}d`;
+}
+function fmtCost(cost: number | null, source: string): string {
+  if (cost !== null) return `$${cost.toFixed(4)}`;
+  if (source === "subscription_not_metered") return "subscription (not $-metered)";
+  return "cost unknown";
+}
+function UsageView() {
+  const [statuses, setStatuses] = useState<UsageStatus[] | null>(null);
+  const [health, setHealth] = useState<CollectorHealth[]>([]);
+  const [error, setError] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setError("");
+    try {
+      setStatuses(await fetchModelUsage());
+      try { setHealth(await fetchCollectorHealth()); } catch { setHealth([]); }
+    } catch (e) { setStatuses(null); setError((e as Error).message); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const doRefresh = useCallback(async () => {
+    setBusy(true);
+    try { await refreshModelUsage(); await load(); }
+    catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }, [load]);
+
+  return (
+    <div className="usage-view">
+      <div className="usage-head">
+        <h2>Usage &amp; Limits</h2>
+        <button className="btn" onClick={() => void doRefresh()} disabled={busy}>
+          {busy ? "refreshing…" : "Refresh"}
+        </button>
+      </div>
+      {error && <div className="usage-note bad">{error}</div>}
+      {statuses && statuses.length === 0 && !error && (
+        <div className="usage-note muted">
+          No usage observed yet. Run a refresh, or wait for a collector to poll —
+          nothing here is fabricated, so an unpolled runtime shows nothing.
+        </div>
+      )}
+      {statuses && statuses.length > 0 && (
+        <div className="usage-cards">
+          {statuses.map((s) => <UsageCard key={s.runtime_id} s={s} />)}
+        </div>
+      )}
+      {health.length > 0 && (
+        <div className="usage-health">
+          <h3>Collector health</h3>
+          <table className="tool-table">
+            <thead><tr><th>collector</th><th>auth</th><th>fails</th><th>last ok</th><th>last error</th></tr></thead>
+            <tbody>
+              {health.map((h) => (
+                <tr key={h.collector_id}>
+                  <td>{h.collector_id}</td>
+                  <td>{h.never_ran ? "never ran" : h.auth_state}</td>
+                  <td>{h.consecutive_failures}</td>
+                  <td>{h.last_success_at ? fmtReset(h.last_success_at) : "—"}</td>
+                  <td className="usage-err">{h.last_error ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+function UsageCard({ s }: { s: UsageStatus }) {
+  const provider = s.limits.filter((l) => l.scope === "provider");
+  const budget = s.limits.filter((l) => l.scope === "internal_budget");
+  const u = s.rolled_usage;
+  return (
+    <div className="usage-card">
+      <div className="usage-card-head">
+        <span className="usage-runtime">{s.runtime_id}</span>
+        <span className={`usage-badge ${AVAIL_CLASS[s.availability] ?? "muted"}`}>
+          {s.availability.replace(/_/g, " ")}
+        </span>
+        {s.stale && <span className="usage-badge muted" title="freshest signal is stale">stale</span>}
+      </div>
+      <div className="usage-reason">{s.availability_reason}</div>
+      {provider.map((l) => <UsageBucket key={l.bucket_id} l={l} />)}
+      {budget.length > 0 && <div className="usage-sub">Internal budget</div>}
+      {budget.map((l) => <UsageBucket key={l.bucket_id} l={l} />)}
+      {u && (
+        <div className="usage-rollup">
+          <span title="attributed request tokens">{fmtInt(u.total_tokens)} tok</span>
+          <span>{fmtInt(u.calls)} calls</span>
+          <span>{fmtCost(u.cost_usd, u.cost_source)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+function UsageBucket({ l }: { l: UsageLimit }) {
+  const pctText = l.used_percent === null ? "unknown" : `${l.used_percent.toFixed(0)}%`;
+  const stateClass = l.state === "exhausted" ? "bad"
+    : l.state === "near_limit" ? "warn"
+    : l.state === "unknown" ? "muted" : "ok";
+  return (
+    <div className="usage-bucket">
+      <div className="usage-bucket-top">
+        <span className="usage-bucket-label">{l.label || l.bucket_id}</span>
+        <span className={`usage-pct ${stateClass}`}>{pctText}</span>
+      </div>
+      <div className="usage-bar">
+        <div className={`usage-bar-fill ${stateClass}`}
+          style={{ width: `${l.used_percent === null ? 0 : Math.min(100, l.used_percent)}%` }} />
+      </div>
+      <div className="usage-bucket-foot">
+        <span>resets {fmtReset(l.reset_at)}</span>
+        {l.credits_remaining !== null && <span>credits {l.credits_remaining}</span>}
+      </div>
     </div>
   );
 }
@@ -4524,6 +4669,7 @@ export function App() {
             boardsNote={boardsNote} lanesNote={lanesNote} />}
         {view === "observability" && (metrics
           ? <ObservabilityView m={metrics} /> : <div className="loading">…</div>)}
+        {view === "usage" && <UsageView />}
         {view === "activity" && (activity
           ? <ActivityView a={activity} /> : <div className="loading">…</div>)}
         {/* chat stays MOUNTED so the conversation persists across view switches */}

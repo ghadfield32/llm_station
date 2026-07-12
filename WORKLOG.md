@@ -6,6 +6,39 @@ liners. Newest notes at the top of each topic. Full design lives in
 this is the fast "has this been done?" index. Dates are when the line was written.
 
 ## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
+- PHASE 3 — USAGE & LIMITS COCKPIT API + UI 07-12 (same branch
+  `feat/codex-usage-collector`, extends PR #35). The backend layer becomes a
+  real operator surface. NEW `usage/cockpit_views.py` = PURE view builders over
+  a UsageService (no FastAPI, no SDK) so the cockpit handlers are one-liners and
+  the view logic unit-tests alone: usage_overview / runtime_detail /
+  limits_overview (each bucket tagged with its runtime availability+staleness,
+  provider vs internal_budget kept distinct) / alerts_view / top_drivers (from
+  recorded driver facts, "(unattributed)" is explicit) / collector_health (uses
+  per-collector get_collection_state so it works on BOTH stores — no new Ledger
+  endpoint) / refresh (runs every registered collector via the tracked path).
+  Cockpit (`services/agent_kanban_ui/app.py`): 7 read routes —
+  GET /api/model-usage, /api/model-usage/{runtime_id}, /api/model-limits,
+  /api/model-alerts, /api/model-usage/collector-health,
+  /api/model-usage/top-drivers, POST /api/model-usage/refresh (literal paths
+  declared BEFORE the {runtime_id} catch-all so FastAPI ordering doesn't swallow
+  them). In-process `UsageService(UsageStore())` lazy singleton +
+  `_require_usage()` gate; OFF by default (KANBAN_UI_USAGE_ENABLED), with
+  KANBAN_UI_USAGE_CODEX (registers the real Codex collector for refresh) /
+  KANBAN_UI_USAGE_FAKE (deterministic demo) toggles. Honest-empty: enabled but
+  unpolled returns [] and an unseen runtime returns UNKNOWN — never fabricated.
+  UI (`web/src/App.tsx` + `api.ts` + `styles.css`): new "Usage & Limits" nav +
+  self-contained `UsageView` (own fetch/refresh — no 503-spam of the global 5s
+  poll when the feature is off), per-runtime cards (availability badge, provider
+  buckets + internal budget as separate bars with used%/reset/credits, rolled
+  usage with honest cost — "subscription (not $-metered)"/"cost unknown", never
+  $0.00), a stale badge, and a collector-health table. +15 tests
+  (test_usage_cockpit_views.py = 9 pure, test_agent_kanban_ui_usage.py = 6
+  TestClient: disabled 503, honest-empty, fake-refresh populates, route ordering
+  vs {runtime_id}, bad-dimension 400). ruff + `mypy src/command_center/usage/`
+  clean; existing cockpit suites still green; `tsc && vite build` clean. NOT yet
+  built: SSE live push (/events/stream), reconciliation + routing-decisions
+  routes, and enriching /api/chat/runtime + /api/agent-harnesses with a
+  usage_summary field (deferred to the next slice).
 - PHASE 2.1 — CODEX COLLECTOR COMPLETED (multi-bucket) 07-12 (same branch
   `feat/codex-usage-collector`, extends PR #35). Grounded by a fresh LIVE SDK
   introspection (read-only), which CORRECTED two assumptions in the roadmap

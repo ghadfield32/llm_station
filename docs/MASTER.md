@@ -92,10 +92,11 @@ a planned runtime, not shipped.** A **unified Usage & Limits subsystem** (§4.6)
 is built to lock the four concepts (usage / provider limits / availability /
 internal budget) apart so history is never shown as remaining quota — Phase 1
 foundation + Phase 1.1 hardening (PR #34) and the **first real provider
-collector** (Codex app-server rate limits, `PROVIDER_NATIVE`, live-smoke passed;
-PR #35) have landed. The backend is deliberately **ahead of** the UI: the
-`/api/model-usage` routes and the Usage & Limits dashboard are the next surface,
-not yet live. The ordered plan to the full "pick either agent, see honest live
+collector** (Codex app-server rate limits, `PROVIDER_NATIVE`, multi-bucket,
+live-smoke passed; PR #35) have landed. The **Usage & Limits cockpit surface is
+now built too** (behind `KANBAN_UI_USAGE_ENABLED`): 7 `/api/model-usage*` routes
++ a per-runtime-card dashboard that renders honestly-empty until a collector
+polls (§4.6). The ordered plan to the full "pick either agent, see honest live
 quota, let the pipeline route them" end state — plus the wrapped
 `openai/codex-plugin-cc` bridge — is in §4.8. This whole chain is stacked
 behind PR #32 and is **not** merged to `main` yet, so it is **not** part of the
@@ -534,12 +535,27 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
 **Ollama** → health = availability only, never a fabricated quota. **ccusage**
 → reconciler only (never a primary count).
 
-**What is NOT built yet:** every collector except Codex; the `/api/model-usage`
-(+ limits/alerts) cockpit routes; and the Usage & Limits **UI** itself
-(selector badges, overview cards, top-cost-drivers, reset timelines, alert
-center, routing-evidence panel). The backend is deliberately **ahead of** the
-UI — the interface becomes authoritative only after the semantics above are
-locked, which they now are.
+- **Phase 3 — the Usage & Limits cockpit surface is BUILT** (read-only, OFF by
+  default via `KANBAN_UI_USAGE_ENABLED`). Pure view builders
+  (`usage/cockpit_views.py`, no FastAPI/SDK, unit-tested alone) back 7 cockpit
+  routes: `GET /api/model-usage`, `/api/model-usage/{runtime_id}`,
+  `/api/model-limits`, `/api/model-alerts`, `/api/model-usage/collector-health`,
+  `/api/model-usage/top-drivers`, `POST /api/model-usage/refresh`. An in-process
+  `UsageService` singleton (no HTTP hop — the cockpit imports `command_center`
+  directly) renders **honestly empty** when enabled but unpolled (`[]` /
+  UNKNOWN, never fabricated). A new **"Usage & Limits"** cockpit page shows a
+  per-runtime card (availability badge, provider buckets + internal budget as
+  separate bars with used%/reset/credits, rolled usage with honest cost —
+  "subscription (not $-metered)" / "cost unknown", never $0.00), a stale badge,
+  and a collector-health table. 15 tests; `tsc && vite build` clean.
+
+**What is NOT built yet:** every collector except Codex; the Usage & Limits
+UI's remaining depth (selector quota badges on the model/agent pickers,
+historical charts, reset timelines, routing-evidence panel); SSE live push
+(`/api/model-usage/events/stream`); the reconciliation + routing-decisions
+routes; and enriching `/api/chat/runtime` + `/api/agent-harnesses` with a
+`usage_summary`. The core surface (overview, per-runtime detail, limits,
+alerts, top-drivers, collector-health, refresh) is live behind the flag.
 
 ### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
 
