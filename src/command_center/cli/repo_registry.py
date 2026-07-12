@@ -33,8 +33,30 @@ KANBAN_BOARDS = "configs/kanban_boards.yaml"
 RUN_ID_DIR = "evaluation/system-validation/20260616-autonomy-contracts"
 
 
-def _load_autonomy(config_path: Path) -> AutonomyConfig:
+def load_autonomy_config(config_path: Path) -> AutonomyConfig:
+    """Public: reused by agent_sessions/adapters/codex_agent.py's repo
+    resolution, which needs the SAME typed config rather than a second,
+    possibly-drifting yaml.safe_load. See resolve_repo_local_path below for
+    the actual resolution logic worth sharing."""
     return AutonomyConfig.model_validate(yaml.safe_load(config_path.read_text(encoding="utf-8")))
+
+
+def resolve_repo_local_path(repo: RepoManifest, root: Path, env: dict[str, str]) -> Path | None:
+    """Canonical repo_id -> local filesystem path resolution: 'self' -> this
+    control-plane repo's own root; 'env:NAME' -> the external repo's local
+    path from that env var (never a committed absolute path). Returns None
+    when unresolved (e.g. the env var isn't set) — callers decide whether
+    that's a hard failure or just means gates involving repo files can't
+    verify (see verify_repo, the original caller this was extracted from).
+    Shared by adapters/codex_agent.py so a registered repo resolves
+    identically everywhere, never via a second reimplementation."""
+    ref = repo.local_path_ref
+    if ref == "self":
+        return root
+    if ref and ref.startswith("env:"):
+        value = env.get(ref.split(":", 1)[1])
+        return Path(value) if value else None
+    return None
 
 
 def _load_boards(root: Path) -> KanbanBoardsConfig:
@@ -80,12 +102,7 @@ def verify_repo(
     # not the control repo — otherwise an external repo falsely inherits the control
     # repo's files/evidence.
     ref = repo.local_path_ref
-    if ref == "self":
-        target_root: Path | None = root
-    elif ref and ref.startswith("env:") and env.get(ref.split(":", 1)[1]):
-        target_root = Path(env[ref.split(":", 1)[1]])
-    else:
-        target_root = None  # unresolved -> file gates cannot verify the real repo
+    target_root = resolve_repo_local_path(repo, root, env)
 
     where = "self" if ref == "self" else (str(target_root) if target_root else f"{ref}(unresolved)")
     devc_ok = (target_root is not None and bool(repo.devcontainer_path)
@@ -186,7 +203,7 @@ def run_repo_verify(
     env: dict[str, str] | None = None,
     output: Path | None = None,
 ) -> dict[str, Any]:
-    cfg = _load_autonomy(config_path)
+    cfg = load_autonomy_config(config_path)
     boards = _load_boards(root)
     env = env if env is not None else {}
     if all_repos:
@@ -245,7 +262,7 @@ def run_repo_register(
     *, repo_id: str, local_path: str, remote_url: str, kanban_board: str,
     apply: bool = False, config_path: Path = ROOT / AUTONOMY, root: Path = ROOT,
 ) -> dict[str, Any]:
-    cfg = _load_autonomy(config_path)
+    cfg = load_autonomy_config(config_path)
     if any(r.repo_id == repo_id for r in cfg.repo_manifests):
         return {"status": "blocked", "blockers": [f"repo_id_already_registered_{repo_id}"]}
     boards = _load_boards(root)
@@ -345,7 +362,7 @@ def run_repo_enable_autonomy(
         return {"status": "verified_dry_run", "repo_id": repo_id,
                 "next": "all gates pass; rerun with --apply to flip autonomous_edits_enabled"}
     text = config_path.read_text(encoding="utf-8")
-    cfg = _load_autonomy(config_path)
+    cfg = load_autonomy_config(config_path)
     repo = next(r for r in cfg.repo_manifests if r.repo_id == repo_id)
     if repo.autonomous_edits_enabled:
         return {"status": "already_enabled", "repo_id": repo_id}

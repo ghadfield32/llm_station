@@ -26,6 +26,16 @@ dev = [
   "mypy>=1.11",
   "pytest>=8.0",
   "fastapi>=0.115",
+  "types-PyYAML>=6.0",
+]
+# Real Codex Agent harness (src/command_center/agent_sessions/adapters/codex_agent.py).
+# Pinned EXACTLY, not floated — this is a beta SDK (0.1.0bN) with a bundled native
+# CLI binary dependency (openai-codex-cli-bin); a floating range would silently pull
+# a different beta build with a different (possibly undocumented) event surface.
+# Verified real via https://pypi.org/pypi/openai-codex/json (author=OpenAI) — NOT
+# the unrelated `codex-sdk` PyPI package (Cleanlab's product, see agent_preflight.py).
+agent-codex = [
+  "openai-codex==0.1.0b3",
 ]
 
 # Console scripts are only exposed for commands that resolve their own paths and so work from

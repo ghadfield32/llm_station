@@ -50,6 +50,13 @@ class HarnessRegistry:
                 "available": probe.available,
                 "detail": probe.detail,
                 "supported_modes": list(descriptor.supported_modes),
+                # False for a harness whose SDK exposes no programmatic hook
+                # to causally resolve a pending approval (e.g. codex_agent —
+                # see adapters/codex_agent.py's resolve_approval docstring).
+                # Defaults True: FakeHarness (and any future harness that
+                # doesn't explicitly declare otherwise) genuinely does
+                # resolve approvals interactively.
+                "interactive_approvals": getattr(harness, "interactive_approvals", True),
             })
         return results
 
@@ -104,12 +111,17 @@ def default_registry(store: SessionStoreProtocol) -> HarnessRegistry:
             factory=lambda: FakeHarness(store)),
         HarnessDescriptor(
             harness_id="codex_agent", label="Codex Agent", production=True,
-            supported_modes=("analysis", "workspace"),
-            factory=lambda: NotBuiltHarness(
-                harness_id="codex_agent",
-                blocker="no real adapter built yet (see WORKLOG.md 'Agent-session "
-                        "chat integration', Phase 3) — run `cc agent-preflight "
-                        "--harness codex` for current SDK/auth status")),
+            # analysis (read-only) only in this milestone — workspace/mission
+            # modes are refused by CodexAgentHarness.start_session itself
+            supported_modes=("analysis",),
+            # Deferred import (see codex_agent.py's own _import_sdk): this
+            # module is only imported when a Codex session is actually probed/
+            # started, never just from importing registry.py or listing
+            # harnesses in a deployment without the optional `agent-codex`
+            # extra installed.
+            factory=lambda: __import__(
+                "command_center.agent_sessions.adapters.codex_agent",
+                fromlist=["CodexAgentHarness"]).CodexAgentHarness(store)),
         HarnessDescriptor(
             harness_id="claude_agent", label="Claude Agent", production=True,
             supported_modes=("analysis", "workspace"),

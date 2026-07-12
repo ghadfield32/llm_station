@@ -18,9 +18,19 @@
 # frontier-router-budgets.yaml: enabled: true with every harness below false is
 # a no-op, not readiness (agent_session_egress_ready() requires at least one
 # harness on).
+# DECIDED 2026-07-11 (Geoff, verified via a live run, not just a policy
+# statement): codex_agent is enabled here. Real finding: CodexAgentHarness
+# never sets OPENAI_API_KEY anywhere — it authenticates by reusing the
+# existing `codex login` CLI session (ChatGPT-subscription auth), so this
+# flag does not actually gate any forbidden key for Codex specifically; it's
+# the deliberate operator record that live use is authorized. Live-verified
+# end to end: real auth, real thread, a real turn, a same-thread follow-up,
+# resume-by-id after a fresh harness instance, interrupt, and zero
+# filesystem mutation (mutation_proof before/after snapshot matched
+# exactly) — see WORKLOG.md "Agent-session chat integration".
 schema_version: command-center.agent-session-budgets.v1
 default:
-  enabled: false
+  enabled: true
   harnesses:
-    codex_agent: false
+    codex_agent: true
     claude_agent: false

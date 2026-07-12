@@ -474,6 +474,95 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   `test_agent_kanban_ui_agent_sessions.py` — the latter needed a
   `list_sessions` method added to the test suite's `_FakeWorkerClient`
   stub). ruff clean; mypy clean on the `src/` files touched.
+- HOST WORKER DEPLOYMENT WIRING 07-11: `scripts/start_agent_worker.ps1`
+  (start/stop/restart/status/autostart, mirrors gateway.ps1's conventions —
+  runs `cc agent-worker` hidden on the HOST, loads AGENT_WORKER_TOKEN from
+  .env, refuses to start without it). `docker-compose.yml`'s agent-kanban-ui
+  service gained the `AGENT_WORKER_URL`/`AGENT_WORKER_TOKEN`/
+  `KANBAN_UI_AGENT_SESSIONS_ENABLED`/`KANBAN_UI_FAKE_AGENT_ENABLED` env
+  (worker reached via `host.docker.internal:8791`, same pattern as Ollama/
+  AppFlowy — all default OFF). `.env.example` documents the agent-worker
+  block (empty placeholders only, no secrets). This is FakeHarness-era ops
+  wiring — how to RUN the worker — committed separately from the Codex
+  adapter (what it runs).
+- REAL CODEX READ-ONLY ADAPTER DONE 07-11 (`adapters/codex_agent.py`, the
+  audited/hardened version of the pre-incident prototype). Backed by the
+  pinned `openai-codex==0.1.0b3` (`agent-codex` optional-deps extra;
+  `openai-codex-cli-bin==0.137.0a4` bundled). Every SDK type used was
+  verified by LIVE introspection against the pinned package (see the
+  introspection findings below), never guessed from docs. Real live probe
+  passed end-to-end against Geoff's actual `codex login` session (auth,
+  read-only thread, first turn, same-thread follow-up, resume-by-id via a
+  fresh instance, interrupt, ZERO filesystem mutation via mutation_proof.py's
+  before/after snapshot). Read-only analysis mode ONLY; workspace/full-access
+  refused. `configs/agent-session-budgets.yaml` flips `codex_agent: true`
+  (Geoff-authorized; note Codex auth is ChatGPT-session, sets no forbidden
+  vendor key, so this gate doesn't actually exempt any key for Codex).
+- REAL SDK FINDINGS baked into the adapter (each a live discovery, not a
+  doc claim): (1) auth reuses the existing `codex login` session — no
+  OPENAI_API_KEY, consumes subscription quota. (2) `handle.stream()` yields a
+  generic `Notification(method, payload)` envelope; the concrete typed event
+  is `.payload`. (3) `ThreadItem` (and other nested types) are pydantic
+  RootModel wrappers — real fields live on `.root`, accessed via a `_unwrap`
+  helper. (4) a global `~/.codex/config.toml` model/effort newer than the
+  pinned CLI build breaks `thread_start` ("gpt-5.6-sol requires a newer
+  Codex") — fixed WITHOUT touching the operator's global config, via a
+  per-session `config_overrides=("model_reasoning_effort=medium",)` plus
+  dynamic model validation. (5) the SDK exposes NO programmatic hook to
+  resolve a Guardian approval review — decisions are auto (`auto_review`) or
+  blanket (`deny_all`); this harness uses `deny_all`.
+- AUDIT HARDENING (each a specific fix over the raw prototype): (A) preflight
+  `overall` is truthful for codex-only runs — the ANTHROPIC/OPENAI forbidden-
+  provider policy probe is Claude-specific and no longer BLOCKs a
+  `--harness codex --live` run, AND `codex_api_key_present` is now
+  informational (its NOT_CONFIGURED is the EXPECTED existing-login state, so
+  it no longer drags overall to NOT_CONFIGURED). Result: a real
+  `cc agent-preflight --harness codex --live --repo llm_station` now reports
+  `overall: PASS` (verified live, 14/14 gating checks pass, zero mutation).
+  (B) dynamic model validation
+  (`configs/agent-session-models.yaml`: preferred_model + reasoning_effort +
+  allow_sdk_default_fallback) — never a hardcoded model trusted blind; the
+  configured/requested model is checked against the SDK's OWN live
+  `client.models()` list, falls back to the SDK-designated default, and the
+  selected model + selection reason are recorded on `session_started`.
+  (C+D) per-turn `_TurnState` coalesces assistant deltas by item_id (a
+  completed agentMessage whose text already streamed is NOT re-emitted) and
+  dedupes terminal failures (a non-retryable ErrorNotification followed by
+  TurnCompletedNotification(failed) yields ONE session_failed; a retryable
+  error is a `warning`, not terminal). (E) `interactive_approvals = False`
+  is a real, registry-surfaced capability (probes() reports it), not a
+  UI-only assumption — resolve_approval records an audit-only,
+  `effective: False` event. (F) repo resolution reuses
+  `repo_registry.resolve_repo_local_path` (extracted, canonical — one place
+  for path/env-ref policy), eliminating a duplicated resolver. (G) zero new
+  mypy failures: `types-PyYAML` added to dev deps (fixes the yaml-stub gap
+  repo-wide as a bonus) AND codex_agent.py's own repo resolution no longer
+  imports yaml directly. (H) `shutdown()` on the harness + a worker
+  `lifespan` handler interrupt active turns and close the SDK client on
+  worker stop, so no orphan `codex_bin` app-server process is left behind —
+  walks EVERY per-session cached harness instance (service caches one per
+  session, not one per type).
+- TESTS 07-11: `tests/test_codex_agent_adapter.py` (38, all against a FAKE
+  SDK installed into sys.modules — no real package/network/account): SDK-
+  absent & auth-failure unavailability, analysis-only/read-only rejection,
+  thread-id persistence + follow-up reuse, resume-after-restart via
+  thread_resume, interrupt reaching the active handle, unknown native events
+  → visible warning (never inferred from prose), usage attribution, no-secret
+  probe output, non-causal approval recording, close→archive, canonical
+  repo resolver reuse, the full `_resolve_model` matrix (explicit/preferred/
+  SDK-default/fallback-disallowed/no-models), delta coalescing + terminal
+  dedup + retryable-error distinction, interactive_approvals capability, and
+  shutdown cleanup (incl. close() raising / no client ever built). Plus
+  `test_agent_preflight.py` (codex-only truthful overall), worker shutdown
+  tests, and the pre-existing registry/service/worker suites updated for
+  codex_agent now being a REAL adapter (their "unbuilt placeholder"
+  assertions moved to claude_agent, which genuinely still is one). Full repo
+  suite green; ruff clean; mypy clean across all 14 touched agent-session +
+  preflight files.
+- STILL OUT OF SCOPE (explicit): Claude read-only adapter, writable/worktree
+  mode, mission executor routing, cross-agent review, OpenRouter agent
+  provider profiles — all gated behind the Codex read-only slice merging
+  first.
 
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro

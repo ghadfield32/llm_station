@@ -68,10 +68,12 @@ def test_start_session_with_unsupported_mode_fails(service):
 
 
 def test_start_session_with_unavailable_harness_reports_exact_blocker(service):
+    # claude_agent, not codex_agent — codex_agent is a real adapter now (see
+    # adapters/codex_agent.py); claude_agent remains a genuine NotBuiltHarness.
     with pytest.raises(RuntimeError, match="no real adapter built yet"):
         asyncio.run(service.start_session(SessionStart(
             conversation_id="c1", repo_id="r", mode="analysis",
-            harness_id="codex_agent")))
+            harness_id="claude_agent")))
 
 
 def test_full_lifecycle_through_the_service(service):
@@ -117,9 +119,11 @@ def test_approval_lifecycle_through_the_service(service):
 
 
 def test_list_harnesses_reports_fake_and_unbuilt_harnesses(service):
+    # codex_agent's availability now depends on the real environment (SDK
+    # installed? real account?) — see test_codex_agent_adapter.py for its
+    # deterministic coverage. claude_agent stays a genuine NotBuiltHarness.
     harnesses = {h["harness_id"]: h for h in asyncio.run(service.list_harnesses())}
     assert harnesses["fake"]["available"] is True
-    assert harnesses["codex_agent"]["available"] is False
     assert harnesses["claude_agent"]["available"] is False
 
 

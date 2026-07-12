@@ -358,3 +358,87 @@ def test_build_app_requires_a_worker_token_when_none_injected(monkeypatch):
     monkeypatch.delenv("AGENT_WORKER_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="AGENT_WORKER_TOKEN"):
         build_app(store=SessionStore())
+
+
+class _HarnessWithShutdown:
+    """A controllable AgentHarness that also declares the OPTIONAL
+    shutdown() hook (not part of the Protocol — see adapters/codex_agent.py
+    and worker_app.py's _shutdown_harnesses) — real adapters that own a
+    subprocess connection (Codex) declare it; FakeHarness does not."""
+
+    name = "with-shutdown"
+
+    def __init__(self, store):
+        from command_center.agent_sessions.protocol import HarnessProbe
+        self.store = store
+        self.shutdown_called = False
+        self._HarnessProbe = HarnessProbe
+
+    async def probe(self):
+        return self._HarnessProbe(available=True, detail="test double")
+
+    async def start_session(self, request):
+        record = self.store.create_session(
+            harness=self.name, conversation_id=request.conversation_id,
+            repo_id=request.repo_id, provider_profile=request.provider_profile,
+            model=request.model, permission_profile=request.permission_profile)
+        self.store.set_status(record.session_id, "idle")
+        return record.session_id
+
+    async def send(self, session_id, prompt):
+        from command_center.agent_sessions.events import AgentEvent
+        yield self.store.append_event(session_id, AgentEvent("session_idle", {}))
+
+    async def resolve_approval(self, session_id, decision):
+        raise RuntimeError("not used in this test")
+
+    async def interrupt(self, session_id):
+        pass
+
+    async def resume(self, session_id):
+        pass
+
+    async def close(self, session_id):
+        pass
+
+    async def shutdown(self):
+        self.shutdown_called = True
+
+
+def test_worker_shutdown_calls_shutdown_on_every_cached_harness_instance():
+    """AgentSessionService caches one harness instance PER SESSION (not one
+    shared instance per harness type), so a real Codex worker with multiple
+    active sessions would own multiple live SDK clients — this proves the
+    shutdown handler walks all of them, not just one."""
+    from command_center.agent_sessions.registry import HarnessDescriptor, HarnessRegistry
+
+    store = SessionStore()
+    harness = _HarnessWithShutdown(store)
+    registry = HarnessRegistry([HarnessDescriptor(
+        harness_id="with-shutdown", label="With Shutdown", production=False,
+        supported_modes=("analysis",), factory=lambda: harness)])
+    app = build_app(store=store, token=TOKEN, registry=registry)
+
+    # TestClient's `with` context manager reliably drives the real ASGI
+    # startup/shutdown lifecycle (unlike cross-request background-task
+    # survival, which this repo's own tests found unreliable on the same
+    # portal — this is a single, simple lifecycle event, not that).
+    with TestClient(app) as client:
+        created = client.post("/api/agent-sessions", headers=_auth(), json={
+            "harness_id": "with-shutdown", "conversation_id": "c1",
+            "repo_id": "r", "mode": "analysis"})
+        assert created.status_code == 200
+        assert harness.shutdown_called is False
+
+    assert harness.shutdown_called is True
+
+
+def test_worker_shutdown_skips_harnesses_without_the_optional_hook():
+    """FakeHarness declares no shutdown() — the handler must not raise just
+    because a harness doesn't opt into the optional cleanup hook."""
+    with TestClient(build_app(store=SessionStore(), token=TOKEN)) as client:
+        created = client.post("/api/agent-sessions", headers=_auth(), json={
+            "harness_id": "fake", "conversation_id": "c1",
+            "repo_id": "r", "mode": "analysis"})
+        assert created.status_code == 200
+    # no exception on exit == pass

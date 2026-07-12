@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
@@ -128,7 +129,23 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         finally:
             active_runs.pop(session_id, None)
 
-    app = FastAPI(title="Command Center Agent Worker", version="0.1.0")
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        yield
+        # A real harness adapter (Codex) owns a live SDK client with its own
+        # subprocess connection — see adapters/codex_agent.py's shutdown().
+        # AgentSessionService caches one harness instance PER SESSION (not
+        # one shared instance per harness type — see service.py's
+        # _active_harnesses), so shutdown must walk every cached instance,
+        # not just one. FakeHarness (and any harness that doesn't declare
+        # shutdown()) is skipped — nothing to clean up.
+        for harness in list(service._active_harnesses.values()):
+            shutdown_fn = getattr(harness, "shutdown", None)
+            if shutdown_fn is not None:
+                await shutdown_fn()
+
+    app = FastAPI(title="Command Center Agent Worker", version="0.1.0",
+                 lifespan=_lifespan)
 
     async def _authed(authorization: str | None = Header(default=None)) -> None:
         if authorization != f"Bearer {token}":

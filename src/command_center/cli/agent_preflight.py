@@ -30,6 +30,12 @@ class Probe:
     check: str
     status: str          # PASS | BLOCKED | NOT_CONFIGURED
     detail: str
+    # Informational probes report a fact but never gate `overall` — used for a
+    # probe whose NOT_CONFIGURED is an EXPECTED, benign state, not a real
+    # problem (e.g. codex_api_key_present: Codex authenticates via the
+    # existing `codex login` session, so OPENAI_API_KEY being unset is
+    # correct, not a blocker — see run()).
+    informational: bool = False
 
 
 def _sdk_probe(check: str, import_name: str, dist_name: str) -> Probe:
@@ -58,12 +64,13 @@ def _cli_probe(check: str, binary: str) -> Probe:
     return Probe(check, "PASS", f"{path} — {version}")
 
 
-def _env_key_probe(check: str, key: str) -> Probe:
+def _env_key_probe(check: str, key: str, *, informational: bool = False) -> Probe:
     from command_center.channels.core import env
     present = bool(env().get(key))
     # presence only — never print the value
     return Probe(check, "PASS" if present else "NOT_CONFIGURED",
-                 f"{key} {'is set' if present else 'is not set'} (.env + process, merged)")
+                 f"{key} {'is set' if present else 'is not set'} (.env + process, merged)",
+                 informational=informational)
 
 
 def _codex_cli_session_auth_probe() -> Probe:
@@ -117,7 +124,12 @@ def probe_codex() -> list[Probe]:
     return [
         _sdk_probe("codex_sdk_importable", "openai_codex", "openai-codex"),
         _cli_probe("codex_cli_installed", "codex"),
-        _env_key_probe("codex_api_key_present", "OPENAI_API_KEY"),
+        # informational: Codex authenticates via the existing `codex login`
+        # session (codex_cli_session_auth below / live_auth when --live), so
+        # OPENAI_API_KEY being unset is the EXPECTED, correct state — it must
+        # not drag `overall` to NOT_CONFIGURED (verified live: a real turn
+        # runs with no API key set). See run().
+        _env_key_probe("codex_api_key_present", "OPENAI_API_KEY", informational=True),
         _codex_cli_session_auth_probe(),
     ]
 
@@ -137,19 +149,149 @@ def probe_host() -> list[Probe]:
          if in_container else "running on the host"))]
 
 
-def run(harness: str) -> dict:
+def live_probe_codex(repo_id: str) -> list[Probe]:
+    """REAL, opt-in, quota-consuming verification (`--live`, never run by
+    default) against the actual pinned openai-codex SDK and the actual
+    authenticated account — not a static file check. Exercises the required
+    Codex adapter acceptance list: SDK import+version, real auth (not just
+    an auth.json file existing), read-only-sandbox thread creation, a
+    same-thread follow-up, resume-by-id via a FRESH harness instance
+    (simulating a worker restart), the target repo being resolvable/
+    openable, and zero filesystem mutation — verified via mutation_proof,
+    never assumed. interrupt() mechanics themselves are proven by
+    test_codex_agent_adapter.py's fake-SDK unit test; this only checks the
+    live call doesn't raise."""
+    import asyncio
+    import importlib.metadata as md
+
+    probes: list[Probe] = []
+    try:
+        import openai_codex   # noqa: F401  (import-success is the check)
+        version = md.version("openai-codex")
+    except ImportError as exc:
+        probes.append(Probe("live_sdk_import", "BLOCKED",
+                            f"openai-codex not importable: {exc!r}"))
+        return probes
+    probes.append(Probe("live_sdk_import", "PASS", f"openai-codex {version} imported"))
+
+    from command_center.agent_sessions.adapters.codex_agent import (
+        CodexAgentHarness, _resolve_repo_path)
+    from command_center.agent_sessions.mutation_proof import snapshot
+    from command_center.agent_sessions.protocol import SessionStart
+    from command_center.agent_sessions.store import SessionStore
+
+    try:
+        repo_path = _resolve_repo_path(repo_id)
+    except Exception as exc:
+        probes.append(Probe("live_repo_resolvable", "BLOCKED", repr(exc)))
+        return probes
+    if not repo_path.is_dir():
+        probes.append(Probe("live_repo_resolvable", "BLOCKED",
+                            f"{repo_path} is not a directory"))
+        return probes
+    probes.append(Probe("live_repo_resolvable", "PASS",
+                        f"repo_id {repo_id!r} -> {repo_path}"))
+
+    store = SessionStore()
+    harness = CodexAgentHarness(store)
+
+    async def _run() -> list[Probe]:
+        results: list[Probe] = []
+        probe = await harness.probe()
+        results.append(Probe("live_auth", "PASS" if probe.available else "BLOCKED",
+                             probe.detail))
+        if not probe.available:
+            return results
+
+        before = snapshot(repo_path)
+        try:
+            session_id = await harness.start_session(SessionStart(
+                conversation_id="agent-preflight-live", repo_id=repo_id,
+                mode="analysis", harness_id="codex_agent",
+                permission_profile="read_only"))
+            results.append(Probe("live_thread_created", "PASS", f"session {session_id}"))
+
+            events1 = [e async for e in harness.send(
+                session_id, "In one short sentence, what does this repository do?")]
+            terminal1 = [e.type for e in events1
+                        if e.type in ("session_idle", "session_failed")]
+            results.append(Probe(
+                "live_first_turn", "PASS" if terminal1 == ["session_idle"] else "BLOCKED",
+                f"{len(events1)} events, terminal={terminal1}"))
+
+            events2 = [e async for e in harness.send(
+                session_id, "One more short sentence: what language is it mostly "
+                           "written in?")]
+            terminal2 = [e.type for e in events2
+                        if e.type in ("session_idle", "session_failed")]
+            results.append(Probe(
+                "live_followup_same_thread",
+                "PASS" if terminal2 == ["session_idle"] else "BLOCKED",
+                f"{len(events2)} events, terminal={terminal2}"))
+
+            external_id = store.get(session_id).external_session_id
+            harness2 = CodexAgentHarness(store)   # fresh instance = simulated restart
+            events3 = [e async for e in harness2.send(
+                session_id, "In one word: what license, if any, does it use?")]
+            results.append(Probe(
+                "live_resume_by_thread_id", "PASS" if events3 else "BLOCKED",
+                f"resumed via external_session_id={external_id}, {len(events3)} events"))
+
+            try:
+                await harness2.interrupt(session_id)   # idle session: must not raise
+                results.append(Probe("live_interrupt_call", "PASS",
+                                     "interrupt() on an idle session did not raise"))
+            except Exception as exc:
+                results.append(Probe("live_interrupt_call", "BLOCKED", repr(exc)))
+
+            await harness2.close(session_id)
+        finally:
+            after = snapshot(repo_path)
+            problems = before.diff(after)
+            results.append(Probe(
+                "live_zero_mutation", "PASS" if not problems else "BLOCKED",
+                "no filesystem changes" if not problems else "; ".join(problems)))
+        return results
+
+    probes.extend(asyncio.run(_run()))
+    return probes
+
+
+def run(harness: str, *, live: bool = False, repo: str = "") -> dict:
     probes: list[Probe] = list(probe_host())
     if harness in ("all", "claude"):
         probes += probe_claude()
     if harness in ("all", "codex"):
         probes += probe_codex()
-    probes.append(_forbidden_provider_policy_probe())
-    overall = ("BLOCKED" if any(p.status == "BLOCKED" for p in probes) else
-               "NOT_CONFIGURED" if any(p.status == "NOT_CONFIGURED" for p in probes) else
+        if live:
+            if not repo:
+                probes.append(Probe(
+                    "live_probe", "BLOCKED",
+                    "--live requires --repo <repo_id> (a repo_manifests entry "
+                    "in configs/autonomy.yaml)"))
+            else:
+                probes += live_probe_codex(repo)
+    # This probe is genuinely a CLAUDE-specific blocker (the Claude Agent SDK
+    # structurally requires ANTHROPIC_API_KEY, which is permanently forbidden
+    # without an explicit policy decision — see the probe's own docstring).
+    # Codex never touches OPENAI_API_KEY (verified live: authenticates via a
+    # reused `codex login` session), so including this probe in a codex-only
+    # run made `cc agent-preflight --harness codex --live` report BLOCKED
+    # overall even when every Codex-relevant check passed — not honest.
+    if harness in ("all", "claude"):
+        probes.append(_forbidden_provider_policy_probe())
+    # Informational probes report a fact but never gate overall (e.g.
+    # codex_api_key_present, whose NOT_CONFIGURED is the expected state for
+    # existing-login Codex — see probe_codex). A truly optional-and-absent
+    # thing must not make a fully-working setup look non-PASS.
+    gating = [p for p in probes if not p.informational]
+    overall = ("BLOCKED" if any(p.status == "BLOCKED" for p in gating) else
+               "NOT_CONFIGURED" if any(p.status == "NOT_CONFIGURED" for p in gating) else
                "PASS")
     return {
         "schema_version": "command-center.agent-preflight.v1",
         "harness": harness,
+        "live": live,
         "overall": overall,
         "probes": [asdict(p) for p in probes],
     }
@@ -162,12 +304,16 @@ def main() -> int:
                     "writes anything.")
     parser.add_argument("--harness", choices=["all", "claude", "codex"], default="all")
     parser.add_argument("--repo", default="",
-                        help="unused placeholder for a future per-repo worktree/"
-                             "devcontainer check (Phase 1+)")
+                        help="repo_id (from configs/autonomy.yaml repo_manifests) for "
+                             "--live's real Codex thread — required when --live is set")
+    parser.add_argument("--live", action="store_true",
+                        help="REAL, quota-consuming verification against the actual "
+                             "authenticated Codex account (codex harness only) — never "
+                             "run unless you explicitly pass this; see live_probe_codex")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args()
 
-    result = run(args.harness)
+    result = run(args.harness, live=args.live, repo=args.repo)
     if args.json:
         print(json.dumps(result, indent=2))
     else:

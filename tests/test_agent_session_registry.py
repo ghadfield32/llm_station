@@ -49,26 +49,33 @@ def test_probes_report_fake_as_available(registry):
     assert probes["fake"]["production"] is False
 
 
-def test_probes_report_unbuilt_harnesses_with_exact_blockers_not_generic(registry):
+def test_probes_report_unbuilt_harness_with_exact_blocker_not_generic(registry):
+    # codex_agent is a REAL adapter now (see adapters/codex_agent.py) — its
+    # probe() result depends on the real environment (SDK installed? real
+    # account authenticated?), which test_codex_agent_adapter.py covers
+    # deterministically via a fake SDK. claude_agent remains a genuine
+    # NotBuiltHarness placeholder, so it's the one this test can assert on
+    # unconditionally.
     probes = {p["harness_id"]: p for p in asyncio.run(registry.probes())}
-    for harness_id in ("codex_agent", "claude_agent"):
-        p = probes[harness_id]
-        assert p["available"] is False
-        assert p["detail"] != "unavailable"
-        assert len(p["detail"]) > 20   # a real, specific reason, not a stub string
-        assert "no real adapter built yet" in p["detail"]
+    p = probes["claude_agent"]
+    assert p["available"] is False
+    assert p["detail"] != "unavailable"
+    assert len(p["detail"]) > 20   # a real, specific reason, not a stub string
+    assert "no real adapter built yet" in p["detail"]
 
 
-def test_probing_unbuilt_harnesses_never_imports_their_sdk(registry):
-    for mod in ("claude_agent_sdk", "openai_codex"):
-        sys.modules.pop(mod, None)
+def test_probing_unbuilt_claude_harness_never_imports_its_sdk(registry):
+    # codex_agent's probe() now legitimately imports openai_codex to give an
+    # honest availability answer (see codex_agent.py's _import_sdk) — that's
+    # expected, not a regression. claude_agent is still NotBuiltHarness, so
+    # it alone keeps the "never imports just from listing" guarantee.
+    sys.modules.pop("claude_agent_sdk", None)
     asyncio.run(registry.probes())
     assert "claude_agent_sdk" not in sys.modules
-    assert "openai_codex" not in sys.modules
 
 
 def test_unbuilt_harness_refuses_every_lifecycle_method_not_just_probe(registry):
-    harness = registry.get("codex_agent").factory()
+    harness = registry.get("claude_agent").factory()
     from command_center.agent_sessions.protocol import ApprovalDecision, SessionStart
 
     with pytest.raises(RuntimeError):
