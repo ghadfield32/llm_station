@@ -396,8 +396,59 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   entirely FakeHarness-backed, still zero paid/authenticated calls. Real Codex/
   Claude adapters remain explicitly out of scope until that vertical slice
   works end-to-end and a human decides to proceed.
-
-## Frontier-router chat lane — untrusted tool_calls dispatch
+- INCIDENT 07-11 (real, contained, fully recovered): a Bash tool cwd silently
+  drifted from this worktree (`C:\tmp\cc-agent-runtime`) back to the main
+  `llm_station` checkout mid-session (the same class of drift documented
+  earlier this arc for `docker build`/`git status`). A throwaway proof `.env`
+  write and a `docker compose up` — both intended for an isolated worktree-
+  only proof — ran from the wrong directory instead, overwriting the REAL
+  `.env` and recreating the REAL `llm_station-ledger-1`/`llm_station-agent-
+  kanban-ui-1` production containers with disposable secrets and shifted
+  ports. Caught immediately (container names were `llm_station-*`, not
+  `cc-agent-runtime-*`), fully recovered: Ledger `PRAGMA integrity_check` =
+  `ok` with every real table intact, zero Docker volume changes across the
+  whole incident (before/after `docker volume ls` diff empty), and — better
+  than expected — the real, complete, current `.env` was recovered from VS
+  Code's own Local History (a snapshot ~22h before the incident, cross-
+  verified byte-for-byte-equivalent `LITELLM_MASTER_KEY`/`POSTGRES_PASSWORD`
+  against the untouched live `litellm`/`litellm-db` containers), so no secret
+  needed rotating. Full evidence trail preserved outside the repo. Root cause
+  was structural, not "be more careful": nothing verified the actual Docker/
+  filesystem target before a destructive-capable command ran.
+- SAFETY TOOLING DONE 07-11 (the structural fix, before any further live
+  proof work): `scripts/run_agent_deployment_proof.ps1` is now the ONLY
+  sanctioned way to bring up an isolated ledger+cockpit pair for a live
+  agent-session proof. Refuses to run (exit 1, `REFUSED: ...`) unless every
+  invariant holds — resolved git root matches the expected worktree, current
+  branch matches, proof-env project name is never `llm_station` and must
+  self-document as disposable (contains "proof"), the proof `.env` path must
+  live INSIDE the worktree and must never be named `.env`, and (checked again
+  AFTER container creation, not just before) no resulting container name may
+  start with `llm_station-`. `-DryRun` runs every check with zero Docker/
+  filesystem side effects — this is what the test suite exercises, so the
+  guarantees are provable without a daemon. No-clobber env generation
+  (`-GenerateEnv`): an existing proof `.env` is never regenerated or
+  overwritten, verified by a real test that plants a sentinel value and
+  confirms it survives. `docker-compose.agent-proof.yml` is a documentation/
+  defense-in-depth override (`restart: "no"` for the two proof services) —
+  the REAL volume-isolation guarantee is Compose's own automatic project-name
+  volume namespacing (verified: `docker-compose.yml`'s `ledger_data` has no
+  `name:`/`external:` override, so a distinct `-p` value alone guarantees a
+  distinct volume, never `llm_station_ledger_data`).
+- TESTS 07-11: `tests/test_agent_deployment_proof_safety.py` (10, 1 skipped
+  when no second fixed-path git repo is available for the synthetic root-
+  mismatch case — the realistic incident scenario, wrong root AND wrong
+  branch together, is covered by the branch-mismatch test instead, which is
+  what actually caught the real incident) — shells out to the real script via
+  `pwsh`/`powershell` (skips cleanly if neither is on PATH), asserts refusal
+  for: `llm_station` project name, a project name without "proof" in it,
+  wrong branch, `.env`-named proof path, proof path outside the worktree,
+  missing proof env without `-GenerateEnv`; asserts success + zero side
+  effects for the happy path and for no-clobber. First test run caught a
+  real test-design bug (not a script bug): three tests used pytest's own
+  `tmp_path`, which lives outside the worktree — the script correctly
+  refused per its own "must be inside worktree" invariant; fixed by adding an
+  `in_worktree_proof_env` fixture instead of weakening the script.
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro
   (frontier lane, no `tools` ever sent — verified in frontier_client.py body) returned a
   structured tool_calls entry for project_status(project_name=...) anyway; GatewayCore's
