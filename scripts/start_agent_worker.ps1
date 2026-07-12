@@ -34,8 +34,13 @@ function Load-DotEnv {
   # Minimal .env loader (KEY=VALUE lines, # comments) — only fills vars not
   # already set in the environment, so an explicit `$env:X=...` before
   # calling this script always wins.
+  # -PathType Leaf: skip if .env is absent OR is a directory. Docker's
+  # bind-mount of `./.env` (docker-compose.yml) CREATES an empty .env
+  # DIRECTORY in a checkout that has no real .env file (e.g. a stacked
+  # worktree used only for deployment proofs) — Get-Content on a directory
+  # throws, and there's nothing to load from it anyway.
   $envFile = Join-Path $RepoRoot ".env"
-  if (-not (Test-Path $envFile)) { return }
+  if (-not (Test-Path $envFile -PathType Leaf)) { return }
   Get-Content $envFile | ForEach-Object {
     if ($_ -match '^\s*#' -or $_ -notmatch '=') { return }
     $k, $v = $_ -split '=', 2
