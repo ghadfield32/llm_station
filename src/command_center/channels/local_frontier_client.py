@@ -12,6 +12,7 @@ unverified on this machine) — timeouts here are sized for that, not for a norm
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -27,6 +28,19 @@ from ..schemas import contracts
 ROOT = Path(__file__).resolve().parents[3]
 PROVIDERS_PATH = ROOT / "configs" / "local-frontier-providers.yaml"
 HEALTH_PROBE_TIMEOUT = 3.0   # local loopback — a slow/no response means "not running," not "slow reply"
+
+
+def _cache_slot_for(conversation_id: str, kv_slots: int) -> int:
+    """Deterministic conversation_id -> cache_slot mapping (colibrì's `cache_slot` request
+    field, 0 <= cache_slot < kv_slots — see openai_server.py). Without this every request
+    implicitly shares slot 0: observed live 2026-07-11/12, prefill cost grew 13 -> 163 tokens
+    as unrelated conversations' turns bled into the same KV cache. Python's builtin hash() is
+    process-randomized (PYTHONHASHSEED) and would map the same conversation to a different slot
+    across restarts, defeating colibrì's own KV-cache-persists-across-restarts feature — sha256
+    is stable. Different conversations can still collide onto the same slot (kv_slots is small,
+    e.g. 2) and share cache; that's a capacity limit, not a bug this mapping can remove."""
+    digest = hashlib.sha256(conversation_id.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % kv_slots
 
 
 def _env() -> dict[str, str]:
@@ -92,8 +106,10 @@ async def local_frontier_chat_completion(
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
+    cache_slot = _cache_slot_for(conversation_id, model.kv_slots)
     body: dict[str, Any] = {
-        "model": model_id, "messages": messages, "max_tokens": model.max_output_tokens}
+        "model": model_id, "messages": messages, "max_tokens": model.max_output_tokens,
+        "cache_slot": cache_slot}
     t0 = time.monotonic()
     try:
         r = await http.post(
@@ -115,6 +131,7 @@ async def local_frontier_chat_completion(
         "conversation_id": conversation_id,
         "model_id": model_id,
         "task_class": task_class,
+        "cache_slot": cache_slot,
         "elapsed_seconds": round(elapsed_s, 2),
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": completion_tokens or None,

@@ -934,12 +934,18 @@ not a real turn through its own `/api/chat` — that gap is now closed):
     via `free -h` showing zero swap growth afterward. **Never launch colibrì without an explicit,
     conservative `--ram` value on a shared machine.**
   - **colibrì does not isolate KV cache by `conversation_id`** — there's a `cache_slot` request
-    extension (see the engine's own docs) that `local_frontier_client` does not yet send, so
-    every request implicitly shares slot 0. Observed live: prefill cost grew from 13 tokens (first
-    request ever) to 163 tokens (a later, unrelated conversation) purely from unrelated prior
-    turns bleeding into the same cache. This directly inflates latency across a session and is a
-    known, undone gap — mapping `conversation_id` to a stable `cache_slot` (mod `kv_slots`) is the
-    fix, not yet implemented.
+    extension (`0 <= cache_slot < kv_slots`, confirmed against the engine's own
+    `openai_server.py`) that `local_frontier_client` didn't send, so every request implicitly
+    shared slot 0. Observed live: prefill cost grew from 13 tokens (first request ever) to 163
+    tokens (a later, unrelated conversation) purely from unrelated prior turns bleeding into the
+    same cache. **Fixed 2026-07-12**: `_cache_slot_for(conversation_id, kv_slots)` deterministically
+    maps each conversation to a stable slot via `sha256` (not Python's builtin `hash()`, which is
+    `PYTHONHASHSEED`-randomized per process and would silently defeat colibrì's own
+    KV-cache-persists-across-restarts feature). Live-verified: the server log echoed `KV slot 0`
+    for a conversation id chosen specifically because it hashes to slot 0, confirming the computed
+    value is what colibrì actually received and used. With `kv_slots=2` distinct conversations can
+    still collide onto the same slot and share cache — that's a capacity limit inherent to a
+    small `kv_slots`, not something this mapping removes.
   - `queue_timeout_seconds` at the schema default (900s) proved too tight once the above two
     effects (reduced expert cache under `--ram 28`, growing cache_slot-0 prefill) stacked: a real
     request completed successfully server-side (`200 OK`, scheduler `completed: 1`, never

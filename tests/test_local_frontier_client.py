@@ -42,6 +42,46 @@ def _mock_transport(payload: dict, status_code: int = 200):
     return httpx.MockTransport(handler)
 
 
+# ---- cache_slot mapping ---------------------------------------------------------------------
+
+def test_cache_slot_is_deterministic_and_in_bounds():
+    for kv_slots in (1, 2, 16):
+        for conversation_id in ("c1", "acceptance-gate-test", "a very long conversation id"):
+            slot = lfc._cache_slot_for(conversation_id, kv_slots)
+            assert 0 <= slot < kv_slots
+            # same input -> same output, every time (KV cache persists across engine
+            # restarts on colibri's side; the mapping must be stable to actually use that)
+            assert slot == lfc._cache_slot_for(conversation_id, kv_slots)
+
+
+def test_cache_slot_does_not_depend_on_process_hash_randomization():
+    """Python's builtin hash() is PYTHONHASHSEED-randomized per process — using it here would
+    map the same conversation to a different slot after every restart, defeating colibri's own
+    KV-cache-persists-across-restarts feature. sha256 must be used instead."""
+    import os
+    import subprocess
+    import sys
+    script = (
+        "from command_center.channels.local_frontier_client import _cache_slot_for; "
+        "print(_cache_slot_for('a-stable-conversation-id', 16))"
+    )
+    results = set()
+    for seed in ("1", "2", "3"):
+        env = {**os.environ, "PYTHONHASHSEED": seed}
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, env=env, check=True)
+        results.add(proc.stdout.strip())
+    assert len(results) == 1, f"cache_slot changed across PYTHONHASHSEED values: {results}"
+
+
+def test_different_conversations_can_map_to_different_slots():
+    """Not a strict requirement (small kv_slots means collisions are expected and fine — see
+    _cache_slot_for's docstring), but with kv_slots=16 a handful of distinct conversation ids
+    landing on the exact same slot would suggest the hash isn't actually varying by input."""
+    slots = {lfc._cache_slot_for(f"conversation-{i}", 16) for i in range(20)}
+    assert len(slots) > 1
+
+
 # ---- gates --------------------------------------------------------------------------------
 
 def test_completion_refuses_disabled_lane(tmp_path, monkeypatch):
@@ -139,6 +179,10 @@ def test_completion_live_call_never_sends_tools_and_records_ledger(tmp_path, mon
     msg = asyncio.run(go())
     assert msg["content"] == "hello from colibri"
     assert "tools" not in seen_bodies[0]     # never sends a tools schema
+    # Every request carries a cache_slot — without this, unrelated conversations silently
+    # share KV state (observed live 2026-07-11/12: prefill cost grew 13 -> 163 tokens as
+    # earlier, unrelated turns bled into the shared default slot 0).
+    assert 0 <= seen_bodies[0]["cache_slot"] < 2   # kv_slots=2 in _providers_config()
     # REQUIRED, not optional — an uncapped reply can outrun queue_timeout_seconds itself at
     # colibri-class throughput (regression: a real cockpit turn without this hit exactly that
     # 2026-07-11, surfacing as an opaque transport error instead of a clean timeout).
