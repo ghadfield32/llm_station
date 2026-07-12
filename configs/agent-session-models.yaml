@@ -31,3 +31,11 @@ claude_agent:
   # distinct from the provider's rate-limit quota (RateLimitEvent) — the usage
   # subsystem never conflates internal budget with provider allowance.
   max_budget_usd: null
+
+# Claude Code LOCAL lane (the default Claude lane) — drives the installed `claude`
+# CLI with the operator's existing `claude auth login` subscription (NO API key).
+# preferred_model is a CLI alias ('opus'/'sonnet'/'fable') or a full model id;
+# leave unset for the CLI's own default. max_turns bounds a single read-only turn.
+claude_code_local:
+  preferred_model: null
+  max_turns: 20
