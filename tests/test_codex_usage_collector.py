@@ -50,9 +50,9 @@ class _Snapshot:
 
 
 class _RateLimitsResponse:
-    def __init__(self, snapshot):
+    def __init__(self, snapshot, by_limit_id=None):
         self.rate_limits = snapshot
-        self.rate_limits_by_limit_id = {}
+        self.rate_limits_by_limit_id = by_limit_id or {}
 
 
 class _AccountRoot:
@@ -69,14 +69,15 @@ class _AccountResponse:
 
 
 class _FakeUnderlying:
-    def __init__(self, snapshot, rl_error=None):
+    def __init__(self, snapshot, rl_error=None, by_limit_id=None):
         self._snapshot = snapshot
         self._rl_error = rl_error
+        self._by_limit_id = by_limit_id
 
     async def request(self, method, params, *, response_model):
         if self._rl_error is not None:
             raise self._rl_error
-        return _RateLimitsResponse(self._snapshot)
+        return _RateLimitsResponse(self._snapshot, self._by_limit_id)
 
 
 class _FakeAsyncCodex:
@@ -86,11 +87,12 @@ class _FakeAsyncCodex:
             primary=_Window(0, 1783861277, 300),
             secondary=_Window(0, 1784400188, 10080))
         self.rl_error = None
+        self.by_limit_id = None       # non-empty dict -> the multi-bucket path
         self.closed = False
 
     @property
     def _client(self):
-        return _FakeUnderlying(self.snapshot, self.rl_error)
+        return _FakeUnderlying(self.snapshot, self.rl_error, self.by_limit_id)
 
     async def account(self):
         if self.account_error is not None:
@@ -194,6 +196,80 @@ def test_rate_limits_read_failure_keeps_available_but_warns(monkeypatch):
     assert result.availability[0].state == AvailabilityState.AVAILABLE
     assert result.limits == []
     assert result.warnings
+
+
+# ── multi-bucket view (rate_limits_by_limit_id) ──────────────────────────────
+
+def _win_d(used, resets, mins):
+    return {"usedPercent": used, "windowDurationMins": mins, "resetsAt": resets}
+
+
+def _credits_d(has, balance, unlimited=False):
+    return {"hasCredits": has, "unlimited": unlimited, "balance": balance}
+
+
+def _limit_entry(limit_id, *, name=None, primary=None, secondary=None, credits=None):
+    return {"limitId": limit_id, "limitName": name, "primary": primary,
+            "secondary": secondary, "credits": credits, "individualLimit": None}
+
+
+def test_multi_bucket_imports_every_named_limit_and_dedupes_compat(monkeypatch):
+    codex = _FakeAsyncCodex()
+    # the default `codex` limit + a per-model limit, the real shape
+    codex.by_limit_id = {
+        "codex": _limit_entry(
+            "codex",
+            primary=_win_d(40, 1783861277, 300),
+            secondary=_win_d(12, 1784400188, 10080),
+            credits=_credits_d(False, "0")),
+        "codex_bengalfox": _limit_entry(
+            "codex_bengalfox", name="GPT-5.3-Codex-Spark",
+            primary=_win_d(7, 1783877044, 300),
+            secondary=_win_d(3, 1784463844, 10080)),
+    }
+    _install_fake_sdk(monkeypatch, codex)
+
+    result = asyncio.run(CodexAppServerCollector().collect())
+    buckets = {lim.bucket_id: lim for lim in result.limits}
+    # default limit keeps bare primary/secondary (dedupes the compat view);
+    # the per-model limit is namespaced — 4 buckets, no duplicates
+    assert set(buckets) == {"primary", "secondary",
+                            "codex_bengalfox_primary", "codex_bengalfox_secondary"}
+    assert len(result.limits) == 4
+    assert buckets["primary"].used_percent == 40.0
+    assert buckets["primary"].source == UsageSource.PROVIDER_NATIVE
+    # the named limit carries its human label
+    assert "GPT-5.3-Codex-Spark" in buckets["codex_bengalfox_primary"].label
+    assert buckets["codex_bengalfox_secondary"].window_seconds == 10080 * 60
+
+
+def test_credits_imported_only_when_has_credits(monkeypatch):
+    codex = _FakeAsyncCodex()
+    codex.by_limit_id = {
+        "codex": _limit_entry("codex", primary=_win_d(5, 1783861277, 300),
+                              credits=_credits_d(False, "0")),          # off -> None
+        "codex_paid": _limit_entry("codex_paid", name="Paid",
+                                   primary=_win_d(5, 1783861277, 300),
+                                   credits=_credits_d(True, "12.5")),   # on -> 12.5
+    }
+    _install_fake_sdk(monkeypatch, codex)
+    buckets = {lim.bucket_id: lim
+               for lim in asyncio.run(CodexAppServerCollector().collect()).limits}
+    assert buckets["primary"].credits_remaining is None
+    assert buckets["codex_paid_primary"].credits_remaining == 12.5
+
+
+def test_multi_bucket_availability_uses_worst_window_across_all_limits(monkeypatch):
+    codex = _FakeAsyncCodex()
+    codex.by_limit_id = {
+        "codex": _limit_entry("codex", primary=_win_d(10, 1783861277, 300)),
+        "codex_hot": _limit_entry("codex_hot", name="Hot",
+                                  primary=_win_d(93, 1783861277, 300)),  # worst
+    }
+    _install_fake_sdk(monkeypatch, codex)
+    result = asyncio.run(CodexAppServerCollector().collect())
+    assert result.availability[0].state == AvailabilityState.LIMITED
+    assert "93%" in result.availability[0].reason
 
 
 # ── end-to-end through the service + collector state ─────────────────────────

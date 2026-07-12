@@ -6,6 +6,32 @@ liners. Newest notes at the top of each topic. Full design lives in
 this is the fast "has this been done?" index. Dates are when the line was written.
 
 ## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
+- PHASE 2.1 — CODEX COLLECTOR COMPLETED (multi-bucket) 07-12 (same branch
+  `feat/codex-usage-collector`, extends PR #35). Grounded by a fresh LIVE SDK
+  introspection (read-only), which CORRECTED two assumptions in the roadmap
+  doc: (1) **`account/rateLimits/read` returns TWO views** — the single-bucket
+  compatibility `rate_limits` AND a **`rate_limits_by_limit_id`** dict keyed by
+  limit_id (the default `codex` limit PLUS per-model limits, e.g.
+  `codex_bengalfox` = "GPT-5.3-Codex-Spark"), each with camelCase
+  `primary`/`secondary` windows, its own `credits` (balance/hasCredits/
+  unlimited) and a `limitName`. The collector now imports EVERY named bucket:
+  the default limit keeps the bare `primary`/`secondary` bucket_ids (so it
+  DEDUPES the compat windows — never double-counted), other limits are
+  namespaced `{limit_id}_primary/_secondary`, credits import only when
+  hasCredits (else None, never a misleading 0.0), and availability takes the
+  worst used% across ALL buckets. Live smoke now returns **4 provider_native
+  buckets** (was 2). (2) **There is NO `account/usage/read` in the pinned
+  app-server** — the JSON-RPC server rejects it as an unknown variant (valid
+  account methods: rateLimits/read, read, login/*, logout,
+  sendAddCreditsNudgeEmail). So there is no account-level token/daily-bucket
+  summary to poll; per-turn token usage flows through the adapter's
+  `ThreadTokenUsage` events (NOT re-emitted here → no double-count). Also:
+  `account/rateLimits/updated` is a server NOTIFICATION, not a request — the
+  worker wires it (and every reconnect) to a fresh `collect()` refresh (one
+  code path, no payload-parsing drift). +3 tests (multi-bucket enumeration +
+  compat dedup, credits gating, worst-window availability) = 13 collector
+  tests; existing 10 compat tests unchanged (fake's empty by_limit_id → compat
+  path). ruff + `mypy src/command_center/usage/` clean.
 - PHASE 2 — FIRST REAL PROVIDER COLLECTOR DONE 07-12 (branch
   `feat/codex-usage-collector`, stacked on `feat/unified-runtime-usage`/PR #34):
   `collectors/codex_app_server.py` turns the Codex app-server's account +
