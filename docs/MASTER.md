@@ -962,6 +962,33 @@ not a real turn through its own `/api/chat` — that gap is now closed):
     write into `.env` and trust blindly mid-session again without a stability check
     (`wc -l .env` a few times in a row with no writes in between) first.
 
+**Performance-tuning experiments, 2026-07-12** (`--ram 28` + default engine settings, measured
+against the same `"Reply with exactly one short sentence."` prompt, real `/api/chat` calls
+through the cockpit, each compared against the 0.0549 tok/s acceptance-gate baseline):
+
+- `iobench` (the engine's own I/O diagnostic) measured **0.07 GB/s buffered vs 0.99 GB/s
+  `O_DIRECT`** — a dramatic 14x gap in a synthetic 8-thread burst-read pattern. Tempting to read
+  as "free 14x speedup available," but `glm.c`'s own `g_direct` comment already documents that
+  the maintainer tested exactly this (VHDX-backed NVMe, "latenza serializzata ~60ms/req") and
+  found buffered reads win in real inference despite the synthetic numbers — a warning not to
+  trust a diagnostic tool's access pattern as representative of the real workload.
+- **`MTP=0`** (explicitly disabling the already-confirmed-broken int4 MTP head, avoiding even the
+  wasted 24-proposal self-disable probe): **0.0078 tok/s — ~7x slower**, not faster. Likely
+  because MTP's verification pass batches multiple experts' disk reads together (the engine's
+  own "batch-union MoE" behavior extends to MTP verification), and under this storage stack's
+  high per-request latency, batched reads beat strictly-sequential ones even when the draft
+  itself gets rejected. Reverted.
+- **`DIRECT=1`** (enabling `O_DIRECT` on expert slabs, testing the maintainer's stated finding
+  directly rather than trusting it by analogy): **0.0151 tok/s — ~3.6x slower**. Confirms the
+  `g_direct` comment's claim empirically on this specific machine, not just by reading the
+  source. Reverted.
+- **Conclusion: both tested "obvious" optimizations regressed performance.** The
+  maintainer-chosen defaults (MTP on, `O_DIRECT` off) plus the one change already proven
+  necessary here (`--ram 28`, avoiding swap thrashing) represent the practical performance
+  ceiling found so far without deeper engine-level work (a RAM sweep above 28 and a genuine
+  `iobench`-informed cache-sizing pass remain untested, lower-priority given the two negative
+  results above and the real risk of repeating the swap-thrashing regression).
+
 What is done (legacy detail):
 
 1. `model-scout` now emits an open-weight-only candidate set by default. A source
