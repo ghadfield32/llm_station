@@ -187,6 +187,28 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- CLAUDE USAGE FEED (loop closed) + SELECTOR BADGES 07-12 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). Closes the "a running Claude
+  session lights up its own card" loop: new `KANBAN_UI_USAGE_CLAUDE` gate
+  registers TWO event-fed Claude collectors (claude_code_local + claude_agent,
+  distinct runtime_ids so the subscription lane never lands on the API lane's
+  card), and the cockpit SSE generator (`_agent_event_frames`) now TEES every
+  live `rate_limit` AgentEvent into the durable usage store via
+  `_feed_agent_usage` → `translate_rate_limit_info(..., runtime_id=harness)` →
+  `UsageService.ingest_collector_result` (attributed to the session's harness,
+  resolved from a `_session_harness` cache populated at create, backfilled from
+  the worker otherwise). Best-effort — a tee failure never breaks the browser
+  stream. Codex limits keep coming from its own provider collector (not teed).
+  UI: the Agent-Sessions picker `<option>`s carry a concise live badge
+  (`harnessBadgeText`: a non-available availability state or the worst limit
+  bucket ≥50%), and the session header shows an availability chip from the
+  harness's `usage_summary` (already added to /api/agent-harnesses). +1
+  integration test (a real claude_code_local rate_limit event → /api/model-usage
+  shows the claude_code_local card NEAR_LIMIT with a five_hour bucket, NOT the
+  API lane). ruff + mypy clean; tsc+vite build clean; full suite green.
+  KNOWN LIMITATION (documented): the cockpit tee only runs while a browser SSE
+  stream is open — a fully headless session isn't captured yet (a worker-side
+  UsageService is the durable follow-up).
 - COCKPIT PICKERS (runtime → model → effort) + 2 real-bug fixes 07-12 (branch
   `feat/agent-cockpit-pickers`, stacked on `feat/claude-agent-readonly`).
   Grounded by an ultracode workflow (5 investigators → adversarial verify →

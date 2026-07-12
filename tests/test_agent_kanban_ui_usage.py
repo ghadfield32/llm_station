@@ -84,6 +84,25 @@ def test_collector_health_is_not_swallowed_by_runtime_catchall(monkeypatch):
     assert health[0]["never_ran"] is False
 
 
+def test_claude_rate_limit_event_tees_into_the_usage_store(monkeypatch):
+    # a live claude_code_local rate_limit AgentEvent, teed through the cockpit,
+    # must land on the claude_code_local runtime card (NOT the API lane) — the
+    # loop that lights up the Usage page + selector badge from a real session.
+    mod, client = _load(monkeypatch, enabled=True, fake=False)
+    monkeypatch.setattr(mod, "USAGE_CLAUDE", True)
+    mod._session_harness["s1"] = "claude_code_local"
+    ev = {"type": "rate_limit", "ts": "2026-07-12T00:00:00+00:00",
+          "payload": {"status": "allowed_warning", "rate_limit_type": "five_hour",
+                      "utilization": None, "resets_at": 1783896000}}
+    mod._feed_agent_usage(None, "s1", ev)      # harness cached -> no worker call
+
+    rows = {r["runtime_id"]: r for r in client.get("/api/model-usage").json()}
+    assert "claude_code_local" in rows and "claude_agent" not in rows
+    claude = rows["claude_code_local"]
+    assert claude["availability"] == "near_limit"
+    assert any(lim["bucket_id"] == "five_hour" for lim in claude["limits"])
+
+
 def test_top_drivers_bad_dimension_is_400(monkeypatch):
     _mod, client = _load(monkeypatch, enabled=True, fake=True)
     client.post("/api/model-usage/refresh")

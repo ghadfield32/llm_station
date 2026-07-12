@@ -77,6 +77,10 @@ FAKE_AGENT_ENABLED = os.environ.get("KANBAN_UI_FAKE_AGENT_ENABLED", "") == "1"
 # FakeCollector for a dev/demo page — never both on in a real deployment.
 USAGE_ENABLED = os.environ.get("KANBAN_UI_USAGE_ENABLED", "") == "1"
 USAGE_CODEX = os.environ.get("KANBAN_UI_USAGE_CODEX", "") == "1"
+# Claude limits are EVENT-driven (fed from live agent-session rate_limit events,
+# not polled), so this gate registers the two Claude usage lanes AND turns on the
+# SSE usage tee (_feed_agent_usage).
+USAGE_CLAUDE = os.environ.get("KANBAN_UI_USAGE_CLAUDE", "") == "1"
 USAGE_FAKE = os.environ.get("KANBAN_UI_USAGE_FAKE", "") == "1"
 AGENT_WORKER_URL = os.environ.get(
     "AGENT_WORKER_URL", "http://host.docker.internal:8791").rstrip("/")
@@ -1229,7 +1233,57 @@ def _get_usage_service():
             from command_center.usage.collectors.codex_app_server import (
                 CODEX_COLLECTOR_ID, CodexAppServerCollector)
             _usage_collectors.append((CodexAppServerCollector(), CODEX_COLLECTOR_ID))
+        if USAGE_CLAUDE:
+            # TWO event-fed Claude collectors — one per lane — so a local
+            # subscription session's limits never land on the API lane's card.
+            # They report honest UNKNOWN until a real rate_limit event is teed
+            # in from a live session (see _feed_agent_usage below).
+            from command_center.usage.collectors.claude_agent import (
+                ClaudeRateLimitCollector)
+            _usage_collectors.append(
+                (ClaudeRateLimitCollector("claude_code_local"), "claude_code_local_rl"))
+            _usage_collectors.append(
+                (ClaudeRateLimitCollector("claude_agent"), "claude_agent_rl"))
     return _usage_service
+
+
+# session_id -> harness_id, so the SSE usage tee can attribute a rate_limit
+# event to the right runtime without an extra worker round-trip. Populated on
+# create; lazily backfilled from the worker for pre-existing sessions.
+_session_harness: dict[str, str] = {}
+_CLAUDE_HARNESSES = ("claude_code_local", "claude_agent")
+
+
+def _harness_of(client, session_id: str) -> str | None:
+    harness = _session_harness.get(session_id)
+    if harness is None:
+        try:
+            rec = _call_worker(client.get_session, session_id)
+            harness = rec.get("harness")
+            if harness:
+                _session_harness[session_id] = harness
+        except Exception:
+            return None
+    return harness
+
+
+def _feed_agent_usage(client, session_id: str, ev: dict) -> None:
+    """Tee a live `rate_limit` AgentEvent into the durable usage store so a
+    running Claude session lights up its own Usage card + selector badge. Codex
+    limits come from its own provider collector, so only Claude lanes are fed
+    here. Best-effort — a usage-tee failure must never break the browser SSE."""
+    if not (USAGE_ENABLED and USAGE_CLAUDE) or ev.get("type") != "rate_limit":
+        return
+    harness = _harness_of(client, session_id)
+    if harness not in _CLAUDE_HARNESSES:
+        return
+    try:
+        from command_center.usage.collectors.claude_agent import translate_rate_limit_info
+        result = translate_rate_limit_info(
+            ev.get("payload", {}) or {}, ev.get("ts") or "", harness)
+        _get_usage_service().ingest_collector_result(result)
+    except Exception:
+        pass
 
 
 def _require_usage():
@@ -3089,7 +3143,10 @@ def create_agent_session(body: AgentSessionCreateIn) -> dict:
             status_code=403,
             detail="Fake Agent is disabled in this deployment (set "
                    "KANBAN_UI_FAKE_AGENT_ENABLED=1 for development use)")
-    return _call_worker(client.create_session, body.model_dump())
+    rec = _call_worker(client.create_session, body.model_dump())
+    if isinstance(rec, dict) and rec.get("session_id"):
+        _session_harness[rec["session_id"]] = body.harness_id   # for the usage tee
+    return rec
 
 
 @app.get("/api/agent-sessions/{session_id}")
@@ -3182,6 +3239,7 @@ async def _agent_event_frames(client, session_id: str, checkpoint: int, is_disco
         events = r.json()
         for ev in events:
             checkpoint = ev["sequence"]
+            _feed_agent_usage(client, session_id, ev)   # tee live limits into usage
             yield f"id: {ev['sequence']}\nevent: agent_event\ndata: {json.dumps(ev)}\n\n"
         now = time.monotonic()
         if not events and now - last_heartbeat >= _AGENT_EVENT_HEARTBEAT_SECONDS:

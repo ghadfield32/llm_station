@@ -58,6 +58,7 @@ AGENT_WORKER_URL=http://host.docker.internal:8791   # or 127.0.0.1:8791 if same 
 AGENT_WORKER_TOKEN=<same secret as the worker>
 KANBAN_UI_USAGE_ENABLED=1        # so the selector can show usage/limit badges
 KANBAN_UI_USAGE_CODEX=1          # register the Codex rate-limit collector
+KANBAN_UI_USAGE_CLAUDE=1         # tee live Claude rate_limit events into the usage store
 ```
 
 Rebuild/restart the cockpit **from this branch** (it must contain

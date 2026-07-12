@@ -396,6 +396,21 @@ function ObservabilityView({ m }: { m: Metrics }) {
     </>
   );
 }
+// concise, text-only live badge for a harness <option> (options can't hold DOM):
+// surfaces a non-available availability state or the worst limit bucket ≥50%.
+function harnessBadgeText(h: AgentHarnessOption): string {
+  const u = h.usage_summary;
+  if (!u) return "";
+  if (u.availability && u.availability !== "available" && u.availability !== "unknown")
+    return ` · ${u.availability.replace(/_/g, " ")}`;
+  const pcts = (u.limits ?? [])
+    .map((l) => l.used_percent).filter((p): p is number => p != null);
+  if (pcts.length) {
+    const worst = Math.max(...pcts);
+    if (worst >= 50) return ` · ${worst.toFixed(0)}% used`;
+  }
+  return "";
+}
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="metric" title={hint}>
@@ -3560,6 +3575,12 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
     <>
       <div className="chat-subbar">
         <span className="muted small">agent session <code>{sessionId}</code> · {status ?? "…"}</span>
+        {harness?.usage_summary && (
+          <span className={`usage-badge ${AVAIL_CLASS[harness.usage_summary.availability] ?? "muted"}`}
+            title={harness.usage_summary.availability_reason}>
+            {harness.usage_summary.availability.replace(/_/g, " ")}
+          </span>
+        )}
         <div className="chat-header-right">
           {(status === "idle" || status === "active") && (
             <button className="clear" onClick={() => void doInterrupt()}>interrupt</button>
@@ -4358,7 +4379,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
                     {agentHarnesses?.map((h) => (
                       <option key={h.harness_id} value={`agent:${h.harness_id}`}
                         disabled={!h.available} title={h.detail}>
-                        {h.label}{h.available ? "" : ` — ${h.detail}`}
+                        {h.label}{h.available ? harnessBadgeText(h) : ` — ${h.detail}`}
                       </option>
                     ))}
                   </optgroup>
