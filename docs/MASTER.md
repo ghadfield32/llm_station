@@ -498,14 +498,32 @@ config structurally refuses `routing.allow_silent_fallback: true`.
   (SDK-absent → UNAVAILABLE, auth fail → AUTHENTICATION_REQUIRED, RPC fail →
   still AVAILABLE + warning; never raises for an expected condition).
   `UsageService.run_collector_tracked()` wraps it in a durable collector
-  checkpoint. **Live smoke passed** against the real prolite account; 10
-  hermetic tests + a mypy override for the optional un-stubbed `openai_codex.*`.
+  checkpoint. **Live smoke passed** against the real prolite account; a mypy
+  override covers the optional un-stubbed `openai_codex.*`.
+- **Phase 2.1 — Codex collector COMPLETED (multi-bucket):** a fresh read-only
+  live introspection corrected the roadmap and the collector now imports the
+  full `rate_limits_by_limit_id` view (the default `codex` limit **plus**
+  per-model limits like `codex_bengalfox` = "GPT-5.3-Codex-Spark"), deduping
+  the compatibility windows against the default limit and namespacing the rest
+  `{limit_id}_primary/_secondary`, with per-limit **credits** (only when
+  `hasCredits`, else None). Live smoke now returns **4 provider_native
+  buckets**. 13 collector tests. **Two grounded corrections:** there is **no
+  `account/usage/read`** in the pinned app-server (the JSON-RPC server rejects
+  it as an unknown variant — per-turn tokens instead flow through the adapter's
+  `ThreadTokenUsage` events, not a collector poll), and
+  `account/rateLimits/updated` is a server **notification** the worker wires to
+  a fresh `collect()` refresh (also on reconnect), not a separately-parsed
+  message.
 
 **The authoritative provider sources each remaining collector must use** (so
 they are provider-native, not estimates): **Codex** → app-server
-`account/rateLimits/read` + `account/rateLimits/updated` + `account/usage/read`
-(usedPercent, windowDurationMins, resetsAt, multi-bucket `rateLimitsByLimitId`,
-planType). **Claude** → the SDK's structured `RateLimitEvent`
+`account/rateLimits/read` (single-bucket compat `rate_limits` **and**
+multi-bucket `rate_limits_by_limit_id` — usedPercent, windowDurationMins,
+resetsAt, credits, planType) plus the `account/rateLimits/updated` server
+notification as a refresh trigger. *(Note: this pinned app-server exposes no
+`account/usage/read` — token usage comes from per-thread `ThreadTokenUsage`
+events, handled by the adapter, not this collector.)* **Claude** → the SDK's
+structured `RateLimitEvent`
 (status allowed/allowed_warning/rejected; type five_hour / seven_day /
 seven_day_opus / seven_day_sonnet / overage) — record the SDK-emitted state,
 never infer subscription quota from token counts; show unknown/stale until a
