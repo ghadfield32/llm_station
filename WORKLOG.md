@@ -187,6 +187,27 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- MASTER.md TRUTH-CHECK GATE 07-12 (same branch `feat/agent-cockpit-pickers`,
+  extends PR #37). Encodes "a phase is not complete until docs/MASTER.md
+  describes it" as an automated check. `scripts/check_master_runtime_truth.py`
+  (`check()` → list of drift problems; `main()` exits non-zero) verifies: the 3
+  canonical runtime ids (codex_agent/claude_code_local/claude_agent) are
+  documented; required section markers exist (readiness snapshot, §4/§4.5/§4.6/
+  §5/§11/§14); each critical runtime file EXISTS on disk AND is referenced by its
+  MASTER relative-path fragment; documented key endpoints
+  (/api/agent-harnesses/{id}/models, /api/model-usage) exist literally in the
+  named source; and superseded claims (e.g. "wires ONLY the FakeHarness",
+  "Claude Agent is still a planned runtime, not shipped") never reappear.
+  Deliberately conservative (a small set of load-bearing facts, not a brittle
+  full-token scan) so it fails only on REAL drift — passes on current MASTER.
+  +6 tests (truthful-now + 4 drift-detection: undocumented runtime id, superseded
+  claim, removed section, dropped file reference). Wired into
+  `configs/breakage.yaml` (fnmatch globs) so `make impact` prints the MASTER
+  truth check as a required check whenever `src/command_center/agent_sessions/*`,
+  `src/command_center/usage/*`, or `services/agent_kanban_ui/app.py` change. Also
+  corrected the PR #37 body to its real head (abdd222, 5 commits; worker
+  ingestion + Ledger durability shipped; remaining usage-depth gaps explicit).
+  ruff clean; cc validate PASS; full suite green.
 - USAGE RESTART-PROOF + ONE AUTHORITATIVE STORE 07-12 (same branch
   `feat/agent-cockpit-pickers`, extends PR #37). Completes the "worker owns
   ingestion → durable LedgerUsageStore → cockpit reads durable result" wiring
