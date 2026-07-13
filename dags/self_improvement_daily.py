@@ -29,6 +29,7 @@ between the daily runs. (On Airflow 3.x: Dataset→Asset, DatasetOrTimeSchedule�
 """
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timedelta
 
@@ -68,11 +69,25 @@ def _registry():
 
 def _fetch(spec: dict) -> list[dict]:
     """Records for a feed source. Live-fetch sources (dag_support.LIVE_FETCHERS, e.g. the keyless
-    `codesota` leaderboard) pull fresh at scan time — no Variable needed. Every other source reads
-    its pre-ingested `improvement_feed_<name>` Variable (e.g. an upstream ingestion DAG writes
-    `improvement_feed_arxiv`). Routing lives in the Airflow-free `dag_support.fetch_records` so it
-    stays unit-tested; the Airflow-specific `Variable.get` is injected here. A missing/!JSON value
-    or a failed live fetch raises — the per-source isolate guard records it as a visible failure."""
+    `codesota` leaderboard) pull fresh at scan time — no Variable needed. The model/registry
+    pillar (`litellm_registry`) is the other exception: when its Variable is empty, this calls
+    the model-scout bridge (`scan_feed_records`) directly and caches the result back into the
+    Variable — so the SCHEDULED run is never blind to newly released models. GLM/Kimi enter the
+    loop here via the watchlist (track-as-context for the ones too big to run; propose-pull for
+    the ones that fit). Every other source reads its pre-ingested `improvement_feed_<name>`
+    Variable (e.g. an upstream ingestion DAG writes `improvement_feed_arxiv`) via the
+    Airflow-free `dag_support.fetch_records`, so that routing stays unit-tested; only the
+    Airflow-specific `Variable.get`/`Variable.set` calls live here. A missing/invalid Variable
+    or a failed live fetch raises — the per-source isolate guard records it as a visible
+    failure, never a silent empty pillar."""
+    if spec["name"] == "litellm_registry":
+        raw = Variable.get("improvement_feed_litellm_registry", default_var="")
+        if raw:
+            return json.loads(raw)
+        from command_center.registry.model_scout import scan_feed_records
+        records = scan_feed_records(offline=False)
+        Variable.set("improvement_feed_litellm_registry", json.dumps(records))
+        return records
     return dag_support.fetch_records(
         spec, lambda key: Variable.get(key, default_var="[]"))
 

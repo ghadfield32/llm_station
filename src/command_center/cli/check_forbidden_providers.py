@@ -15,6 +15,30 @@ ROOT = Path(__file__).resolve().parents[3]
 FORBIDDEN_KEYS = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"}
 FORBIDDEN_MODEL_FRAGMENTS = ("openai/", "anthropic/", "openrouter/", "gpt-", "claude-")
 
+# Keys that belong ONLY to the separate, budgeted frontier-router backup lane. They stay
+# forbidden by default; they are permitted ONLY under explicit `--allow-frontier-router-egress`
+# AND only when the budget is enabled with redaction + usage accounting. The local LiteLLM lane
+# (models.yaml / litellm-config) stays cloud-free in BOTH modes — that is never relaxed.
+ROUTER_LANE_KEYS = {"OPENROUTER_API_KEY", "ZAI_API_KEY"}
+FRONTIER_BUDGETS = ROOT / "configs" / "frontier-router-budgets.yaml"
+
+
+def frontier_egress_ready() -> tuple[bool, str]:
+    """The router lane may permit its keys only when its budget is deliberately enabled with the
+    safety knobs on. Reads the raw budgets YAML (no fabrication: a missing/false flag = not
+    ready)."""
+    if not FRONTIER_BUDGETS.exists():
+        return False, "configs/frontier-router-budgets.yaml is missing"
+    data = yaml.safe_load(FRONTIER_BUDGETS.read_text(encoding="utf-8")) or {}
+    default = data.get("default") or {}
+    if not default.get("enabled"):
+        return False, "budgets.default.enabled is false"
+    if not default.get("require_redaction"):
+        return False, "budgets.default.require_redaction is false"
+    if not default.get("fail_on_missing_usage"):
+        return False, "budgets.default.fail_on_missing_usage is false"
+    return True, "frontier-router budget enabled with redaction + usage accounting"
+
 
 def dotenv_keys(path: Path) -> set[str]:
     if not path.exists():
@@ -28,26 +52,26 @@ def dotenv_keys(path: Path) -> set[str]:
     return keys
 
 
-def check_env_files(errors: list[str]) -> None:
+def check_env_files(errors: list[str], forbidden: set[str]) -> None:
     for rel in (".env", ".env.example"):
         keys = dotenv_keys(ROOT / rel)
-        leaked = sorted(keys & FORBIDDEN_KEYS)
+        leaked = sorted(keys & forbidden)
         if leaked:
             errors.append(f"{rel} defines forbidden provider key(s): {', '.join(leaked)}")
 
 
-def check_process_env(errors: list[str]) -> None:
-    leaked = sorted(key for key in FORBIDDEN_KEYS if os.environ.get(key))
+def check_process_env(errors: list[str], forbidden: set[str]) -> None:
+    leaked = sorted(key for key in forbidden if os.environ.get(key))
     if leaked:
         errors.append(f"process environment contains forbidden provider key(s): {', '.join(leaked)}")
 
 
-def check_compose(errors: list[str]) -> None:
+def check_compose(errors: list[str], forbidden: set[str]) -> None:
     path = ROOT / "docker-compose.yml"
     if not path.exists():
         return
     text = path.read_text(encoding="utf-8")
-    for key in FORBIDDEN_KEYS:
+    for key in forbidden:
         if f"${{{key}}}" in text:
             errors.append(f"docker-compose.yml passes forbidden provider key {key}")
 
@@ -88,11 +112,23 @@ def check_litellm_config(errors: list[str]) -> None:
             errors.append(f"generated alias '{name}' does not use OLLAMA_API_BASE")
 
 
-def main() -> int:
+def main(allow_router_egress: bool = False) -> int:
     errors: list[str] = []
-    check_env_files(errors)
-    check_process_env(errors)
-    check_compose(errors)
+    forbidden = set(FORBIDDEN_KEYS)
+    if allow_router_egress:
+        ready, why = frontier_egress_ready()
+        if ready:
+            # Permit ONLY the router-lane keys, and ONLY for the env/process/compose checks.
+            forbidden -= ROUTER_LANE_KEYS
+            print(f"frontier-router egress mode: router-lane keys permitted ({why})")
+        else:
+            errors.append(
+                f"--allow-frontier-router-egress requested but the lane is not ready: {why}")
+
+    check_env_files(errors, forbidden)
+    check_process_env(errors, forbidden)
+    check_compose(errors, forbidden)
+    # The LOCAL lane is cloud-free in BOTH modes — never relaxed by egress mode.
     check_models_yaml(errors)
     check_litellm_config(errors)
 
@@ -102,9 +138,20 @@ def main() -> int:
         print("forbidden-providers: FAIL")
         return 1
 
-    print("forbidden-providers: PASS")
+    label = " (frontier-router egress)" if allow_router_egress else ""
+    print(f"forbidden-providers: PASS{label}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Fail if cloud routes/keys re-enter the local-only setup.")
+    parser.add_argument(
+        "--allow-frontier-router-egress", action="store_true",
+        help=("permit the budgeted router-lane keys (OPENROUTER_API_KEY/ZAI_API_KEY) IFF "
+              "configs/frontier-router-budgets.yaml is enabled with redaction + usage "
+              "accounting; the local LiteLLM lane stays cloud-free regardless"))
+    args = parser.parse_args()
+    raise SystemExit(main(allow_router_egress=args.allow_frontier_router_egress))

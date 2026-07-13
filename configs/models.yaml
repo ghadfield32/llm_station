@@ -4,6 +4,13 @@ schema_version: command-center.models.v1
 # Local-only LiteLLM registry. Cloud coding happens through Claude Code and
 # Codex executors, authenticated separately with subscription/OAuth login.
 # Every role below must render to ollama_chat/... via OLLAMA_API_BASE.
+#
+# Each candidate may carry `status: active|scout` (default active). `active`
+# candidates are routed (rendered into the LiteLLM model_list); `scout`
+# candidates are a watchlist — tracked here, under evaluation, NOT routed —
+# so a proposed model has one home alongside the roster. Inspect with
+# `cc model-status`. Promotion stays human-only: `cc model-promote --role R
+# --candidate ALIAS --approver YOU --apply` flips scout -> active.
 
 roles:
   triage:
@@ -73,12 +80,15 @@ local_whitelist:
   - "qwen3:30b"
   - "devstral:24b"
 
-# The model scout proposes candidates and annotates each with VRAM fit on the
-# 4090 (WS1 gate). Discovery is keyless-first; provider routes stay forbidden in
-# roles. curated-openweight is the versioned provenance-clean source; artificial-analysis
-# runs only if AA_API_KEY is set (optional tiebreaker).
+# The model scout proposes candidates and annotates each with VRAM fit on BOTH the
+# 24 GB 4090 worker and the 16 GB 5080 laptop (WS1 gate). Discovery is keyless-first;
+# provider routes stay forbidden in roles. curated-openweight is the versioned,
+# provenance-clean, must-be-installed source; model-watchlist tracks un-pulled frontier
+# (GLM-5.2, Kimi K2) and pull-to-verify models without installing them; artificial-analysis
+# runs only if AA_API_KEY is set (optional tiebreaker). Source names are validated against
+# KNOWN_SCOUT_SOURCES at `make validate` (a typo is rejected, not a silent runtime skip).
 scout:
   cadence: monthly
-  sources: [aider-polyglot, local-ollama-tags, curated-openweight, artificial-analysis]
+  sources: [aider-polyglot, local-ollama-tags, curated-openweight, model-watchlist, artificial-analysis]
   propose_only: true
   max_candidates_per_run: 10
