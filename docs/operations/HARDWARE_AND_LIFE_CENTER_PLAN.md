@@ -393,6 +393,78 @@ Data classes:
   thumbnails, caches, legally reacquirable media. Preserve catalog, license,
   source revision, and hashes; redownload where economical.
 
+### Desktop Docker retention audit
+
+**Audit date:** 2026-07-13. **Scope:** Docker Desktop only; no container,
+image, volume, cache, network, or project file was changed during the audit.
+
+Docker's logical accounting was **463.5 GB** at the time of inspection:
+
+| Docker class | Used | Docker-reported reclaimable | Interpretation |
+| --- | ---: | ---: | --- |
+| Images | 274.6 GB | 257.6 GB | Rebuildable only when the image is not needed by a retained container and its Compose/build inputs are available. |
+| Container writable layers | 30.47 GB | 19.28 GB | Potentially unsafe: a writable layer can contain uncommitted output even when the image is reproducible. |
+| Named volumes | 79.6 GB | 24.64 GB | Treat database/configuration volumes as retained operational state until a verified logical backup exists. |
+| Build cache | 79.43 GB | 79.43 GB | Reproducible build acceleration, not a Life Center archive or a blind-prune authorization. |
+
+This logical view is not the same measure as the approximately 533 GiB Docker
+Desktop/WSL runtime file reported in Gate 0. The latter includes storage-driver
+allocation and overhead. Neither total belongs in the retained-data forecast as
+one undifferentiated backup target.
+
+The three largest writable layers were inspected with `docker inspect --size`,
+`docker diff`, and their mount maps. `docker diff` identifies changed paths, not
+their complete semantic contents or a recovery source, so the classifications
+below are conservative.
+
+| Container layer | Writable size | Audit evidence | Retention decision |
+| --- | ---: | --- | --- |
+| Active `bball_homography_pipeline_env_datascience` | 10.1 GB (9.39 GiB) | 3,323 changed `.venv` paths, 104 `home/astro` paths, temporary cache/compiler paths, and NVIDIA runtime injection. Project videos, models, checkpoints, reports, MLflow state, and source are bind-mounted rather than represented by this layer. | **Active mixed runtime state. Do not remove.** Promote any needed output to a mounted canonical path; make the environment/cache reproducible before replacing it. |
+| Stopped `bball_homography_pipeline_env_cv_worker` | 10.1 GB (9.37 GiB) | 1,114 changed `.venv` paths, 93 `home/astro` paths, including Hugging Face model-cache content, plus temporary/compiler and NVIDIA runtime paths. | **Rebuildable cache/environment candidate, pending owner review.** It is not a canonical backup source; retain only an inventory of model revisions/hashes and any explicitly promoted output. |
+| Stopped `betts_basketball-datascience-1` | 8.01 GB (7.46 GiB) | 31,793 changed `.venv` paths, 614 PyTensor-cache paths, JAX/pytest/NPM/Jupyter temporary state, and NVIDIA runtime paths. The workspace, MLflow data, Codex state, and UV cache are mounted separately. | **Rebuildable environment/cache candidate, pending owner review.** Preserve source, lockfiles, configuration, and promoted artifacts—not this layer as a backup. |
+
+The stopped-container exit codes do not make their data disposable: `143` is
+normally a controlled termination and `137` can be a forced termination or
+resource event. A stopped container may be removed only after its owner confirms
+the recovery source and the writable-layer review below is complete.
+
+#### Docker retention classes and backup boundary
+
+| Class | Current examples | Backup / Life Center treatment |
+| --- | --- | --- |
+| **Authoritative data** | Selected project bind-mounted source video, annotations, final reports/results, promoted models, website exports, and user-selected personal data. | Classify the actual host roots in private `backup-scope.json`; retain and back them up according to classes A/B. Do not infer retention from Docker presence. |
+| **Operational state** | `betts_basketball_airflow-postgres-data`, `betts_basketball_neo4j-data`, `llm_station_litellm_db_data`, `llm_station_ledger_data`, `llm_station_kuma_data`, and Airflow logs/configuration needed for recovery. | Use application-consistent logical database exports plus versioned configuration and restore tests. Do not copy a live volume as the sole database backup. |
+| **Reproducible cache** | Hugging Face/UV/Roboflow/YOLO caches, PyTensor/JAX/Torch compiler cache, `.venv`, build cache, public base-model cache, and temporary transcodes. | Exclude from retained-capacity sizing and routine off-site backup. Keep manifests, lockfiles, pinned image digests, model hashes/licenses, and documented rebuild commands. |
+| **Rebuildable images** | Docker images and duplicate application images. | Exclude from backup; retain Compose definitions, Dockerfiles, lockfiles, image digests, and build instructions. |
+| **Disposable runtime state** | Failed-run scratch, temporary test output, one-shot init containers, and container writable state with an established recovery source. | Delete only through a reviewed cleanup record; never treat `reclaimable` as sufficient evidence. |
+
+Docker bind mounts are outside the Docker volume total. For this desktop they
+include the Betts workspace/DAGs/MLflow locations and homography source, video,
+model, checkpoint, report, and serving locations. Those host paths are the
+storage-scope and backup decision; the Docker Desktop VHDX, entire repository
+envelopes, virtual environments, and caches are not.
+
+#### Reviewed cleanup gate
+
+Before removing any stopped container, image, named volume, or build cache,
+create a small review record with all of the following:
+
+1. Owner and purpose, including whether a service is active, paused, or retired.
+2. Exact recovery source: Compose/Dockerfile/lockfile/image digest for code, or
+   a tested logical export/backup for databases and configuration.
+3. Confirmation that important output was promoted from the writable layer to a
+   canonical bind-mounted or archived location.
+4. For a named volume, a successful application-level restore test where it
+   holds database or service state.
+5. Rebuild/rollback steps and the expected reclaimed space.
+6. Post-change checks for the affected service and a desktop free-space result.
+
+`docker system prune -a` and `docker volume prune` remain prohibited for this
+desktop. Start with individually reviewed retired containers and duplicate,
+unmounted caches; do not touch the active CV layer, databases, or bind-mounted
+project data. The immediate target remains at least 15–20% desktop free space
+before any new Lifestyle application pilot.
+
 The model-storage resolution differs from the rejected 5090 proposal:
 
 1. Desktop NVMe is Tier 1 for active production models.
