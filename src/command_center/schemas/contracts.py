@@ -466,6 +466,87 @@ class FrontierRouterBudgetsConfig(Strict):
         return self
 
 
+# ---- usage-monitoring.yaml -------------------------------------------------
+# Thresholds/polling/routing/alerts for the unified runtime Usage/Limits layer
+# (src/command_center/usage/). Distinct from the frontier/agent-session BUDGET
+# configs: those are internal spend caps; this governs how PROVIDER-reported
+# usage/limits/availability are polled, alerted on, and used for routing.
+class UsageThresholds(Strict):
+    warning_percent: float = Field(default=75.0, ge=0, le=100)
+    critical_percent: float = Field(default=90.0, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.critical_percent < self.warning_percent:
+            raise ValueError("critical_percent must be >= warning_percent")
+        return self
+
+
+class UsagePolling(Strict):
+    active_session_seconds: int = Field(default=30, gt=0)
+    idle_seconds: int = Field(default=300, gt=0)
+
+
+class UsageRouting(Strict):
+    block_when_exhausted: bool = True
+    allow_silent_fallback: bool = False
+    reserve_capacity_for_high_risk_missions: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        # Structural enforcement of the "no silent fallback" invariant (KPI:
+        # silent fallbacks = 0): the toggle exists for config symmetry but the
+        # contract refuses True, same fail-closed discipline as the frontier
+        # budget's require_redaction. A router must surface every rejection.
+        if self.allow_silent_fallback:
+            raise ValueError(
+                "allow_silent_fallback must be false — every executor rejection "
+                "must be surfaced, never a silent substitution")
+        return self
+
+
+class UsageAlertChannels(Strict):
+    cockpit: bool = True
+    chat_notification: bool = True
+    ledger: bool = True
+    email_digest: bool = True
+
+
+class UsageRetention(Strict):
+    # Detailed per-request samples are the biggest table; keep them a bounded
+    # window. Aggregates/alerts/routing decisions are cheap + evidential, so
+    # they're kept far longer / indefinitely — the evidence behind a routing
+    # decision is NEVER pruned.
+    request_sample_days: int = Field(default=90, gt=0)
+    keep_aggregates_days: int = Field(default=730, gt=0)
+    keep_alerts_and_routing_indefinitely: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.keep_aggregates_days < self.request_sample_days:
+            raise ValueError(
+                "keep_aggregates_days must be >= request_sample_days "
+                "(aggregates outlive the detailed samples they summarize)")
+        return self
+
+
+class UsageMonitoringConfig(Strict):
+    schema_version: str
+    enabled: bool = True
+    thresholds: UsageThresholds = Field(default_factory=UsageThresholds)
+    polling: UsagePolling = Field(default_factory=UsagePolling)
+    routing: UsageRouting = Field(default_factory=UsageRouting)
+    alerts: UsageAlertChannels = Field(default_factory=UsageAlertChannels)
+    retention: UsageRetention = Field(default_factory=UsageRetention)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.usage-monitoring.v1":
+            raise ValueError(
+                "schema_version must be command-center.usage-monitoring.v1")
+        return self
+
+
 # ---- local-frontier-providers.yaml ------------------------------------------
 # A THIRD lane, distinct from both the local-only LiteLLM/Ollama gateway and the paid
 # frontier-router backup lane: an experimental LOOPBACK-only engine (colibrì, or any future

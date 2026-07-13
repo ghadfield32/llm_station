@@ -185,6 +185,144 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
+# Unified runtime usage schema. MIRROR of the canonical source of truth in
+# src/command_center/usage/ledger_schema.py (SCHEMA_SQL). Duplicated here
+# because this container cannot import command_center; kept honest by
+# tests/test_usage_ledger_schema.py, which fails on any drift. Additive —
+# extends the same ledger.db, does not create a second database.
+USAGE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS model_usage_samples (
+    sample_id           TEXT PRIMARY KEY,
+    runtime_id          TEXT NOT NULL,
+    source              TEXT NOT NULL,
+    observed_at         TEXT NOT NULL,
+    ingested_at         TEXT NOT NULL,
+    source_hash         TEXT NOT NULL UNIQUE,
+    sample_kind         TEXT NOT NULL DEFAULT 'request_delta',
+    input_tokens        INTEGER DEFAULT 0,
+    cached_input_tokens INTEGER DEFAULT 0,
+    output_tokens       INTEGER DEFAULT 0,
+    reasoning_tokens    INTEGER DEFAULT 0,
+    total_tokens        INTEGER DEFAULT 0,
+    calls               INTEGER DEFAULT 0,
+    sessions            INTEGER DEFAULT 0,
+    tool_calls          INTEGER DEFAULT 0,
+    duration_ms         INTEGER DEFAULT 0,
+    cost_usd            REAL,
+    cost_source         TEXT,
+    window_start        TEXT,
+    window_end          TEXT,
+    aggregation_key     TEXT,
+    repository_scans    INTEGER DEFAULT 0,
+    test_runs           INTEGER DEFAULT 0,
+    retries             INTEGER DEFAULT 0,
+    failed_calls        INTEGER DEFAULT 0,
+    worker_restarts     INTEGER DEFAULT 0,
+    session_resumes     INTEGER DEFAULT 0,
+    tenant_id           TEXT,
+    workspace_id        TEXT,
+    user_id             TEXT,
+    conversation_id     TEXT,
+    agent_session_id    TEXT,
+    mission_id          TEXT,
+    repo_id             TEXT,
+    provider_request_id TEXT,
+    source_record_id    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS model_limit_snapshots (
+    snapshot_id       TEXT PRIMARY KEY,
+    runtime_id        TEXT NOT NULL,
+    bucket_id         TEXT NOT NULL,
+    scope             TEXT NOT NULL,
+    source            TEXT NOT NULL,
+    state             TEXT NOT NULL,
+    observed_at       TEXT NOT NULL,
+    ingested_at       TEXT NOT NULL,
+    source_hash       TEXT NOT NULL UNIQUE,
+    label             TEXT,
+    used_percent      REAL,
+    used_amount       REAL,
+    limit_amount      REAL,
+    remaining_amount  REAL,
+    unit              TEXT,
+    window_seconds    INTEGER,
+    reset_at          TEXT,
+    plan_type         TEXT,
+    credits_remaining REAL
+);
+
+CREATE TABLE IF NOT EXISTS model_availability_events (
+    event_id    TEXT PRIMARY KEY,
+    runtime_id  TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    state       TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    ingested_at TEXT NOT NULL,
+    source_hash TEXT NOT NULL UNIQUE,
+    reason      TEXT,
+    detail      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS model_usage_alerts (
+    alert_id   TEXT PRIMARY KEY,
+    runtime_id TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    dedup_key  TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    subject_id TEXT,
+    threshold  REAL,
+    message    TEXT,
+    detail     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS model_routing_decisions (
+    decision_id                 TEXT PRIMARY KEY,
+    created_at                  TEXT NOT NULL,
+    mission_id                  TEXT,
+    runtime_id                  TEXT NOT NULL,
+    selected                    INTEGER NOT NULL,
+    reason                      TEXT,
+    usage_snapshot_id           TEXT,
+    limit_snapshot_ids          TEXT,
+    availability_at_selection   TEXT,
+    budget_state_at_selection   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS model_usage_collection_state (
+    collector_id          TEXT PRIMARY KEY,
+    updated_at            TEXT NOT NULL,
+    last_success_at       TEXT,
+    last_cursor           TEXT,
+    last_source_record_id TEXT,
+    last_error            TEXT,
+    consecutive_failures  INTEGER DEFAULT 0,
+    next_eligible_at      TEXT,
+    auth_state            TEXT DEFAULT 'unknown'
+);
+
+CREATE INDEX IF NOT EXISTS ix_usage_samples_runtime_observed
+    ON model_usage_samples (runtime_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_mission
+    ON model_usage_samples (mission_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_repo
+    ON model_usage_samples (repo_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_user
+    ON model_usage_samples (user_id);
+CREATE INDEX IF NOT EXISTS ix_usage_samples_session
+    ON model_usage_samples (agent_session_id);
+CREATE INDEX IF NOT EXISTS ix_limit_snapshots_runtime_bucket_observed
+    ON model_limit_snapshots (runtime_id, bucket_id, observed_at);
+CREATE INDEX IF NOT EXISTS ix_availability_runtime_observed
+    ON model_availability_events (runtime_id, observed_at);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    TEXT PRIMARY KEY,
+    applied_at TEXT
+);
+"""
+
+
 # Experiment lifecycle edges + the human-only wall, mirrored from
 # command_center.improvement.lifecycle. The Ledger enforces the structural walls
 # even on its REST surface: entering Canary/Promoted requires a valid human HMAC
@@ -214,6 +352,9 @@ def init_db():
         c.executescript(AGENT_SESSION_SCHEMA_SQL)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("agent_sessions.v1", _now()))
+        c.executescript(USAGE_SCHEMA_SQL)
+        c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+                  "VALUES (?, ?)", ("usage.v1", _now()))
         c.executescript("""
         CREATE TABLE IF NOT EXISTS missions (
             id TEXT PRIMARY KEY,
@@ -935,6 +1076,186 @@ def resolve_agent_session_approval(sid: str, aid: str, body: AgentSessionApprova
         resolved = c.execute("SELECT * FROM agent_session_approvals WHERE approval_id=?",
                              (aid,)).fetchone()
     return _approval_row_to_dict(resolved)
+
+
+# ---- Unified runtime usage (usage / limits / availability / alerts) --------
+# REST mirror of command_center.usage.store.UsageStore. Ingestion is
+# idempotent at the SQL layer (UNIQUE source_hash / dedup_key): a repeat is a
+# no-op that returns the already-stored row. Source-priority winner selection
+# stays in the CLIENT store (shared with the in-memory backend via
+# select_latest_limits/select_latest_availability), so these endpoints just
+# store rows and return them all — the client picks the winner, keeping both
+# backends behaviourally identical. Fixed column allowlists (never the raw
+# body keys) build every INSERT, so an unexpected key can't reach SQL.
+
+_USAGE_SAMPLE_COLS = (
+    "sample_id", "runtime_id", "source", "observed_at", "ingested_at", "source_hash",
+    "sample_kind", "input_tokens", "cached_input_tokens", "output_tokens",
+    "reasoning_tokens", "total_tokens", "calls", "sessions", "tool_calls",
+    "duration_ms", "cost_usd", "cost_source", "window_start", "window_end",
+    "aggregation_key", "repository_scans", "test_runs", "retries", "failed_calls",
+    "worker_restarts", "session_resumes", "tenant_id", "workspace_id", "user_id",
+    "conversation_id", "agent_session_id", "mission_id", "repo_id",
+    "provider_request_id", "source_record_id")
+_COLLECTION_STATE_COLS = (
+    "collector_id", "updated_at", "last_success_at", "last_cursor",
+    "last_source_record_id", "last_error", "consecutive_failures", "next_eligible_at",
+    "auth_state")
+_LIMIT_COLS = (
+    "snapshot_id", "runtime_id", "bucket_id", "scope", "source", "state", "observed_at",
+    "ingested_at", "source_hash", "label", "used_percent", "used_amount", "limit_amount",
+    "remaining_amount", "unit", "window_seconds", "reset_at", "plan_type",
+    "credits_remaining")
+_AVAIL_COLS = (
+    "event_id", "runtime_id", "source", "state", "observed_at", "ingested_at",
+    "source_hash", "reason", "detail")
+_ALERT_COLS = (
+    "alert_id", "runtime_id", "kind", "dedup_key", "created_at", "subject_id",
+    "threshold", "message", "detail")
+_ROUTING_COLS = (
+    "decision_id", "created_at", "mission_id", "runtime_id", "selected", "reason",
+    "usage_snapshot_id", "limit_snapshot_ids", "availability_at_selection",
+    "budget_state_at_selection")
+
+
+def _insert_or_ignore(table: str, cols: tuple, body: dict) -> None:
+    values = [body.get(c) for c in cols]
+    placeholders = ", ".join("?" for _ in cols)
+    with closing(_db()) as c:
+        c.execute(f"INSERT OR IGNORE INTO {table} ({', '.join(cols)}) "
+                  f"VALUES ({placeholders})", values)
+        c.commit()
+
+
+def _fetch_one(table: str, where_col: str, value) -> dict:
+    with closing(_db()) as c:
+        row = c.execute(f"SELECT * FROM {table} WHERE {where_col}=?", (value,)).fetchone()
+    return dict(row) if row else {}
+
+
+@app.post("/model-usage/sample")
+def ingest_usage_sample(body: dict):
+    _insert_or_ignore("model_usage_samples", _USAGE_SAMPLE_COLS, body)
+    return _fetch_one("model_usage_samples", "source_hash", body["source_hash"])
+
+
+@app.get("/model-usage/samples")
+def list_usage_samples(runtime_id: str, after: Optional[str] = None):
+    q = "SELECT * FROM model_usage_samples WHERE runtime_id=?"
+    args: list = [runtime_id]
+    if after:
+        q += " AND observed_at > ?"
+        args.append(after)
+    q += " ORDER BY observed_at LIMIT 5000"
+    with closing(_db()) as c:
+        return [dict(r) for r in c.execute(q, tuple(args)).fetchall()]
+
+
+@app.post("/model-usage/limit")
+def ingest_limit_snapshot(body: dict):
+    _insert_or_ignore("model_limit_snapshots", _LIMIT_COLS, body)
+    return _fetch_one("model_limit_snapshots", "source_hash", body["source_hash"])
+
+
+@app.get("/model-usage/limits")
+def list_limit_snapshots(runtime_id: str):
+    """ALL snapshots for a runtime — the client applies source-priority."""
+    with closing(_db()) as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM model_limit_snapshots WHERE runtime_id=? LIMIT 5000",
+            (runtime_id,)).fetchall()]
+
+
+@app.post("/model-usage/availability")
+def ingest_availability_event(body: dict):
+    _insert_or_ignore("model_availability_events", _AVAIL_COLS, body)
+    return _fetch_one("model_availability_events", "source_hash", body["source_hash"])
+
+
+@app.get("/model-usage/availability")
+def list_availability_events(runtime_id: str):
+    with closing(_db()) as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM model_availability_events WHERE runtime_id=? LIMIT 5000",
+            (runtime_id,)).fetchall()]
+
+
+@app.post("/model-usage/alert")
+def record_usage_alert(body: dict):
+    """Deduplicated by UNIQUE dedup_key: `recorded` is False when the alert
+    already existed (nothing re-fired)."""
+    with closing(_db()) as c:
+        existed = c.execute("SELECT 1 FROM model_usage_alerts WHERE dedup_key=?",
+                            (body["dedup_key"],)).fetchone()
+    _insert_or_ignore("model_usage_alerts", _ALERT_COLS, body)
+    return {"recorded": existed is None,
+            "alert": _fetch_one("model_usage_alerts", "dedup_key", body["dedup_key"])}
+
+
+@app.get("/model-usage/alerts")
+def list_usage_alerts(runtime_id: Optional[str] = None):
+    q = "SELECT * FROM model_usage_alerts"
+    args: tuple = ()
+    if runtime_id:
+        q += " WHERE runtime_id=?"
+        args = (runtime_id,)
+    q += " ORDER BY created_at LIMIT 2000"
+    with closing(_db()) as c:
+        return [dict(r) for r in c.execute(q, args).fetchall()]
+
+
+@app.post("/model-usage/routing-decision")
+def record_routing_decision(body: dict):
+    _insert_or_ignore("model_routing_decisions", _ROUTING_COLS, body)
+    return _fetch_one("model_routing_decisions", "decision_id", body["decision_id"])
+
+
+@app.get("/model-usage/runtimes")
+def list_usage_runtimes():
+    with closing(_db()) as c:
+        rows = c.execute(
+            "SELECT runtime_id FROM model_usage_samples "
+            "UNION SELECT runtime_id FROM model_limit_snapshots "
+            "UNION SELECT runtime_id FROM model_availability_events").fetchall()
+    return sorted({r["runtime_id"] for r in rows})
+
+
+@app.get("/model-usage/collection-state/{collector_id}")
+def get_collection_state(collector_id: str):
+    """Durable collector checkpoint. 404 (not an error row) when a collector
+    has never run — the client treats that as "start fresh"."""
+    row = _fetch_one("model_usage_collection_state", "collector_id", collector_id)
+    if not row:
+        raise HTTPException(404, "collector state not found")
+    return row
+
+
+@app.post("/model-usage/collection-state")
+def set_collection_state(body: dict):
+    """Upsert a collector checkpoint (INSERT OR REPLACE — a collector writes
+    its full state each poll)."""
+    values = [body.get(c) for c in _COLLECTION_STATE_COLS]
+    placeholders = ", ".join("?" for _ in _COLLECTION_STATE_COLS)
+    with closing(_db()) as c:
+        c.execute(
+            f"INSERT OR REPLACE INTO model_usage_collection_state "
+            f"({', '.join(_COLLECTION_STATE_COLS)}) VALUES ({placeholders})", values)
+        c.commit()
+    return _fetch_one("model_usage_collection_state", "collector_id",
+                      body["collector_id"])
+
+
+@app.post("/model-usage/prune")
+def prune_usage_samples(body: dict):
+    """Retention: delete detailed samples observed strictly before `before`.
+    Never touches routing decisions or alerts (the evidence behind a decision
+    is kept)."""
+    with closing(_db()) as c:
+        cur = c.execute("DELETE FROM model_usage_samples WHERE observed_at < ?",
+                        (body["before"],))
+        c.commit()
+        removed = cur.rowcount
+    return {"removed": removed}
 
 
 if __name__ == "__main__":

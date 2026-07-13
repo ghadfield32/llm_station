@@ -5,6 +5,98 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
+- PHASE 1.1 HARDENING DONE 07-12 (same branch, extends PR #34, before any
+  real provider collector is trusted): four correctness fixes over the raw
+  foundation. (A) UNKNOWN COST IS NEVER $0.00 — `UsageSample.cost_usd` is now
+  nullable and `cost_source` is a real enum (provider_reported / estimated /
+  subscription_not_metered / unknown / mixed); subscription Codex/Claude
+  activity is `subscription_not_metered` with cost None, shown as "dollar
+  cost unavailable", never zero. `summarize_cost()` rolls cost honestly
+  (None stays None). (B) NO CROSS-COLLECTOR DOUBLE-COUNTING — new `SampleKind`
+  (request_delta / session_total / provider_window_total /
+  provider_lifetime_total / daily_bucket / reconciliation_observation); ONLY
+  request_delta is additive, so the roll-up sums just those — the same
+  activity seen as a request_delta AND a provider_window_total AND a ccusage
+  reconciliation_observation counts ONCE, not 3x (provider totals are a
+  separate authoritative view). Added window_start/end + aggregation_key. (C)
+  ATTRIBUTION DRIVER FACTS on UsageSample (reasoning_tokens, repository_scans,
+  test_runs, retries, failed_calls, worker_restarts, session_resumes) so
+  "what used the most?" is answered from recorded fact. (D) COLLECTOR
+  CHECKPOINTS — new `model_usage_collection_state` table + CollectionState
+  (last_cursor/last_success_at/consecutive_failures/next_eligible_at/
+  auth_state) so a real collector resumes instead of re-importing a range and
+  its failures are visible; plus 7 DDL indexes (runtime/observed, mission,
+  repo, user, session, bucket) and a retention policy
+  (`UsageRetention`: request_sample_days 90 / keep_aggregates_days 730 /
+  keep_alerts_and_routing_indefinitely — the evidence behind a routing
+  decision is NEVER pruned) with a `prune_samples()` store method +
+  /model-usage/prune endpoint. Same usage.v1 (unmerged, so the DDL is still
+  being finalized in place — additive columns, no ALTER needed) — canonical
+  DDL + byte-mirror updated together, drift test still green. +12 tests
+  (test_usage_hardening.py + cross-backend collection-state/prune/hardening-
+  field round-trips) = 50 usage tests; ruff+mypy clean; make validate PASS;
+  full repo suite green.
+- PHASE 1 FOUNDATION DONE 07-12 (branch `feat/unified-runtime-usage`, stacked
+  on `feat/agent-session-runtime`): one SHARED usage layer across every chat
+  model AND coding agent, NOT a second control plane. Keeps four concepts
+  rigorously distinct so historical usage is never shown as remaining
+  provider quota: Usage (observed tokens/calls/cost/duration), Provider
+  limits (provider-REPORTED buckets + resets), Availability (installed/
+  authed/busy/limited/exhausted/unavailable/unknown), Internal budget (our
+  own caps). Investigated the repo FIRST (dedicated Explore pass) — reuses
+  `improvement/router_cost.py` for cost math and mirrors the agent_sessions
+  Ledger-extension pattern rather than rebuilding either.
+- LOAD-BEARING INVARIANTS, each proven by a test (not just asserted):
+  provider quota is NEVER overwritten by an estimate (source-priority:
+  PROVIDER_NATIVE > PROVIDER_DERIVED > RECONCILER > FAKE > ESTIMATE — a fresh
+  estimate loses to a stale provider value); UNKNOWN stays UNKNOWN and stale
+  is visibly stale, never coerced to 0%; multiple provider buckets stay
+  SEPARATE (never flattened to one %); ingestion is idempotent by
+  `source_hash`; alerts dedup by (runtime, subject, kind, threshold, reset)
+  so a 30s poll fires an alert ONCE; credentials / raw provider responses /
+  raw ccusage logs NEVER enter the Ledger — only normalized rows, traceable
+  to tenant/user/session/mission/repo.
+- MODULES: `schemas.py` (UsageSample/LimitSnapshot/AvailabilityEvent/
+  UsageAlert/RoutingDecision + the composite RuntimeUsageStatus + Attribution
+  + source-rank), `protocol.py` (CollectorProtocol/UsageStoreProtocol),
+  `store.py` (in-memory + shared `select_latest_*` source-priority selectors),
+  `alerts.py` (threshold+dedup, never alerts on UNKNOWN), `attribution.py`
+  ("what used the most?" ranked from recorded fact, explicit "(unattributed)"
+  bucket), `reconciliation.py` (cross-source mismatch, higher authority wins,
+  gap often = usage outside the metered surfaces), `service.py` (the single
+  ingest→dedup-alert→roll-up orchestrator), `collectors/fake.py` (a
+  deterministic collector — same role as FakeHarness; real Codex/Claude/
+  OpenRouter/LiteLLM/Ollama/ccusage collectors are later phases).
+- DURABILITY: 5 Ledger tables via the proven mirrored-DDL pattern —
+  `usage/ledger_schema.py` (canonical `SCHEMA_VERSION = "usage.v1"`,
+  UNIQUE source_hash/dedup_key at the SQL layer so a repeat is a real no-op),
+  byte-mirrored into `services/ledger/app.py` (+ init_db block +
+  /model-usage* endpoints with fixed column allowlists) and drift-tested.
+  `LedgerUsageStore` is a sync drop-in for the in-memory store (injected
+  httpx.Client), applying the SAME `select_latest_*` selectors so both
+  backends pick the identical winner — proven by a real cross-backend run of
+  the same scenarios (idempotency, source-priority, alert dedup, roll-up)
+  plus restart-recovery against the same db.
+- CONFIG: `configs/usage-monitoring.yaml` + `UsageMonitoringConfig`
+  (registered in CONFIG_CONTRACTS, `make validate` covers it). The contract
+  STRUCTURALLY refuses `routing.allow_silent_fallback: true` (KPI: silent
+  fallbacks = 0), same fail-closed discipline as the frontier budget's
+  require_redaction; critical_percent must be >= warning_percent.
+- TESTS 07-12: 38 across test_usage_{store,service,attribution,
+  monitoring_config,ledger_store,ledger_schema}.py — source-priority both
+  directions, UNKNOWN-never-coerced, alert threshold matrix + dedup, honest
+  staleness, attribution ranking + unattributed bucket, reconciliation
+  mismatch, config invariants, schema drift + additive migration, and
+  cross-backend parity + restart recovery against a real Ledger TestClient.
+  ruff + mypy clean on all 12 usage source files; full repo suite green.
+- NEXT (later phases, explicitly NOT in this branch): the real provider
+  collectors (Codex app-server account/rateLimits/usage, Claude
+  RateLimitEvent, OpenRouter key endpoint, LiteLLM /spend/logs, Ollama
+  health, ccusage reconciler), the /api/model-usage cockpit routes + Usage &
+  Limits UI (badges/overview/top-drivers/reset-timeline/alert-center), and
+  evidence-based executor routing that consumes model_routing_decisions.
+
 ## Agent-session chat integration (Claude Agent / Codex Agent)
 - DECISION 07-11: Claude/Codex will be agent-session harnesses (own SDK, own auth, own
   worktree), never GatewayCore model aliases — no `/chat/completions`-shaped call, no
