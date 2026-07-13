@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -1498,6 +1498,26 @@ def whole_work_graph() -> dict:
 def work_graph_neighbourhood(work_item_id: str, depth: int = 1) -> dict:
     svc = _require_workgraph()
     return _wg_call(svc.graph, work_item_id, depth=depth).model_dump()
+
+
+@app.get("/api/work/{work_item_id}/resolve")
+def resolve_work_permalink(work_item_id: str) -> dict:
+    """Resolve a stable work-item permalink to its canonical landing target +
+    the full navigation receipt. The backend owns the destination — a client
+    reads target.href and follows it verbatim."""
+    svc = _require_workgraph()
+    return _wg_call(svc.resolve, work_item_id).model_dump()
+
+
+@app.get("/work/{work_item_id}")
+def open_work_permalink(work_item_id: str):
+    """The human-facing permalink: GET /work/<id> 302-redirects into the SPA at
+    the resolved canonical target, so a pasted /work/<id> link lands on the right
+    board (or the Work Map). target.href is a '?...'-query the SPA understands, so
+    '/' + href is the in-app deep link. Unknown id → 404 (via _wg_call)."""
+    svc = _require_workgraph()
+    resolution = _wg_call(svc.resolve, work_item_id)
+    return RedirectResponse(url="/" + resolution.target.href, status_code=302)
 
 
 @app.get("/api/domain/{domain_id}/cards")

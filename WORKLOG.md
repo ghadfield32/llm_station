@@ -37,8 +37,21 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   (item/placement/edge/status/events survive a fresh service over the same
   ledger.db; one-primary + cycle rules enforced across "restart"). Full suite
   green via PYTHONPATH=worktree/src (editable install → main checkout otherwise).
-- NEXT: merge #40 + #48 + Phase C-2; /work/<id> permalink resolver → structured
-  Chat creation receipts (TaskCreationReceipt).
+- Permalink resolver DONE (branch `feat/work-graph-permalink`, stacked on C-2):
+  stable `/work/<id>` links. NEW `PermalinkResolution` schema +
+  `WorkGraphService.resolve()`/`_canonical_target()` — the BACKEND picks the one
+  landing target (primary board > any active board > Work Map) + returns the full
+  link receipt; browser follows target.href verbatim. Cockpit `GET
+  /api/work/{id}/resolve` (JSON) + `GET /work/{id}` (302 → `/?view=…&work=…`
+  into the SPA), both before the `/`-mounted SPA so they win route matching.
+  Tests: 5 service (target selection incl. soft-removed-primary → Work Map,
+  unknown → KeyError) + 4 cockpit (resolve JSON, redirect Location, work-map
+  fallback, 404). 36/36 work-graph tests green via PYTHONPATH=worktree/src.
+  (Pre-existing UNRELATED Windows flake: test_local_frontier_client live-usage
+  test — 10ms MockTransport sleep < monotonic granularity → tokens_per_second
+  None; not touched by this branch.)
+- NEXT: merge #40 + #48 + C-2 + permalink; structured Chat creation receipts
+  (TaskCreationReceipt/TaskBatchReceipt) so chat-created todos link back.
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

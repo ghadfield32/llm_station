@@ -114,3 +114,16 @@ class WorkGraph(BaseModel):
     items: list[WorkItem] = Field(default_factory=list)
     placements: list[WorkPlacement] = Field(default_factory=list)
     edges: list[WorkEdge] = Field(default_factory=list)
+
+
+class PermalinkResolution(BaseModel):
+    """What a stable ``/work/<id>`` permalink resolves to. The backend picks the
+    single canonical place to land (``target``) AND returns the full navigation
+    receipt (``links``); the browser follows ``target.href`` verbatim and never
+    decides the destination itself."""
+    work_item_id: str
+    title: str
+    kind: WorkItemKind
+    canonical_status: CanonicalStatus
+    target: ResourceLink                 # the one place to land
+    links: list[ResourceLink] = Field(default_factory=list)
