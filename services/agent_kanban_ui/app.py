@@ -50,7 +50,7 @@ from command_center.kanban.metrics import (
     compute_metrics, load_calls, log_path, recent_calls)
 from command_center.kanban_sync import EventLog, project_cards
 from command_center.kanban_sync.events import emit_event, is_human_owned_status
-from command_center.work_graph import WorkPlanIn
+from command_center.work_graph import WorkPlanEdgeIn, WorkPlanIn, WorkPlanItemIn
 
 # Chat + governed writes turn the UI into a first-class CHANNEL (it embeds the same
 # GatewayCore Discord uses). OFF by default so the read-only board deployment holds
@@ -1583,6 +1583,59 @@ def commit_chat_work(plan: WorkPlanIn) -> dict:
     nothing."""
     _require_workgraph()               # 503 if the graph is disabled
     return _plan_call(_get_chat_planner().commit, plan).model_dump()
+
+
+# ── Capture → work conversion: an intake idea becomes connected work ──────────
+# A captured thought is turned into canonical work via the SAME planner (structured
+# plan in, receipts out). The capture supplies provenance (capture_id →
+# WorkItem.capture_id, its batch, its conversation); the caller supplies the
+# structure until classification/routing (Phase G) infers it. preview persists
+# nothing; convert commits the plan AND marks the capture 'routed' with a link
+# event — the capture is never destroyed, only linked to the work it produced.
+class CaptureConvertIn(BaseModel):
+    items: list[WorkPlanItemIn]
+    edges: list[WorkPlanEdgeIn] = Field(default_factory=list)
+    conversation_id: str | None = None      # optional; else the capture's own
+
+
+def _plan_from_capture(capture_view, body: CaptureConvertIn) -> WorkPlanIn:
+    rec = capture_view.record
+    return WorkPlanIn(
+        conversation_id=body.conversation_id or rec.conversation_id,
+        capture_id=rec.capture_id, capture_batch_id=rec.batch_id,
+        items=body.items, edges=body.edges)
+
+
+def _capture_for_conversion(capture_id: str):
+    """Require both subsystems and fetch the capture (404 if unknown)."""
+    _require_workgraph()
+    try:
+        return _require_capture().get(capture_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/captures/{capture_id}/work-preview")
+def preview_capture_work(capture_id: str, body: CaptureConvertIn) -> dict:
+    """Dry-run converting a capture into work: returns the receipt WITHOUT
+    persisting anything and WITHOUT touching the capture."""
+    view = _capture_for_conversion(capture_id)
+    plan = _plan_from_capture(view, body)
+    return _plan_call(_get_chat_planner().preview, plan).model_dump()
+
+
+@app.post("/api/captures/{capture_id}/convert", status_code=201)
+def convert_capture_to_work(capture_id: str, body: CaptureConvertIn) -> dict:
+    """Create the work the capture describes, then mark the capture 'routed' and
+    link it to the created work items. Atomic on the work side (a bad plan writes
+    nothing); the capture is only marked AFTER the work commits."""
+    view = _capture_for_conversion(capture_id)
+    plan = _plan_from_capture(view, body)
+    receipt = _plan_call(_get_chat_planner().commit, plan)
+    work_item_ids = [r.work_item.work_item_id for r in receipt.created]
+    _get_capture_service().mark_converted(
+        capture_id, work_item_ids, conversation_id=plan.conversation_id)
+    return receipt.model_dump()
 
 
 @app.get("/api/domain/{domain_id}/cards")

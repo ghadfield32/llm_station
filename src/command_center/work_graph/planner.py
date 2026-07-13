@@ -62,7 +62,10 @@ class WorkPlanEdgeIn(BaseModel):
 
 
 class WorkPlanIn(BaseModel):
-    conversation_id: str
+    # a plan may originate from chat (conversation_id set), a capture, or the
+    # daily intake DAG (no conversation) — so conversation_id is optional.
+    conversation_id: str | None = None
+    capture_id: str | None = None            # the originating capture, if any
     capture_batch_id: str | None = None
     items: list[WorkPlanItemIn] = Field(default_factory=list)
     edges: list[WorkPlanEdgeIn] = Field(default_factory=list)
@@ -115,6 +118,7 @@ class ChatWorkPlanner:
                 it.title, kind=it.kind, description=it.description,
                 owner=it.owner, priority=it.priority, due_at=it.due_at,
                 conversation_id=plan.conversation_id,
+                capture_id=plan.capture_id,
                 capture_batch_id=plan.capture_batch_id)
             ref_to_id[it.ref] = item.work_item_id
 
@@ -157,6 +161,7 @@ class ChatWorkPlanner:
             created.append(receipts[it.ref])
 
         return TaskBatchReceipt(conversation_id=plan.conversation_id,
+                                capture_id=plan.capture_id,
                                 capture_batch_id=plan.capture_batch_id,
                                 created=created)
 
