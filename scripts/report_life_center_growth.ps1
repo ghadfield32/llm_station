@@ -145,7 +145,7 @@ $lines.Add("")
 if (-not $mature) {
     $lines.Add("Do not close the growth gate yet. Continue daily snapshots until the first eligible closeout date.")
 } else {
-    $lines.Add("Use the scoped authoritative forecast: 10 TB only at or below 6.3 TiB, 12 TB only at or below 7.6 TiB, otherwise re-price 16 TB or larger. A laptop can defer full-pool backup only for a measured critical subset below 1.2 TiB that separately passes health, restore, append-only, and off-site gates.")
+    $lines.Add("Use the scoped authoritative forecast: 10 TB only at or below 6.3 TiB, 12 TB only at or below 7.6 TiB, otherwise re-price 16 TB or larger. The initial design includes a new encrypted full-capacity local backup drive and a separately measured high-value off-site subset.")
 }
 
 $parent = Split-Path -Parent $outputPath

@@ -36,10 +36,10 @@ Future stationary Life Center host — stable data/application appliance
 ├── password manager only after backup/restore and recovery are proven
 └── Home Assistant OS in an isolated VM initially, or a dedicated device later
 
-Old laptops — optional, non-authoritative recovery/utility tier
-├── one dedicated encrypted append-only critical-backup node, or restore test node
-├── replaceable cache or bounded worker only when separately admitted
-└── never a distributed filesystem, production dependency, or mixed backup/worker role
+Old laptops — deferred optional recovery/utility tier
+├── future restore test, replaceable cache, or bounded worker only when separately admitted
+├── no initial backup, storage, or network dependency
+└── never a distributed filesystem or production dependency
 ```
 
 The laptop must not be the only host or only data copy for household services.
@@ -658,7 +658,7 @@ These are deployment gates, not optional polish:
 
 | Gate | Work | Exit condition |
 | --- | --- | --- |
-| 0 — inventory/purchase | desktop baseline, daily growth task, Spectrum 600 Mb/s tier/router topology, two-office layout, recovery targets, and price procedure are captured in `LIFE_CENTER_GATE0.md`; finish cable/noise acceptance, 30-day growth, exact server component SKUs, and purchase-day validation | three-year forecast and bill of materials approved; current default is upstairs Node 804 + `2 x 12 TB` CMR + 16 TB separate backup + BR1000MS + one UDR7 + direct Cat6 to downstairs desktop |
+| 0 — inventory/purchase | desktop baseline, daily growth task, Spectrum 600 Mb/s tier/router topology, two-office layout, recovery targets, and price procedure are captured in `LIFE_CENTER_GATE0.md`; finish cable/noise acceptance, 30-day growth, exact value-tier component SKUs, and purchase-day validation | three-year forecast and bill of materials approved; current default is an upstairs serviceable four-bay Intel-iGPU value-tier tower + `2 x 12 TB` CMR + 16 TB-class separate backup + BR1000MS + one UDR7 + direct Cat6 to downstairs desktop |
 | 1 — repository | create private `life-center-infra` with typed host/service/storage contracts, Compose, Tailscale/firewall policy, secret references, backup classes, risk tiers, tests, and runbooks | configuration validates with no real secrets or personal data |
 | 2 — foundation | install Debian, storage, Tailscale, firewall, Docker, SMART/scrub monitoring, UPS, backup tooling, encrypted secrets, and digest-pinned test images | security G0–G2 pass; reboot plus dummy backup/restore proven |
 | 3 — applications | pilot Nextcloud dummy files, Immich duplicate photos, Jellyfin, Audiobookshelf/Calibre-Web, AdGuard on one test client, then HA OS VM | each service passes its applicable hardening, backup, restore, upgrade, and rollback checks before the next critical admission |

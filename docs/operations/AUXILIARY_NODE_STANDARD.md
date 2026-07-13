@@ -1,7 +1,8 @@
 # Auxiliary-node standard
 
-**Status:** design-only. No laptop is enrolled, receives credentials, accesses
-VLAN 60, runs a worker, or contributes authoritative capacity.
+**Status:** deferred reference only. No auxiliary node is planned for the
+initial Life Center deployment; no laptop is enrolled, receives credentials,
+accesses VLAN 60, runs a worker, or contributes authoritative capacity.
 
 This is the optional fourth tier beneath the desktop, Life Center, and MSI
 laptop. It exists to reuse healthy old hardware without making recovery or core
@@ -32,10 +33,9 @@ Quarantine immediately on patch drift, SMART/thermal/battery failure, identity
 or tag change, unexpected storage identity, unexplained outbound traffic, or
 failed job validation.
 
-The dedicated backup laptop additionally follows every condition in
-[`LIFE_CENTER_IMPLEMENTATION_READINESS.md`](LIFE_CENTER_IMPLEMENTATION_READINESS.md).
-It must be in a different room from the Life Center, but that is still local—not
-off-site.
+Any future backup-controller role requires separately added healthy storage and
+full qualification; it cannot replace the initial dedicated external backup
+drive or off-site copy.
 
 ## Network and agents
 

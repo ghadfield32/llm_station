@@ -12,7 +12,7 @@ RTX 4090 desktop: always-on llm_station, Betts production coordination, CV/video
                   local models, agents, and the only normal local production writer.
 Life Center:      authoritative mirrored storage and household/archive services.
 MSI RTX 5080:     portable human work, remote desktop access, bounded sample CV.
-Old laptops:       optional dedicated backup/restore/cache/worker roles only.
+Old laptops:       deferred optional reuse only; not part of the initial build.
 Phone/remote PC:   Tailscale, read-only cockpit, native-app deep links, approvals.
 ```
 
@@ -20,42 +20,13 @@ Old laptops are non-authoritative and preemptible. Do not build distributed
 storage, RAID across laptops, Ceph, GlusterFS, Storage Spaces over shares, or a
 backup set whose restoration needs several sleeping laptops.
 
-## Critical-backup exception
+## Optional future old-laptop reuse
 
-The healthiest old 2 TB laptop may defer the 16 TB full-pool backup disk only
-while **all** conditions below hold:
-
-- the measured protected critical set is below 1.2 TiB and its 12-month forecast
-  stays below 80% of usable laptop capacity;
-- every omitted source is explicitly reproducible from another authority or
-  intentionally accepted as losable;
-- the laptop is a dedicated `backup` role with no secondary role, no SMB share,
-  no Docker/agent endpoint, no browser/general use, and no delete/prune token;
-- disk SMART short and long tests, read/surface test, sustained write, thermal,
-  battery, power-adapter, reboot, disk-encryption, and recovery-key tests pass;
-- encrypted append-only backup works, the writer cannot alter/delete snapshots,
-  a separate maintainer identity is offline except for maintenance, and a restore
-  works after writer-credential revocation; and
-- 0.5–1 TiB of the highest-value data has an independently restored encrypted
-  off-site copy.
-
-Purchase the separate full-pool local backup target immediately when any one
-condition fails, the critical set reaches 70% of usable capacity, 12-month
-forecast reaches 80%, health degrades, restore time misses RTO, more original CV
-media is retained, or full-pool local recovery is required. A same-building
-different-room laptop is a separate local copy, never an off-site copy.
-
-Run the local helper on the candidate laptop before admitting it:
-
-```powershell
-.\scripts\qualify_life_center_backup_laptop.ps1 -BackupRoot 'D:\LifeCenterBackup'
-.\scripts\qualify_life_center_backup_laptop.ps1 -BackupRoot 'D:\LifeCenterBackup' -RunWriteTest -WriteTestGiB 8
-```
-
-The default invocation is read-only. The explicit write test leaves an 8 GiB
-random file for manual verification/deletion. Its ignored local output does not
-claim that SMART, append-only access, restores, off-site backup, or physical
-separation have passed.
+Old laptops are not part of the initial Life Center deployment. A healthy old
+laptop may later be evaluated as an isolated restore-test machine, replaceable
+cache, bounded worker, or backup controller after separately added healthy
+storage is available. No purchase, network change, backup exception, recovery
+target, or implementation gate depends on an old laptop.
 
 ## Backup identities and proof
 
@@ -146,7 +117,8 @@ only the intended paths, run checks, commit deliberately, push, open a draft PR,
 review/merge it, then fetch `main` and verify the files are present.
 
 No hardware purchase is authorized until the 30-day scoped growth result,
-laptop qualification, Cat6/noise/thermal acceptance, exact Value and Reliability
-BOM comparison, and same-day seller/warranty/model/return validation are complete.
-The 16 TB disk, BMC platform, managed switch, AP, laptop adapters, CasaOS, and
-self-hosted password manager remain deferred unless their specific gates pass.
+Cat6/noise/thermal acceptance, exact value-tier bill of materials, and same-day
+seller/warranty/model/return validation are complete. The initial purchase
+includes the full-capacity encrypted local-backup drive. BMC/IPMI, ECC, managed
+switch, AP, laptop adapters, CasaOS, and self-hosted password manager remain
+deferred unless a measured need justifies them.
