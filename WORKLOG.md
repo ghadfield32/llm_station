@@ -1294,6 +1294,38 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   refresh (Ctrl+Shift+R) — server is source of truth. Same class as notes UI.
 - NEVER rename Status options — curator/retention/20 tools write exact strings.
 
+## AppFlowy mobile sync ("can't sync" + slow loads)
+- ROOT-CAUSED 06-20: two INDEPENDENT issues (full detail: docs/remote-access.md
+  → "Phone can't sync"). Server side verified healthy — no change.
+- CAUSE 1 (phone "can't sync"): `iphone-12` is OFFLINE on the tailnet (last seen
+  06-14, ~6d; key valid to 2026-12-09, NOT expired). Serve URL is tailnet-only,
+  so an off-tailnet phone can't reach it at all. FIX = reconnect Tailscale VPN on
+  the phone (no re-login); durable = disable key expiry + VPN On-Demand. *User
+  device action — cannot be done from the host.*
+- CAUSE 2 (slow desktop loads): per-request `af_self_host_commercial_license`
+  SELECT (0-row, tiny table) stalled 17–441s (06-18) / 46s (06-20) — STARVED
+  during host-contention windows. CORRECTION: first read of `docker stats`
+  (~2000%/"20 cores pinned") was a SPIKE sample; in-container `top` at the same
+  window showed ~73% idle, load avg 8/14/18 on 24 CPUs → betts load is BURSTY,
+  not pinned. Steadier issue = MEMORY/SWAP pressure (WSL2 15.5GB cap, ~1.5GB
+  free, swap 3.3/4.0GB used, 25+ containers), amplified by a 1h+ manual
+  sportsbook backfill. No broken DAGs (`list-import-errors`=none); betts DAG
+  code is clean. Not an AppFlowy defect; no AppFlowy patch fabricated.
+- FIX 2 APPLIED 06-21: live `docker update --cpus 16 betts_basketball-airflow-
+  scheduler-1` (ceiling = its configured `AIRFLOW__CORE__PARALLELISM=16`; leaves
+  8/24 cores for AppFlowy + neighbors). Non-disruptive, backfill kept running.
+  Verified: cgroup `cpu.max=1600000 100000`; AppFlowy 2–3ms; scheduler load
+  18→4.5. **NOT persistent across recreate** — add `cpus: "16"` to the
+  `airflow-scheduler` service in the betts_basketball compose to persist.
+- FIX 2 REMAINING (optional, durable): raise WSL2 mem cap in `~/.wslconfig`
+  (host 31GB; WSL2 sees 15.5GB + swaps 3.3/4GB) to kill the swap-thrash half of
+  the contention — helps all stacks, needs `wsl --shutdown` (restarts everything).
+- VERIFIED OK: Serve `/ → 127.0.0.1:8081` (HTTPS 200, valid *.ts.net cert),
+  MagicDNS on, 11/11 appflowy containers Up+healthy, WS proxied (`location /ws`,
+  86400s), desktop collab join observed in appflowy_cloud log.
+- NEXT: (1) user reconnects phone, confirm `tailscale status` shows iphone online;
+  (2) decide betts airflow scheduler fix (root-cause the runaway vs. CPU cap).
+
 ## In-app AppFlowy AI
 - BLOCKED (upstream): `appflowy_ai` license-walls every request ("commercial
   license not yet available"). Wiring to LiteLLM verified correct; container
