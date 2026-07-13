@@ -58,6 +58,10 @@ from command_center.kanban_sync.events import emit_event, is_human_owned_status
 # governed verbs (which already refuse Approved).
 CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
 DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "1"
+# Universal Capture — a benign, non-destructive intake list (no repo/Ledger/config
+# side effects), so it defaults ON (opt-out). Captures are in-memory for now; a
+# durable Ledger-backed store is the immediate follow-up.
+CAPTURE_ENABLED = os.environ.get("KANBAN_UI_CAPTURE_ENABLED", "1") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -515,6 +519,56 @@ def _domain_spec(domain_id: str) -> dict:
         if d.get("domain_id") == domain_id:
             return d
     raise HTTPException(status_code=404, detail=f"unknown domain {domain_id!r}")
+
+
+# ── Board-module create (kanban board + domain surface, atomic) ───────────────
+def _kanban_boards_path() -> Path:
+    return CONFIGS_DIR / "kanban_boards.yaml"
+
+
+def _read_board_registry_data() -> dict[str, Any]:
+    path = _kanban_boards_path()
+    if not path.is_file():
+        return {"schema_version": "command-center.kanban-boards.v1", "boards": []}
+    return _read_yaml_file(path)
+
+
+def _validate_board_registry(data: dict[str, Any], *, status_code: int = 400) -> None:
+    from command_center.schemas.contracts import KanbanBoardsConfig
+    try:
+        KanbanBoardsConfig.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"invalid kanban_boards.yaml: {exc}") from exc
+
+
+# governance defaults for a new internal board — the human wall is FIXED here
+_KANBAN_STATUS_LABELS = {
+    "backlog": "Backlog", "ready": "Ready", "in_progress": "In Progress",
+    "done": "Done", "blocked": "Blocked", "rejected": "Rejected",
+    "awaiting_approval": "Awaiting Approval"}
+_KANBAN_ALLOWED_VERBS = ["add_mission_card", "stage_card", "start_todo",
+                         "finish_todo", "block_card", "reject_card"]
+_KANBAN_WALL_VERBS = ["approve_card", "merge", "deploy", "delete_card", "delete_board"]
+
+
+def _slug_board_id(title: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", (title or "").strip().lower()).strip("_")
+    return slug
+
+
+def _audit_config_write(action: str, detail: dict[str, Any]) -> None:
+    """Append an audit record for a config-mutating write. Best-effort JSONL next
+    to the configs — the create is the source of truth, so a failed audit must not
+    fail the create, but every board-module create is recorded here."""
+    from datetime import datetime, timezone
+    rec = {"ts": datetime.now(timezone.utc).isoformat(), "action": action, **detail}
+    try:
+        with (CONFIGS_DIR / "config_audit.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass
 
 
 # snapshot board field -> the domain card grammar the typed components render
@@ -1028,6 +1082,23 @@ class DomainSurfaceIn(BaseModel):
     empty_state: dict[str, Any] = Field(default_factory=dict)
 
 
+class BoardModuleIn(BaseModel):
+    """Normalized 'create a board module' request — produces BOTH a kanban board
+    (the repo/verb/status contract) and its domain surface (card grammar), with
+    generic_task cards so every board gets the same chat + pipeline treatment.
+    Governance defaults are FIXED (wall verbs always forbidden; human approval /
+    merge unchanged). The browser never writes YAML — this is the typed seam."""
+    title: str
+    description: str = ""
+    icon: str = ""
+    # life = no repository (Books/Health/…); repository/hybrid drive repo work and
+    # must name >=1 repo. Default life: the common new personal board is repo-less.
+    execution_scope: str = "life"
+    repo_ids: list[str] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    chat_enabled: bool = True
+
+
 @app.get("/api/domains")
 def domains() -> dict:
     """The typed-surface registry: card grammar + source binding + empty states,
@@ -1087,6 +1158,173 @@ def delete_domain_schema(domain_id: str) -> dict:
     next_data = dict(data)
     next_data["domains"] = next_domains
     return _write_domain_config(next_data)
+
+
+@app.post("/api/board-module", status_code=201)
+def create_board_module(body: BoardModuleIn) -> dict:
+    """Create a whole board MODULE from one typed request: a kanban board (the
+    repo/verb/status contract) + its domain surface (generic_task card grammar),
+    so every board — including user-created ones — gets the same chat + pipeline
+    + usage treatment. Governance defaults are FIXED: wall verbs stay forbidden,
+    human approval/merge is unchanged. Atomic (both configs validate before either
+    is written), write-gated, and audited. The browser never emits YAML."""
+    _require_domain_config_writable()   # CHAT_ENABLED + DOMAIN_CONFIG_WRITES + writable
+    board_id = _slug_board_id(body.title)
+    if not board_id:
+        raise HTTPException(status_code=400, detail="title must yield a non-empty board id")
+
+    reg = _read_board_registry_data()
+    if any(b.get("board_id") == board_id for b in reg.get("boards", [])):
+        raise HTTPException(status_code=409, detail=f"board {board_id!r} already exists")
+    dom = _domain_config()
+    if any(d.get("domain_id") == board_id for d in dom.get("domains", [])):
+        raise HTTPException(status_code=409, detail=f"domain {board_id!r} already exists")
+
+    scope = body.execution_scope if body.execution_scope in ("life", "repository", "hybrid") else "life"
+    repo_ids = [r.strip() for r in body.repo_ids if r.strip()]
+    if scope == "life":
+        repo_ids = []                       # no fake board-id-as-repo workaround
+    elif not repo_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"a {scope} board must name at least one repo_id "
+                   "(use execution_scope 'life' for a repo-less board)")
+    board_spec = {
+        "board_id": board_id, "provider": "command_center_ui", "workspace_ref": "self",
+        "board_ref": board_id, "execution_scope": scope, "repo_ids": repo_ids,
+        "status_mapping": dict(_KANBAN_STATUS_LABELS),
+        "required_fields": ["MissionID", "RepoID", "Risk", "LastSync", "Section"],
+        "allowed_agent_verbs": list(_KANBAN_ALLOWED_VERBS),
+        "forbidden_agent_verbs": list(_KANBAN_WALL_VERBS), "blockers": []}
+    columns = ([c.strip() for c in body.columns if c.strip()]
+               or list(_KANBAN_STATUS_LABELS.values()))
+    surface = _clean_domain_surface({
+        "domain_id": board_id, "title": body.title.strip(),
+        "card_component": "generic_task", "source": "board_store", "board_id": board_id,
+        "columns": columns, "column_actions": {},
+        "summary_fields": [{"name": "title", "label": "Title"},
+                           {"name": "status", "label": "Status"}],
+        "drawer_fields": [{"name": "description", "label": "Description"},
+                          {"name": "notes", "label": "Notes"}],
+        "allowed_actions": ["stage_card", "start_todo", "finish_todo",
+                            "block_card", "reject_card"],
+        "empty_state": {"title": f"No {body.title.strip()} cards yet",
+                        "hint": body.description.strip() or "Add a card to get started."}})
+
+    # Validate BOTH before writing EITHER — never a half-created module.
+    next_reg = {"schema_version": reg.get("schema_version", "command-center.kanban-boards.v1"),
+                "boards": [*reg.get("boards", []), board_spec]}
+    next_dom = {**dom, "domains": [*dom.get("domains", []), surface]}
+    _validate_board_registry(next_reg)
+    _validate_domain_config(next_dom)
+    _write_yaml_file(_kanban_boards_path(), next_reg)
+    _write_domain_config(next_dom)      # re-validates + writes domain_surfaces.yaml
+    _audit_config_write("board_module.create", {
+        "board_id": board_id, "title": body.title.strip(), "execution_scope": scope,
+        "repo_ids": repo_ids, "icon": body.icon, "chat_enabled": body.chat_enabled})
+    return {"board_id": board_id, "domain_id": board_id, "title": body.title.strip(),
+            "provider": "command_center_ui", "execution_scope": scope,
+            "card_component": "generic_task",
+            "columns": columns, "repo_ids": repo_ids, "chat_enabled": body.chat_enabled}
+
+
+# ── Universal Capture (intake) ────────────────────────────────────────────────
+# A rough thought is preserved as an immutable capture BEFORE deciding whether it
+# becomes a card/project/nothing — capturing never starts work. Classification /
+# routing / packet building are later phases; this is the stable record + Inbox.
+_capture_service = None   # type: ignore[var-annotated]
+
+
+def _get_capture_service():
+    global _capture_service
+    if _capture_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.intake import CaptureService, InMemoryCaptureStore
+        _capture_service = CaptureService(
+            InMemoryCaptureStore(),
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda: "cap-" + secrets.token_hex(5))
+    return _capture_service
+
+
+def _require_capture():
+    if not CAPTURE_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Universal Capture is disabled (set KANBAN_UI_CAPTURE_ENABLED=1)")
+    return _get_capture_service()
+
+
+class CaptureIn(BaseModel):
+    raw_content: str
+    source_type: str = "text"
+    source_ref: str | None = None
+    current_board_id: str | None = None
+    current_card_id: str | None = None
+    conversation_id: str | None = None
+    requested_mode: str = "save_only"
+
+
+class CaptureBatchIn(BaseModel):
+    text: str
+    source_type: str = "list"
+    current_board_id: str | None = None
+    conversation_id: str | None = None
+    requested_mode: str = "save_only"
+
+
+def _capture_fields(body) -> dict:
+    fields = {"source_type": body.source_type, "requested_mode": body.requested_mode,
+              "current_board_id": body.current_board_id,
+              "conversation_id": body.conversation_id}
+    if getattr(body, "source_ref", None) is not None:
+        fields["source_ref"] = body.source_ref
+    if getattr(body, "current_card_id", None) is not None:
+        fields["current_card_id"] = body.current_card_id
+    return fields
+
+
+@app.post("/api/captures", status_code=201)
+def create_capture(body: CaptureIn) -> dict:
+    svc = _require_capture()
+    try:
+        view = svc.capture(body.raw_content, **_capture_fields(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return view.model_dump()
+
+
+@app.post("/api/captures/batch", status_code=201)
+def create_capture_batch(body: CaptureBatchIn) -> dict:
+    svc = _require_capture()
+    views = svc.capture_batch(body.text, **_capture_fields(body))
+    return {"count": len(views),
+            "batch_id": views[0].record.batch_id if views else None,
+            "captures": [v.model_dump() for v in views]}
+
+
+@app.get("/api/captures")
+def list_captures(status: str | None = None) -> list:
+    svc = _require_capture()
+    return [v.model_dump() for v in svc.list(status=status)]
+
+
+@app.get("/api/captures/{capture_id}")
+def get_capture(capture_id: str) -> dict:
+    svc = _require_capture()
+    try:
+        return svc.get(capture_id).model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/intake/inbox")
+def intake_inbox() -> dict:
+    """The Universal Inbox: captures grouped into lanes. A capture is recoverable
+    here even after it is routed elsewhere — nothing is ever silently dropped."""
+    return _require_capture().inbox()
 
 
 @app.get("/api/domain/{domain_id}/cards")
@@ -2512,6 +2750,7 @@ def board_registry() -> dict:
         boards.append({
             "board_id": board.get("board_id"),
             "provider": board.get("provider"),
+            "execution_scope": board.get("execution_scope", "repository"),
             "workspace_ref": board.get("workspace_ref"),
             "board_ref": board.get("board_ref"),
             "repo_ids": board.get("repo_ids", []),
@@ -3086,6 +3325,20 @@ class AgentApprovalIn(BaseModel):
     reason: str = ""
 
 
+class AgentPromoteIn(BaseModel):
+    """'Track as mission' — the OPTIONAL governance wrapper for an existing chat.
+    summary becomes the mission's action line; nothing here grants writes."""
+    summary: str = ""
+
+
+class ChatPromoteIn(BaseModel):
+    """'Track as mission' for a GatewayCore conversation (no agent session).
+    Same inert tracking contract; nothing here grants writes."""
+    conversation_id: str
+    summary: str = ""
+    repo: str = ""
+
+
 # ── Usage & Limits routes (read-only; in-process UsageService) ────────────────
 # NOTE: the literal /api/model-usage/* paths are declared BEFORE the
 # /api/model-usage/{runtime_id} catch-all so FastAPI's in-order matching does
@@ -3255,6 +3508,82 @@ def resume_agent_session(session_id: str) -> dict:
 def close_agent_session(session_id: str) -> dict:
     client = _require_agent_sessions()
     return _call_worker(client.close_session, session_id)
+
+
+@app.post("/api/agent-sessions/{session_id}/promote")
+def promote_agent_session(session_id: str, body: AgentPromoteIn) -> dict:
+    """'Track as mission' — the OPTIONAL governance/tracking wrapper.
+
+    A mission is NEVER a prerequisite for chat. This records an EXISTING read-only
+    agent session as a Ledger mission so the same conversation becomes monitorable
+    on the missions board. It deliberately:
+      - reuses the durable session (read via the worker) — it does NOT call
+        start_session/create_session, so the conversation is not restarted or
+        duplicated;
+      - opens an L0 (read-only), requires_approval=False mission with NO branch —
+        so there is nothing to execute and no write capability is granted
+        (`cc branch-mission` never polls open missions; it generates its own id);
+      - links the session to the mission via the append-only event log (kind
+        `note`), needing no schema change.
+    Writes remain gated behind lease + worktree + approval, unchanged by this."""
+    client = _require_agent_sessions()
+    rec = _call_worker(client.get_session, session_id)   # durable repo/conversation
+    repo_id = (rec.get("repo_id") or "").strip()
+    conversation_id = rec.get("conversation_id") or ""
+    action = (body.summary or "").strip() or f"Tracked cockpit agent session {session_id}"
+    try:
+        mr = httpx.post(f"{LEDGER_BASE_URL}/mission", json={
+            "action": action, "repo": repo_id or "unknown", "branch": "",
+            "risk": "L0", "requires_approval": False}, timeout=15)
+        mr.raise_for_status()
+        mission = mr.json()
+        mid = mission["id"]
+        er = httpx.post(f"{LEDGER_BASE_URL}/mission/{mid}/event", json={
+            "kind": "note", "payload": {
+                "event": "agent_session_link", "session_id": session_id,
+                "conversation_id": conversation_id, "harness": rec.get("harness"),
+                "repo_id": repo_id, "mode": "analysis", "promoted_from": "cockpit_chat"}},
+            timeout=15)
+        er.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"ledger error at {LEDGER_BASE_URL}: {exc}") from exc
+    return {"mission_id": mid, "status": mission.get("status", "open"),
+            "session_id": session_id, "conversation_id": conversation_id}
+
+
+@app.post("/api/chat/promote")
+def promote_chat(body: ChatPromoteIn) -> dict:
+    """'Track as mission' for a GatewayCore conversation (no agent session).
+
+    Same INERT tracking-mission contract as the agent-session promote: L0
+    (read-only), requires_approval=False, NO branch — so nothing executes and no
+    write capability is granted. It links the conversation via the append-only
+    event log. A mission is never required to chat; this is opt-in tracking so a
+    plain conversation can be monitored on the missions board without losing
+    context. Writes remain gated behind lease + worktree + approval, unchanged."""
+    conversation_id = (body.conversation_id or "").strip()
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id is required")
+    action = (body.summary or "").strip() or f"Tracked cockpit chat {conversation_id}"
+    repo = (body.repo or "").strip() or "unknown"
+    try:
+        mr = httpx.post(f"{LEDGER_BASE_URL}/mission", json={
+            "action": action, "repo": repo, "branch": "",
+            "risk": "L0", "requires_approval": False}, timeout=15)
+        mr.raise_for_status()
+        mission = mr.json()
+        mid = mission["id"]
+        er = httpx.post(f"{LEDGER_BASE_URL}/mission/{mid}/event", json={
+            "kind": "note", "payload": {
+                "event": "chat_conversation_link", "conversation_id": conversation_id,
+                "promoted_from": "cockpit_gateway_chat"}}, timeout=15)
+        er.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"ledger error at {LEDGER_BASE_URL}: {exc}") from exc
+    return {"mission_id": mid, "status": mission.get("status", "open"),
+            "conversation_id": conversation_id}
 
 
 _AGENT_EVENT_POLL_SECONDS = 0.5

@@ -80,6 +80,39 @@ export interface MissionDetail {
   [k: string]: unknown;
 }
 
+// Universal Capture — save a rough thought as a durable, recoverable intake
+// record BEFORE it becomes work. Capturing never starts work.
+export interface CaptureRecord {
+  capture_id: string; raw_content: string; source_type: string;
+  requested_mode: string; batch_id?: string | null; captured_at: string;
+  current_board_id?: string | null; conversation_id?: string | null;
+}
+export interface CaptureView {
+  record: CaptureRecord; processing_status: string;
+  classification?: unknown; event_count: number; updated_at: string;
+}
+export interface InboxCaptureCard {
+  capture_id: string; preview: string; source_type: string;
+  requested_mode: string; processing_status: string; batch_id?: string | null;
+  capture_kind?: string | null; suggested_board_id?: string | null;
+  captured_at: string; updated_at: string;
+}
+export interface InboxData {
+  columns: { name: string; captures: InboxCaptureCard[] }[]; total: number;
+}
+export interface CaptureIn {
+  raw_content: string; source_type?: string; source_ref?: string;
+  current_board_id?: string; current_card_id?: string; conversation_id?: string;
+  requested_mode?: string;
+}
+export const createCapture = (body: CaptureIn) =>
+  postJSON<CaptureView>("/api/captures", body, "POST");
+export const createCaptureBatch = (
+  text: string, extra: Partial<CaptureIn> = {}) =>
+  postJSON<{ count: number; batch_id: string | null; captures: CaptureView[] }>(
+    "/api/captures/batch", { text, source_type: "list", ...extra }, "POST");
+export const fetchInbox = () => getJSON<InboxData>("/api/intake/inbox");
+
 export const fetchMissions = () => getJSON<BoardData>("/api/missions");
 export const fetchMetrics = () => getJSON<Metrics>("/api/metrics");
 export const fetchBoards = () => getJSON<BoardSnapshot>("/api/boards");
@@ -245,6 +278,34 @@ export const updateDomainSchema = (domainId: string, domain: DomainSpec) =>
   postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, domain, "PUT");
 export const deleteDomainSchema = (domainId: string) =>
   postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, {}, "DELETE");
+
+// Create a whole board MODULE (kanban board + generic_task domain surface) from
+// one typed request — the guided Create-Board flow. Safe governance defaults.
+export type ExecutionScope = "life" | "repository" | "hybrid";
+export interface BoardModuleIn {
+  title: string;
+  description?: string;
+  icon?: string;
+  execution_scope?: ExecutionScope;
+  repo_ids?: string[];
+  columns?: string[];
+  chat_enabled?: boolean;
+}
+export interface BoardModuleResult {
+  board_id: string;
+  domain_id: string;
+  title: string;
+  provider: string;
+  execution_scope: ExecutionScope;
+  card_component: string;
+  columns: string[];
+  repo_ids: string[];
+  chat_enabled: boolean;
+}
+export const createBoardModule = (body: BoardModuleIn) =>
+  postJSON<BoardModuleResult>("/api/board-module", body, "POST");
+export const boardIdFromTitle = (title: string) =>
+  title.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");
 export const fetchDomainCards = (id: string) =>
   getJSON<DomainCards>(`/api/domain/${encodeURIComponent(id)}/cards`);
 export const fetchDomainCard = (id: string, cardId: string) =>
@@ -842,6 +903,29 @@ export const interruptAgentSession = (sessionId: string) =>
 export const resumeAgentSession = (sessionId: string) =>
   postJSON<AgentStatusAck>(
     `/api/agent-sessions/${encodeURIComponent(sessionId)}/resume`, {});
+
+// "Track as mission" — record this read-only session as a Ledger tracking mission.
+// Reuses the existing session (no restart); grants no writes. Returns the mission id.
+export interface AgentPromoteResult {
+  mission_id: string;
+  status: string;
+  session_id: string;
+  conversation_id: string;
+}
+export const promoteAgentSession = (sessionId: string, summary = "") =>
+  postJSON<AgentPromoteResult>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/promote`, { summary });
+
+// "Track as mission" for a GatewayCore conversation (no agent session). Same
+// inert tracking mission; grants no writes. Returns the mission id.
+export interface ChatPromoteResult {
+  mission_id: string;
+  status: string;
+  conversation_id: string;
+}
+export const promoteChat = (conversationId: string, summary = "") =>
+  postJSON<ChatPromoteResult>(
+    "/api/chat/promote", { conversation_id: conversationId, summary });
 export async function closeAgentSession(sessionId: string): Promise<AgentStatusAck> {
   const r = await fetch(`/api/agent-sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" });

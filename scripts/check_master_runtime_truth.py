@@ -27,6 +27,7 @@ REQUIRED_SECTIONS = (
     "## 4. Architecture",
     "### 4.5",                        # the agent lane
     "### 4.6",                        # unified Usage & Limits
+    "### 4.8",                        # chat-first product surface + Universal Capture
     "## 5. Model lanes and routing",
     "## 11. Module tree",
     "## 14. Change log",
@@ -43,6 +44,8 @@ REQUIRED_FILES = (
     ("src/command_center/usage/collectors/codex_app_server.py", "collectors/codex_app_server.py"),
     ("src/command_center/usage/collectors/claude_agent.py", "collectors/claude_agent.py"),
     ("docs/runbooks/agent-sessions-activation.md", "agent-sessions-activation.md"),
+    # Universal Capture (PR #44) — the intake record MASTER §4.8 documents.
+    ("src/command_center/intake/schemas.py", "src/command_center/intake/"),
 )
 
 # claims that were true once and would now be a lie — must never reappear
@@ -60,6 +63,12 @@ REQUIRED_ENDPOINTS = (
      ("src/command_center/agent_sessions/worker_app.py",
       "services/agent_kanban_ui/app.py")),
     ("/api/model-usage", ("services/agent_kanban_ui/app.py",)),
+    # chat-first product surface (§4.8, PRs #42–#44) — documented AND implemented.
+    ("/api/agent-sessions/{session_id}/promote", ("services/agent_kanban_ui/app.py",)),
+    ("/api/chat/promote", ("services/agent_kanban_ui/app.py",)),
+    ("/api/board-module", ("services/agent_kanban_ui/app.py",)),
+    ("/api/captures", ("services/agent_kanban_ui/app.py",)),
+    ("/api/intake/inbox", ("services/agent_kanban_ui/app.py",)),
 )
 
 
