@@ -3683,6 +3683,38 @@ function ChatRuntimePanel({ runtime, conversations, activeId, onOpenConversation
         </div>
       </div>
       <div className="metric diag-card">
+        <div className="diag-head">Local Frontier lane (experimental)</div>
+        <p className="muted small">{runtime.local_frontier_note}</p>
+        <div className="conv-list">
+          {(runtime.local_frontier_models ?? []).map((f) => (
+            <div className="conv-row" key={f.model_id}>
+              <div className="conv-open" style={{ cursor: "default" }}>
+                <span className="conv-title">
+                  <Badge value={f.selectable ? "ready" : f.health}
+                    tone={f.selectable ? "good" : "warn"} />
+                  {f.model_id}
+                </span>
+                <span className="muted small">
+                  {f.provider} · local · text only · no tools
+                  {f.context_tokens ? ` · ${(f.context_tokens / 1000).toFixed(0)}k ctx` : ""}
+                  {f.disk_footprint_gb ? ` · ${f.disk_footprint_gb}GB on disk` : ""}
+                  {f.measured?.median_tokens_per_second != null
+                    ? ` · measured ${f.measured.median_tokens_per_second.toFixed(2)} tok/s`
+                    : f.expected_tokens_per_second
+                    ? ` · ${f.expected_tokens_per_second.low}-${f.expected_tokens_per_second.high} tok/s (unverified, self-reported)`
+                    : ""}
+                </span>
+              </div>
+            </div>
+          ))}
+          {(runtime.local_frontier_models ?? []).length === 0 && (
+            <div className="muted small">
+              No local-frontier candidates configured — see configs/local-frontier-providers.yaml.
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="metric diag-card">
         <div className="diag-head">Executors (not chat models)</div>
         <p className="muted small">{runtime.executor_note}</p>
         <div className="domain-badges">
@@ -4321,7 +4353,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
                   <span className="muted small">model</span>
                   <select className="select" value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Claude Code/Codex are agentic coding executors, launched from missions — never a chat model.">
+                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Local Frontier models are a free but experimental, very slow, loopback-only lane. Claude Code/Codex are agentic coding executors, launched from missions — never a chat model.">
                     <optgroup label="Local (free)">
                       {roles.map((r) => {
                         const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
@@ -4346,6 +4378,29 @@ function ChatView({ roles, runtime, draft, onBack }: {
                               {f.model_id}
                               {resultsBits.length ? ` — ${resultsBits.join(" · ")}` : ""}
                               {f.selectable ? "" : !f.lane_enabled ? " (lane disabled)" : " (no key)"}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )}
+                    {(runtime?.local_frontier_models ?? []).length > 0 && (
+                      <optgroup label="Local Frontier — experimental, may take minutes">
+                        {(runtime?.local_frontier_models ?? []).map((f) => {
+                          const m = f.measured;
+                          const resultsBits: string[] = [];
+                          if (m?.median_tokens_per_second != null) {
+                            resultsBits.push(`measured ${m.median_tokens_per_second.toFixed(2)} tok/s`);
+                          } else if (f.expected_tokens_per_second) {
+                            resultsBits.push(
+                              `${f.expected_tokens_per_second.low}-${f.expected_tokens_per_second.high} tok/s (unverified)`);
+                          }
+                          if (m?.pass_rate != null) resultsBits.push(`${Math.round(m.pass_rate * 100)}% suite pass`);
+                          return (
+                            <option key={f.model_id} value={`local-frontier:${f.model_id}`}
+                              disabled={!f.selectable}>
+                              {f.model_id}
+                              {resultsBits.length ? ` — ${resultsBits.join(" · ")}` : ""}
+                              {f.selectable ? "" : !f.lane_enabled ? " (lane disabled)" : ` (${f.health})`}
                             </option>
                           );
                         })}

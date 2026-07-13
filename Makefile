@@ -215,6 +215,9 @@ agent-session-egress-check:  ## Forbidden-providers check in AGENT-SESSION EGRES
 frontier-router-benchmark:  ## Continual top-3 KPI check (configs/model-benchmarks.yaml suite vs frontier candidates). SUITE= LIVE=1 for real calls (spends money if the lane is enabled).
 	@$(PY) -m command_center.improvement.frontier_benchmark --suite $(or $(SUITE),chat) $(if $(LIVE),--live,)
 
+colibri-benchmark:  ## Continual KPI check for the local-frontier lane (configs/model-benchmarks.yaml suite vs colibrì). SUITE= LIVE=1 for real calls (no $ cost, but can take minutes-to-hours). MAX_CASES= caps cases/candidate (default 3).
+	@$(PY) -m command_center.improvement.local_frontier_benchmark --suite $(or $(SUITE),chat) $(if $(LIVE),--live,) --max-cases $(or $(MAX_CASES),3)
+
 model-fit:  ## Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
 	@$(PY) -m command_center.cli.model_fit $(if $(CTX),--ctx $(CTX),) $(if $(MODEL),--model $(MODEL),) $(if $(ENV),--env $(ENV),) $(if $(VRAM),--vram-gb $(VRAM),)
 

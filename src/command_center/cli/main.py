@@ -337,6 +337,13 @@ COMMANDS: dict[str, tuple] = {
                                   "generated/model-scout-report.md", *a), "propose model candidates"),
     "usage-digest": (lambda a: pym("command_center.cli.usage_digest", "--output",
                                    "generated/usage-digest.md", *a), "spend + mission summary"),
+    # local-frontier (colibrì) — read-only, no cost/egress, so unlike frontier-router these ARE
+    # registered here. The heavy step (`make colibri-benchmark`, a real live call that can take
+    # minutes-to-hours) deliberately stays Makefile-only, same separation frontier-router uses.
+    "colibri-preflight": (lambda a: pym("command_center.cli.local_frontier", "preflight", *a),
+                          "disk/RAM/GPU headroom vs. the local-frontier lane's configured model(s)"),
+    "colibri-health": (lambda a: pym("command_center.cli.local_frontier", "health", *a),
+                       "local-frontier lane_enabled/health/selectable per configured model"),
     # channels
     "gateway": (lambda a: pym("command_center.channels", *a), "run enabled chat channels (configs/channels.yaml)"),
     "notify": (lambda a: pym("command_center.cli.notify", *a), "push a proactive digest (brief + active missions) to Discord (--dry-run)"),

@@ -100,6 +100,12 @@ generated/frontier-router-usage.jsonl
 generated/frontier-benchmark-report.json
 generated/frontier-benchmark-report.md
 
+# ── Local-frontier (colibrì) usage ledger + benchmark reports — same reasoning,
+# regenerate via make colibri-benchmark ──
+generated/local-frontier-usage.jsonl
+generated/local-frontier-benchmark-report.json
+generated/local-frontier-benchmark-report.md
+
 # ── Local staging / scratch ───────────────────────────────────────────────
 _staging/
 .codex_tmp/
