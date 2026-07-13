@@ -1,0 +1,34 @@
+schema_version: command-center.frontier-router-budgets.v1
+
+# Hard budget + safety gate for the paid frontier-router lane. Default is OFF (enabled: false):
+# no OpenRouter / Z.ai / Moonshot call happens unless a human flips this on AND a key exists AND
+# the cost preflight passes AND redaction passes. Matches the repo's no-silent-fallback,
+# no-fabricated-usage discipline. The contract refuses require_redaction: false and refuses an
+# enabled budget without usage accounting + human approval for live repo context.
+
+default:
+  enabled: false
+  monthly_cap_usd: 10.00
+  per_run_cap_usd: 1.00
+  per_request_cap_usd: 0.25
+  require_redaction: true
+  require_human_approval_for_live_repo_context: true
+  log_token_usage: true
+  log_cost_estimate: true
+  fail_on_missing_usage: true
+
+# The only task classes a router-backed run may serve. None of these can promote a local model.
+allowed_task_classes:
+  - frontier_reference_eval
+  - long_context_comparison
+  - local_failure_fallback
+  - external_framework_calibration
+
+# Payload classes that must NEVER be sent to a paid provider (enforced before any call).
+blocked_payloads:
+  - secrets
+  - private_keys
+  - raw_env_files
+  - unredacted_customer_data
+  - unredacted_gmail
+  - unredacted_financial_data

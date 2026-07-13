@@ -68,11 +68,26 @@ def _registry():
 
 
 def _fetch(spec: dict) -> list[dict]:
-    """Live records for a feed source, pre-ingested into an Airflow Variable as a JSON list
-    (e.g. an upstream ingestion DAG writes `improvement_feed_arxiv`). A missing/!JSON value
-    raises — and the per-source isolate guard records it as a visible failed source."""
-    raw = Variable.get(f"improvement_feed_{spec['name']}", default_var="[]")
-    return json.loads(raw)
+    """Live records for a feed source.
+
+    Most sources are pre-ingested into an Airflow Variable as a JSON list (an upstream
+    ingestion task writes e.g. ``improvement_feed_arxiv``). The model/registry pillar is the
+    exception: when its Variable is empty, this calls the model-scout bridge
+    (``scan_feed_records``) directly and caches the result back into the Variable — so the
+    SCHEDULED run is never blind to newly released models. GLM/Kimi enter the loop here via the
+    watchlist (track-as-context for the ones too big to run; propose-pull for the ones that
+    fit). Errors propagate into the per-source isolate guard as a visible failed source, never
+    a silent empty pillar. (This is the wiring that makes the docstring's old "phantom upstream
+    ingestion DAG" real for the model pillar.)"""
+    raw = Variable.get(f"improvement_feed_{spec['name']}", default_var="")
+    if raw:
+        return json.loads(raw)
+    if spec["name"] == "litellm_registry":
+        from command_center.registry.model_scout import scan_feed_records
+        records = scan_feed_records(offline=False)
+        Variable.set("improvement_feed_litellm_registry", json.dumps(records))
+        return records
+    return []
 
 
 @dag(
