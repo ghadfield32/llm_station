@@ -593,13 +593,43 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
   "subscription (not $-metered)" / "cost unknown", never $0.00), a stale badge,
   and a collector-health table. 15 tests; `tsc && vite build` clean.
 
+- **Phase 3.2 — Claude usage is now WIRED + the selector has model/effort
+  pickers + badges** (PR #37, `KANBAN_UI_USAGE_CLAUDE`). Runtime-discovered
+  **model + reasoning-effort pickers** (Codex live `client.models()` incl.
+  supported efforts; Claude validated alias catalogs) flow through a new
+  `GET /api/agent-harnesses/{id}/models`; effort is threaded end-to-end and
+  pinned per session (Claude `--effort` / SDK `options.effort` / Codex
+  `model_reasoning_effort`). `/api/agent-harnesses` is enriched with
+  `usage_summary` + `models_endpoint`, and the picker renders a live
+  availability/limit **badge**. The cockpit SSE generator now **tees live
+  `rate_limit` events into the durable usage store** (two Claude lanes kept
+  distinct — `claude_code_local` ≠ `claude_agent` — fixing a real
+  misattribution). Real bug fixed: the Claude collector's hardcoded
+  runtime_id. Operator runbook: `docs/runbooks/agent-sessions-activation.md`.
+
+- **Phase 3.3 — WORKER-owned usage ingestion (headless-safe)** (PR #37,
+  `AGENT_WORKER_USAGE`): the worker feeds its own `UsageService` on `rate_limit`
+  events as a turn runs (`_run_turn`), so a headless session captures usage even
+  with no browser attached (the cockpit SSE tee's gap). Idempotent by `source_hash`.
+- **Phase 3.4 — restart-proof, ONE authoritative usage store** (PR #37): the
+  worker's `UsageService` is now backed by `LedgerUsageStore` when
+  `LEDGER_BASE_URL` is set (durable across restart), and the cockpit — under
+  `KANBAN_UI_USAGE_LEDGER=1` — reads the **same** Ledger, so it renders exactly
+  the rows the worker wrote (not a per-process in-memory illusion). Proven by
+  `test_usage_ledger_durability.py`: an observation ingested through one
+  Ledger-backed service is visible to a brand-new service reading the same
+  Ledger, the two Claude lanes stay distinct, and a re-ingested event stays
+  single. The SSE tee remains a compatibility writer (dedup by `source_hash`).
+
 **What is NOT built yet:** every collector except Codex; the Usage & Limits
-UI's remaining depth (selector quota badges on the model/agent pickers,
-historical charts, reset timelines, routing-evidence panel); SSE live push
-(`/api/model-usage/events/stream`); the reconciliation + routing-decisions
-routes; and enriching `/api/chat/runtime` + `/api/agent-harnesses` with a
-`usage_summary`. The core surface (overview, per-runtime detail, limits,
-alerts, top-drivers, collector-health, refresh) is live behind the flag.
+UI's remaining depth (historical charts, reset timelines, routing-evidence
+panel, top-driver *UI*); SSE live push (`/api/model-usage/events/stream`); the
+reconciliation + routing-decisions routes; Ledger-backing the worker usage
+store (restart-durable) + pointing the cockpit reads at the worker (retiring the
+tee as authoritative); and per-model/per-effort usage attribution on samples.
+The core surface (overview, per-runtime detail, limits, alerts, top-drivers,
+collector-health, refresh) + model/effort pickers + selector badges + the Claude
+rate_limit tee + worker-owned headless ingestion are live behind the flags.
 
 ### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
 

@@ -28,6 +28,30 @@ def _auth():
     return {"Authorization": f"Bearer {TOKEN}"}
 
 
+def test_worker_owned_usage_captures_a_rate_limit_headlessly():
+    # the worker's own UsageService ingests a live rate_limit event with NO
+    # browser attached (the headless gap the cockpit tee can't cover), and
+    # exposes it for the cockpit to proxy. Codex/API-lane events are ignored.
+    from command_center.agent_sessions import worker_app as wa
+    from command_center.agent_sessions.events import AgentEvent
+    from command_center.usage.service import UsageService
+    from command_center.usage.store import UsageStore
+
+    usage = UsageService(UsageStore())
+    ev = AgentEvent("rate_limit", {"status": "allowed_warning",
+                    "rate_limit_type": "five_hour", "utilization": None,
+                    "resets_at": 1783896000})
+    ev.ts = "2026-07-12T00:00:00+00:00"
+    wa._worker_feed_usage(usage, "claude_code_local", ev)
+    wa._worker_feed_usage(usage, "codex_agent", ev)      # ignored (own collector)
+    app = wa.build_app(store=SessionStore(), token=TOKEN, usage_service=usage)
+    client = TestClient(app)
+    rows = client.get("/api/model-usage", headers=_auth()).json()
+    assert {r["runtime_id"] for r in rows} == {"claude_code_local"}
+    detail = client.get("/api/model-usage/claude_code_local", headers=_auth()).json()
+    assert detail["availability"] == "near_limit"
+
+
 def _wait_for_events(client, session_id, *, min_count, after_sequence=0, timeout=2.0):
     """POST /messages is fire-and-forget (202 Accepted, a background task —
     see worker_app.py's async execution-model correction), so a caller that

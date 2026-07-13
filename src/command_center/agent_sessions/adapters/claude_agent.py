@@ -53,6 +53,15 @@ _READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
 _DISALLOWED_TOOLS = (
     "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "BashOutput",
     "KillShell", "WebSearch", "WebFetch", "Task")
+# API-lane model aliases (the SDK resolves an alias to the account's model).
+_MODEL_CATALOG = (
+    ("default", "Auto — recommended", True),
+    ("opus", "Opus", False),
+    ("sonnet", "Sonnet", False),
+    ("haiku", "Haiku", False),
+    ("fable", "Fable", False),
+)
+_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 def _import_sdk() -> Any:
@@ -200,7 +209,8 @@ def _translate_message(msg: Any) -> list[AgentEvent]:
 
 
 def _build_read_only_options(sdk: Any, *, repo_path: Path, model: str | None,
-                             resume: str | None, max_budget_usd: float | None) -> Any:
+                             resume: str | None, max_budget_usd: float | None,
+                             effort: str | None = None) -> Any:
     """The read-only ClaudeAgentOptions with all three defense-in-depth layers.
     The can_use_tool callback is the authoritative gate: ALLOW iff the tool is in
     the read-only set, else DENY (verified callback signature: (name, input,
@@ -224,6 +234,7 @@ def _build_read_only_options(sdk: Any, *, repo_path: Path, model: str | None,
         plugins=[],
         cwd=str(repo_path),
         model=model,
+        effort=effort,                   # SDK-native reasoning effort (None = default)
         max_budget_usd=max_budget_usd,
         include_partial_messages=False,  # full messages only — no delta dedup needed
         resume=resume,
@@ -247,6 +258,16 @@ class ClaudeAgentHarness:
     def __init__(self, store: SessionStoreProtocol) -> None:
         self.store = store
         self._clients: dict[str, Any] = {}
+        self._effort: dict[str, str | None] = {}   # per-session, pinned at start
+
+    def list_models(self) -> list[dict[str, Any]]:
+        """API-lane model aliases (the SDK resolves them per account). Kept
+        separate from the local-subscription lane's catalog on purpose."""
+        return [{"id": mid, "display_name": disp, "is_default": is_def,
+                 "description": "", "default_effort": None,
+                 "supported_efforts": list(_EFFORTS), "context_options": [],
+                 "available": True}
+                for mid, disp, is_def in _MODEL_CATALOG]
 
     async def probe(self) -> HarnessProbe:
         try:
@@ -285,7 +306,8 @@ class ClaudeAgentHarness:
         repo_path = _resolve_repo_path(record.repo_id)
         options = _build_read_only_options(
             sdk, repo_path=repo_path, model=record.model,
-            resume=record.external_session_id, max_budget_usd=self._max_budget())
+            resume=record.external_session_id, max_budget_usd=self._max_budget(),
+            effort=self._effort.get(session_id))
         client = sdk.ClaudeSDKClient(options)
         await client.connect()
         self._clients[session_id] = client
@@ -310,6 +332,7 @@ class ClaudeAgentHarness:
             harness=self.name, conversation_id=request.conversation_id,
             repo_id=request.repo_id, provider_profile=request.provider_profile,
             model=model, permission_profile=request.permission_profile)
+        self._effort[record.session_id] = request.effort   # pinned for the session
         # eager connect proves auth + the CLI subprocess before we claim "idle"
         await self._ensure_client(record.session_id)
         self.store.append_event(record.session_id, AgentEvent(

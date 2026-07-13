@@ -72,3 +72,22 @@ changes:
     affects: [control-plane availability, volumes, network exposure]
     required_checks: [make verify, make up, make health]
     rollout: [direct]
+
+  # Coding-agent + usage surfaces: any change here must keep docs/MASTER.md
+  # truthful (the MASTER truth gate) — "a phase is not complete until MASTER.md
+  # describes it". `make impact` reads your diff and prints these; run the
+  # truth check before marking a PR ready.
+  src/command_center/agent_sessions/*:
+    affects: [Agent Sessions runtime/adapters/worker/registry, docs/MASTER.md §4.5]
+    required_checks: ["python scripts/check_master_runtime_truth.py", make validate]
+    rollout: [direct]
+
+  src/command_center/usage/*:
+    affects: [Usage & Limits subsystem + collectors, docs/MASTER.md §4.6]
+    required_checks: ["python scripts/check_master_runtime_truth.py"]
+    rollout: [direct]
+
+  services/agent_kanban_ui/app.py:
+    affects: [cockpit API (agent sessions, model/effort picker, usage), docs/MASTER.md]
+    required_checks: ["python scripts/check_master_runtime_truth.py"]
+    rollout: [direct]

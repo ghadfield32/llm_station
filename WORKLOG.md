@@ -187,6 +187,119 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- MASTER.md TRUTH-CHECK GATE 07-12 (same branch `feat/agent-cockpit-pickers`,
+  extends PR #37). Encodes "a phase is not complete until docs/MASTER.md
+  describes it" as an automated check. `scripts/check_master_runtime_truth.py`
+  (`check()` → list of drift problems; `main()` exits non-zero) verifies: the 3
+  canonical runtime ids (codex_agent/claude_code_local/claude_agent) are
+  documented; required section markers exist (readiness snapshot, §4/§4.5/§4.6/
+  §5/§11/§14); each critical runtime file EXISTS on disk AND is referenced by its
+  MASTER relative-path fragment; documented key endpoints
+  (/api/agent-harnesses/{id}/models, /api/model-usage) exist literally in the
+  named source; and superseded claims (e.g. "wires ONLY the FakeHarness",
+  "Claude Agent is still a planned runtime, not shipped") never reappear.
+  Deliberately conservative (a small set of load-bearing facts, not a brittle
+  full-token scan) so it fails only on REAL drift — passes on current MASTER.
+  +6 tests (truthful-now + 4 drift-detection: undocumented runtime id, superseded
+  claim, removed section, dropped file reference). Wired into
+  `configs/breakage.yaml` (fnmatch globs) so `make impact` prints the MASTER
+  truth check as a required check whenever `src/command_center/agent_sessions/*`,
+  `src/command_center/usage/*`, or `services/agent_kanban_ui/app.py` change. Also
+  corrected the PR #37 body to its real head (abdd222, 5 commits; worker
+  ingestion + Ledger durability shipped; remaining usage-depth gaps explicit).
+  ruff clean; cc validate PASS; full suite green.
+- USAGE RESTART-PROOF + ONE AUTHORITATIVE STORE 07-12 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). Completes the "worker owns
+  ingestion → durable LedgerUsageStore → cockpit reads durable result" wiring
+  (the last gap from worker-owned ingestion). The WORKER's UsageService is now
+  backed by `LedgerUsageStore` when `LEDGER_BASE_URL` is set (it always is —
+  the worker already requires it for sessions), so provider-limit observations
+  survive a restart. The COCKPIT, under `KANBAN_UI_USAGE_LEDGER=1`, backs its
+  own UsageService with a LedgerUsageStore against the SAME `LEDGER_BASE_URL`,
+  so it READS the very rows the worker wrote — one authoritative durable store,
+  not a per-process in-memory illusion. The SSE tee remains a compatibility
+  writer (idempotent by source_hash, so tee + worker feeding the same event
+  dedups). +2 tests (`test_usage_ledger_durability.py`): a claude_code_local
+  rate_limit ingested through one Ledger-backed service is visible to a BRAND
+  NEW service reading the same Ledger (restart proof), the two Claude lanes stay
+  distinct, and a re-ingested event stays single (idempotent). ruff + mypy
+  clean; full suite green. Runbook adds `AGENT_WORKER_USAGE=1` +
+  `KANBAN_UI_USAGE_LEDGER=1`. NEXT (documented): retire the cockpit tee once the
+  worker is the sole writer in a deployment; SSE becomes presentation-only.
+- WORKER-OWNED USAGE INGESTION (headless-safe) 07-12 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). Closes the cockpit-tee gap: the
+  cockpit SSE tee only ingests while a browser stream is open, so a HEADLESS
+  session captured nothing. Now the WORKER — which already iterates every
+  AgentEvent in `_run_turn` — feeds its OWN UsageService on `rate_limit` events
+  (`_worker_feed_usage`, attributed to the session's harness, two Claude lanes
+  distinct; Codex uses its own provider collector). Gated by `AGENT_WORKER_USAGE=1`
+  (or an injected `usage_service` for tests); in-memory for this slice. New worker
+  read endpoints `GET /api/model-usage` + `/api/model-usage/{runtime_id}` (reuse
+  cockpit_views) so the cockpit can PROXY the worker to become the single
+  authoritative read path (documented next micro-step). Idempotent by source_hash
+  so a doubly-fed event (tee + worker against one Ledger) dedups. +1 worker test
+  (a headless rate_limit feed → /api/model-usage shows claude_code_local NEAR_LIMIT,
+  codex/API-lane ignored). ruff + mypy clean; full suite green. NEXT (documented):
+  Ledger-back the worker usage store (restart-durable) + point the cockpit's
+  /api/model-usage reads at the worker (retire the tee as authoritative).
+- CLAUDE USAGE FEED (loop closed) + SELECTOR BADGES 07-12 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). Closes the "a running Claude
+  session lights up its own card" loop: new `KANBAN_UI_USAGE_CLAUDE` gate
+  registers TWO event-fed Claude collectors (claude_code_local + claude_agent,
+  distinct runtime_ids so the subscription lane never lands on the API lane's
+  card), and the cockpit SSE generator (`_agent_event_frames`) now TEES every
+  live `rate_limit` AgentEvent into the durable usage store via
+  `_feed_agent_usage` → `translate_rate_limit_info(..., runtime_id=harness)` →
+  `UsageService.ingest_collector_result` (attributed to the session's harness,
+  resolved from a `_session_harness` cache populated at create, backfilled from
+  the worker otherwise). Best-effort — a tee failure never breaks the browser
+  stream. Codex limits keep coming from its own provider collector (not teed).
+  UI: the Agent-Sessions picker `<option>`s carry a concise live badge
+  (`harnessBadgeText`: a non-available availability state or the worst limit
+  bucket ≥50%), and the session header shows an availability chip from the
+  harness's `usage_summary` (already added to /api/agent-harnesses). +1
+  integration test (a real claude_code_local rate_limit event → /api/model-usage
+  shows the claude_code_local card NEAR_LIMIT with a five_hour bucket, NOT the
+  API lane). ruff + mypy clean; tsc+vite build clean; full suite green.
+  KNOWN LIMITATION (documented): the cockpit tee only runs while a browser SSE
+  stream is open — a fully headless session isn't captured yet (a worker-side
+  UsageService is the durable follow-up).
+- COCKPIT PICKERS (runtime → model → effort) + 2 real-bug fixes 07-12 (branch
+  `feat/agent-cockpit-pickers`, stacked on `feat/claude-agent-readonly`).
+  Grounded by an ultracode workflow (5 investigators → adversarial verify →
+  synthesis) which confirmed the ROOT CAUSE the agents "don't show available":
+  availability is computed ONLY in the host worker's registry.probes(), reached
+  by a triple-env-gated cockpit proxy (KANBAN_UI_AGENT_SESSIONS_ENABLED +
+  AGENT_WORKER_TOKEN + AGENT_WORKER_URL) — and the deployed build predates the
+  real harnesses. On THIS host all probes are available=True (codex_agent,
+  claude_code_local); the gap is deployment/wiring, not adapters. Delivered:
+  (1) **model catalog, runtime-discovered** — `list_models()` on each adapter
+  (codex wraps the live `client.models()`, which I verified exposes
+  `default_reasoning_effort` + `supported_reasoning_efforts` per model; Claude
+  lanes return validated alias catalogs incl. opus/sonnet/haiku/fable + 1M
+  variants), `AgentSessionService.list_models()`, worker `GET /api/agent-
+  harnesses/{id}/models`, cockpit proxy + `AgentWorkerClient.list_models`.
+  (2) **effort end-to-end** — new `effort`/`context_mode` on SessionStart +
+  SessionStartIn + the cockpit AgentSessionCreateIn; per-session effort in all
+  three adapters (claude_code_local appends `--effort`; claude_agent sets the
+  SDK-native `options.effort`; codex bakes `model_reasoning_effort=<effort>`
+  into its per-session client's config_overrides — the client is per-session
+  because AgentSessionService builds a fresh harness per session). Recorded in
+  the session_started event (requested_effort). (3) **UI picker** — the
+  AgentSessionPanel setup gains model + effort `<select>`s (efforts filtered to
+  the selected model's supported set; disabled choices never silently
+  substituted), passed through createAgentSession. (4) **/api/agent-harnesses
+  enriched** with `usage_summary` (from cockpit_views) + `models_endpoint` so
+  the selector can badge a runtime's live availability/limits. TWO REAL BUGS
+  FIXED: the Claude collector hardcoded `runtime_id="claude_agent"` →
+  parametrized (default preserved) so a claude_code_local feed attributes to
+  the right lane (was silently misattributing the local subscription lane to
+  the API lane); and worker_app.py's stale "wires ONLY the FakeHarness"
+  docstring corrected. +8 picker tests; ruff+mypy clean; tsc+vite build clean;
+  full suite green. STILL wiring (next): the worker→ClaudeRateLimitCollector.
+  feed() path (open design choice: worker-side vs cockpit SSE tee), badge
+  rendering in the picker optgroup, and the deployment runbook to actually
+  bring worker+cockpit up (an operator step — never run proofs by hand).
 - CLAUDE CODE LOCAL (SUBSCRIPTION-LOGIN) ADAPTER DONE + LIVE-PROVEN 07-12 (same
   branch `feat/claude-agent-readonly`, extends PR #36). **The key correction to
   the SDK adapter below: this machine can run Claude with NO ANTHROPIC_API_KEY**

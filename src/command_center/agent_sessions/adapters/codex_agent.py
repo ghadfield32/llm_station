@@ -353,6 +353,11 @@ class CodexAgentHarness:
         self._client: Any = None
         self._threads: dict[str, Any] = {}
         self._active_turns: dict[str, Any] = {}
+        # reasoning effort for THIS session. AgentSessionService constructs a
+        # fresh harness instance per session (service.py _harness_for), so this
+        # per-instance value is per-session — it is baked into the client's
+        # config_overrides at construction. None -> the safe "medium" default.
+        self._effort: str | None = None
 
     async def _client_ready(self) -> Any:
         if self._client is None:
@@ -369,9 +374,37 @@ class CodexAgentHarness:
             # harness. "medium" is a safe, always-valid choice for a
             # read-only analysis session regardless of the operator's
             # personal interactive-CLI preference.
+            effort = self._effort or "medium"
             self._client = oc.AsyncCodex(oc.CodexConfig(
-                config_overrides=("model_reasoning_effort=medium",)))
+                config_overrides=(f"model_reasoning_effort={effort}",)))
         return self._client
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        """Runtime-discovered Codex model catalog for the picker — the live SDK
+        model list (client.models()), which carries per-model reasoning-effort
+        metadata (default_reasoning_effort + supported_reasoning_efforts) so the
+        UI can offer only the efforts a model actually supports. Hidden models
+        are dropped."""
+        client = await self._client_ready()
+        response = await client.models()
+        out: list[dict[str, Any]] = []
+        for m in response.data:
+            if getattr(m, "hidden", False):
+                continue
+            efforts = [getattr(e, "value", e)
+                       for e in (getattr(m, "supported_reasoning_efforts", None) or [])]
+            default_effort = getattr(m, "default_reasoning_effort", None)
+            out.append({
+                "id": getattr(m, "id", None),
+                "display_name": getattr(m, "display_name", getattr(m, "id", "")),
+                "description": getattr(m, "description", "") or "",
+                "is_default": bool(getattr(m, "is_default", False)),
+                "default_effort": getattr(default_effort, "value", default_effort),
+                "supported_efforts": efforts,
+                "context_options": [],
+                "available": True,
+            })
+        return out
 
     async def probe(self) -> HarnessProbe:
         try:
@@ -417,6 +450,9 @@ class CodexAgentHarness:
                 f"this milestone (got {request.permission_profile!r})")
         oc = _import_sdk()
         repo_path = _resolve_repo_path(request.repo_id)
+        # pin effort BEFORE the client is built — _client_ready bakes it into
+        # config_overrides, and the client is per-session (see __init__).
+        self._effort = request.effort
         client = await self._client_ready()
         model, model_reason = await _resolve_model(client, request.model)
         thread = await client.thread_start(
@@ -431,7 +467,8 @@ class CodexAgentHarness:
         self.store.append_event(record.session_id, AgentEvent(
             "session_started",
             {"mode": request.mode, "external_session_id": thread.id,
-             "model": model, "model_selection_reason": model_reason}))
+             "model": model, "model_selection_reason": model_reason,
+             "requested_effort": request.effort or "medium"}))
         # "idle" = ready, no turn running yet — matches FakeHarness/worker_app's
         # status vocabulary exactly (see worker_app.py's async-execution note)
         self.store.set_status(record.session_id, "idle")

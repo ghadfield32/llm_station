@@ -6,16 +6,18 @@ Exposes /api/agent-sessions/* over plain HTTP, gated by a bearer token the
 cockpit is separately configured with; binds to localhost only by default (see
 cli/agent_worker.py, the `cc agent-worker` entry point).
 
-Currently wires ONLY the FakeHarness (registry.default_registry()) — no real
-Claude/Codex adapter exists yet (WORKLOG.md "Agent-session chat integration",
-Phase 2/3, not started). This worker's job right now is proving the transport,
-not running a real agent.
+Wires the full `registry.default_registry()` — fake plus the REAL adapters:
+`codex_agent` (ChatGPT-login), `claude_code_local` (Claude CLI subscription
+login, the default Claude lane), and `claude_agent` (Agent SDK + API key). Each
+harness's availability is computed live by its own probe() (registry.probes()),
+so the cockpit's harness selector reflects real, per-host auth state.
 """
 from __future__ import annotations
 
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
@@ -60,6 +62,8 @@ class SessionStartIn(BaseModel):
     mode: str
     provider_profile: str = "default"
     model: str | None = None
+    effort: str | None = None
+    context_mode: str | None = None
     permission_profile: str = "read_only"
 
 
@@ -70,6 +74,25 @@ class MessageIn(BaseModel):
 class ApprovalIn(BaseModel):
     approved: bool
     reason: str = ""
+
+
+_CLAUDE_HARNESSES = ("claude_code_local", "claude_agent")
+
+
+def _worker_feed_usage(usage: object, harness: str | None, ev: AgentEvent) -> None:
+    """Ingest a live `rate_limit` AgentEvent into the WORKER's own UsageService,
+    so a session's provider-limit state is captured even with NO browser SSE
+    attached (the headless gap the cockpit-side tee can't cover). Attributed to
+    the session's harness so the two Claude lanes stay distinct. Best-effort;
+    Codex limits come from its own provider collector, not here."""
+    if usage is None or ev.type != "rate_limit" or harness not in _CLAUDE_HARNESSES:
+        return
+    try:
+        from command_center.usage.collectors.claude_agent import translate_rate_limit_info
+        result = translate_rate_limit_info(ev.payload or {}, ev.ts or "", harness)
+        usage.ingest_collector_result(result)   # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 def _reconcile_orphaned_sessions(store: SessionStoreProtocol) -> None:
@@ -90,13 +113,37 @@ def _reconcile_orphaned_sessions(store: SessionStoreProtocol) -> None:
 
 
 def build_app(*, store: SessionStoreProtocol | None = None,
-             token: str | None = None, registry=None) -> FastAPI:
+             token: str | None = None, registry=None,
+             usage_service: object | None = None) -> FastAPI:
     store = store if store is not None else _default_store()
     token = token if token is not None else _default_token()
     service = AgentSessionService(
         store=store, registry=registry if registry is not None
         else default_registry(store))
     _reconcile_orphaned_sessions(store)
+
+    # Optional WORKER-OWNED usage ingestion. The worker sees every AgentEvent as
+    # the turn runs (see _run_turn), so feeding a UsageService here captures a
+    # Claude rate_limit event even when NO browser SSE is attached — the
+    # headless gap the cockpit-side tee can't cover. In-memory here; a
+    # Ledger-backed worker store (restart-durable) + the cockpit reading THIS
+    # (via proxy) instead of its own tee are the documented next steps.
+    usage: Any = usage_service
+    if usage is None and os.environ.get("AGENT_WORKER_USAGE", "") == "1":
+        from command_center.usage.service import UsageService as _UsageService
+        ledger_base = os.environ.get("LEDGER_BASE_URL")
+        if ledger_base:
+            # DURABLE: the worker writes provider-limit observations to the same
+            # Ledger the cockpit reads (when KANBAN_UI_USAGE_LEDGER=1), so a
+            # worker/cockpit restart preserves the latest known limits and there
+            # is ONE authoritative store. Ingestion is idempotent by source_hash.
+            import httpx
+            from command_center.usage.ledger_store import LedgerUsageStore
+            usage = _UsageService(
+                LedgerUsageStore(httpx.Client(base_url=ledger_base, timeout=30)))
+        else:
+            from command_center.usage.store import UsageStore as _UsageStore
+            usage = _UsageService(_UsageStore())
 
     # PROCESS-LOCAL only, same discipline as AgentSessionService's own
     # _active_harnesses cache: the single source of truth for "is a turn
@@ -114,9 +161,10 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         completion, failed (with a durable event naming what happened) on a
         real crash or on interrupt-triggered cancellation."""
         store.set_status(session_id, "active")
+        harness_id = store.get(session_id).harness
         try:
-            async for _ in service.send_message(session_id, prompt):
-                pass
+            async for ev in service.send_message(session_id, prompt):
+                _worker_feed_usage(usage, harness_id, ev)   # headless-safe capture
             store.set_status(session_id, "idle")
         except asyncio.CancelledError:
             store.append_event(session_id, AgentEvent(
@@ -158,6 +206,36 @@ def build_app(*, store: SessionStoreProtocol | None = None,
     @app.get("/api/agent-harnesses", dependencies=[Depends(_authed)])
     async def list_harnesses() -> list[dict]:
         return await service.list_harnesses()
+
+    @app.get("/api/agent-harnesses/{harness_id}/models",
+            dependencies=[Depends(_authed)])
+    async def list_models(harness_id: str) -> dict:
+        """Runtime-discovered model catalog for the harness selector (Codex live
+        SDK models incl. supported reasoning efforts; Claude validated aliases).
+        A discovery failure (e.g. the SDK login expired) surfaces as an empty
+        list + a reason, never a 500 that blanks the picker."""
+        try:
+            models = await service.list_models(harness_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except Exception as exc:
+            return {"harness_id": harness_id, "models": [],
+                    "error": f"model discovery failed: {exc!r}"}
+        return {"harness_id": harness_id, "models": models}
+
+    if usage is not None:
+        from command_center.usage import cockpit_views as _cv
+
+        @app.get("/api/model-usage", dependencies=[Depends(_authed)])
+        def model_usage() -> list:
+            """Worker-owned usage view — captures headless sessions the
+            cockpit-side SSE tee cannot. The cockpit can proxy this to become
+            the single authoritative read path (documented next step)."""
+            return _cv.usage_overview(usage)
+
+        @app.get("/api/model-usage/{runtime_id}", dependencies=[Depends(_authed)])
+        def model_usage_runtime(runtime_id: str) -> dict:
+            return _cv.runtime_detail(usage, runtime_id)
 
     @app.get("/api/agent-sessions", dependencies=[Depends(_authed)])
     def list_sessions(conversation_id: str | None = None,

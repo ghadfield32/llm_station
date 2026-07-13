@@ -53,6 +53,35 @@ _DISALLOWED_TOOLS = (
     "KillShell", "WebSearch", "WebFetch", "Task")
 _DEFAULT_MAX_TURNS = 20
 
+# Validated Claude Code CLI model-alias catalog for the picker. The CLI has no
+# models() RPC, so this is a curated alias list (verified against `claude --help`
+# and the init event's model list); the RESOLVED concrete model is captured from
+# the stream-json at run time. Aliases update to the account's recommended model;
+# the [1m] variants pin the 1M-context build (a distinct model id, not a flag).
+_MODEL_CATALOG = (
+    # (id, display_name, is_default)
+    ("default", "Auto — recommended", True),
+    ("opus", "Opus", False),
+    ("opus[1m]", "Opus (1M context)", False),
+    ("opusplan", "Opus Plan (opus plans, sonnet executes)", False),
+    ("sonnet", "Sonnet", False),
+    ("sonnet[1m]", "Sonnet (1M context)", False),
+    ("haiku", "Haiku", False),
+    ("fable", "Fable", False),
+)
+# effort levels the CLI accepts (--effort); not every model supports every level,
+# so the picker should let the CLI clamp and the session records requested vs
+# applied (the applied value is echoed back in the stream's init metadata).
+_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def list_models_catalog() -> list[dict[str, Any]]:
+    return [{"id": mid, "display_name": disp, "is_default": is_def,
+             "description": "", "default_effort": None,
+             "supported_efforts": list(_EFFORTS), "context_options": [],
+             "available": True}
+            for mid, disp, is_def in _MODEL_CATALOG]
+
 
 def _claude_bin() -> str | None:
     return shutil.which("claude")
@@ -196,6 +225,14 @@ class ClaudeCodeLocalHarness:
     def __init__(self, store: SessionStoreProtocol) -> None:
         self.store = store
         self._active_procs: dict[str, asyncio.subprocess.Process] = {}
+        # per-session reasoning effort, pinned at start_session. Kept here (not
+        # on the durable SessionRecord) for this milestone — a worker restart
+        # resets a resumed turn to the CLI default effort; the requested value
+        # is durably recorded in the session_started event either way.
+        self._effort: dict[str, str | None] = {}
+
+    def list_models(self) -> list[dict[str, Any]]:
+        return list_models_catalog()
 
     async def probe(self) -> HarnessProbe:
         bin_path = _claude_bin()
@@ -243,6 +280,9 @@ class ClaudeCodeLocalHarness:
         ]
         if record.model:
             args += ["--model", record.model]
+        effort = self._effort.get(record.session_id)
+        if effort:
+            args += ["--effort", effort]      # CLI clamps an unsupported level
         if record.external_session_id:
             args += ["--resume", record.external_session_id]  # follow-up / restart
         return args
@@ -291,10 +331,12 @@ class ClaudeCodeLocalHarness:
             harness=self.name, conversation_id=request.conversation_id,
             repo_id=request.repo_id, provider_profile=request.provider_profile,
             model=model, permission_profile=request.permission_profile)
+        self._effort[record.session_id] = request.effort   # pinned for the session
         self.store.append_event(record.session_id, AgentEvent(
             "session_started",
             {"mode": request.mode, "model": model,
              "model_selection_reason": model_reason,
+             "requested_effort": request.effort, "context_mode": request.context_mode,
              "permission_profile": "read_only", "auth": "subscription_oauth",
              "read_only_tools": list(_READ_ONLY_TOOLS)}))
         self.store.set_status(record.session_id, "idle")

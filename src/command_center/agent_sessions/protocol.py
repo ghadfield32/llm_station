@@ -36,6 +36,11 @@ class SessionStart:
     harness_id: str = "fake"
     provider_profile: str = "default"
     model: str | None = None
+    # reasoning effort for this session (low|medium|high|xhigh|max|ultracode);
+    # None = the runtime's own default. Pinned for the session — see each
+    # adapter's use (Claude CLI --effort, Codex model_reasoning_effort).
+    effort: str | None = None
+    context_mode: str | None = None    # e.g. "1m" for a long-context model
     permission_profile: str = "read_only"
 
 

@@ -21,9 +21,9 @@ import {
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
   StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
   reclassifyJobApplications, ReclassifyResult, bulkSelectSuggested,
-  AgentEvent, AgentHarnessOption, AgentSessionRecord,
+  AgentEvent, AgentHarnessOption, AgentSessionRecord, AgentModelOption,
   closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
-  fetchAgentSession, interruptAgentSession, resolveAgentApproval,
+  fetchAgentSession, fetchHarnessModels, interruptAgentSession, resolveAgentApproval,
   resumeAgentSession, sendAgentMessage, streamAgentEvents,
   UsageStatus, UsageLimit, CollectorHealth,
   fetchModelUsage, fetchCollectorHealth, refreshModelUsage,
@@ -395,6 +395,21 @@ function ObservabilityView({ m }: { m: Metrics }) {
       <div className="obs-foot">source: {m.log_file}</div>
     </>
   );
+}
+// concise, text-only live badge for a harness <option> (options can't hold DOM):
+// surfaces a non-available availability state or the worst limit bucket ≥50%.
+function harnessBadgeText(h: AgentHarnessOption): string {
+  const u = h.usage_summary;
+  if (!u) return "";
+  if (u.availability && u.availability !== "available" && u.availability !== "unknown")
+    return ` · ${u.availability.replace(/_/g, " ")}`;
+  const pcts = (u.limits ?? [])
+    .map((l) => l.used_percent).filter((p): p is number => p != null);
+  if (pcts.length) {
+    const worst = Math.max(...pcts);
+    if (worst >= 50) return ` · ${worst.toFixed(0)}% used`;
+  }
+  return "";
 }
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -3355,11 +3370,35 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
   const [error, setError] = useState<string | null>(null);
   const [repoId, setRepoId] = useState(thread?.agentRepoId ?? repos[0]?.repo_id ?? "");
   const [mode, setMode] = useState(thread?.agentMode ?? "analysis");
+  // runtime-discovered model + effort catalog for this harness (empty until loaded)
+  const [models, setModels] = useState<AgentModelOption[]>([]);
+  const [model, setModel] = useState<string>("");
+  const [effort, setEffort] = useState<string>("");
   const sessionIdRef = useRef(sessionId);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   const closeStreamRef = useRef<(() => void) | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { endRef.current?.scrollIntoView(); }, [events]);
+
+  // load the runtime's model catalog once, only while setting up a new session
+  useEffect(() => {
+    if (sessionId) return;
+    let cancelled = false;
+    fetchHarnessModels(harnessId)
+      .then((cat) => {
+        if (cancelled) return;
+        setModels(cat.models);
+        const def = cat.models.find((m) => m.is_default) ?? cat.models[0];
+        setModel(def?.id ?? "");
+      })
+      .catch(() => { if (!cancelled) setModels([]); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [harnessId, sessionId]);
+
+  // efforts offered by the currently-selected model (falls back to all)
+  const selectedModel = models.find((m) => m.id === model);
+  const effortChoices = selectedModel?.supported_efforts ?? [];
 
   function connect(id: string, afterSequence: number) {
     closeStreamRef.current?.();
@@ -3411,6 +3450,7 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
       const rec = await createAgentSession({
         harness_id: harnessId, conversation_id: thread?.id ?? "agent",
         repo_id: repoId, mode, permission_profile: "read_only",
+        model: model || null, effort: effort || null,
       });
       setSessionId(rec.session_id);
       setRecord(rec);
@@ -3497,6 +3537,29 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
                   <option value="workspace" disabled>workspace (leased worktree — not yet available)</option>
                 </select>
               </label>
+              {models.length > 0 && (
+                <label className="chat-field">
+                  <span className="muted small">model</span>
+                  <select className="select" value={model}
+                    onChange={(e) => { setModel(e.target.value); setEffort(""); }}>
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id} disabled={!m.available}>
+                        {m.display_name}{m.is_default ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {effortChoices.length > 0 && (
+                <label className="chat-field">
+                  <span className="muted small">reasoning effort</span>
+                  <select className="select" value={effort}
+                    onChange={(e) => setEffort(e.target.value)}>
+                    <option value="">auto ({selectedModel?.default_effort ?? "model default"})</option>
+                    {effortChoices.map((ef) => <option key={ef} value={ef}>{ef}</option>)}
+                  </select>
+                </label>
+              )}
               <button className="actbtn" disabled={busy || !repoId} onClick={() => void createSession()}>
                 {busy ? "starting…" : "start agent session"}
               </button>
@@ -3512,6 +3575,12 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
     <>
       <div className="chat-subbar">
         <span className="muted small">agent session <code>{sessionId}</code> · {status ?? "…"}</span>
+        {harness?.usage_summary && (
+          <span className={`usage-badge ${AVAIL_CLASS[harness.usage_summary.availability] ?? "muted"}`}
+            title={harness.usage_summary.availability_reason}>
+            {harness.usage_summary.availability.replace(/_/g, " ")}
+          </span>
+        )}
         <div className="chat-header-right">
           {(status === "idle" || status === "active") && (
             <button className="clear" onClick={() => void doInterrupt()}>interrupt</button>
@@ -4342,7 +4411,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
                     {agentHarnesses?.map((h) => (
                       <option key={h.harness_id} value={`agent:${h.harness_id}`}
                         disabled={!h.available} title={h.detail}>
-                        {h.label}{h.available ? "" : ` — ${h.detail}`}
+                        {h.label}{h.available ? harnessBadgeText(h) : ` — ${h.detail}`}
                       </option>
                     ))}
                   </optgroup>
