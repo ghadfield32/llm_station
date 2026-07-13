@@ -3520,7 +3520,17 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
         <div className="agent-session-setup">
           <div><b>{harness?.label ?? harnessId}</b>{harness ? ` — ${harness.detail}` : ""}</div>
           {harness && !harness.available ? (
-            <div className="muted">This harness is not available in this deployment.</div>
+            <div className="agent-unavailable">
+              <div className="muted">
+                Unavailable — {harness.detail || "the host worker can't reach this runtime."}
+              </div>
+              <div className="muted small">
+                To enable it: wire the host agent worker (<code>KANBAN_UI_AGENT_SESSIONS_ENABLED=1</code>,{" "}
+                <code>AGENT_WORKER_URL</code>, <code>AGENT_WORKER_TOKEN</code>) and log the runtime in on the
+                worker (<code>claude auth login</code> / <code>codex login</code>). See{" "}
+                <code>docs/runbooks/agent-sessions-activation.md</code>.
+              </div>
+            </div>
           ) : (
             <>
               <label className="chat-field">
@@ -4392,17 +4402,17 @@ function ChatView({ roles, runtime, draft, onBack }: {
                 </button>
               )}
               <label className="chat-field">
-                <span className="muted small">agent</span>
+                <span className="muted small">assistant</span>
                 <select className="select" value={targetRaw}
                   onChange={(e) => setTargetRaw(e.target.value)}
-                  title="GatewayCore runs in-app; agent sessions run on the host worker; specialists open in their own tab">
+                  title="Pick who handles this chat. GatewayCore runs in-app (fast conversation, local + routed models). Claude Code and Codex run coding agent sessions on the host worker — no mission needed to start a read-only one. Specialists open in their own tab.">
                   <option value="GatewayCore">GatewayCore (in-app)</option>
                   {externalChats.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}{c.active ? "" : " (not configured)"}
                     </option>
                   ))}
-                  <optgroup label="Agent Sessions">
+                  <optgroup label="Coding agents (Claude Code · Codex)">
                     {agentHarnessesError && (
                       <option value="agent:__unavailable" disabled>
                         Agent sessions unavailable — {agentHarnessesError}
@@ -4422,7 +4432,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
                   <span className="muted small">model</span>
                   <select className="select" value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Local Frontier models are a free but experimental, very slow, loopback-only lane. Claude Code/Codex are agentic coding executors, launched from missions — never a chat model.">
+                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Local Frontier models are a free but experimental, very slow, loopback-only lane. To run Claude Code or Codex, pick them from the Assistant selector — they are coding agents, not GatewayCore chat models.">
                     <optgroup label="Local (free)">
                       {roles.map((r) => {
                         const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
@@ -4475,13 +4485,6 @@ function ChatView({ roles, runtime, draft, onBack }: {
                         })}
                       </optgroup>
                     )}
-                    <optgroup label="Executors — from missions, not here">
-                      {(runtime?.executors ?? []).map((e) => (
-                        <option key={e.name} value={`executor:${e.name}`} disabled>
-                          {e.name} ({e.family}) — start from a mission, not this dropdown
-                        </option>
-                      ))}
-                    </optgroup>
                   </select>
                 </label>
               )}
