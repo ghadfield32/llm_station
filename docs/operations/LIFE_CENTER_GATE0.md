@@ -153,7 +153,7 @@ First valid automated snapshot, `20260713-135526`:
 | Measurement target | Class | Size | Errors | Interpretation |
 | --- | --- | ---: | ---: | --- |
 | Personal synced tree | retained review | 53.89 GiB | 0 | classify for personal/site-independent backup |
-| Projects envelope | envelope only | 153.98 GiB | 8 | capacity signal only; not a complete retained total |
+| Project-root envelope | not tracked recursively | n/a | n/a | intentionally excluded: overlapping repositories, generated dependencies, and junctions make it a noisy non-authoritative aggregate |
 | Betts data | retained review | 21.24 GiB | 0 | classify raw, curated, and reproducible data |
 | Betts models | retained review | 1.57 GiB | 0 | promote only hard-to-recreate/versioned models |
 | Betts reports | retained review | 4.82 GiB | 0 | retain final evidence, not every run |
