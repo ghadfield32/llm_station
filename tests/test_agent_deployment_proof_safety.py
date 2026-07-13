@@ -106,6 +106,7 @@ def test_refuses_project_name_without_proof_in_it(tmp_path):
     assert "does not contain 'proof'" in result.stdout
 
 
+@needs_attached_branch
 def test_refuses_wrong_branch(tmp_path):
     result = run_script(
         WorktreeRoot=str(REPO_ROOT), ExpectedBranch="definitely-not-a-real-branch",
