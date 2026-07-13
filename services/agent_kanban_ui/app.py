@@ -65,6 +65,9 @@ CAPTURE_ENABLED = os.environ.get("KANBAN_UI_CAPTURE_ENABLED", "1") == "1"
 # Durable capture: back the Inbox with the Ledger (survives restart) instead of
 # the in-memory store. Off by default so a Ledger-less dev cockpit still works.
 CAPTURE_LEDGER = os.environ.get("KANBAN_UI_CAPTURE_LEDGER", "") == "1"
+# Canonical work graph (WorkItem/placement/edge). Benign in-memory list, no repo/
+# Ledger/config side effects → defaults on. Durable Ledger persistence is Phase C-2.
+WORKGRAPH_ENABLED = os.environ.get("KANBAN_UI_WORKGRAPH_ENABLED", "1") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -1336,6 +1339,156 @@ def intake_inbox() -> dict:
     """The Universal Inbox: captures grouped into lanes. A capture is recoverable
     here even after it is routed elsewhere — nothing is ever silently dropped."""
     return _require_capture().inbox()
+
+
+# ── Canonical work graph — one WorkItem, many board placements, typed edges ────
+# A task on three boards is ONE work item with three placements, never three
+# unrelated cards. Creating work items/placements/edges is planning, NOT a
+# mission — write-capable execution stays behind the mission + lease + wall.
+_workgraph_service = None   # type: ignore[var-annotated]
+
+
+def _get_workgraph_service():
+    global _workgraph_service
+    if _workgraph_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.work_graph import (
+            InMemoryWorkGraphStore,
+            WorkGraphService,
+        )
+        _workgraph_service = WorkGraphService(
+            InMemoryWorkGraphStore(),
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda prefix: f"{prefix}-" + secrets.token_hex(5))
+    return _workgraph_service
+
+
+def _require_workgraph():
+    if not WORKGRAPH_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="the work graph is disabled (set KANBAN_UI_WORKGRAPH_ENABLED=1)")
+    return _get_workgraph_service()
+
+
+class WorkItemIn(BaseModel):
+    title: str
+    description: str = ""
+    kind: str = "todo"
+    owner: str | None = None
+    priority: str | None = None
+    due_at: str | None = None
+    capture_id: str | None = None
+    conversation_id: str | None = None
+    mission_id: str | None = None
+
+
+class WorkStatusIn(BaseModel):
+    status: str
+
+
+class WorkPlacementIn(BaseModel):
+    board_id: str
+    domain_id: str
+    is_primary: bool = False
+    placement_stage: str | None = None
+    card_component: str = "generic_task"
+
+
+class WorkEdgeIn(BaseModel):
+    from_work_item_id: str
+    to_work_item_id: str
+    relation: str
+    reason: str | None = None
+
+
+def _wg_call(fn, *args, **kwargs):
+    """Translate a graph-integrity violation (cycle/dup primary) → 409, an unknown
+    ref → 404. Keeps the human-legible reason."""
+    from command_center.work_graph import WorkGraphError
+    try:
+        return fn(*args, **kwargs)
+    except WorkGraphError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/work-items", status_code=201)
+def create_work_item(body: WorkItemIn) -> dict:
+    svc = _require_workgraph()
+    item = _wg_call(svc.create_item, body.title, **body.model_dump(exclude={"title"}))
+    return {"item": item.model_dump(), "links": [lk.model_dump()
+                                                 for lk in svc.links_for(item.work_item_id)]}
+
+
+@app.get("/api/work-items")
+def list_work_items() -> list:
+    return [i.model_dump() for i in _require_workgraph().list_items()]
+
+
+@app.get("/api/work-items/{work_item_id}")
+def get_work_item(work_item_id: str) -> dict:
+    svc = _require_workgraph()
+    item = _wg_call(svc.get_item, work_item_id)
+    return {"item": item.model_dump(),
+            "placements": [p.model_dump()
+                           for p in svc._store.placements_for(work_item_id)],
+            "links": [lk.model_dump() for lk in svc.links_for(work_item_id)]}
+
+
+@app.get("/api/work-items/{work_item_id}/links")
+def get_work_item_links(work_item_id: str) -> list:
+    svc = _require_workgraph()
+    return [lk.model_dump() for lk in _wg_call(svc.links_for, work_item_id)]
+
+
+@app.post("/api/work-items/{work_item_id}/status")
+def set_work_item_status(work_item_id: str, body: WorkStatusIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.set_status, work_item_id, body.status).model_dump()
+
+
+@app.post("/api/work-items/{work_item_id}/placements", status_code=201)
+def add_work_placement(work_item_id: str, body: WorkPlacementIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.add_placement, work_item_id, body.board_id, body.domain_id,
+                    is_primary=body.is_primary, placement_stage=body.placement_stage,
+                    card_component=body.card_component).model_dump()
+
+
+@app.delete("/api/work-items/{work_item_id}/placements/{placement_id}")
+def remove_work_placement(work_item_id: str, placement_id: str) -> dict:
+    svc = _require_workgraph()
+    _wg_call(svc.remove_placement, placement_id)
+    return {"ok": True}
+
+
+@app.post("/api/work-edges", status_code=201)
+def create_work_edge(body: WorkEdgeIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.add_edge, body.from_work_item_id, body.to_work_item_id,
+                    body.relation, reason=body.reason).model_dump()
+
+
+@app.delete("/api/work-edges/{edge_id}")
+def remove_work_edge(edge_id: str) -> dict:
+    svc = _require_workgraph()
+    _wg_call(svc.remove_edge, edge_id)
+    return {"ok": True}
+
+
+@app.get("/api/work-graph")
+def whole_work_graph() -> dict:
+    return _require_workgraph().graph().model_dump()
+
+
+@app.get("/api/work-graph/{work_item_id}")
+def work_graph_neighbourhood(work_item_id: str, depth: int = 1) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.graph, work_item_id, depth=depth).model_dump()
 
 
 @app.get("/api/domain/{domain_id}/cards")
