@@ -65,16 +65,18 @@ def test_api_routes_reject_wrong_token(client):
     assert r.status_code == 401
 
 
-def test_list_harnesses_reports_fake_and_placeholders(client):
-    # codex_agent is a real adapter now (see adapters/codex_agent.py) — its
-    # availability depends on the real environment, covered deterministically
-    # in test_codex_agent_adapter.py. claude_agent stays NotBuiltHarness.
+def test_list_harnesses_reports_fake_and_real_adapters(client):
+    # Both codex_agent and claude_agent are real adapters now; their
+    # availability depends on the real environment (optional SDK/auth), covered
+    # deterministically in the per-adapter tests. On this host claude_agent is
+    # unavailable with a CONCRETE blocker, never a generic "unavailable".
     r = client.get("/api/agent-harnesses", headers=_auth())
     assert r.status_code == 200
     harnesses = {h["harness_id"]: h for h in r.json()}
     assert harnesses["fake"]["available"] is True
     assert harnesses["claude_agent"]["available"] is False
-    assert "no real adapter built yet" in harnesses["claude_agent"]["detail"]
+    detail = harnesses["claude_agent"]["detail"]
+    assert ("claude-agent-sdk" in detail) or ("ANTHROPIC_API_KEY" in detail)
 
 
 def test_create_session_with_unknown_harness_404s(client):
@@ -89,7 +91,8 @@ def test_create_session_with_unavailable_harness_400s_with_exact_blocker(client)
         "harness_id": "claude_agent", "conversation_id": "c1",
         "repo_id": "r", "mode": "analysis"})
     assert r.status_code == 400
-    assert "no real adapter built yet" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert ("claude-agent-sdk" in detail) or ("ANTHROPIC_API_KEY" in detail)
 
 
 def test_list_sessions_filters_by_conversation_id_and_repo_id(client):

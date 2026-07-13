@@ -18,7 +18,8 @@ EventType = Literal[
     "tool_requested", "approval_required", "approval_resolved",
     "tool_started", "tool_output", "tool_finished",
     "file_changed", "command_started", "command_finished",
-    "usage", "warning", "session_idle", "session_failed", "session_closed",
+    "usage", "rate_limit", "warning",
+    "session_idle", "session_failed", "session_closed",
 ]
 
 

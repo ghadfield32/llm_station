@@ -122,14 +122,29 @@ def default_registry(store: SessionStoreProtocol) -> HarnessRegistry:
             factory=lambda: __import__(
                 "command_center.agent_sessions.adapters.codex_agent",
                 fromlist=["CodexAgentHarness"]).CodexAgentHarness(store)),
+        # TWO Claude lanes behind the same contract (see WORKLOG.md): the DEFAULT
+        # local lane drives the installed Claude Code CLI with the operator's
+        # existing `claude auth login` subscription (NO API key); the optional
+        # API lane uses the Agent SDK + ANTHROPIC_API_KEY (for hosted/shared
+        # deployments). Both refuse anything but read-only analysis this milestone.
         HarnessDescriptor(
-            harness_id="claude_agent", label="Claude Agent", production=True,
-            supported_modes=("analysis", "workspace"),
-            factory=lambda: NotBuiltHarness(
-                harness_id="claude_agent",
-                blocker="no real adapter built yet (see WORKLOG.md 'Agent-session "
-                        "chat integration', Phase 2) — requires the "
-                        "--allow-agent-session-egress policy decision plus "
-                        "ANTHROPIC_API_KEY before it can even be attempted; run "
-                        "`cc agent-preflight --harness claude` for current status")),
+            harness_id="claude_code_local",
+            label="Claude Agent (local subscription)", production=True,
+            supported_modes=("analysis",),
+            # Deferred import: constructing the harness must not import anything
+            # heavy; it only shells out to the `claude` CLI at probe/send time.
+            factory=lambda: __import__(
+                "command_center.agent_sessions.adapters.claude_code_local",
+                fromlist=["ClaudeCodeLocalHarness"]).ClaudeCodeLocalHarness(store)),
+        HarnessDescriptor(
+            harness_id="claude_agent", label="Claude Agent (API key)",
+            production=True, supported_modes=("analysis",),
+            # Deferred import (see claude_agent.py's own _import_sdk): only
+            # imported when a Claude API session is probed/started, so a
+            # deployment without the optional `agent-claude` extra can still
+            # import registry.py and list harnesses. probe() reports the real
+            # blocker (SDK missing / ANTHROPIC_API_KEY absent) honestly.
+            factory=lambda: __import__(
+                "command_center.agent_sessions.adapters.claude_agent",
+                fromlist=["ClaudeAgentHarness"]).ClaudeAgentHarness(store)),
     ])

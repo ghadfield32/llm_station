@@ -68,9 +68,12 @@ def test_start_session_with_unsupported_mode_fails(service):
 
 
 def test_start_session_with_unavailable_harness_reports_exact_blocker(service):
-    # claude_agent, not codex_agent — codex_agent is a real adapter now (see
-    # adapters/codex_agent.py); claude_agent remains a genuine NotBuiltHarness.
-    with pytest.raises(RuntimeError, match="no real adapter built yet"):
+    # Both real adapters (codex_agent, claude_agent) probe the real environment.
+    # On a test host without the optional SDK/auth, starting claude_agent fails
+    # with its CONCRETE blocker (missing claude-agent-sdk OR ANTHROPIC_API_KEY),
+    # never a generic "unavailable" — the service surfaces that reason verbatim.
+    with pytest.raises(RuntimeError,
+                       match="claude-agent-sdk|ANTHROPIC_API_KEY"):
         asyncio.run(service.start_session(SessionStart(
             conversation_id="c1", repo_id="r", mode="analysis",
             harness_id="claude_agent")))
@@ -118,10 +121,11 @@ def test_approval_lifecycle_through_the_service(service):
     assert resolved.type == "approval_resolved" and resolved.payload["approved"] is True
 
 
-def test_list_harnesses_reports_fake_and_unbuilt_harnesses(service):
-    # codex_agent's availability now depends on the real environment (SDK
-    # installed? real account?) — see test_codex_agent_adapter.py for its
-    # deterministic coverage. claude_agent stays a genuine NotBuiltHarness.
+def test_list_harnesses_reports_fake_and_real_adapters(service):
+    # codex_agent and claude_agent are both real adapters now; availability
+    # depends on the real environment (optional SDK/auth). On this host
+    # claude_agent is unavailable but with a concrete reason (SDK/key), covered
+    # in test_claude_agent_adapter.py / test_agent_session_registry.py.
     harnesses = {h["harness_id"]: h for h in asyncio.run(service.list_harnesses())}
     assert harnesses["fake"]["available"] is True
     assert harnesses["claude_agent"]["available"] is False

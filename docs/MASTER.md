@@ -98,8 +98,14 @@ runtimes with their own SDK/auth/worktree/execution state, architecturally
 separate from the chat lane (full detail: §4.5). Honest status as of this
 snapshot: the **Codex read-only runtime is real and proven** (pinned
 `openai-codex==0.1.0b3`, reuses the existing `codex login`, 14/14 live
-cockpit-acceptance turns, zero repo mutation; PR #33). **Claude Agent is still
-a planned runtime, not shipped.** A **unified Usage & Limits subsystem** (§4.6)
+cockpit-acceptance turns, zero repo mutation; PR #33). **Claude read-only is now
+built in TWO lanes** (PR #36, §4.5): the **default local lane**
+(`claude_code_local`) drives the installed Claude Code CLI with the operator's
+existing `claude auth login` subscription — **no API key, and LIVE-PROVEN on this
+host** (real read-only turn, zero mutation, `apiKeySource: "none"`); plus an
+optional API lane (`claude_agent`, Agent SDK + `ANTHROPIC_API_KEY`) for
+hosted/shared deployments (built + hermetically tested, live deferred). A
+**unified Usage & Limits subsystem** (§4.6)
 is built to lock the four concepts (usage / provider limits / availability /
 internal budget) apart so history is never shown as remaining quota — Phase 1
 foundation + Phase 1.1 hardening (PR #34) and the **first real provider
@@ -442,12 +448,36 @@ chain `feat/agent-session-runtime` → `feat/unified-runtime-usage` →
   proven by a hash-before/after harness. **14/14 live cockpit-acceptance turns
   passed against the real account, zero repo mutation.** PR #33 (marked ready,
   merge held).
+- **TWO Claude read-only lanes** behind the same `AgentHarness` contract (PR #36):
+  - **`claude_code_local` — the DEFAULT local lane, LIVE-PROVEN** (no API key).
+    `adapters/claude_code_local.py` drives the installed **Claude Code CLI**
+    (`claude -p … --output-format stream-json`) with the operator's existing
+    **`claude auth login` subscription** — verified live (`apiKeySource: "none"`,
+    `subscriptionType: "max"`). Read-only is **defense-in-depth**: `--tools Read
+    Glob Grep` (the actual capability limit) + a `--disallowedTools` writelist +
+    `--permission-mode plan` + `--strict-mcp-config` (zero MCP) +
+    `--disable-slash-commands`, **never `--bare`** (which forces API-key auth),
+    and the subprocess env has `ANTHROPIC_API_KEY` stripped. Durable
+    `external_session_id` (captured from the init event) + `--resume` on restart;
+    real `rate_limit_event` → the `rate_limit` AgentEvent (feeds §4.6);
+    subscription cost recorded honestly (`cost_usd=None`,
+    `api_equivalent_cost_usd` labeled). **Live zero-mutation proof passed** (real
+    read-only turn, Glob+Read, repo untouched). 18 hermetic tests.
+  - **`claude_agent` — the optional API lane** (`adapters/claude_agent.py`,
+    pinned `claude-agent-sdk==0.2.116`, `agent-claude` extra). Same
+    defense-in-depth via `allowed_tools`+`disallowed_tools`+`can_use_tool`, but
+    authenticated by **`ANTHROPIC_API_KEY`** (per Anthropic's embedded-product
+    rules) behind `--allow-agent-session-egress` — for hosted/shared deployments.
+    Built + hermetically proven (26 tests); its live run is deferred (needs the
+    key + egress, an operator decision).
 
 **What is NOT built yet** (honest gaps — see §4.8 for the ordered plan):
 
-- **Claude Agent is still a planned runtime, not a shipped one.** The SDK
-  primitives are right (`claude-agent-sdk`, restricted `allowed_tools`,
-  resumable `session_id`, structured `RateLimitEvent`), but no adapter exists.
+- **Claude API lane has no LIVE run yet** (the local subscription lane is
+  live-proven; the SDK/API lane awaits `ANTHROPIC_API_KEY` + egress). The
+  worker→`ClaudeRateLimitCollector.feed()` wiring, cockpit selectability of the
+  Claude lanes, and the full 14-item live battery (one live turn proven) are
+  still pending.
 - **Write-capable execution is unfinished.** Both agents are read-only today.
   Writable work stays gated behind leased worktrees, mission bindings, branch
   protection, test evidence, and independent review — none of that write path
@@ -536,11 +566,13 @@ resetsAt, credits, planType) plus the `account/rateLimits/updated` server
 notification as a refresh trigger. *(Note: this pinned app-server exposes no
 `account/usage/read` — token usage comes from per-thread `ThreadTokenUsage`
 events, handled by the adapter, not this collector.)* **Claude** → the SDK's
-structured `RateLimitEvent`
-(status allowed/allowed_warning/rejected; type five_hour / seven_day /
-seven_day_opus / seven_day_sonnet / overage) — record the SDK-emitted state,
-never infer subscription quota from token counts; show unknown/stale until a
-real event exists. **OpenRouter** → `GET /api/v1/key` (limit, limit_remaining,
+structured `RateLimitEvent` **(BUILT — `usage/collectors/claude_agent.py`,
+PR #36)**: status allowed/allowed_warning/rejected; type five_hour / seven_day /
+seven_day_opus / seven_day_sonnet / overage. Because it is EVENT-driven (not
+pollable), the collector is fed by the adapter's `rate_limit` events and its
+`collect()` returns an honest UNKNOWN until one is seen — it records the
+SDK-emitted state, never infers subscription quota from token counts.
+**OpenRouter** → `GET /api/v1/key` (limit, limit_remaining,
 limit_reset, usage_daily/weekly/monthly, byok_usage) — the authoritative
 remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs`
 (+ custom spend-log metadata for per-user/project/request attribution).

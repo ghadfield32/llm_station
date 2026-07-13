@@ -187,6 +187,81 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- CLAUDE CODE LOCAL (SUBSCRIPTION-LOGIN) ADAPTER DONE + LIVE-PROVEN 07-12 (same
+  branch `feat/claude-agent-readonly`, extends PR #36). **The key correction to
+  the SDK adapter below: this machine can run Claude with NO ANTHROPIC_API_KEY**
+  by driving the installed `claude` CLI with the operator's existing `claude auth
+  login` subscription. New `adapters/claude_code_local.py` (harness_id
+  `claude_code_local`, label "Claude Agent (local subscription)") is now the
+  DEFAULT Claude lane; the SDK adapter stays as the optional API lane (relabeled
+  "Claude Agent (API key)"). Both behind the same AgentHarness contract. Verified
+  LIVE against the installed CLI (v2.1.207): `claude auth status` →
+  `loggedIn:true, authMethod:"claude.ai", apiProvider:"firstParty",
+  subscriptionType:"max"`; a real `claude -p ... --output-format stream-json`
+  turn ran with `apiKeySource:"none"`. Captured the EXACT stream-json envelope
+  (newline-delimited `{"type":...}`): system(subtype=init, carries session_id +
+  apiKeySource) → **rate_limit_event**(rate_limit_info: status/resetsAt/
+  rateLimitType/overageStatus — camelCase, no utilization) → assistant(message.
+  content blocks) → result(session_id, is_error, total_cost_usd = API-EQUIVALENT,
+  not real spend). Adapter: each turn is a fresh `claude -p` subprocess (session
+  continuity via the CLI's persisted sessions + `--resume <external_session_id>`,
+  captured from the init event — restart-safe, no long-lived process). Read-only
+  = DEFENSE IN DEPTH: `--tools Read Glob Grep` (actual capability limit) +
+  `--disallowedTools` writelist + `--permission-mode plan` + `--strict-mcp-config`
+  (no --mcp-config → zero MCP) + `--disable-slash-commands`; **NEVER `--bare`** (it
+  forces API-key auth); and the subprocess env has ANTHROPIC_API_KEY STRIPPED so a
+  stray key can't silently switch to metered billing. rate_limit_event → the
+  existing `rate_limit` AgentEvent, normalized camelCase→snake, feeding
+  ClaudeRateLimitCollector. Cost recorded honestly (cost_usd=None, cost_source=
+  subscription_not_metered, api_equivalent_cost_usd=<reported>). **LIVE
+  ZERO-MUTATION PROOF PASSED**: real read-only turn against a throwaway git repo
+  used Glob+Read, gave a real answer, captured a real rate_limit event + session
+  UUID, mutation_proof before/after diff EMPTY. +18 hermetic tests (fake
+  `_stream_cli` seam + pure `_translate_line`). ruff + mypy clean; full suite
+  green. NOT built: workspace/write mode, worker→collector.feed() wiring, cockpit
+  selectability, the full 14-item live battery (one live turn proven). GOTCHA:
+  introspect the real CLI flags (`claude --help`) — docs' `--tools`/`--safe-mode`
+  differ by version; `--permission-mode` choices on 2.1.207 are acceptEdits/auto/
+  bypassPermissions/manual/dontAsk/plan.
+- CLAUDE AGENT READ-ONLY ADAPTER + RATELIMIT COLLECTOR DONE 07-12 (branch
+  `feat/claude-agent-readonly`, stacked on `feat/codex-usage-collector`/PR #35).
+  Grounded by a read-only live introspection of the pinned `claude-agent-sdk`
+  (0.2.116, `agent-claude` extra) — every class/field verified, NOT guessed:
+  ClaudeSDKClient(options).connect/query/receive_response/interrupt/disconnect;
+  ClaudeAgentOptions(allowed_tools/disallowed_tools/can_use_tool/permission_mode/
+  setting_sources/mcp_servers/plugins/resume/session_id/cwd/model/max_budget_usd);
+  messages AssistantMessage(content blocks)/ResultMessage(session_id,total_cost_usd,
+  is_error)/SystemMessage/UserMessage/RateLimitEvent(rate_limit_info); RateLimitInfo
+  (status allowed/allowed_warning/rejected, rate_limit_type five_hour/seven_day/
+  seven_day_opus/seven_day_sonnet/overage, resets_at epoch, utilization, overage_*);
+  PermissionResultAllow/Deny. THREE deep-research corrections baked in: (1) NAME =
+  "Claude Agent" (never "Claude Code") + ANTHROPIC_API_KEY auth (Anthropic forbids
+  claude.ai-login for embedded products) behind --allow-agent-session-egress
+  (still `claude_agent: false` in agent-session-budgets.yaml — operator decision).
+  (2) `allowed_tools` is a PRE-APPROVE list, NOT a strict allowlist, so read-only
+  is DEFENSE-IN-DEPTH: allowed_tools={Read,Glob,Grep} + a disallowed_tools
+  writelist + a deny-by-default `can_use_tool` (the authoritative gate: allow iff
+  in the read set) + setting_sources=None (isolated) + empty mcp/plugins. (3)
+  limits are EVENT-DRIVEN: a RateLimitEvent → a normalized `rate_limit` AgentEvent
+  (new event type) whose payload the worker forwards to
+  `usage/collectors/claude_agent.py::ClaudeRateLimitCollector.feed()`; that
+  collector's `collect()` returns honest UNKNOWN ("no RateLimitEvent observed
+  yet") until fed, and maps status→availability + rate_limit_type→a PROVIDER_NATIVE
+  bucket (never infers quota from tokens). Adapter mirrors the Codex adapter:
+  durable external_session_id (captured from the message stream) + resume=id on a
+  restarted instance, per-turn message→AgentEvent translation (dispatch on class
+  NAME, never prose), real interrupt, cost capture, close/shutdown. registry.py
+  now wires the real ClaudeAgentHarness (deferred import) replacing NotBuiltHarness;
+  9 pre-existing tests that used claude_agent as THE "unbuilt harness" example
+  updated (both real harnesses now probe the environment honestly — a concrete
+  SDK/key blocker, never generic "unavailable"; NotBuiltHarness tested directly).
+  +26 hermetic tests (18 adapter via a fake claude_agent_sdk, 8 collector). ruff +
+  mypy clean (openai_codex/claude_agent_sdk mypy override). **LIVE ACCEPTANCE
+  DEFERRED** — unlike Codex (which reused an existing `codex login`), Claude needs
+  ANTHROPIC_API_KEY + egress enablement, neither on this host; built to the
+  verified surface + hermetically proven, live end-to-end run is the operator's
+  next step. NOT built: workspace/write mode (refused in start_session), the
+  worker→collector.feed() wiring, cockpit selectability of claude_agent.
 - DECISION 07-11: Claude/Codex will be agent-session harnesses (own SDK, own auth, own
   worktree), never GatewayCore model aliases — no `/chat/completions`-shaped call, no
   entry into GatewayCore.dispatch. Confirmed correct by the frontier tool_calls incident
