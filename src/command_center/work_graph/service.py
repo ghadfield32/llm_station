@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 
 from .schemas import (
     ACYCLIC_RELATIONS,
+    PermalinkResolution,
     ResourceLink,
     WorkEdge,
     WorkEvent,
@@ -198,6 +199,37 @@ class WorkGraphService:
                 kind="mission", resource_id=item.mission_id, label="Mission",
                 href=_href({"view": "missions", "mission": item.mission_id})))
         return links
+
+    # ---- permalink ---------------------------------------------------------
+    def resolve(self, work_item_id: str) -> PermalinkResolution:
+        """Resolve a stable ``/work/<id>`` permalink: the ONE canonical place to
+        land plus the full navigation receipt. The backend decides the target —
+        the browser follows target.href verbatim, it never picks a destination."""
+        item = self._store.get_item(work_item_id)     # KeyError if unknown
+        return PermalinkResolution(
+            work_item_id=work_item_id, title=item.title, kind=item.kind,
+            canonical_status=item.canonical_status,
+            target=self._canonical_target(item),
+            links=self.links_for(work_item_id))
+
+    def _canonical_target(self, item: WorkItem) -> ResourceLink:
+        """Where opening the permalink lands: the primary board if there is one,
+        else any active board, else the Work Map (an item with no placement yet
+        still resolves — you land where you can act on it / give it a home)."""
+        placements = self._store.placements_for(item.work_item_id)
+        dest = next((p for p in placements if p.is_primary),
+                    placements[0] if placements else None)
+        if dest is not None:
+            return ResourceLink(
+                kind="board", resource_id=dest.board_id,
+                label=f"Open on board: {dest.board_id}",
+                href=_href({"view": "domains", "domain": dest.domain_id,
+                            "work": item.work_item_id}),
+                relation="primary" if dest.is_primary else "secondary")
+        return ResourceLink(
+            kind="graph", resource_id=item.work_item_id, label="Open in Work Map",
+            href=_href({"view": "work-map", "work": item.work_item_id}),
+            relation="self")
 
     def _event(self, work_item_id: str, kind: str, payload: dict) -> None:
         self._store.append_event(WorkEvent(

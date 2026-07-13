@@ -17,8 +17,8 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   §4.8 + truth-check extensions (#45/#46); durable Ledger CaptureStore —
   `intake/ledger_schema.py` + `ledger_store.py`, mirror-DDL + drift test,
   KANBAN_UI_CAPTURE_LEDGER=1 (#47).
-- OPEN, green, mergeable: #40 usage normalization (conflict fixed 07-13 →
-  re-recorded merged MASTER digest 547bc3ec); #48 work-graph (below).
+- MERGED to main 07-13: #40 usage normalization; #48 work-graph C-1+C-2 (below).
+  Permalink + Phase E ride on top via the consolidated PR (below).
 - Work graph #48 (`src/command_center/work_graph/`): ONE canonical WorkItem, many
   board WorkPlacements (never duplicated cards), typed WorkEdges. Board membership
   is a placement (item→board), not an edge. Cycle policy: blocking/structural
@@ -37,8 +37,41 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   (item/placement/edge/status/events survive a fresh service over the same
   ledger.db; one-primary + cycle rules enforced across "restart"). Full suite
   green via PYTHONPATH=worktree/src (editable install → main checkout otherwise).
-- NEXT: merge #40 + #48 + Phase C-2; /work/<id> permalink resolver → structured
-  Chat creation receipts (TaskCreationReceipt).
+- Permalink resolver DONE (branch `feat/work-graph-permalink`, stacked on C-2):
+  stable `/work/<id>` links. NEW `PermalinkResolution` schema +
+  `WorkGraphService.resolve()`/`_canonical_target()` — the BACKEND picks the one
+  landing target (primary board > any active board > Work Map) + returns the full
+  link receipt; browser follows target.href verbatim. Cockpit `GET
+  /api/work/{id}/resolve` (JSON) + `GET /work/{id}` (302 → `/?view=…&work=…`
+  into the SPA), both before the `/`-mounted SPA so they win route matching.
+  Tests: 5 service (target selection incl. soft-removed-primary → Work Map,
+  unknown → KeyError) + 4 cockpit (resolve JSON, redirect Location, work-map
+  fallback, 404). 36/36 work-graph tests green via PYTHONPATH=worktree/src.
+  (Pre-existing UNRELATED Windows flake: test_local_frontier_client live-usage
+  test — 10ms MockTransport sleep < monotonic granularity → tokens_per_second
+  None; not touched by this branch.)
+- Phase E DONE (chat creation receipts): NEW `work_graph/planner.py`
+  `ChatWorkPlanner` + receipt/summary schemas (`TaskCreationReceipt`/
+  `TaskBatchReceipt`/`WorkItemSummary`/`WorkPlacementSummary`/`WorkEdgeSummary`/
+  `RoutingQuestion`/`BoardSuggestion`). Takes a STRUCTURED plan (items+placements+
+  edges) → connected work + navigable receipts (clickable links per item). Cockpit
+  `POST /api/chat/work-items/preview` (side-effect-free — validated in a sandbox
+  seeded from the real graph, provisional ids, nothing persisted) + `/commit`
+  (validates whole plan first → invalid plan writes NOTHING = atomic). Refs wire
+  edges (plan ref OR existing work_item_id). No free-text auto-routing (Phase G).
+  Planning only: creates no mission, no wall verb. Tests: 9 planner (preview
+  zero-side-effect, one-item-per-plan-item + multi-placement, cycle-atomic,
+  existing-ref edge, no-mission, empty/dup-ref reject) + 4 cockpit. MASTER §4.9 +
+  truth-check §4.9/files/endpoints + digest re-record.
+- MERGE STRANDING found+fixed 07-13: GitHub SQUASH-merged #50/#51 DOWN the stack
+  (into feat/work-graph & feat/work-graph-ledger), NOT to main. #48 then merged to
+  main 22:55 landing C-1+C-2 ONLY — permalink + Phase E were NOT on main.
+  Consolidated permalink + Phase E onto `feat/work-graph-complete` (branched from
+  the complete tree, then merged origin/main = #40/#48/#49/#52; work_graph files
+  taken as additions-only supersets, #40 usage routes preserved in app.py); ONE PR
+  → main carries just permalink + receipts. Digest re-recorded vs merged MASTER.
+- NEXT: merge the consolidated PR; Work Map + Connected-Work drawer UI (Phase F);
+  capture→work conversion; classification/routing (Phase G).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

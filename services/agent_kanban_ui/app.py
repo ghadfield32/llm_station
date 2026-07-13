@@ -41,7 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -50,6 +50,7 @@ from command_center.kanban.metrics import (
     compute_metrics, load_calls, log_path, recent_calls)
 from command_center.kanban_sync import EventLog, project_cards
 from command_center.kanban_sync.events import emit_event, is_human_owned_status
+from command_center.work_graph import WorkPlanIn
 
 # Chat + governed writes turn the UI into a first-class CHANNEL (it embeds the same
 # GatewayCore Discord uses). OFF by default so the read-only board deployment holds
@@ -1498,6 +1499,90 @@ def whole_work_graph() -> dict:
 def work_graph_neighbourhood(work_item_id: str, depth: int = 1) -> dict:
     svc = _require_workgraph()
     return _wg_call(svc.graph, work_item_id, depth=depth).model_dump()
+
+
+@app.get("/api/work/{work_item_id}/resolve")
+def resolve_work_permalink(work_item_id: str) -> dict:
+    """Resolve a stable work-item permalink to its canonical landing target +
+    the full navigation receipt. The backend owns the destination — a client
+    reads target.href and follows it verbatim."""
+    svc = _require_workgraph()
+    return _wg_call(svc.resolve, work_item_id).model_dump()
+
+
+@app.get("/work/{work_item_id}")
+def open_work_permalink(work_item_id: str):
+    """The human-facing permalink: GET /work/<id> 302-redirects into the SPA at
+    the resolved canonical target, so a pasted /work/<id> link lands on the right
+    board (or the Work Map). target.href is a '?...'-query the SPA understands, so
+    '/' + href is the in-app deep link. Unknown id → 404 (via _wg_call)."""
+    svc = _require_workgraph()
+    resolution = _wg_call(svc.resolve, work_item_id)
+    return RedirectResponse(url="/" + resolution.target.href, status_code=302)
+
+
+# ── Chat creation: idea → connected work, with navigable receipts ─────────────
+# Chat turns a STRUCTURED plan (items + placements + typed edges) into canonical
+# work and returns a TaskBatchReceipt so the transcript stays navigable. preview
+# is side-effect-free; commit validates the whole plan in a sandbox first, so an
+# invalid plan (cycle, unknown ref) writes NOTHING. This is planning, not a
+# mission — it starts no execution and touches no wall verb.
+_chat_planner = None   # type: ignore[var-annotated]
+
+
+def _get_chat_planner():
+    global _chat_planner
+    if _chat_planner is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.work_graph import (
+            ChatWorkPlanner,
+            InMemoryWorkGraphStore,
+            WorkGraphService,
+        )
+
+        def _sandbox() -> WorkGraphService:
+            # provisional ids make preview receipts obviously not-yet-real
+            return WorkGraphService(
+                InMemoryWorkGraphStore(),
+                clock=lambda: datetime.now(timezone.utc).isoformat(),
+                id_factory=lambda prefix: f"prev-{prefix}-" + secrets.token_hex(4))
+
+        _chat_planner = ChatWorkPlanner(_get_workgraph_service(),
+                                        sandbox_factory=_sandbox)
+    return _chat_planner
+
+
+def _plan_call(fn, plan):
+    """ChatPlanError (malformed plan) → 400, WorkGraphError (cycle/dup primary) →
+    409, KeyError (edge references an unknown work item) → 404."""
+    from command_center.work_graph import ChatPlanError, WorkGraphError
+    try:
+        return fn(plan)
+    except ChatPlanError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except WorkGraphError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/chat/work-items/preview")
+def preview_chat_work(plan: WorkPlanIn) -> dict:
+    """Dry-run a plan: return the receipt WITHOUT persisting anything (ids are
+    provisional, the graph is unchanged)."""
+    _require_workgraph()               # 503 if the graph is disabled
+    return _plan_call(_get_chat_planner().preview, plan).model_dump()
+
+
+@app.post("/api/chat/work-items/commit", status_code=201)
+def commit_chat_work(plan: WorkPlanIn) -> dict:
+    """Create the connected work and return a TaskBatchReceipt with clickable
+    links for every item. Validated as a whole first, so a bad plan writes
+    nothing."""
+    _require_workgraph()               # 503 if the graph is disabled
+    return _plan_call(_get_chat_planner().commit, plan).model_dump()
 
 
 @app.get("/api/domain/{domain_id}/cards")

@@ -11,14 +11,30 @@ from .schemas import (
     ACYCLIC_RELATIONS,
     CYCLE_OK_RELATIONS,
     WORK_ITEM_KINDS,
+    BoardSuggestion,
+    PermalinkResolution,
     ResourceLink,
+    RoutingQuestion,
+    TaskBatchReceipt,
+    TaskCreationReceipt,
     WorkEdge,
+    WorkEdgeSummary,
     WorkEvent,
     WorkGraph,
     WorkItem,
+    WorkItemSummary,
     WorkPlacement,
+    WorkPlacementSummary,
 )
 from .ledger_store import LedgerWorkGraphStore
+from .planner import (
+    ChatPlanError,
+    ChatWorkPlanner,
+    PlanBoardRef,
+    WorkPlanEdgeIn,
+    WorkPlanIn,
+    WorkPlanItemIn,
+)
 from .service import WorkGraphError, WorkGraphService
 from .store import InMemoryWorkGraphStore
 
@@ -32,8 +48,22 @@ __all__ = [
     "WorkGraph",
     "WorkItem",
     "WorkPlacement",
+    "PermalinkResolution",
+    "WorkItemSummary",
+    "WorkPlacementSummary",
+    "WorkEdgeSummary",
+    "RoutingQuestion",
+    "BoardSuggestion",
+    "TaskCreationReceipt",
+    "TaskBatchReceipt",
     "WorkGraphError",
     "WorkGraphService",
     "InMemoryWorkGraphStore",
     "LedgerWorkGraphStore",
+    "ChatPlanError",
+    "ChatWorkPlanner",
+    "PlanBoardRef",
+    "WorkPlanIn",
+    "WorkPlanItemIn",
+    "WorkPlanEdgeIn",
 ]
