@@ -842,6 +842,18 @@ export const interruptAgentSession = (sessionId: string) =>
 export const resumeAgentSession = (sessionId: string) =>
   postJSON<AgentStatusAck>(
     `/api/agent-sessions/${encodeURIComponent(sessionId)}/resume`, {});
+
+// "Track as mission" — record this read-only session as a Ledger tracking mission.
+// Reuses the existing session (no restart); grants no writes. Returns the mission id.
+export interface AgentPromoteResult {
+  mission_id: string;
+  status: string;
+  session_id: string;
+  conversation_id: string;
+}
+export const promoteAgentSession = (sessionId: string, summary = "") =>
+  postJSON<AgentPromoteResult>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/promote`, { summary });
 export async function closeAgentSession(sessionId: string): Promise<AgentStatusAck> {
   const r = await fetch(`/api/agent-sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" });

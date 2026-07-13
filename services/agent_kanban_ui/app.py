@@ -3086,6 +3086,12 @@ class AgentApprovalIn(BaseModel):
     reason: str = ""
 
 
+class AgentPromoteIn(BaseModel):
+    """'Track as mission' — the OPTIONAL governance wrapper for an existing chat.
+    summary becomes the mission's action line; nothing here grants writes."""
+    summary: str = ""
+
+
 # ── Usage & Limits routes (read-only; in-process UsageService) ────────────────
 # NOTE: the literal /api/model-usage/* paths are declared BEFORE the
 # /api/model-usage/{runtime_id} catch-all so FastAPI's in-order matching does
@@ -3255,6 +3261,48 @@ def resume_agent_session(session_id: str) -> dict:
 def close_agent_session(session_id: str) -> dict:
     client = _require_agent_sessions()
     return _call_worker(client.close_session, session_id)
+
+
+@app.post("/api/agent-sessions/{session_id}/promote")
+def promote_agent_session(session_id: str, body: AgentPromoteIn) -> dict:
+    """'Track as mission' — the OPTIONAL governance/tracking wrapper.
+
+    A mission is NEVER a prerequisite for chat. This records an EXISTING read-only
+    agent session as a Ledger mission so the same conversation becomes monitorable
+    on the missions board. It deliberately:
+      - reuses the durable session (read via the worker) — it does NOT call
+        start_session/create_session, so the conversation is not restarted or
+        duplicated;
+      - opens an L0 (read-only), requires_approval=False mission with NO branch —
+        so there is nothing to execute and no write capability is granted
+        (`cc branch-mission` never polls open missions; it generates its own id);
+      - links the session to the mission via the append-only event log (kind
+        `note`), needing no schema change.
+    Writes remain gated behind lease + worktree + approval, unchanged by this."""
+    client = _require_agent_sessions()
+    rec = _call_worker(client.get_session, session_id)   # durable repo/conversation
+    repo_id = (rec.get("repo_id") or "").strip()
+    conversation_id = rec.get("conversation_id") or ""
+    action = (body.summary or "").strip() or f"Tracked cockpit agent session {session_id}"
+    try:
+        mr = httpx.post(f"{LEDGER_BASE_URL}/mission", json={
+            "action": action, "repo": repo_id or "unknown", "branch": "",
+            "risk": "L0", "requires_approval": False}, timeout=15)
+        mr.raise_for_status()
+        mission = mr.json()
+        mid = mission["id"]
+        er = httpx.post(f"{LEDGER_BASE_URL}/mission/{mid}/event", json={
+            "kind": "note", "payload": {
+                "event": "agent_session_link", "session_id": session_id,
+                "conversation_id": conversation_id, "harness": rec.get("harness"),
+                "repo_id": repo_id, "mode": "analysis", "promoted_from": "cockpit_chat"}},
+            timeout=15)
+        er.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"ledger error at {LEDGER_BASE_URL}: {exc}") from exc
+    return {"mission_id": mid, "status": mission.get("status", "open"),
+            "session_id": session_id, "conversation_id": conversation_id}
 
 
 _AGENT_EVENT_POLL_SECONDS = 0.5
