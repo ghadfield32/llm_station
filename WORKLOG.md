@@ -187,6 +187,22 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- WORKER-OWNED USAGE INGESTION (headless-safe) 07-12 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). Closes the cockpit-tee gap: the
+  cockpit SSE tee only ingests while a browser stream is open, so a HEADLESS
+  session captured nothing. Now the WORKER — which already iterates every
+  AgentEvent in `_run_turn` — feeds its OWN UsageService on `rate_limit` events
+  (`_worker_feed_usage`, attributed to the session's harness, two Claude lanes
+  distinct; Codex uses its own provider collector). Gated by `AGENT_WORKER_USAGE=1`
+  (or an injected `usage_service` for tests); in-memory for this slice. New worker
+  read endpoints `GET /api/model-usage` + `/api/model-usage/{runtime_id}` (reuse
+  cockpit_views) so the cockpit can PROXY the worker to become the single
+  authoritative read path (documented next micro-step). Idempotent by source_hash
+  so a doubly-fed event (tee + worker against one Ledger) dedups. +1 worker test
+  (a headless rate_limit feed → /api/model-usage shows claude_code_local NEAR_LIMIT,
+  codex/API-lane ignored). ruff + mypy clean; full suite green. NEXT (documented):
+  Ledger-back the worker usage store (restart-durable) + point the cockpit's
+  /api/model-usage reads at the worker (retire the tee as authoritative).
 - CLAUDE USAGE FEED (loop closed) + SELECTOR BADGES 07-12 (same branch
   `feat/agent-cockpit-pickers`, extends PR #37). Closes the "a running Claude
   session lights up its own card" loop: new `KANBAN_UI_USAGE_CLAUDE` gate

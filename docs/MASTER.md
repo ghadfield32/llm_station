@@ -595,15 +595,22 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
   misattribution). Real bug fixed: the Claude collector's hardcoded
   runtime_id. Operator runbook: `docs/runbooks/agent-sessions-activation.md`.
 
+- **Phase 3.3 — WORKER-owned usage ingestion (headless-safe)** (PR #37,
+  `AGENT_WORKER_USAGE`): the worker feeds its own `UsageService` on `rate_limit`
+  events as a turn runs (`_run_turn`), so a headless session captures usage even
+  with no browser attached (the cockpit SSE tee's gap). Worker read endpoints
+  `GET /api/model-usage[/{runtime_id}]` let the cockpit proxy the worker as the
+  single authoritative read path (next micro-step). Idempotent by `source_hash`.
+
 **What is NOT built yet:** every collector except Codex; the Usage & Limits
 UI's remaining depth (historical charts, reset timelines, routing-evidence
 panel, top-driver *UI*); SSE live push (`/api/model-usage/events/stream`); the
-reconciliation + routing-decisions routes; a WORKER-side Claude usage feed (the
-current SSE tee only captures usage while a browser stream is open — a headless
-session isn't captured yet); and per-model/per-effort usage attribution on
-samples. The core surface (overview, per-runtime detail, limits, alerts,
-top-drivers, collector-health, refresh) + model/effort pickers + selector
-badges + the Claude rate_limit tee are live behind the flags.
+reconciliation + routing-decisions routes; Ledger-backing the worker usage
+store (restart-durable) + pointing the cockpit reads at the worker (retiring the
+tee as authoritative); and per-model/per-effort usage attribution on samples.
+The core surface (overview, per-runtime detail, limits, alerts, top-drivers,
+collector-health, refresh) + model/effort pickers + selector badges + the Claude
+rate_limit tee + worker-owned headless ingestion are live behind the flags.
 
 ### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
 
