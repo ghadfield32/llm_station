@@ -6,6 +6,95 @@ liners. Newest notes at the top of each topic. Full design lives in
 this is the fast "has this been done?" index. Dates are when the line was written.
 
 ## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
+- PHASE 3 — USAGE & LIMITS COCKPIT API + UI 07-12 (same branch
+  `feat/codex-usage-collector`, extends PR #35). The backend layer becomes a
+  real operator surface. NEW `usage/cockpit_views.py` = PURE view builders over
+  a UsageService (no FastAPI, no SDK) so the cockpit handlers are one-liners and
+  the view logic unit-tests alone: usage_overview / runtime_detail /
+  limits_overview (each bucket tagged with its runtime availability+staleness,
+  provider vs internal_budget kept distinct) / alerts_view / top_drivers (from
+  recorded driver facts, "(unattributed)" is explicit) / collector_health (uses
+  per-collector get_collection_state so it works on BOTH stores — no new Ledger
+  endpoint) / refresh (runs every registered collector via the tracked path).
+  Cockpit (`services/agent_kanban_ui/app.py`): 7 read routes —
+  GET /api/model-usage, /api/model-usage/{runtime_id}, /api/model-limits,
+  /api/model-alerts, /api/model-usage/collector-health,
+  /api/model-usage/top-drivers, POST /api/model-usage/refresh (literal paths
+  declared BEFORE the {runtime_id} catch-all so FastAPI ordering doesn't swallow
+  them). In-process `UsageService(UsageStore())` lazy singleton +
+  `_require_usage()` gate; OFF by default (KANBAN_UI_USAGE_ENABLED), with
+  KANBAN_UI_USAGE_CODEX (registers the real Codex collector for refresh) /
+  KANBAN_UI_USAGE_FAKE (deterministic demo) toggles. Honest-empty: enabled but
+  unpolled returns [] and an unseen runtime returns UNKNOWN — never fabricated.
+  UI (`web/src/App.tsx` + `api.ts` + `styles.css`): new "Usage & Limits" nav +
+  self-contained `UsageView` (own fetch/refresh — no 503-spam of the global 5s
+  poll when the feature is off), per-runtime cards (availability badge, provider
+  buckets + internal budget as separate bars with used%/reset/credits, rolled
+  usage with honest cost — "subscription (not $-metered)"/"cost unknown", never
+  $0.00), a stale badge, and a collector-health table. +15 tests
+  (test_usage_cockpit_views.py = 9 pure, test_agent_kanban_ui_usage.py = 6
+  TestClient: disabled 503, honest-empty, fake-refresh populates, route ordering
+  vs {runtime_id}, bad-dimension 400). ruff + `mypy src/command_center/usage/`
+  clean; existing cockpit suites still green; `tsc && vite build` clean. NOT yet
+  built: SSE live push (/events/stream), reconciliation + routing-decisions
+  routes, and enriching /api/chat/runtime + /api/agent-harnesses with a
+  usage_summary field (deferred to the next slice).
+- PHASE 2.1 — CODEX COLLECTOR COMPLETED (multi-bucket) 07-12 (same branch
+  `feat/codex-usage-collector`, extends PR #35). Grounded by a fresh LIVE SDK
+  introspection (read-only), which CORRECTED two assumptions in the roadmap
+  doc: (1) **`account/rateLimits/read` returns TWO views** — the single-bucket
+  compatibility `rate_limits` AND a **`rate_limits_by_limit_id`** dict keyed by
+  limit_id (the default `codex` limit PLUS per-model limits, e.g.
+  `codex_bengalfox` = "GPT-5.3-Codex-Spark"), each with camelCase
+  `primary`/`secondary` windows, its own `credits` (balance/hasCredits/
+  unlimited) and a `limitName`. The collector now imports EVERY named bucket:
+  the default limit keeps the bare `primary`/`secondary` bucket_ids (so it
+  DEDUPES the compat windows — never double-counted), other limits are
+  namespaced `{limit_id}_primary/_secondary`, credits import only when
+  hasCredits (else None, never a misleading 0.0), and availability takes the
+  worst used% across ALL buckets. Live smoke now returns **4 provider_native
+  buckets** (was 2). (2) **There is NO `account/usage/read` in the pinned
+  app-server** — the JSON-RPC server rejects it as an unknown variant (valid
+  account methods: rateLimits/read, read, login/*, logout,
+  sendAddCreditsNudgeEmail). So there is no account-level token/daily-bucket
+  summary to poll; per-turn token usage flows through the adapter's
+  `ThreadTokenUsage` events (NOT re-emitted here → no double-count). Also:
+  `account/rateLimits/updated` is a server NOTIFICATION, not a request — the
+  worker wires it (and every reconnect) to a fresh `collect()` refresh (one
+  code path, no payload-parsing drift). +3 tests (multi-bucket enumeration +
+  compat dedup, credits gating, worst-window availability) = 13 collector
+  tests; existing 10 compat tests unchanged (fake's empty by_limit_id → compat
+  path). ruff + `mypy src/command_center/usage/` clean.
+- PHASE 2 — FIRST REAL PROVIDER COLLECTOR DONE 07-12 (branch
+  `feat/codex-usage-collector`, stacked on `feat/unified-runtime-usage`/PR #34):
+  `collectors/codex_app_server.py` turns the Codex app-server's account +
+  rate-limit surface into canonical schemas, source=PROVIDER_NATIVE (so it
+  DISPLACES any earlier estimate for the same bucket — proven by test). Every
+  field was verified by LIVE SDK introspection: rate limits come from the raw
+  RPC `account/rateLimits/read` (no named SDK wrapper) via the underlying
+  AsyncCodexClient.request(...), returning a RateLimitSnapshot with
+  `primary`/`secondary` RateLimitWindow(used_percent, resets_at EPOCH,
+  window_duration_mins) + plan_type + rate_limit_reached_type. Maps each
+  window to a PROVIDER-scope LimitSnapshot (bucket_id primary/secondary,
+  epoch→ISO reset, window_seconds), derives an AvailabilityEvent from
+  rate_limit_reached_type / worst used_percent (available/near/limited/
+  exhausted). Emits LIMITS + AVAILABILITY ONLY — per-turn TOKEN usage is
+  already captured by the agent-session adapter's own `usage` events, so
+  re-emitting here would double-count (Phase 1.1 SampleKind). Never raises for
+  an expected provider condition: SDK-absent→UNAVAILABLE, auth/account
+  failure→AUTHENTICATION_REQUIRED, rateLimits/read failure→still AVAILABLE +
+  a warning (all as CollectorResult warnings + availability events).
+  `UsageService.run_collector_tracked()` wraps a collect() in a durable
+  CollectionState checkpoint (a genuine crash increments consecutive_failures
+  + records last_error; a clean run resets them; auth_state reflects an
+  AUTHENTICATION_REQUIRED availability). LIVE SMOKE PASSED against the real
+  prolite account (primary 0%/18000s, secondary 0%/604800s, provider_native,
+  collection_state auth=ok, 0 alerts). +10 hermetic tests (fake openai_codex
+  SDK in sys.modules — translation, availability derivation, all failure
+  modes, tracked success/failure state, provider_native beats a prior
+  estimate). Added a mypy override for the optional un-stubbed `openai_codex.*`
+  (also clears the pre-existing adapter/preflight import-not-found noise).
+  ruff clean; `mypy src/command_center/usage/` clean; full repo suite green.
 - PHASE 1.1 HARDENING DONE 07-12 (same branch, extends PR #34, before any
   real provider collector is trusted): four correctness fixes over the raw
   foundation. (A) UNKNOWN COST IS NEVER $0.00 — `UsageSample.cost_usd` is now

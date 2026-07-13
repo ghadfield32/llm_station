@@ -17,6 +17,7 @@ from .schemas import (
     _ADDITIVE_SAMPLE_KINDS,
     Attribution,
     AvailabilityState,
+    CollectionState,
     RuntimeUsageStatus,
     SampleKind,
     UsageAlert,
@@ -40,6 +41,34 @@ class UsageService:
         """Collect once and ingest — returns the alerts that newly fired."""
         result = await collector.collect()
         return self.ingest_collector_result(result)
+
+    async def run_collector_tracked(self, collector: CollectorProtocol,
+                                    collector_id: str) -> list[UsageAlert]:
+        """Like run_collector, but persists a durable CollectionState checkpoint
+        so a real collector resumes and its failures are visible. A collect()
+        that RAISES (a genuine crash) increments consecutive_failures and
+        records the error; a clean run resets them. auth_state reflects
+        whether the collector reported an AUTHENTICATION_REQUIRED availability
+        (a "ran but not authed" case is a soft failure, not a crash)."""
+        prev = self.store.get_collection_state(collector_id)
+        try:
+            result = await collector.collect()
+        except Exception as exc:
+            failures = (prev.consecutive_failures if prev else 0) + 1
+            self.store.set_collection_state(CollectionState(
+                collector_id=collector_id, updated_at=now_iso(),
+                last_success_at=prev.last_success_at if prev else None,
+                last_error=repr(exc), consecutive_failures=failures,
+                auth_state=prev.auth_state if prev else "unknown"))
+            return []
+        fired = self.ingest_collector_result(result)
+        auth_state = ("authentication_required"
+                      if any(e.state == AvailabilityState.AUTHENTICATION_REQUIRED
+                             for e in result.availability) else "ok")
+        self.store.set_collection_state(CollectionState(
+            collector_id=collector_id, updated_at=now_iso(), last_success_at=now_iso(),
+            last_error=None, consecutive_failures=0, auth_state=auth_state))
+        return fired
 
     def ingest_collector_result(self, result: CollectorResult) -> list[UsageAlert]:
         affected = {s.runtime_id for s in result.samples}
