@@ -195,7 +195,9 @@ def test_domain_move_emits_governed_event(client, monkeypatch):
     assert "Acme Hoops" in progress["chat_prompt"]
 
 
-def test_job_move_to_in_progress_prepares_packet_immediately(client, monkeypatch):
+def test_job_move_to_selected_queues_packet_prep(client, monkeypatch):
+    import time
+
     mod, tc, tmp_path = client
     from command_center.boards.command_center_provider import (
         CommandCenterBoardProvider)
@@ -215,25 +217,75 @@ def test_job_move_to_in_progress_prepares_packet_immediately(client, monkeypatch
     monkeypatch.setattr(
         mod, "_job_search_config_and_root", lambda: (load_config(), tmp_path))
 
-    # gate 1 of the 3-step flow: found -> Selected by Geoff. The selection
-    # drag triggers packet prep; the pipeline advances the card to Needs
-    # Geoff (agent complete) on its own — Geoff never touches In Progress.
+    # gate 1 of the 3-step flow: found -> Selected by Geoff. The move returns
+    # IMMEDIATELY and queues packet prep on the background worker (no inline LLM
+    # wait), so Geoff can move through cards fast. The worker advances the card
+    # to Needs Geoff on its own.
     resp = tc.post("/api/domain/job_application/move",
                    json={"card_id": card_id, "status": "Selected by Geoff"})
 
     assert resp.status_code == 200, resp.json()
     body = resp.json()
     assert body["event"]["status_after"] == "Selected by Geoff"
-    assert body["side_effect"]["operation"] == "process_selected"
-    assert body["side_effect"]["selected_count"] == 1
-    assert body["side_effect"]["plans"][0]["card_id"] == card_id
-    assert body["side_effect"]["plans"][0]["job_key"] == suggestion["job"]["job_key"]
-    assert body["card"]["status"] == "Needs Geoff"
-    assert body["card"]["application_id"]
-    app_dir = tmp_path / "applications_active" / body["card"]["application_id"]
+    assert body["side_effect"]["operation"] == "process_selected_queued"
+    # the card has NOT advanced yet — prep runs in the background
+    assert body["card"]["status"] == "Selected by Geoff"
+
+    # wait for the background worker to finish preparing the packet
+    deadline = time.time() + 30
+    card = None
+    while time.time() < deadline:
+        cards = {c["card_id"]: c for c in provider.list_cards()}
+        card = cards.get(card_id)
+        if card and card.get("status") == "Needs Geoff":
+            break
+        time.sleep(0.05)
+
+    prep = tc.get("/api/job-search/prep-status").json()
+    assert card is not None and card["status"] == "Needs Geoff", (
+        f"packet prep did not complete in time: {prep}")
+    assert prep["runs_completed"] >= 1
+    assert prep["last_error"] is None
+    app_id = card.get("application_id")
+    assert app_id
+    app_dir = tmp_path / "applications_active" / app_id
     assert app_dir.is_dir()
     assert (app_dir / "executor.json").is_file()
-    assert body["card"]["company"] == suggestion["job"]["company"]
+    assert card["company"] == suggestion["job"]["company"]
+    assert card["job_key"] == suggestion["job"]["job_key"]
+
+
+def test_job_reject_move_records_reason(client, monkeypatch):
+    mod, tc, tmp_path = client
+    from command_center.boards.command_center_provider import (
+        CommandCenterBoardProvider)
+    from command_center.job_search.board import publish_suggestions
+    from command_center.job_search.config import load_config
+    from command_center.job_search.rejections import load_rejections
+    from command_center.kanban_sync import EventLog
+
+    _write_suggestion(tmp_path, "sportsbook_analytics_engineer.md")
+    publish_suggestions(backend="internal", apply=True, root=tmp_path,
+                        env=_board_env(tmp_path))
+    provider = CommandCenterBoardProvider(
+        board_id="job_search_pipeline_internal",
+        event_log=EventLog(tmp_path / "events.jsonl"),
+        store_dir=tmp_path / "boards")
+    card_id = provider.list_cards()[0]["card_id"]
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(
+        mod, "_job_search_config_and_root", lambda: (load_config(), tmp_path))
+
+    resp = tc.post("/api/domain/job_application/move",
+                   json={"card_id": card_id, "status": "Rejected / Skip",
+                         "reason_code": "salary", "reason_note": "too low"})
+    assert resp.status_code == 200, resp.json()
+    assert resp.json()["side_effect"]["operation"] == "rejection_recorded"
+    assert resp.json()["side_effect"]["reason_code"] == "salary"
+    rows = load_rejections(tmp_path)
+    assert len(rows) == 1
+    assert rows[0]["reason_code"] == "salary"
+    assert rows[0]["note"] == "too low"
 
 
 def test_domain_move_reports_write_preflight_failure(client, monkeypatch):

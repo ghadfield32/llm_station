@@ -925,3 +925,86 @@ def test_register_repo_apply_writes_disabled_manifest(client, monkeypatch, tmp_p
         m for m in saved["repo_manifests"] if m["repo_id"] == "totally-new-test-repo")
     assert manifest["autonomous_edits_enabled"] is False
     assert manifest["blockers"] == ["repo_autonomy_not_yet_verified"]
+
+
+def _job_search_test_root(tmp_path, monkeypatch, mod):
+    """Point the app's job-search config + data root at a tmp copy so settings
+    writes and rejection reads never touch the real data/job_search."""
+    import yaml
+    from command_center.job_search.config import load_config
+
+    raw = yaml.safe_load(
+        (ROOT / "configs" / "job_search.yaml").read_text(encoding="utf-8"))
+    data_root = tmp_path / "data"
+    raw["job_search"]["data_root"] = str(data_root)
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    cfg_path = configs / "job_search.yaml"
+    cfg_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    (data_root / "profile").mkdir(parents=True)
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
+    monkeypatch.setattr(mod, "CONFIGS_DIR", configs)
+    monkeypatch.setattr(mod, "_job_search_config_and_root",
+                        lambda: (load_config(cfg_path), data_root))
+    return data_root, cfg_path
+
+
+def test_job_search_locations_settings_write_profile_override(
+        client, monkeypatch, tmp_path):
+    import yaml
+    mod, tc = client
+    data_root, _ = _job_search_test_root(tmp_path, monkeypatch, mod)
+    r = tc.put("/api/job-search/profile-controls/locations", json={
+        "mode": "regions", "regions": ["Texas", "Seattle"],
+        "remote_types_allowed": ["remote", "hybrid"],
+        "employment_types_allowed": [],
+    })
+    assert r.status_code == 200, r.json()
+    loc = r.json()["locations"]
+    assert loc["regions"] == ["Texas", "Seattle"]
+    assert loc["remote_types_allowed"] == ["remote", "hybrid"]
+    # untouched fields survive the shallow section update
+    assert loc["countries"] == ["United States"]
+    settings = yaml.safe_load(
+        (data_root / "profile" / "search_settings.yml").read_text(encoding="utf-8"))
+    assert settings["locations"]["regions"] == ["Texas", "Seattle"]
+
+
+def test_job_search_locations_invalid_combo_is_rejected(
+        client, monkeypatch, tmp_path):
+    mod, tc = client
+    _job_search_test_root(tmp_path, monkeypatch, mod)
+    # regions mode with no regions AND no countries must fail validation
+    r = tc.put("/api/job-search/profile-controls/locations", json={
+        "mode": "regions", "regions": [], "countries": [],
+    })
+    assert r.status_code == 400, r.json()
+
+
+def test_job_search_languages_settings_write_profile_override(
+        client, monkeypatch, tmp_path):
+    mod, tc = client
+    _job_search_test_root(tmp_path, monkeypatch, mod)
+    r = tc.put("/api/job-search/profile-controls/languages", json={
+        "spoken": ["English", "Spanish"]})
+    assert r.status_code == 200, r.json()
+    assert r.json()["languages"]["spoken"] == ["English", "Spanish"]
+
+
+def test_prep_status_endpoint_reports_idle_queue(client):
+    _, tc = client
+    body = tc.get("/api/job-search/prep-status").json()
+    assert body["operation"] == "prep_status"
+    assert body["running"] is False
+    assert "runs_completed" in body
+
+
+def test_rejections_report_endpoint(client, monkeypatch, tmp_path):
+    mod, tc = client
+    data_root, _ = _job_search_test_root(tmp_path, monkeypatch, mod)
+    from command_center.job_search.rejections import record_rejection
+    record_rejection(data_root, job_key="a", reason_code="salary")
+    body = tc.get("/api/job-search/rejections-report").json()
+    assert body["total_rejections"] == 1
+    assert body["counts_by_reason"].get("salary") == 1

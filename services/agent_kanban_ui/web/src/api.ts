@@ -80,6 +80,39 @@ export interface MissionDetail {
   [k: string]: unknown;
 }
 
+// Universal Capture — save a rough thought as a durable, recoverable intake
+// record BEFORE it becomes work. Capturing never starts work.
+export interface CaptureRecord {
+  capture_id: string; raw_content: string; source_type: string;
+  requested_mode: string; batch_id?: string | null; captured_at: string;
+  current_board_id?: string | null; conversation_id?: string | null;
+}
+export interface CaptureView {
+  record: CaptureRecord; processing_status: string;
+  classification?: unknown; event_count: number; updated_at: string;
+}
+export interface InboxCaptureCard {
+  capture_id: string; preview: string; source_type: string;
+  requested_mode: string; processing_status: string; batch_id?: string | null;
+  capture_kind?: string | null; suggested_board_id?: string | null;
+  captured_at: string; updated_at: string;
+}
+export interface InboxData {
+  columns: { name: string; captures: InboxCaptureCard[] }[]; total: number;
+}
+export interface CaptureIn {
+  raw_content: string; source_type?: string; source_ref?: string;
+  current_board_id?: string; current_card_id?: string; conversation_id?: string;
+  requested_mode?: string;
+}
+export const createCapture = (body: CaptureIn) =>
+  postJSON<CaptureView>("/api/captures", body, "POST");
+export const createCaptureBatch = (
+  text: string, extra: Partial<CaptureIn> = {}) =>
+  postJSON<{ count: number; batch_id: string | null; captures: CaptureView[] }>(
+    "/api/captures/batch", { text, source_type: "list", ...extra }, "POST");
+export const fetchInbox = () => getJSON<InboxData>("/api/intake/inbox");
+
 export const fetchMissions = () => getJSON<BoardData>("/api/missions");
 export const fetchMetrics = () => getJSON<Metrics>("/api/metrics");
 export const fetchBoards = () => getJSON<BoardSnapshot>("/api/boards");
@@ -245,6 +278,34 @@ export const updateDomainSchema = (domainId: string, domain: DomainSpec) =>
   postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, domain, "PUT");
 export const deleteDomainSchema = (domainId: string) =>
   postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, {}, "DELETE");
+
+// Create a whole board MODULE (kanban board + generic_task domain surface) from
+// one typed request — the guided Create-Board flow. Safe governance defaults.
+export type ExecutionScope = "life" | "repository" | "hybrid";
+export interface BoardModuleIn {
+  title: string;
+  description?: string;
+  icon?: string;
+  execution_scope?: ExecutionScope;
+  repo_ids?: string[];
+  columns?: string[];
+  chat_enabled?: boolean;
+}
+export interface BoardModuleResult {
+  board_id: string;
+  domain_id: string;
+  title: string;
+  provider: string;
+  execution_scope: ExecutionScope;
+  card_component: string;
+  columns: string[];
+  repo_ids: string[];
+  chat_enabled: boolean;
+}
+export const createBoardModule = (body: BoardModuleIn) =>
+  postJSON<BoardModuleResult>("/api/board-module", body, "POST");
+export const boardIdFromTitle = (title: string) =>
+  title.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");
 export const fetchDomainCards = (id: string) =>
   getJSON<DomainCards>(`/api/domain/${encodeURIComponent(id)}/cards`);
 export const fetchDomainCard = (id: string, cardId: string) =>
@@ -255,9 +316,12 @@ export const fetchDomainCardProgress = (id: string, cardId: string) =>
     `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/progress`);
 export const fetchDomainActions = (id: string) =>
   getJSON<DomainActions>(`/api/domain/${encodeURIComponent(id)}/actions`);
-export const moveDomainCard = (id: string, cardId: string, status: string) =>
+export const moveDomainCard = (
+  id: string, cardId: string, status: string,
+  reason?: { reason_code?: string; reason_note?: string },
+) =>
   postJSON<DomainMoveResult>(`/api/domain/${encodeURIComponent(id)}/move`, {
-    card_id: cardId, status,
+    card_id: cardId, status, ...(reason ?? {}),
   });
 export interface DomainNoteResult {
   status: string;
@@ -402,6 +466,8 @@ export interface JobProfileControls {
   }[];
   company_targets: Record<string, string[]>;
   executor_fallback: Record<string, string>;
+  locations: JobLocations;
+  languages: JobLanguages;
   standing_answers: {
     answers: StandingAnswer[];
     source: string;
@@ -498,6 +564,73 @@ export const updateDraftDefault = (key: string, value: string) =>
     source: string;
     application_questions: JobProfileControls["application_questions"];
   }>("/api/job-search/profile-controls/draft-default", { key, value }, "PUT");
+
+// ---- location + language filters (hybrid geo/language gate) ----------------
+export interface JobLocations {
+  mode: "worldwide" | "countries" | "regions" | string;
+  remote_ok: boolean;
+  remote_types_allowed: string[];
+  employment_types_allowed: string[];
+  countries: string[];
+  regions: string[];
+}
+export interface JobLanguages {
+  spoken: string[];
+  require_spoken_for_apply: boolean;
+}
+export const updateJobSearchLocations = (body: Partial<JobLocations>) =>
+  postJSON<{ status: string; source: string; locations: JobLocations }>(
+    "/api/job-search/profile-controls/locations", body, "PUT");
+export const updateJobSearchLanguages = (body: Partial<JobLanguages>) =>
+  postJSON<{ status: string; source: string; languages: JobLanguages }>(
+    "/api/job-search/profile-controls/languages", body, "PUT");
+
+// ---- background packet-prep queue ------------------------------------------
+export interface PrepStatus {
+  operation: string;
+  pending: boolean;
+  running: boolean;
+  runs_completed: number;
+  requests_total: number;
+  last_finished_at: string | null;
+  last_error: string | null;
+  last_result: Record<string, unknown> | null;
+}
+export const fetchPrepStatus = () =>
+  getJSON<PrepStatus>("/api/job-search/prep-status");
+
+// ---- rejection feedback loop -----------------------------------------------
+export interface RejectionSuggestion {
+  priority: string;
+  area: string;
+  suggestion: string;
+  evidence: unknown;
+}
+export interface RejectionsReport {
+  operation: string;
+  total_rejections: number;
+  counts_by_reason: Record<string, number>;
+  reason_labels: Record<string, string>;
+  suggestions: RejectionSuggestion[];
+  source: string;
+}
+export const fetchRejectionsReport = () =>
+  getJSON<RejectionsReport>("/api/job-search/rejections-report");
+// mirrors command_center.job_search.rejections.REASON_CODES
+export const REJECT_REASONS: { code: string; label: string }[] = [
+  { code: "location", label: "Location / geography wrong" },
+  { code: "remote", label: "Work arrangement wrong (remote/hybrid/onsite)" },
+  { code: "language", label: "Language requirement I don't meet" },
+  { code: "seniority", label: "Seniority mismatch (too junior / too senior)" },
+  { code: "salary", label: "Salary too low or not listed" },
+  { code: "domain", label: "Wrong domain / industry" },
+  { code: "role_type", label: "Wrong kind of work" },
+  { code: "company", label: "Company-specific reason" },
+  { code: "duplicate", label: "Duplicate / already applied" },
+  { code: "stale", label: "Posting expired or stale" },
+  { code: "low_fit", label: "Low overall fit" },
+  { code: "other", label: "Other (see note)" },
+];
 
 export interface BoardRegistryBoard {
   board_id: string;
@@ -842,6 +975,29 @@ export const interruptAgentSession = (sessionId: string) =>
 export const resumeAgentSession = (sessionId: string) =>
   postJSON<AgentStatusAck>(
     `/api/agent-sessions/${encodeURIComponent(sessionId)}/resume`, {});
+
+// "Track as mission" — record this read-only session as a Ledger tracking mission.
+// Reuses the existing session (no restart); grants no writes. Returns the mission id.
+export interface AgentPromoteResult {
+  mission_id: string;
+  status: string;
+  session_id: string;
+  conversation_id: string;
+}
+export const promoteAgentSession = (sessionId: string, summary = "") =>
+  postJSON<AgentPromoteResult>(
+    `/api/agent-sessions/${encodeURIComponent(sessionId)}/promote`, { summary });
+
+// "Track as mission" for a GatewayCore conversation (no agent session). Same
+// inert tracking mission; grants no writes. Returns the mission id.
+export interface ChatPromoteResult {
+  mission_id: string;
+  status: string;
+  conversation_id: string;
+}
+export const promoteChat = (conversationId: string, summary = "") =>
+  postJSON<ChatPromoteResult>(
+    "/api/chat/promote", { conversation_id: conversationId, summary });
 export async function closeAgentSession(sessionId: string): Promise<AgentStatusAck> {
   const r = await fetch(`/api/agent-sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" });

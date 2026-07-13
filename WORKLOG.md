@@ -5,6 +5,49 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Chat-first cockpit + Universal Capture + Work Graph (2026-07-13)
+- MERGED to main: chat-first Assistant chooser — Claude/Codex selectable, no
+  "start from a mission" dead-end (#41); Track-as-mission for agent + gateway
+  chats, reuses the session/thread, inert L0 mission (#42/#43); "Open in chat /
+  Ask Claude / Ask Codex" on every card, seeded from chat_prompt (#43); atomic
+  board-module wizard — kanban board + generic_task surface, wall verbs forbidden,
+  write-gated, audited (#43); first-class no-repo `life` boards via
+  KanbanBoardSpec.execution_scope (#44); Universal Capture — IMMUTABLE
+  CaptureRecord + Inbox, bulk-split, in `src/command_center/intake/` (#44); MASTER
+  §4.8 + truth-check extensions (#45/#46); durable Ledger CaptureStore —
+  `intake/ledger_schema.py` + `ledger_store.py`, mirror-DDL + drift test,
+  KANBAN_UI_CAPTURE_LEDGER=1 (#47).
+- OPEN, green, mergeable: #40 usage normalization (conflict fixed 07-13 →
+  re-recorded merged MASTER digest 547bc3ec); #48 work-graph (below).
+- Work graph #48 (`src/command_center/work_graph/`): ONE canonical WorkItem, many
+  board WorkPlacements (never duplicated cards), typed WorkEdges. Board membership
+  is a placement (item→board), not an edge. Cycle policy: blocking/structural
+  (blocks/parent_of/implements/supersedes/derived_from) ACYCLIC → 409;
+  informational (related_to/informs/supports/duplicates) may cycle. One primary
+  board; soft-remove preserves the item; links are BACKEND-generated. Cockpit
+  /api/work-items[/{id}[/links]] /placements /work-edges /work-graph[/{id}].
+- Phase C-2 DONE (branch `feat/work-graph-ledger`, stacked on #48): durable
+  Ledger persistence, same mirror-DDL pattern as #47. NEW
+  `work_graph/ledger_schema.py` (`workgraph.v1`: work_items/work_placements/
+  work_edges/work_events) + byte-mirror `WORKGRAPH_SCHEMA_SQL` in
+  `services/ledger/app.py` (+ upsert/get/list/event REST routes) +
+  `work_graph/ledger_store.py` (`LedgerWorkGraphStore`, same surface as in-memory,
+  404→KeyError). Cockpit `_get_workgraph_service` picks it under
+  KANBAN_UI_WORKGRAPH_LEDGER=1. Tests: drift guard + 7 round-trip/durability
+  (item/placement/edge/status/events survive a fresh service over the same
+  ledger.db; one-primary + cycle rules enforced across "restart"). Full suite
+  green via PYTHONPATH=worktree/src (editable install → main checkout otherwise).
+- NEXT: merge #40 + #48 + Phase C-2; /work/<id> permalink resolver → structured
+  Chat creation receipts (TaskCreationReceipt).
+- DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
+  lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
+  AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1
+  start). GOTCHAS: `docker compose up -d` SKIPS the profile-gated agent-kanban-ui
+  (use `--profile ui up -d agent-kanban-ui`); ruleset protect-main-command-center
+  requires 1 code-owner review (solo → set required approvals 0, or admin bypass);
+  local checkout was on feat/life-center-foundation (#46 base), `git checkout main`
+  for #47/#48; empty-reply from :8787 = curled mid-restart, not a crash.
+
 ## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
 - PHASE 3 — USAGE & LIMITS COCKPIT API + UI 07-12 (same branch
   `feat/codex-usage-collector`, extends PR #35). The backend layer becomes a
@@ -187,6 +230,31 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- AGENT `usage` EVENT NORMALIZATION + TEE RETIRED AS WRITER 07-13 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). The observability-correctness
+  slice: turns each agent turn's `usage` event into an attributed UsageSample so
+  "what used the most and why?" (top model / top effort / top uncached-context
+  session) is answered from recorded fact. (1) UsageSample gains `model`,
+  `effort`, `context_mode`, `api_equivalent_cost_usd` — additive columns in the
+  usage.v1 DDL (canonical `ledger_schema.py` + byte-mirror `services/ledger/
+  app.py` + `_USAGE_SAMPLE_COLS`, drift test green; `ledger_store` round-trips
+  them). (2) NEW `usage/agent_usage.py::agent_usage_sample(payload, runtime_id,
+  session_id, repo_id, conversation_id, model, effort, ...)` → a REQUEST_DELTA
+  UsageSample with honest cost (subscription: `cost_usd=None` +
+  `cost_source=subscription_not_metered` + `api_equivalent_cost_usd` in its own
+  field, NEVER $0.00; API lane: real `cost_usd`+`provider_reported`) and correct
+  uncached-token math (input = uncached + cache_create + cache_read; cached =
+  the cache portion). (3) The WORKER feeds `usage` events too (all agent lanes,
+  not just Claude) in `_run_turn` — model from the session record, effort
+  recovered from the session_started event — so headless usage is durably
+  attributed. (4) `attribution.rank_by` now supports `model`/`effort`/`context`
+  dimensions (sample-level, not just Attribution), so top_drivers can rank by
+  them. (5) TEE RETIRED AS WRITER: the cockpit SSE tee stands down when
+  `USAGE_LEDGER` (the worker is the sole authoritative writer); it stays only as
+  the in-memory dev fallback. +11 tests (translator honesty + uncached math, API
+  vs subscription cost, rank_by model/effort, Ledger round-trip of the new
+  fields, worker usage feed, tee-stands-down-under-Ledger). ruff + mypy clean;
+  full suite green. NEXT: top-driver UI + charts consuming these samples.
 - MASTER.md TRUTH-CHECK GATE 07-12 (same branch `feat/agent-cockpit-pickers`,
   extends PR #37). Encodes "a phase is not complete until docs/MASTER.md
   describes it" as an automated check. `scripts/check_master_runtime_truth.py`

@@ -330,26 +330,52 @@ The config files and their contracts:
 
 | Machine | Role | Why it's here |
 |---------|------|---------------|
-| **VPS** ($5–12/mo, 2 vCPU / 4 GB) | always-on brain | Must be up when the house, 4090, and 5080 are all off. The load-bearing decision — the brain can't live on hardware that sleeps. |
-| **RTX 4090 desktop** | heavy worker + local model tier | Runs DAGs/CV, the git worktrees agents edit, and the free local models (Qwen/Devstral) for triage and cheap judging. |
-| **RTX 5080 laptop** | human workstation | VS Code Remote Tunnel into the 4090's worktree; dashboards. You drive; the agent works. |
-| **Pi / mini-PC** (optional) | home relay only | Wake-on-LAN for the 4090, watchdog, backup mirror. Skip unless needed; a mini-PC beats a Pi at 2026 prices. |
+| **RTX 4090 desktop** | current always-on control plane + heavy worker + local model tier | Runs Command Center, Betts DAGs/CV, the git worktrees agents edit, and the free local models (Qwen/Devstral). |
+| **RTX 5080 laptop** | portable human/dev/candidate lane | Interviews, VS Code/Tailscale into the 4090, dashboards, live/sample CV, and bounded 16 GB-fit experiments; never a household availability dependency. |
+| **Life Center host** (planned) | stationary storage + household applications | Separate four-bay data plane; current purchase default is a 12 TB-class mirror plus appdata NVMe, separate backup, UPS, and stable home services—not an AI worker. |
+| **VPS** (deferred optional) | future off-home control plane only if a measured need appears | Revisit for 24/7 response while the desktop is off, off-home hosting, or a required public webhook; not part of current Option C. |
+
+The verified hardware, workload split, reliability gates, and planned separate
+Life Center/storage host are recorded in
+[`operations/HARDWARE_AND_LIFE_CENTER_PLAN.md`](operations/HARDWARE_AND_LIFE_CENTER_PLAN.md).
+That decision keeps the always-on 4090 desktop as the current Betts/CV/model
+worker and keeps the mobile 5080 laptop out of every household availability
+dependency. The desktop's failed memory was replaced with new DDR5 and is
+operator-tested as reliable. The Life Center's mandatory security, recovery,
+agent-authority, and data-admission gates are in
+[`operations/LIFE_CENTER_SECURITY_BASELINE.md`](operations/LIFE_CENTER_SECURITY_BASELINE.md).
+The design is adopted, but no Life Center hardware, private infrastructure
+repository, service, backup target, or security gate is yet recorded as
+implemented. The measured desktop baseline and exact Gate 0 planning selection
+are in
+[`operations/LIFE_CENTER_GATE0.md`](operations/LIFE_CENTER_GATE0.md); Gate 0
+identifies the `SAX1V1R` Spectrum router and its separate-modem path, selects one
+UDR7 as the initial replacement, registers daily aggregate-only growth tracking,
+defines initial recovery targets, and selects the Node 804 + ASUS W680M-ACE SE +
+i5-12500 + 32 GB ECC/IPMI host. The confirmed service is Internet Ultra at 600
+Mb/s advertised download. The selected layout keeps the Life Center, modem,
+UDR7, and UPS in the upstairs office with one direct Cat6 2.5 GbE run to the
+downstairs desktop and a dedicated BMC Management link; no initial switch or
+extra access point is required. The exact closeout procedure is
+[`operations/LIFE_CENTER_GATE0_CLOSEOUT.md`](operations/LIFE_CENTER_GATE0_CLOSEOUT.md).
+Gate 0 remains open only on cable/noise acceptance, the mature 30-day growth
+result, budget acceptance, and purchase-day seller/warranty validation.
 
 The brain reaches the muscle over a **Tailscale private mesh** — no public
 SSH, no public dashboards. All web UIs bind to 127.0.0.1 and are reached over
 Tailscale. Nothing is public unless you deliberately add Caddy + Cloudflare
 Access (on the do-not-build list by default).
 
-> **Current state (2026-06-12):** everything still runs on the Windows
-> workstation; the VPS/4090 split and the Linux migration
-> (`growth-os/deploy/linux/MIGRATION.md`) are the standing next steps when the
-> prod box revives.
+> **Current state (2026-07-13):** `llm_station` runs on the Windows RTX 4090
+> desktop and is reached over Tailscale. The separate Life Center is a planned
+> data/application host. A VPS is deferred unless the explicit needs above
+> materialize.
 
 ---
 
 ## 4. Architecture — what runs where
 
-### The control plane (Docker Compose, on the VPS / currently local)
+### The control plane (Docker Compose, currently on the desktop; VPS deferred)
 
 | Service | Job |
 |---|---|
@@ -389,10 +415,16 @@ bridge; on demand/host: packages, import_books/dags, selftest.
 ### 4.5 The agent lane — Agent Sessions (Codex & Claude coding runtimes)
 
 **The one architectural rule for agents:** Claude Code and Codex are **not**
-chat models and never enter GatewayCore. They are agentic *runtimes* — their
-own SDK, tool loop, auth, filesystem/shell authority, resumable session state,
-and execution state. They live in a **separate lane** from the supervised
-`/chat/completions` chat surface. This split is not stylistic; it is the whole
+GatewayCore/LiteLLM chat-model aliases and never enter GatewayCore's supervised
+`/chat/completions` surface. They are agentic *runtimes* — their own SDK, tool
+loop, auth, filesystem/shell authority, resumable session state, and execution
+state. They live in a **separate lane** from the supervised `/chat/completions`
+chat surface. *Product-facing, that internal split stays invisible:* Claude Code
+and Codex ARE directly selectable in the Chat UI as **Coding Agent assistants**
+(the "Assistant" chooser), and a **read-only agent chat needs no mission** — a
+mission is optional governance, never a prerequisite for talking to an agent.
+The old "start from a mission, not this dropdown" dead-end was the bug; see the
+chat-first product surface in §4.8. This split is not stylistic; it is the whole
 safety posture (Orca/Omnigent systems separate chat from agent harnesses for
 the same reason). The frontier tool_calls incident (§14, 2026-07-10/11) proved
 it empirically: even a small, explicitly *tool-less* integration crossed a
@@ -620,16 +652,28 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
   Ledger-backed service is visible to a brand-new service reading the same
   Ledger, the two Claude lanes stay distinct, and a re-ingested event stays
   single. The SSE tee remains a compatibility writer (dedup by `source_hash`).
+- **Phase 3.5 — agent `usage`-event normalization + tee retired as writer**
+  (PR #37): each turn's `usage` event becomes an attributed `UsageSample`
+  (`usage/agent_usage.py`) with honest cost (subscription → `cost_usd=None` +
+  `api_equivalent_cost_usd` in its own field, never $0.00; API lane → real
+  `cost_usd`) and correct uncached-token math. `UsageSample` gained
+  `model`/`effort`/`context_mode`/`api_equivalent_cost_usd` (additive usage.v1
+  columns), the worker feeds `usage` events durably for ALL agent lanes, and
+  `attribution.rank_by` supports `model`/`effort`/`context` dimensions — so "top
+  model / top effort / top uncached-context session" is answered from recorded
+  fact. Under `KANBAN_UI_USAGE_LEDGER` the cockpit SSE tee **stands down as a
+  writer** (the worker is the sole authoritative writer; the tee is only the
+  in-memory dev fallback).
 
 **What is NOT built yet:** every collector except Codex; the Usage & Limits
 UI's remaining depth (historical charts, reset timelines, routing-evidence
-panel, top-driver *UI*); SSE live push (`/api/model-usage/events/stream`); the
-reconciliation + routing-decisions routes; Ledger-backing the worker usage
-store (restart-durable) + pointing the cockpit reads at the worker (retiring the
-tee as authoritative); and per-model/per-effort usage attribution on samples.
-The core surface (overview, per-runtime detail, limits, alerts, top-drivers,
-collector-health, refresh) + model/effort pickers + selector badges + the Claude
-rate_limit tee + worker-owned headless ingestion are live behind the flags.
+panel, and the **top-driver UI** that renders the now-available per-model/
+per-effort samples); SSE live push (`/api/model-usage/events/stream`); the
+reconciliation + routing-decisions routes. The core surface (overview,
+per-runtime detail, limits, alerts, top-drivers API, collector-health, refresh)
++ model/effort pickers + selector badges + Claude rate_limit tee + worker-owned
+headless ingestion + restart-proof shared-Ledger store + attributed usage
+samples are live behind the flags.
 
 ### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
 
@@ -700,6 +744,95 @@ events + usage evidence. The pipeline selects an agent for read-only
 investigation first, then leased-worktree execution, then evidence-based
 automatic routing — with the Codex plugin fitting in as a Claude-side
 convenience layer, never a competing control plane.
+
+---
+
+### 4.8 Chat-first product surface — direct agent chat, mission promotion, board modules, and Universal Capture (PRs #41–#44)
+
+The lanes above are the architecture; this is how the operator actually uses
+them. The guiding rule: **think naturally → capture → organize → (optionally)
+prepare & review → execute safely**, and the interface — not the user — absorbs
+the difference between a note, a chat, an agent session, and a mission. Governance
+attaches automatically only when work needs authority; it is never a toll gate on
+getting started.
+
+**Direct agent chat, no mission (PR #41 — `feat/chat-first-assistant-ux`).** The
+cockpit chat composer has ONE primary chooser, labelled **Assistant**:
+GatewayCore (in-app), external specialists, and the **Coding agents (Claude Code ·
+Codex)** group. Selecting a coding agent renders `AgentSessionPanel` directly and
+starts a read-only (`analysis`) session against a registered repo — no mission
+required. The old duplicate, *disabled* executor list in the GatewayCore model
+selector ("Executors — from missions, not here" / "start from a mission, not this
+dropdown") is removed: executors are not GatewayCore models and never appear
+there. An unavailable runtime shows the exact reason plus a repair pointer
+(worker env + `claude auth login` / `codex login` + the activation runbook),
+never a bare "unavailable". Guard: `tests/test_chat_first_ux.py` fails if the
+mission-only phrasing regresses.
+
+**Mission is optional tracking; promotion reuses the conversation (PRs #42, #43).**
+"Track as mission" turns an existing conversation into a tracked **Ledger mission**
+without restarting or duplicating it. For an agent session: `POST
+/api/agent-sessions/{id}/promote` reads the durable session (`get_session`) — it
+never calls `start_session` — and opens an **inert** mission (risk `L0`,
+`requires_approval=False`, no branch → nothing executes, no write granted), linked
+via the append-only event log. For a GatewayCore conversation: `POST
+/api/chat/promote` does the same from a `conversation_id`. A shared
+`MissionProgressStrip` then renders the live mission status + recent governed
+events **inside the conversation** — the conversation *is* the mission journey.
+Writes remain gated behind lease + worktree + approval, unchanged. Guards:
+`tests/test_agent_kanban_ui_promote.py`, `tests/test_chat_promote.py`.
+
+**Chat from any card (PR #43).** Every domain card carries **Open in chat**,
+**Ask Claude**, and **Ask Codex**, each seeded from the card's authoritative
+`chat_prompt` (the same recorded context the drawer uses) and opening on the
+chosen assistant lane (`agent:claude_code_local` / `agent:codex_agent`). The
+chat-handoff draft carries an optional `target` so the assistant lane is
+preselected; an agent target also seeds the session's first message. Guard:
+`tests/test_card_chat_context.py`.
+
+**Board modules — create a whole board in-app (PRs #43, #44).** `POST
+/api/board-module` atomically creates BOTH a kanban board (repo/verb/status
+contract) AND its `generic_task` domain surface, so every board — including
+user-created ones — gets the same typed cards + chat + pipeline + usage treatment.
+Governance defaults are FIXED: wall verbs (`approve_card`, `merge`, `deploy`,
+`delete_card`, `delete_board`) stay forbidden and human approval/merge is
+unchanged. The write is atomic (both configs validate via their real Pydantic
+models before either is written), write-gated (`KANBAN_UI_CHAT_ENABLED` +
+`KANBAN_UI_DOMAIN_CONFIG_WRITES`), and audited (`config_audit.jsonl`); the browser
+never emits YAML. A guided `CreateBoardWizard` drives it.
+
+**First-class no-repository "life" boards (PR #44).** `KanbanBoardSpec` gains
+`execution_scope: life | repository | hybrid` (default `repository`, so every
+existing board is unchanged). A **`life`** board (Health, Books, Personal Tasks,
+Notes, Travel, Finances) legitimately carries an empty `repo_ids` — its work lives
+in the Ledger/board store, not a git repo. `repository`/`hybrid` boards still
+require ≥1 repo. This replaces the interim "board-id-as-its-own-repo" workaround.
+Guards: `tests/test_kanban_registry.py`, `tests/test_board_module_create.py`.
+
+**Universal Capture + Inbox (PR #44).** A rough thought is preserved as an
+**immutable** intake record BEFORE deciding whether it becomes a card, project, or
+nothing — *capturing never starts work*. `src/command_center/intake/` is the
+stable record everything downstream appends to: `CaptureRecord` is frozen (the raw
+thought is never edited in place; status/classification are appended events),
+`CaptureClassification` is separate, and `split_bulk_list()` splits a pasted idea
+list into one capture per bullet/line while a single free-text paste stays one
+capture — nothing is lost. API (gated by `KANBAN_UI_CAPTURE_ENABLED`, default on —
+a benign in-memory list with no repo/Ledger/config side effects): `POST
+/api/captures`, `POST /api/captures/batch`, `GET /api/captures[/{id}]`, `GET
+/api/intake/inbox`. The Universal Inbox folds every capture into its lane and never
+drops one — recoverable even after routing. A global **"+ Capture"** composer
+(any screen; bulk-list toggle; save_only / prepare_later / prepare_now /
+create_task) plus an **Inbox** nav view. Guards:
+`tests/test_intake_capture.py`, `tests/test_agent_kanban_ui_capture.py`.
+
+**Readiness status.** PRs #41–#44 are **BUILT + HERMETIC_PROVEN** (web build green;
+targeted + full suite green in CI) and open, **not yet merged to `main`**. The
+next phases append to the Capture record — classification, board auto-routing,
+duplicate detection, the Readiness Packet + LLM review chain, and the
+`universal_intake_daily` DAG — plus a durable Ledger-backed `CaptureStore` (the
+in-memory store's immediate successor). Cross-device availability of the coding
+agents still requires the host Agent Worker to be running and logged in (see §9 /
+`docs/runbooks/agent-sessions-activation.md`).
 
 ---
 
@@ -2711,6 +2844,10 @@ superseded them; kept for history, not as current behavior.
 | [operations/OPERATOR_COMMANDS.md](operations/OPERATOR_COMMANDS.md) | the 7-command friendly wrapper cheat sheet (`cc setup`/`onboard`/`operate`/`improve`/`demo`) |
 | [operations/RUNNING_DAILY_SELF_IMPROVEMENT.md](operations/RUNNING_DAILY_SELF_IMPROVEMENT.md) | how to run/schedule the observer-only daily self-improvement scan |
 | [operations/remote-access.md](operations/remote-access.md) | the Option-C (desktop + Tailscale, no VPS) remote-access design |
+| [operations/HARDWARE_AND_LIFE_CENTER_PLAN.md](operations/HARDWARE_AND_LIFE_CENTER_PLAN.md) | verified desktop/laptop inventory, workload ownership, hardware-health gates, and the separate Life Center boundary |
+| [operations/LIFE_CENTER_SECURITY_BASELINE.md](operations/LIFE_CENTER_SECURITY_BASELINE.md) | mandatory Life Center threat model, least-privilege controls, recovery rules, agent authority tiers, and deployment/data-admission gates |
+| [operations/LIFE_CENTER_GATE0.md](operations/LIFE_CENTER_GATE0.md) | measured desktop capacity baseline, router findings, exact planning selections, budget, and remaining Gate 0 exits |
+| [operations/LIFE_CENTER_GATE0_CLOSEOUT.md](operations/LIFE_CENTER_GATE0_CLOSEOUT.md) | exact server BOM plus the storage-growth, cable-route, noise/thermal, purchase-day seller/warranty, and Gate 1 checklists |
 | [operations/STATUS.md](operations/STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
 
 **`architecture/` — how the system is built**
@@ -2882,6 +3019,36 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-07-13 — Chat-first product surface, board modules, no-repo boards, Universal Capture (PRs #41–#44)
+
+The chat-first product layer over the agent lane. Full detail in **§4.8**. All
+four are BUILT + HERMETIC_PROVEN and open, **not yet merged to `main`**.
+
+- **PR #41 — Assistant chooser.** Removed the "start from a mission, not this
+  dropdown" dead-end; Claude Code / Codex are directly selectable Coding Agent
+  assistants in Chat; read-only agent chat needs no mission. Unavailable runtimes
+  show reason + repair, never a bare "unavailable".
+- **PR #42 — Track-as-mission (agent).** Promote a read-only agent session to an
+  inert `L0` mission (`POST /api/agent-sessions/{id}/promote`) — reuses the
+  session (no restart), grants no writes.
+- **PR #43 — gateway promote + card chat + Create-Board wizard.** `POST
+  /api/chat/promote`; `MissionProgressStrip` (the conversation is the mission
+  journey); "Open in chat / Ask Claude / Ask Codex" on every card seeded from
+  `chat_prompt`; atomic `POST /api/board-module` (kanban board + surface, wall
+  verbs forbidden, write-gated, audited).
+- **PR #44 — no-repo life boards + Universal Capture.** `KanbanBoardSpec
+  .execution_scope` (`life`/`repository`/`hybrid`); `life` boards may be repo-less
+  (replaces the board-id-as-repo workaround). NEW `src/command_center/intake/`:
+  immutable `CaptureRecord` + separate `CaptureClassification` + lossless bulk
+  split; `POST /api/captures[/batch]`, `GET /api/intake/inbox`; global "+ Capture"
+  composer + Inbox view. Capturing never starts work.
+- The MASTER truth check (`scripts/check_master_runtime_truth.py`) now rejects the
+  mission-only executor phrasing and requires the intake files + the capture /
+  board-module / chat-promote endpoints to exist in source.
+- **Not covered yet** (append to the Capture record next): classification, board
+  auto-routing, dedup, the Readiness Packet + LLM review chain,
+  `universal_intake_daily`, and a durable Ledger-backed `CaptureStore`.
 
 ### 2026-07-11/12 — The agent lane: Codex read-only runtime + unified Usage/Limits + first real collector
 

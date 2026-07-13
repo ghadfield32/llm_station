@@ -154,4 +154,8 @@ generated/boards/
 # ── Cockpit validation screenshots — show the real application pipeline; keep
 #    local as proof, never push. Browser-automation profile dirs likewise. ────
 generated/cockpit-*.png
+
+# Local aggregate-only Life Center capacity measurements. These may reveal
+# private storage usage patterns and are intentionally never committed.
+generated/life-center-growth/
 .tmp-*/

@@ -58,6 +58,19 @@ from command_center.kanban_sync.events import emit_event, is_human_owned_status
 # governed verbs (which already refuse Approved).
 CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
 DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "1"
+# Universal Capture — a benign, non-destructive intake list (no repo/Ledger/config
+# side effects), so it defaults ON (opt-out). Captures are in-memory for now; a
+# durable Ledger-backed store is the immediate follow-up.
+CAPTURE_ENABLED = os.environ.get("KANBAN_UI_CAPTURE_ENABLED", "1") == "1"
+# Durable capture: back the Inbox with the Ledger (survives restart) instead of
+# the in-memory store. Off by default so a Ledger-less dev cockpit still works.
+CAPTURE_LEDGER = os.environ.get("KANBAN_UI_CAPTURE_LEDGER", "") == "1"
+# Canonical work graph (WorkItem/placement/edge). Benign in-memory list, no repo/
+# Ledger/config side effects → defaults on. Durable Ledger persistence is Phase C-2.
+WORKGRAPH_ENABLED = os.environ.get("KANBAN_UI_WORKGRAPH_ENABLED", "1") == "1"
+# Durable work graph: back it with the Ledger (survives restart → the work-item
+# ids are permanent enough for deep links). Off by default for a Ledger-less dev.
+WORKGRAPH_LEDGER = os.environ.get("KANBAN_UI_WORKGRAPH_LEDGER", "") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -515,6 +528,56 @@ def _domain_spec(domain_id: str) -> dict:
         if d.get("domain_id") == domain_id:
             return d
     raise HTTPException(status_code=404, detail=f"unknown domain {domain_id!r}")
+
+
+# ── Board-module create (kanban board + domain surface, atomic) ───────────────
+def _kanban_boards_path() -> Path:
+    return CONFIGS_DIR / "kanban_boards.yaml"
+
+
+def _read_board_registry_data() -> dict[str, Any]:
+    path = _kanban_boards_path()
+    if not path.is_file():
+        return {"schema_version": "command-center.kanban-boards.v1", "boards": []}
+    return _read_yaml_file(path)
+
+
+def _validate_board_registry(data: dict[str, Any], *, status_code: int = 400) -> None:
+    from command_center.schemas.contracts import KanbanBoardsConfig
+    try:
+        KanbanBoardsConfig.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"invalid kanban_boards.yaml: {exc}") from exc
+
+
+# governance defaults for a new internal board — the human wall is FIXED here
+_KANBAN_STATUS_LABELS = {
+    "backlog": "Backlog", "ready": "Ready", "in_progress": "In Progress",
+    "done": "Done", "blocked": "Blocked", "rejected": "Rejected",
+    "awaiting_approval": "Awaiting Approval"}
+_KANBAN_ALLOWED_VERBS = ["add_mission_card", "stage_card", "start_todo",
+                         "finish_todo", "block_card", "reject_card"]
+_KANBAN_WALL_VERBS = ["approve_card", "merge", "deploy", "delete_card", "delete_board"]
+
+
+def _slug_board_id(title: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", (title or "").strip().lower()).strip("_")
+    return slug
+
+
+def _audit_config_write(action: str, detail: dict[str, Any]) -> None:
+    """Append an audit record for a config-mutating write. Best-effort JSONL next
+    to the configs — the create is the source of truth, so a failed audit must not
+    fail the create, but every board-module create is recorded here."""
+    from datetime import datetime, timezone
+    rec = {"ts": datetime.now(timezone.utc).isoformat(), "action": action, **detail}
+    try:
+        with (CONFIGS_DIR / "config_audit.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass
 
 
 # snapshot board field -> the domain card grammar the typed components render
@@ -1028,6 +1091,23 @@ class DomainSurfaceIn(BaseModel):
     empty_state: dict[str, Any] = Field(default_factory=dict)
 
 
+class BoardModuleIn(BaseModel):
+    """Normalized 'create a board module' request — produces BOTH a kanban board
+    (the repo/verb/status contract) and its domain surface (card grammar), with
+    generic_task cards so every board gets the same chat + pipeline treatment.
+    Governance defaults are FIXED (wall verbs always forbidden; human approval /
+    merge unchanged). The browser never writes YAML — this is the typed seam."""
+    title: str
+    description: str = ""
+    icon: str = ""
+    # life = no repository (Books/Health/…); repository/hybrid drive repo work and
+    # must name >=1 repo. Default life: the common new personal board is repo-less.
+    execution_scope: str = "life"
+    repo_ids: list[str] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    chat_enabled: bool = True
+
+
 @app.get("/api/domains")
 def domains() -> dict:
     """The typed-surface registry: card grammar + source binding + empty states,
@@ -1087,6 +1167,337 @@ def delete_domain_schema(domain_id: str) -> dict:
     next_data = dict(data)
     next_data["domains"] = next_domains
     return _write_domain_config(next_data)
+
+
+@app.post("/api/board-module", status_code=201)
+def create_board_module(body: BoardModuleIn) -> dict:
+    """Create a whole board MODULE from one typed request: a kanban board (the
+    repo/verb/status contract) + its domain surface (generic_task card grammar),
+    so every board — including user-created ones — gets the same chat + pipeline
+    + usage treatment. Governance defaults are FIXED: wall verbs stay forbidden,
+    human approval/merge is unchanged. Atomic (both configs validate before either
+    is written), write-gated, and audited. The browser never emits YAML."""
+    _require_domain_config_writable()   # CHAT_ENABLED + DOMAIN_CONFIG_WRITES + writable
+    board_id = _slug_board_id(body.title)
+    if not board_id:
+        raise HTTPException(status_code=400, detail="title must yield a non-empty board id")
+
+    reg = _read_board_registry_data()
+    if any(b.get("board_id") == board_id for b in reg.get("boards", [])):
+        raise HTTPException(status_code=409, detail=f"board {board_id!r} already exists")
+    dom = _domain_config()
+    if any(d.get("domain_id") == board_id for d in dom.get("domains", [])):
+        raise HTTPException(status_code=409, detail=f"domain {board_id!r} already exists")
+
+    scope = body.execution_scope if body.execution_scope in ("life", "repository", "hybrid") else "life"
+    repo_ids = [r.strip() for r in body.repo_ids if r.strip()]
+    if scope == "life":
+        repo_ids = []                       # no fake board-id-as-repo workaround
+    elif not repo_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"a {scope} board must name at least one repo_id "
+                   "(use execution_scope 'life' for a repo-less board)")
+    board_spec = {
+        "board_id": board_id, "provider": "command_center_ui", "workspace_ref": "self",
+        "board_ref": board_id, "execution_scope": scope, "repo_ids": repo_ids,
+        "status_mapping": dict(_KANBAN_STATUS_LABELS),
+        "required_fields": ["MissionID", "RepoID", "Risk", "LastSync", "Section"],
+        "allowed_agent_verbs": list(_KANBAN_ALLOWED_VERBS),
+        "forbidden_agent_verbs": list(_KANBAN_WALL_VERBS), "blockers": []}
+    columns = ([c.strip() for c in body.columns if c.strip()]
+               or list(_KANBAN_STATUS_LABELS.values()))
+    surface = _clean_domain_surface({
+        "domain_id": board_id, "title": body.title.strip(),
+        "card_component": "generic_task", "source": "board_store", "board_id": board_id,
+        "columns": columns, "column_actions": {},
+        "summary_fields": [{"name": "title", "label": "Title"},
+                           {"name": "status", "label": "Status"}],
+        "drawer_fields": [{"name": "description", "label": "Description"},
+                          {"name": "notes", "label": "Notes"}],
+        "allowed_actions": ["stage_card", "start_todo", "finish_todo",
+                            "block_card", "reject_card"],
+        "empty_state": {"title": f"No {body.title.strip()} cards yet",
+                        "hint": body.description.strip() or "Add a card to get started."}})
+
+    # Validate BOTH before writing EITHER — never a half-created module.
+    next_reg = {"schema_version": reg.get("schema_version", "command-center.kanban-boards.v1"),
+                "boards": [*reg.get("boards", []), board_spec]}
+    next_dom = {**dom, "domains": [*dom.get("domains", []), surface]}
+    _validate_board_registry(next_reg)
+    _validate_domain_config(next_dom)
+    _write_yaml_file(_kanban_boards_path(), next_reg)
+    _write_domain_config(next_dom)      # re-validates + writes domain_surfaces.yaml
+    _audit_config_write("board_module.create", {
+        "board_id": board_id, "title": body.title.strip(), "execution_scope": scope,
+        "repo_ids": repo_ids, "icon": body.icon, "chat_enabled": body.chat_enabled})
+    return {"board_id": board_id, "domain_id": board_id, "title": body.title.strip(),
+            "provider": "command_center_ui", "execution_scope": scope,
+            "card_component": "generic_task",
+            "columns": columns, "repo_ids": repo_ids, "chat_enabled": body.chat_enabled}
+
+
+# ── Universal Capture (intake) ────────────────────────────────────────────────
+# A rough thought is preserved as an immutable capture BEFORE deciding whether it
+# becomes a card/project/nothing — capturing never starts work. Classification /
+# routing / packet building are later phases; this is the stable record + Inbox.
+_capture_service = None   # type: ignore[var-annotated]
+
+
+def _get_capture_service():
+    global _capture_service
+    if _capture_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.intake import (
+            CaptureService,
+            InMemoryCaptureStore,
+            LedgerCaptureStore,
+        )
+        if CAPTURE_LEDGER:
+            store = LedgerCaptureStore(httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            store = InMemoryCaptureStore()
+        _capture_service = CaptureService(
+            store,
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda: "cap-" + secrets.token_hex(5))
+    return _capture_service
+
+
+def _require_capture():
+    if not CAPTURE_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Universal Capture is disabled (set KANBAN_UI_CAPTURE_ENABLED=1)")
+    return _get_capture_service()
+
+
+class CaptureIn(BaseModel):
+    raw_content: str
+    source_type: str = "text"
+    source_ref: str | None = None
+    current_board_id: str | None = None
+    current_card_id: str | None = None
+    conversation_id: str | None = None
+    requested_mode: str = "save_only"
+
+
+class CaptureBatchIn(BaseModel):
+    text: str
+    source_type: str = "list"
+    current_board_id: str | None = None
+    conversation_id: str | None = None
+    requested_mode: str = "save_only"
+
+
+def _capture_fields(body) -> dict:
+    fields = {"source_type": body.source_type, "requested_mode": body.requested_mode,
+              "current_board_id": body.current_board_id,
+              "conversation_id": body.conversation_id}
+    if getattr(body, "source_ref", None) is not None:
+        fields["source_ref"] = body.source_ref
+    if getattr(body, "current_card_id", None) is not None:
+        fields["current_card_id"] = body.current_card_id
+    return fields
+
+
+@app.post("/api/captures", status_code=201)
+def create_capture(body: CaptureIn) -> dict:
+    svc = _require_capture()
+    try:
+        view = svc.capture(body.raw_content, **_capture_fields(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return view.model_dump()
+
+
+@app.post("/api/captures/batch", status_code=201)
+def create_capture_batch(body: CaptureBatchIn) -> dict:
+    svc = _require_capture()
+    views = svc.capture_batch(body.text, **_capture_fields(body))
+    return {"count": len(views),
+            "batch_id": views[0].record.batch_id if views else None,
+            "captures": [v.model_dump() for v in views]}
+
+
+@app.get("/api/captures")
+def list_captures(status: str | None = None) -> list:
+    svc = _require_capture()
+    return [v.model_dump() for v in svc.list(status=status)]
+
+
+@app.get("/api/captures/{capture_id}")
+def get_capture(capture_id: str) -> dict:
+    svc = _require_capture()
+    try:
+        return svc.get(capture_id).model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/intake/inbox")
+def intake_inbox() -> dict:
+    """The Universal Inbox: captures grouped into lanes. A capture is recoverable
+    here even after it is routed elsewhere — nothing is ever silently dropped."""
+    return _require_capture().inbox()
+
+
+# ── Canonical work graph — one WorkItem, many board placements, typed edges ────
+# A task on three boards is ONE work item with three placements, never three
+# unrelated cards. Creating work items/placements/edges is planning, NOT a
+# mission — write-capable execution stays behind the mission + lease + wall.
+_workgraph_service = None   # type: ignore[var-annotated]
+
+
+def _get_workgraph_service():
+    global _workgraph_service
+    if _workgraph_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.work_graph import (
+            InMemoryWorkGraphStore,
+            LedgerWorkGraphStore,
+            WorkGraphService,
+        )
+        if WORKGRAPH_LEDGER:
+            store = LedgerWorkGraphStore(
+                httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            store = InMemoryWorkGraphStore()
+        _workgraph_service = WorkGraphService(
+            store,
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda prefix: f"{prefix}-" + secrets.token_hex(5))
+    return _workgraph_service
+
+
+def _require_workgraph():
+    if not WORKGRAPH_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="the work graph is disabled (set KANBAN_UI_WORKGRAPH_ENABLED=1)")
+    return _get_workgraph_service()
+
+
+class WorkItemIn(BaseModel):
+    title: str
+    description: str = ""
+    kind: str = "todo"
+    owner: str | None = None
+    priority: str | None = None
+    due_at: str | None = None
+    capture_id: str | None = None
+    conversation_id: str | None = None
+    mission_id: str | None = None
+
+
+class WorkStatusIn(BaseModel):
+    status: str
+
+
+class WorkPlacementIn(BaseModel):
+    board_id: str
+    domain_id: str
+    is_primary: bool = False
+    placement_stage: str | None = None
+    card_component: str = "generic_task"
+
+
+class WorkEdgeIn(BaseModel):
+    from_work_item_id: str
+    to_work_item_id: str
+    relation: str
+    reason: str | None = None
+
+
+def _wg_call(fn, *args, **kwargs):
+    """Translate a graph-integrity violation (cycle/dup primary) → 409, an unknown
+    ref → 404. Keeps the human-legible reason."""
+    from command_center.work_graph import WorkGraphError
+    try:
+        return fn(*args, **kwargs)
+    except WorkGraphError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/work-items", status_code=201)
+def create_work_item(body: WorkItemIn) -> dict:
+    svc = _require_workgraph()
+    item = _wg_call(svc.create_item, body.title, **body.model_dump(exclude={"title"}))
+    return {"item": item.model_dump(), "links": [lk.model_dump()
+                                                 for lk in svc.links_for(item.work_item_id)]}
+
+
+@app.get("/api/work-items")
+def list_work_items() -> list:
+    return [i.model_dump() for i in _require_workgraph().list_items()]
+
+
+@app.get("/api/work-items/{work_item_id}")
+def get_work_item(work_item_id: str) -> dict:
+    svc = _require_workgraph()
+    item = _wg_call(svc.get_item, work_item_id)
+    return {"item": item.model_dump(),
+            "placements": [p.model_dump()
+                           for p in svc._store.placements_for(work_item_id)],
+            "links": [lk.model_dump() for lk in svc.links_for(work_item_id)]}
+
+
+@app.get("/api/work-items/{work_item_id}/links")
+def get_work_item_links(work_item_id: str) -> list:
+    svc = _require_workgraph()
+    return [lk.model_dump() for lk in _wg_call(svc.links_for, work_item_id)]
+
+
+@app.post("/api/work-items/{work_item_id}/status")
+def set_work_item_status(work_item_id: str, body: WorkStatusIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.set_status, work_item_id, body.status).model_dump()
+
+
+@app.post("/api/work-items/{work_item_id}/placements", status_code=201)
+def add_work_placement(work_item_id: str, body: WorkPlacementIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.add_placement, work_item_id, body.board_id, body.domain_id,
+                    is_primary=body.is_primary, placement_stage=body.placement_stage,
+                    card_component=body.card_component).model_dump()
+
+
+@app.delete("/api/work-items/{work_item_id}/placements/{placement_id}")
+def remove_work_placement(work_item_id: str, placement_id: str) -> dict:
+    svc = _require_workgraph()
+    _wg_call(svc.remove_placement, placement_id)
+    return {"ok": True}
+
+
+@app.post("/api/work-edges", status_code=201)
+def create_work_edge(body: WorkEdgeIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.add_edge, body.from_work_item_id, body.to_work_item_id,
+                    body.relation, reason=body.reason).model_dump()
+
+
+@app.delete("/api/work-edges/{edge_id}")
+def remove_work_edge(edge_id: str) -> dict:
+    svc = _require_workgraph()
+    _wg_call(svc.remove_edge, edge_id)
+    return {"ok": True}
+
+
+@app.get("/api/work-graph")
+def whole_work_graph() -> dict:
+    return _require_workgraph().graph().model_dump()
+
+
+@app.get("/api/work-graph/{work_item_id}")
+def work_graph_neighbourhood(work_item_id: str, depth: int = 1) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.graph, work_item_id, depth=depth).model_dump()
 
 
 @app.get("/api/domain/{domain_id}/cards")
@@ -1291,8 +1702,14 @@ def _feed_agent_usage(client, session_id: str, ev: dict) -> None:
     """Tee a live `rate_limit` AgentEvent into the durable usage store so a
     running Claude session lights up its own Usage card + selector badge. Codex
     limits come from its own provider collector, so only Claude lanes are fed
-    here. Best-effort — a usage-tee failure must never break the browser SSE."""
-    if not (USAGE_ENABLED and USAGE_CLAUDE) or ev.get("type") != "rate_limit":
+    here. Best-effort — a usage-tee failure must never break the browser SSE.
+
+    RETIRED AS A WRITER under USAGE_LEDGER: when the cockpit reads the shared
+    Ledger, the WORKER is the sole authoritative writer (worker_app._run_turn),
+    so this browser-dependent tee stands down to avoid a second writer. It stays
+    active only as the in-memory dev/test fallback (no worker durability)."""
+    if not (USAGE_ENABLED and USAGE_CLAUDE) or USAGE_LEDGER \
+            or ev.get("type") != "rate_limit":
         return
     harness = _harness_of(client, session_id)
     if harness not in _CLAUDE_HARNESSES:
@@ -1405,6 +1822,10 @@ class ActionIn(BaseModel):
 class DomainMoveIn(BaseModel):
     card_id: str
     status: str
+    # Optional rejection metadata, recorded when a job card is moved to
+    # "Rejected / Skip" so the rejection report can suggest filter changes.
+    reason_code: str | None = None
+    reason_note: str | None = None
 
 
 class DomainNoteIn(BaseModel):
@@ -1431,6 +1852,22 @@ class JobSearchCategorySettingsIn(BaseModel):
     keywords: list[str] | None = None
     # required only when CREATING a new category (must name a known variant)
     resume_variant: str | None = None
+
+
+class JobSearchLocationsSettingsIn(BaseModel):
+    # partial update: only provided fields are written; validation happens
+    # against the merged JobSearchConfig so a bad mode/region combo returns 400
+    mode: str | None = None
+    remote_ok: bool | None = None
+    remote_types_allowed: list[str] | None = None
+    employment_types_allowed: list[str] | None = None
+    countries: list[str] | None = None
+    regions: list[str] | None = None
+
+
+class JobSearchLanguagesSettingsIn(BaseModel):
+    spoken: list[str] | None = None
+    require_spoken_for_apply: bool | None = None
 
 
 class StandingAnswerIn(BaseModel):
@@ -1573,6 +2010,130 @@ def _process_selected_job_cards() -> dict[str, Any]:
     }
 
 
+class _JobPrepQueue:
+    """Runs job-card packet preparation OFF the request path so moving a card to
+    'Selected by Geoff' returns immediately instead of blocking on an LLM run.
+
+    A single daemon worker drains requests. Rapid moves (or a bulk-select)
+    coalesce into at most one pending re-run, so N moves do not spawn N runs;
+    process_selected is idempotent (already-prepared cards are skipped), so one
+    coalesced run still prepares every pending card. The run holds
+    _job_finalize_lock so preparation never overlaps a Completed finalize.
+
+    The worker never dies on a failed run: the error is captured and surfaced
+    via /api/job-search/prep-status rather than swallowed or killing the queue.
+    """
+
+    def __init__(self) -> None:
+        self._cv = threading.Condition()
+        self._pending = False
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._runs_completed = 0
+        self._requests_total = 0
+        self._last_finished_at: str | None = None
+        self._last_result: dict[str, Any] | None = None
+        self._last_error: str | None = None
+
+    def _ensure_worker(self) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(
+                target=self._loop, name="job-prep-worker", daemon=True)
+            self._thread.start()
+
+    def request(self) -> dict[str, Any]:
+        with self._cv:
+            self._pending = True
+            self._requests_total += 1
+            self._ensure_worker()
+            self._cv.notify_all()
+            snapshot = self._snapshot_locked()
+        snapshot["operation"] = "process_selected_queued"
+        return snapshot
+
+    def status(self) -> dict[str, Any]:
+        with self._cv:
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> dict[str, Any]:
+        return {
+            "pending": self._pending,
+            "running": self._running,
+            "runs_completed": self._runs_completed,
+            "requests_total": self._requests_total,
+            "last_finished_at": self._last_finished_at,
+            "last_result": self._last_result,
+            "last_error": self._last_error,
+        }
+
+    def _loop(self) -> None:
+        while True:
+            with self._cv:
+                while not self._pending:
+                    self._cv.wait()
+                self._pending = False
+                self._running = True
+            result: dict[str, Any] | None = None
+            error: str | None = None
+            try:
+                with _job_finalize_lock:
+                    result = _process_selected_job_cards()
+            except Exception as exc:  # noqa: BLE001 - worker must not die
+                error = repr(exc)
+            with self._cv:
+                self._running = False
+                self._runs_completed += 1
+                self._last_result = result
+                self._last_error = error
+                self._last_finished_at = datetime.now(UTC).isoformat()
+
+
+_job_prep_queue = _JobPrepQueue()
+
+
+def _record_job_rejection_from_card(
+    card: dict, reason_code: str | None, reason_note: str | None,
+) -> dict[str, Any] | None:
+    """Record why a job card was rejected so the rejection report can suggest
+    filter/scoring changes. A drag with no reason still logs one (as 'other')
+    so the count is honest; the UI supplies a reason code when it can."""
+    from command_center.job_search.rejections import record_rejection
+
+    fields = _card_store_fields(card)
+    job_key = str(fields.get("job_key") or card.get("card_id") or "").strip()
+    if not job_key:
+        return None
+    _, root = _job_search_config_and_root()
+    score = fields.get("fit_score")
+    try:
+        fit_score = int(score) if score not in (None, "") else None
+    except (TypeError, ValueError):
+        fit_score = None
+    try:
+        return record_rejection(
+            root,
+            job_key=job_key,
+            reason_code=(reason_code or "other"),
+            note=reason_note,
+            card_id=str(card.get("card_id") or ""),
+            company=fields.get("company") or card.get("company"),
+            role_title=fields.get("role_title") or card.get("role_title"),
+            location=fields.get("location"),
+            remote_type=fields.get("remote_type"),
+            fit_score=fit_score,
+        )
+    except ValueError:
+        # unknown reason code from a client — fall back to 'other' rather than
+        # 500 the move; the rejection is still captured
+        return record_rejection(
+            root, job_key=job_key, reason_code="other", note=reason_note,
+            card_id=str(card.get("card_id") or ""),
+            company=fields.get("company") or card.get("company"),
+            role_title=fields.get("role_title") or card.get("role_title"),
+            location=fields.get("location"),
+            remote_type=fields.get("remote_type"), fit_score=fit_score)
+
+
 def _note_type_moves_to_interviewing(note_type: str) -> bool:
     lowered = note_type.lower()
     return any(token in lowered for token in (
@@ -1622,7 +2183,16 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
         and body.status in {"Selected by Geoff", "In Progress"}
         and _job_card_needs_packet(card)
     ):
-        side_effect = _process_selected_job_cards()
+        # Queue packet prep instead of running it inline: the move returns
+        # immediately so Geoff can move through cards fast, and the background
+        # worker prepares them. /api/job-search/prep-status reports progress.
+        side_effect = _job_prep_queue.request()
+    elif domain_id == "job_application" and body.status == "Rejected / Skip":
+        rejection = _record_job_rejection_from_card(
+            card, body.reason_code, body.reason_note)
+        if rejection is not None:
+            side_effect = {"operation": "rejection_recorded",
+                           "reason_code": rejection["reason_code"]}
     moved = _find_domain_card(provider, body.card_id)
     return {
         "status": "moved",
@@ -2126,6 +2696,8 @@ def _write_job_search_profile_settings(override: dict[str, Any]) -> dict:
         "job_search": cfg.job_search.model_dump(mode="json"),
         "ranking": cfg.ranking.model_dump(mode="json"),
         "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
+        "locations": cfg.locations.model_dump(mode="json"),
+        "languages": cfg.languages.model_dump(mode="json"),
     }
 
 
@@ -2183,6 +2755,8 @@ def job_search_profile_controls() -> dict:
         "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
         "company_targets": cfg.company_targets.model_dump(mode="json"),
         "executor_fallback": cfg.executor_fallback.model_dump(mode="json"),
+        "locations": cfg.locations.model_dump(mode="json"),
+        "languages": cfg.languages.model_dump(mode="json"),
         "standing_answers": _standing_answers_block(root),
         "dag": _job_search_dag_block(cfg),
     }
@@ -2243,6 +2817,45 @@ def update_job_search_runtime(body: JobSearchRuntimeSettingsIn) -> dict:
     for key, value in body.model_dump(exclude_none=True).items():
         runtime[key] = value
     return _write_job_search_profile_settings(override)
+
+
+def _write_profile_override_or_400(override: dict[str, Any], what: str) -> dict:
+    """Persist a profile-settings override, converting a contract violation
+    (e.g. mode=regions with no region/country) into a 400 instead of a 500."""
+    from pydantic import ValidationError
+
+    try:
+        return _write_job_search_profile_settings(override)
+    except ValidationError as exc:
+        errors = exc.errors()
+        msg = errors[0].get("msg") if errors else f"invalid {what} settings"
+        raise HTTPException(status_code=400, detail=str(msg)) from exc
+
+
+@app.put("/api/job-search/profile-controls/locations")
+def update_job_search_locations(body: JobSearchLocationsSettingsIn) -> dict:
+    """Update the location + work-arrangement filter (the countries/states
+    checklist and remote/hybrid/onsite + full-time toggles). Partial update:
+    only provided fields change. Validated against the merged config, so an
+    empty region list under mode=regions (with no country) returns 400."""
+    _require_profile_writable()
+    override = _read_job_search_profile_settings()
+    section = override.setdefault("locations", {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        section[key] = value
+    return _write_profile_override_or_400(override, "locations")
+
+
+@app.put("/api/job-search/profile-controls/languages")
+def update_job_search_languages(body: JobSearchLanguagesSettingsIn) -> dict:
+    """Update the spoken-languages filter. A posting requiring a language not
+    listed here is hard-excluded from suggestions."""
+    _require_profile_writable()
+    override = _read_job_search_profile_settings()
+    section = override.setdefault("languages", {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        section[key] = value
+    return _write_profile_override_or_400(override, "languages")
 
 
 @app.put("/api/job-search/profile-controls/category/{category_id}")
@@ -2466,13 +3079,36 @@ def bulk_select_suggested(body: BulkSelectIn) -> dict:
         moved.append({"card_id": card_id, "company": card.get("company"),
                       "role_title": card.get("role_title"),
                       "event_id": event.event_id})
+    # Queue background packet prep for the whole batch (respects the daily
+    # selected limit; the rest stay queued for the next run).
+    prep = None
+    if moved and target in {"Selected by Geoff", "In Progress"}:
+        prep = _job_prep_queue.request()
     return {
         "status": "bulk_selected",
         "automation_class": body.automation_class,
         "target": target,
         "moved_count": len(moved),
         "moved": moved,
+        "prep": prep,
     }
+
+
+@app.get("/api/job-search/prep-status")
+def job_search_prep_status() -> dict:
+    """Background packet-prep queue status: whether a run is pending/running and
+    the last run's result/error. The UI polls this to badge 'preparing...' cards
+    and to surface a failed prep instead of leaving a card silently stuck."""
+    return {"operation": "prep_status", **_job_prep_queue.status()}
+
+
+@app.get("/api/job-search/rejections-report")
+def job_search_rejections_report() -> dict:
+    """Aggregate recorded rejections into concrete filter/scoring suggestions."""
+    from command_center.job_search.rejections import rejection_report
+
+    cfg, root = _job_search_config_and_root()
+    return rejection_report(root=root, cfg=cfg)
 
 
 @app.put("/api/job-search/profile-controls/draft-default")
@@ -2512,6 +3148,7 @@ def board_registry() -> dict:
         boards.append({
             "board_id": board.get("board_id"),
             "provider": board.get("provider"),
+            "execution_scope": board.get("execution_scope", "repository"),
             "workspace_ref": board.get("workspace_ref"),
             "board_ref": board.get("board_ref"),
             "repo_ids": board.get("repo_ids", []),
@@ -3086,6 +3723,20 @@ class AgentApprovalIn(BaseModel):
     reason: str = ""
 
 
+class AgentPromoteIn(BaseModel):
+    """'Track as mission' — the OPTIONAL governance wrapper for an existing chat.
+    summary becomes the mission's action line; nothing here grants writes."""
+    summary: str = ""
+
+
+class ChatPromoteIn(BaseModel):
+    """'Track as mission' for a GatewayCore conversation (no agent session).
+    Same inert tracking contract; nothing here grants writes."""
+    conversation_id: str
+    summary: str = ""
+    repo: str = ""
+
+
 # ── Usage & Limits routes (read-only; in-process UsageService) ────────────────
 # NOTE: the literal /api/model-usage/* paths are declared BEFORE the
 # /api/model-usage/{runtime_id} catch-all so FastAPI's in-order matching does
@@ -3255,6 +3906,82 @@ def resume_agent_session(session_id: str) -> dict:
 def close_agent_session(session_id: str) -> dict:
     client = _require_agent_sessions()
     return _call_worker(client.close_session, session_id)
+
+
+@app.post("/api/agent-sessions/{session_id}/promote")
+def promote_agent_session(session_id: str, body: AgentPromoteIn) -> dict:
+    """'Track as mission' — the OPTIONAL governance/tracking wrapper.
+
+    A mission is NEVER a prerequisite for chat. This records an EXISTING read-only
+    agent session as a Ledger mission so the same conversation becomes monitorable
+    on the missions board. It deliberately:
+      - reuses the durable session (read via the worker) — it does NOT call
+        start_session/create_session, so the conversation is not restarted or
+        duplicated;
+      - opens an L0 (read-only), requires_approval=False mission with NO branch —
+        so there is nothing to execute and no write capability is granted
+        (`cc branch-mission` never polls open missions; it generates its own id);
+      - links the session to the mission via the append-only event log (kind
+        `note`), needing no schema change.
+    Writes remain gated behind lease + worktree + approval, unchanged by this."""
+    client = _require_agent_sessions()
+    rec = _call_worker(client.get_session, session_id)   # durable repo/conversation
+    repo_id = (rec.get("repo_id") or "").strip()
+    conversation_id = rec.get("conversation_id") or ""
+    action = (body.summary or "").strip() or f"Tracked cockpit agent session {session_id}"
+    try:
+        mr = httpx.post(f"{LEDGER_BASE_URL}/mission", json={
+            "action": action, "repo": repo_id or "unknown", "branch": "",
+            "risk": "L0", "requires_approval": False}, timeout=15)
+        mr.raise_for_status()
+        mission = mr.json()
+        mid = mission["id"]
+        er = httpx.post(f"{LEDGER_BASE_URL}/mission/{mid}/event", json={
+            "kind": "note", "payload": {
+                "event": "agent_session_link", "session_id": session_id,
+                "conversation_id": conversation_id, "harness": rec.get("harness"),
+                "repo_id": repo_id, "mode": "analysis", "promoted_from": "cockpit_chat"}},
+            timeout=15)
+        er.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"ledger error at {LEDGER_BASE_URL}: {exc}") from exc
+    return {"mission_id": mid, "status": mission.get("status", "open"),
+            "session_id": session_id, "conversation_id": conversation_id}
+
+
+@app.post("/api/chat/promote")
+def promote_chat(body: ChatPromoteIn) -> dict:
+    """'Track as mission' for a GatewayCore conversation (no agent session).
+
+    Same INERT tracking-mission contract as the agent-session promote: L0
+    (read-only), requires_approval=False, NO branch — so nothing executes and no
+    write capability is granted. It links the conversation via the append-only
+    event log. A mission is never required to chat; this is opt-in tracking so a
+    plain conversation can be monitored on the missions board without losing
+    context. Writes remain gated behind lease + worktree + approval, unchanged."""
+    conversation_id = (body.conversation_id or "").strip()
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id is required")
+    action = (body.summary or "").strip() or f"Tracked cockpit chat {conversation_id}"
+    repo = (body.repo or "").strip() or "unknown"
+    try:
+        mr = httpx.post(f"{LEDGER_BASE_URL}/mission", json={
+            "action": action, "repo": repo, "branch": "",
+            "risk": "L0", "requires_approval": False}, timeout=15)
+        mr.raise_for_status()
+        mission = mr.json()
+        mid = mission["id"]
+        er = httpx.post(f"{LEDGER_BASE_URL}/mission/{mid}/event", json={
+            "kind": "note", "payload": {
+                "event": "chat_conversation_link", "conversation_id": conversation_id,
+                "promoted_from": "cockpit_gateway_chat"}}, timeout=15)
+        er.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"ledger error at {LEDGER_BASE_URL}: {exc}") from exc
+    return {"mission_id": mid, "status": mission.get("status", "open"),
+            "conversation_id": conversation_id}
 
 
 _AGENT_EVENT_POLL_SECONDS = 0.5

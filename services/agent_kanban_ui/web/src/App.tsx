@@ -6,10 +6,14 @@ import {
   ChatRuntime, DomainActions, DomainCard, DomainCardDetail, DomainCardProgress,
   DomainCards, DomainSchema, DomainSpec,
   FieldSpec, JobProfileControls,
-  createDomainSchema, deleteDomainSchema,
+  ExecutionScope,
+  boardIdFromTitle, createBoardModule, createDomainSchema, deleteDomainSchema,
   fetchBoardRegistry,
-  MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
+  InboxData,
+  MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig,
+  createCapture, createCaptureBatch, fetchActivity,
   fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
+  fetchInbox,
   fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse, TranscriptTurn,
   ChatConversation, fetchChatConversations, deleteChatConversation,
   fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
@@ -21,17 +25,21 @@ import {
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
   StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
   reclassifyJobApplications, ReclassifyResult, bulkSelectSuggested,
+  updateJobSearchLocations, updateJobSearchLanguages,
+  fetchPrepStatus, fetchRejectionsReport, RejectionsReport,
+  REJECT_REASONS,
   AgentEvent, AgentHarnessOption, AgentSessionRecord, AgentModelOption,
   closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
-  fetchAgentSession, fetchHarnessModels, interruptAgentSession, resolveAgentApproval,
-  resumeAgentSession, sendAgentMessage, streamAgentEvents,
+  fetchAgentSession, fetchHarnessModels, interruptAgentSession, promoteAgentSession,
+  promoteChat, resolveAgentApproval, resumeAgentSession, sendAgentMessage, streamAgentEvents,
   UsageStatus, UsageLimit, CollectorHealth,
   fetchModelUsage, fetchCollectorHealth, refreshModelUsage,
 } from "./api";
 
-type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat";
+type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox";
 const NAV: { id: View; label: string }[] = [
   { id: "domains", label: "All Boards" },
+  { id: "inbox", label: "Inbox" },
   { id: "settings", label: "Controls" },
   { id: "router", label: "Router" },
   { id: "diagnostics", label: "Status" },
@@ -448,6 +456,116 @@ function fmtCost(cost: number | null, source: string): string {
   if (source === "subscription_not_metered") return "subscription (not $-metered)";
   return "cost unknown";
 }
+// Global Capture composer — a rough thought becomes a durable, recoverable
+// intake record. Capturing NEVER starts work; it's saved to the Inbox for later
+// classification/routing. A bulk paste is split into one capture per idea.
+function CaptureComposer({ context, onClose, onCaptured }: {
+  context?: string; onClose: () => void; onCaptured: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [bulk, setBulk] = useState(false);
+  const [mode, setMode] = useState("save_only");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function save() {
+    if (!text.trim() || busy) return;
+    setBusy(true); setMsg(null);
+    const extra = { requested_mode: mode, current_board_id: context };
+    try {
+      if (bulk) {
+        const r = await createCaptureBatch(text, extra);
+        setMsg(`saved ${r.count} capture${r.count === 1 ? "" : "s"} to the Inbox`);
+      } else {
+        await createCapture({ raw_content: text, ...extra });
+        setMsg("saved to the Inbox");
+      }
+      setText("");
+      onCaptured();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="capture-overlay" onClick={onClose}>
+      <div className="capture-composer" onClick={(e) => e.stopPropagation()}>
+        <div className="settings-card-head">
+          <h3>Capture{context ? ` · ${context}` : ""}</h3>
+          <button className="editbtn" onClick={onClose}>close</button>
+        </div>
+        <textarea className="capture-text" value={text} autoFocus rows={5}
+          placeholder="What are you thinking about? (a note, todo, idea, post, paper, or a repo task)"
+          onChange={(e) => setText(e.target.value)} />
+        <div className="capture-controls">
+          <label className="capture-check">
+            <input type="checkbox" checked={bulk}
+              onChange={(e) => setBulk(e.target.checked)} /> bulk list (one capture per line/bullet)
+          </label>
+          <label className="chat-field"><span className="muted small">process</span>
+            <select className="select" value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="save_only">Save only</option>
+              <option value="prepare_later">Prepare later (daily)</option>
+              <option value="prepare_now">Prepare now</option>
+              <option value="create_task">Create a task</option>
+            </select>
+          </label>
+          <button className="actbtn" disabled={busy || !text.trim()} onClick={() => void save()}>
+            {busy ? "saving…" : "Capture"}
+          </button>
+        </div>
+        <div className="muted small">
+          Saved, not started — nothing runs until you prepare or route it.
+          {msg && <> · {msg}</>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The Universal Inbox — every capture, grouped into its lane. Recoverable here
+// even after it's routed. Read-only for now (classification/routing are later).
+function InboxView({ refreshKey, onOpenChat }: {
+  refreshKey: number;
+  onOpenChat?: (prompt: string, conversationId?: string, storyTs?: string, target?: string) => void;
+}) {
+  const [inbox, setInbox] = useState<InboxData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchInbox().then((d) => live && setInbox(d)).catch((e) => live && setErr((e as Error).message));
+    return () => { live = false; };
+  }, [refreshKey]);
+  if (err) return <div className="error">Inbox unavailable — {err}</div>;
+  if (!inbox) return <div className="loading">…</div>;
+  if (inbox.total === 0) {
+    return <div className="empty">No captures yet. Use <b>+ Capture</b> to save an idea, todo, or note.</div>;
+  }
+  return (
+    <div className="inbox-view">
+      <div className="muted small">{inbox.total} capture{inbox.total === 1 ? "" : "s"} · saved, not started</div>
+      <div className="inbox-columns">
+        {inbox.columns.map((col) => (
+          <section className="inbox-col" key={col.name}>
+            <h3>{col.name.replace(/_/g, " ")} <span className="status-pill">{col.captures.length}</span></h3>
+            {col.captures.map((c) => (
+              <div className="inbox-card" key={c.capture_id}>
+                <div className="inbox-card-body">{c.preview}</div>
+                <div className="inbox-card-meta muted small">
+                  {c.capture_kind ?? "unclassified"}
+                  {c.suggested_board_id ? ` → ${c.suggested_board_id}` : ""}
+                  {c.batch_id ? " · batch" : ""} · {c.requested_mode.replace(/_/g, " ")}
+                </div>
+                <button className="actbtn" onClick={() =>
+                  onOpenChat?.(`Help me think through this captured idea and prepare a readiness packet:\n\n${c.preview}`)}>
+                  Open in chat
+                </button>
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function UsageView() {
   const [statuses, setStatuses] = useState<UsageStatus[] | null>(null);
   const [health, setHealth] = useState<CollectorHealth[]>([]);
@@ -885,6 +1003,13 @@ function JobApplicationCard({ card }: { card: DomainCard }) {
     ? "Bot-prepared handoff: the packet is ready, but automatic submit is disabled. Geoff can take over, submit, then move this to Completed."
     : manualReason;
   const nextAction = valText(card.next_action);
+  // The background prep worker has not produced a packet yet: the card sits in
+  // a selected lane with no application_id/materials_path. Shown so a queued
+  // move reads as "working" rather than stuck.
+  const status = valText(card.status);
+  const isPreparing =
+    (status === "Selected by Geoff" || status === "In Progress")
+    && !valText(card.application_id) && !valText(card.materials_path);
   return (
     <div className="job-card domain-card-body">
       <div className="domain-card-top">
@@ -901,6 +1026,7 @@ function JobApplicationCard({ card }: { card: DomainCard }) {
       <div className="domain-badges">
         <Badge value={card.automation_class} />
         <Badge value={card.resume_variant} />
+        {isPreparing && <span className="badge job-prep-badge">preparing packet…</span>}
       </div>
       {handoffReason && <div className="job-card-note">{handoffReason}</div>}
       {nextAction && <div className="job-card-next">{nextAction}</div>}
@@ -995,12 +1121,26 @@ function GenericTaskCard({ card }: { card: DomainCard }) {
 }
 function DomainCardTile({
   spec, card, onOpen, canDrag = false, onDragStart, moveTargets = [], onMove, onOpenPacket,
+  onOpenChat,
 }: {
   spec: DomainSpec; card: DomainCard; onOpen: () => void;
   canDrag?: boolean; onDragStart?: () => void;
   moveTargets?: string[]; onMove?: (status: string) => void;
   onOpenPacket?: () => void;
+  // (prompt, target) — target undefined = GatewayCore, "agent:<harness>" = Claude/Codex
+  onOpenChat?: (prompt: string, target?: string) => void;
 }) {
+  // Seed the chat with this card's full context (the same authoritative
+  // chat_prompt the drawer uses), then open on the chosen assistant lane.
+  async function chatAboutCard(target?: string) {
+    const cid = card.card_id;
+    const fallback = `About ${spec.title}${cid != null ? ` card ${cid}` : ""}:`;
+    if (cid == null) { onOpenChat?.(fallback, target); return; }
+    try {
+      const prog = await fetchDomainCardProgress(spec.domain_id, String(cid));
+      onOpenChat?.(prog.chat_prompt || fallback, target);
+    } catch { onOpenChat?.(fallback, target); }
+  }
   let body: ReactNode;
   switch (spec.card_component) {
     case "job_application": body = <JobApplicationCard card={card} />; break;
@@ -1020,6 +1160,22 @@ function DomainCardTile({
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(); }}>
       {body}
+      {onOpenChat && (
+        <div className="card-chat-actions" onPointerDown={(e) => e.stopPropagation()}>
+          <button className="actbtn" title="Open this card in chat with its full context"
+            onClick={(e) => { e.stopPropagation(); void chatAboutCard(); }}>
+            Open in chat
+          </button>
+          <button className="actbtn" title="Investigate this card with Claude Code (read-only agent)"
+            onClick={(e) => { e.stopPropagation(); void chatAboutCard("agent:claude_code_local"); }}>
+            Ask Claude
+          </button>
+          <button className="actbtn" title="Investigate this card with Codex (read-only agent)"
+            onClick={(e) => { e.stopPropagation(); void chatAboutCard("agent:codex_agent"); }}>
+            Ask Codex
+          </button>
+        </div>
+      )}
       {onOpenPacket && (
         <button className="actbtn card-packet-btn"
           title="open the application packet: resume, cover letter, story, approve & submit"
@@ -1704,6 +1860,85 @@ function DomainSchemaEditor({ initial, mode, editable, onClose, onSaved }: {
   );
 }
 
+// Guided Create-Board flow: name → (optional repos/columns) → preview → create.
+// Produces a whole board module (kanban board + generic_task surface) via the
+// typed /api/board-module endpoint. Generic-first; the user can upgrade the card
+// component + fields later with the "edit" (DomainSchemaEditor) flow.
+function CreateBoardWizard({ editable, onClose, onCreated }: {
+  editable: boolean; onClose: () => void; onCreated: (boardId: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [icon, setIcon] = useState("");
+  const [scope, setScope] = useState<ExecutionScope>("life");
+  const [reposText, setReposText] = useState("");
+  const [columnsText, setColumnsText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const boardId = boardIdFromTitle(title);
+  const repoIds = reposText.split(",").map((s) => s.trim()).filter(Boolean);
+  const columns = columnsText.split(",").map((s) => s.trim()).filter(Boolean);
+  const needsRepo = scope !== "life";
+  async function create() {
+    if (!boardId || busy) return;
+    setBusy(true); setMsg(null);
+    try {
+      const res = await createBoardModule({
+        title: title.trim(), description: description.trim(), icon: icon.trim(),
+        execution_scope: scope, repo_ids: repoIds, columns });
+      onCreated(res.board_id);
+      onClose();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="schema-editor">
+      <div className="settings-card-head">
+        <h3>Create Board</h3>
+        <button className="editbtn" onClick={onClose}>close</button>
+      </div>
+      <div className="schema-form-grid">
+        <label>Name<input value={title} disabled={!editable || busy} autoFocus
+          placeholder="e.g. Books, Health, Papers"
+          onChange={(e) => setTitle(e.target.value)} /></label>
+        <label>Icon<input value={icon} disabled={!editable || busy}
+          placeholder="emoji (optional)" onChange={(e) => setIcon(e.target.value)} /></label>
+        <label className="schema-form-wide">Description
+          <input value={description} disabled={!editable || busy}
+            placeholder="what this board is for (optional)"
+            onChange={(e) => setDescription(e.target.value)} /></label>
+        <label>Kind<select className="select" value={scope} disabled={!editable || busy}
+          onChange={(e) => setScope(e.target.value as ExecutionScope)}>
+          <option value="life">life — personal, no repository</option>
+          <option value="repository">repository — drives repo work</option>
+          <option value="hybrid">hybrid — notes + repo work</option>
+        </select></label>
+        <label>Repositories<input value={reposText} disabled={!editable || busy || !needsRepo}
+          placeholder={needsRepo ? "repo ids, comma-separated (required)" : "not used for a life board"}
+          onChange={(e) => setReposText(e.target.value)} /></label>
+        <label>Columns<input value={columnsText} disabled={!editable || busy}
+          placeholder="leave blank for the standard workflow"
+          onChange={(e) => setColumnsText(e.target.value)} /></label>
+      </div>
+      <div className="schema-preview">
+        <div className="muted small">Preview — a new {scope} board module:</div>
+        <ul className="muted small">
+          <li>board id <code>{boardId || "—"}</code> · generic-task cards · chat enabled</li>
+          <li>columns: {columns.length ? columns.join(", ") : "Backlog, Ready, In Progress, Done, Blocked, Rejected, Awaiting Approval"}</li>
+          <li>repos: {needsRepo ? (repoIds.length ? repoIds.join(", ") : "⚠ name at least one") : "none (life board)"}</li>
+          <li>governance: wall verbs (approve / merge / deploy / delete) stay forbidden; human approval unchanged</li>
+        </ul>
+      </div>
+      {msg && <div className="error">ERR {msg}</div>}
+      <div className="settings-head-actions">
+        <button className="actbtn" disabled={!editable || busy || !boardId} onClick={() => void create()}>
+          {busy ? "creating…" : "Create board"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BoardControlsPanel({ schema, registry, err, onSaved }: {
   schema: DomainSchema | null; registry: BoardRegistry | null; err: string | null;
   onSaved: () => void;
@@ -1711,6 +1946,7 @@ function BoardControlsPanel({ schema, registry, err, onSaved }: {
   const domains = schema?.domains ?? [];
   const editable = !!schema?.writable;
   const [editing, setEditing] = useState<{ mode: "create" | "update"; domain: DomainSpec } | null>(null);
+  const [wizard, setWizard] = useState(false);
   return (
     <section className="settings-card settings-card-wide">
       <div className="settings-card-head">
@@ -1720,12 +1956,19 @@ function BoardControlsPanel({ schema, registry, err, onSaved }: {
             {editable ? "editable" : "read-only"}
           </span>
           <span className="status-pill">{domains.length} boards</span>
-          <button className="actbtn" disabled={!editable}
+          <button className="actbtn" disabled={!editable} onClick={() => setWizard(true)}>
+            Create board
+          </button>
+          <button className="editbtn" disabled={!editable}
             onClick={() => setEditing({ mode: "create", domain: newDomainSpec(domains) })}>
-            add board
+            advanced
           </button>
         </div>
       </div>
+      {wizard && (
+        <CreateBoardWizard editable={editable} onClose={() => setWizard(false)}
+          onCreated={() => onSaved()} />
+      )}
       {err && <div className="error">ERR {err}</div>}
       {schema && (
         <div className="diag-table">
@@ -1891,6 +2134,185 @@ function CategorySettingRow({ category, editable, onSaved }: {
   );
 }
 
+const US_STATE_NAMES = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+  "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+  "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine",
+  "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi",
+  "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
+  "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+  "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
+  "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia",
+  "Washington", "West Virginia", "Wisconsin", "Wyoming",
+  "District of Columbia",
+];
+
+function JobFilterSettings({ controls, editable, onSaved }: {
+  controls: JobProfileControls; editable: boolean; onSaved: () => void;
+}) {
+  const loc = controls.locations;
+  const lang = controls.languages;
+  const [spoken, setSpoken] = useState(lang.spoken.join(", "));
+  const [requireSpoken, setRequireSpoken] = useState(lang.require_spoken_for_apply);
+  const [mode, setMode] = useState(loc.mode);
+  const [remoteOk, setRemoteOk] = useState(loc.remote_ok);
+  const [arrangements, setArrangements] = useState<string[]>(loc.remote_types_allowed);
+  const [fullTime, setFullTime] = useState(loc.employment_types_allowed.includes("full_time"));
+  const [countries, setCountries] = useState(loc.countries.join(", "));
+  const [states, setStates] = useState<string[]>(
+    US_STATE_NAMES.filter((s) => loc.regions.some((r) => r.toLowerCase() === s.toLowerCase())));
+  const [customRegions, setCustomRegions] = useState(
+    loc.regions.filter((r) => !US_STATE_NAMES.some((s) => s.toLowerCase() === r.toLowerCase())).join(", "));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const l = controls.languages, c = controls.locations;
+    setSpoken(l.spoken.join(", "));
+    setRequireSpoken(l.require_spoken_for_apply);
+    setMode(c.mode);
+    setRemoteOk(c.remote_ok);
+    setArrangements(c.remote_types_allowed);
+    setFullTime(c.employment_types_allowed.includes("full_time"));
+    setCountries(c.countries.join(", "));
+    setStates(US_STATE_NAMES.filter((s) => c.regions.some((r) => r.toLowerCase() === s.toLowerCase())));
+    setCustomRegions(c.regions.filter((r) => !US_STATE_NAMES.some((s) => s.toLowerCase() === r.toLowerCase())).join(", "));
+  }, [controls]);
+
+  const disabled = !editable || busy;
+  const toggle = (list: string[], value: string) =>
+    (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  const splitCsv = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+  async function saveLanguages() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchLanguages({
+        spoken: splitCsv(spoken), require_spoken_for_apply: requireSpoken });
+      setMsg("languages saved"); onSaved();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+  async function saveLocations() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchLocations({
+        mode, remote_ok: remoteOk,
+        remote_types_allowed: arrangements,
+        employment_types_allowed: fullTime ? ["full_time"] : [],
+        countries: splitCsv(countries),
+        regions: [...states, ...splitCsv(customRegions)],
+      });
+      setMsg("locations saved"); onSaved();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="settings-form job-filter-settings">
+      <h3>Languages I speak</h3>
+      <div className="settings-form-grid">
+        <label>Spoken (comma-separated)
+          <input value={spoken} disabled={disabled}
+            onChange={(e) => setSpoken(e.target.value)} /></label>
+        <label className="chip-check">
+          <input type="checkbox" checked={requireSpoken} disabled={disabled}
+            onChange={(e) => setRequireSpoken(e.target.checked)} />
+          hide jobs that require a language I don't speak</label>
+      </div>
+      <div className="preset-actions">
+        <button className="actbtn" disabled={disabled} onClick={saveLanguages}>save languages</button>
+      </div>
+
+      <h3>Locations & work arrangement</h3>
+      <div className="settings-form-grid">
+        <label>Match mode
+          <select value={mode} disabled={disabled} onChange={(e) => setMode(e.target.value)}>
+            <option value="worldwide">worldwide (anywhere)</option>
+            <option value="countries">countries only</option>
+            <option value="regions">specific states / metros</option>
+          </select></label>
+        <label className="chip-check">
+          <input type="checkbox" checked={remoteOk} disabled={disabled}
+            onChange={(e) => setRemoteOk(e.target.checked)} /> accept remote anywhere</label>
+      </div>
+      <div className="filter-toggle-row">
+        <span className="filter-toggle-label">Work arrangement:</span>
+        {["remote", "hybrid", "onsite"].map((a) => (
+          <label key={a} className={`chip-check ${arrangements.includes(a) ? "chip-on" : ""}`}>
+            <input type="checkbox" checked={arrangements.includes(a)} disabled={disabled}
+              onChange={() => setArrangements((cur) => toggle(cur, a))} />{a}</label>
+        ))}
+        <label className={`chip-check ${fullTime ? "chip-on" : ""}`}>
+          <input type="checkbox" checked={fullTime} disabled={disabled}
+            onChange={(e) => setFullTime(e.target.checked)} /> full-time only</label>
+      </div>
+      <label className="filter-wide">Countries (comma-separated)
+        <input value={countries} disabled={disabled}
+          onChange={(e) => setCountries(e.target.value)} /></label>
+      <div className="filter-states">
+        <span className="filter-toggle-label">States / DC checklist:</span>
+        <div className="state-chip-grid">
+          {US_STATE_NAMES.map((s) => (
+            <label key={s} className={`chip-check ${states.includes(s) ? "chip-on" : ""}`}>
+              <input type="checkbox" checked={states.includes(s)} disabled={disabled}
+                onChange={() => setStates((cur) => toggle(cur, s))} />{s}</label>
+          ))}
+        </div>
+      </div>
+      <label className="filter-wide">Other places (metros / free text, comma-separated)
+        <input value={customRegions} disabled={disabled}
+          onChange={(e) => setCustomRegions(e.target.value)} /></label>
+      <div className="preset-actions">
+        <button className="actbtn" disabled={disabled} onClick={saveLocations}>save locations</button>
+        {msg && <span className={msg.endsWith("saved") ? "actmsg" : "error-inline"}>{msg}</span>}
+      </div>
+      <div className="filter-note">
+        Clear mismatches (onsite/hybrid outside these places, or a job requiring a
+        language you don't speak) are hidden from Suggested Jobs; unclear postings
+        stay visible, ranked lower.
+      </div>
+    </div>
+  );
+}
+
+function RejectionInsights() {
+  const [report, setReport] = useState<RejectionsReport | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    fetchRejectionsReport().then(setReport)
+      .catch((e) => setErr((e as Error).message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (err) return <div className="error-inline">rejections: {err}</div>;
+  if (!report) return <div className="muted">loading rejection insights…</div>;
+  return (
+    <div className="rejection-insights">
+      <div className="preset-actions">
+        <span>{report.total_rejections} rejection{report.total_rejections === 1 ? "" : "s"} recorded</span>
+        <button className="actbtn" onClick={load}>refresh</button>
+      </div>
+      {Object.keys(report.counts_by_reason).length > 0 && (
+        <div className="domain-badges">
+          {Object.entries(report.counts_by_reason).map(([code, n]) => (
+            <span key={code} className="badge">{report.reason_labels[code] ?? code}: {n}</span>
+          ))}
+        </div>
+      )}
+      {report.suggestions.length === 0
+        ? <div className="muted">No suggestions yet — reject a few jobs with a reason to build signal.</div>
+        : (
+          <ul className="rejection-suggestions">
+            {report.suggestions.map((s, i) => (
+              <li key={i} className={`rej-sugg rej-${s.priority}`}>
+                <span className="rej-area">[{s.priority}] {s.area}</span> {s.suggestion}
+              </li>
+            ))}
+          </ul>
+        )}
+      <div className="diag-row"><span>source</span><code>{report.source}</code></div>
+    </div>
+  );
+}
+
 function JobSearchControlsPanel({ controls, onSaved }: {
   controls: JobProfileControls; onSaved: () => void;
 }) {
@@ -1904,6 +2326,7 @@ function JobSearchControlsPanel({ controls, onSaved }: {
         </span>
       </div>
       <JobRuntimeControls controls={controls} onSaved={onSaved} />
+      <JobFilterSettings controls={controls} editable={editable} onSaved={onSaved} />
       <h3>Role Focus</h3>
       <div className="preset-category-list">
         {controls.job_categories.map((category) => (
@@ -1911,6 +2334,8 @@ function JobSearchControlsPanel({ controls, onSaved }: {
             editable={editable} onSaved={onSaved} />
         ))}
       </div>
+      <h3>Rejections & weaknesses</h3>
+      <RejectionInsights />
       <h3>Own Info</h3>
       <div className="diag-table">
         {Object.entries(controls.source_paths).map(([name, path]) => (
@@ -2550,7 +2975,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   refreshKey: string;
   activeDomain: string;
   onActiveDomainChange: (domainId: string) => void;
-  onOpenChat?: (prompt: string, conversationId?: string, storyTs?: string) => void;
+  onOpenChat?: (prompt: string, conversationId?: string, storyTs?: string, target?: string) => void;
 }) {
   const [domains, setDomains] = useState<DomainSpec[]>([]);
   const [cards, setCards] = useState<Record<string, DomainCards>>({});
@@ -2681,21 +3106,56 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
     if (allowed) return allowed;
     return boardColumns.filter((name) => name !== "Unstaged" && name !== status);
   };
+  // After a queued prep, the card advances to Needs Geoff on the background
+  // worker. Poll prep-status and refresh the board so it advances on screen
+  // without a manual reload; stop once the queue is idle (or after ~30s).
+  function pollPrepUntilIdle() {
+    let ticks = 0;
+    const timer = window.setInterval(async () => {
+      ticks += 1;
+      try {
+        const st = await fetchPrepStatus();
+        await load();
+        if ((!st.pending && !st.running) || ticks > 20) window.clearInterval(timer);
+      } catch { window.clearInterval(timer); }
+    }, 1500);
+  }
   async function moveDomainCardTo(card: DomainCard, statusName: string) {
     if (!card || !canMove || statusName === "Unstaged") return;
     const id = cardId(card);
+    const isJobs = spec.domain_id === "job_application";
+    let reason: { reason_code?: string; reason_note?: string } | undefined;
+    if (isJobs && statusName === "Rejected / Skip") {
+      const menu = REJECT_REASONS.map((r, i) => `${i + 1}. ${r.label}`).join("\n");
+      const raw = window.prompt(
+        "Why reject this job? Enter a number — this feeds the rejection report "
+        + "so the filters can be tuned:\n" + menu, String(REJECT_REASONS.length));
+      if (raw === null) return;   // cancelled: leave the card where it is
+      const picked = REJECT_REASONS[parseInt(raw.trim(), 10) - 1];
+      const code = picked ? picked.code : "other";
+      let note: string | undefined;
+      if (code === "other" || code === "company") {
+        note = window.prompt("Add a short note (optional):") ?? undefined;
+      }
+      reason = { reason_code: code, reason_note: note || undefined };
+    }
     setToast(null);
     try {
-      const result = await moveDomainCard(spec.domain_id, id, statusName);
+      const result = await moveDomainCard(spec.domain_id, id, statusName, reason);
       const sideEffect = result.side_effect;
       const actualStatus = valText(result.card?.status) || statusName;
-      const processed = sideEffect?.operation === "process_selected"
-        ? Number(sideEffect.selected_count ?? 0)
-        : 0;
-      setToast(processed > 0
-        ? `${result.card_id} -> ${actualStatus}; prepared ${processed} application packet${processed === 1 ? "" : "s"}`
-        : `${result.card_id} -> ${actualStatus}`);
-      await load();
+      const op = sideEffect?.operation;
+      if (op === "process_selected_queued") {
+        setToast(`${result.card_id} -> ${actualStatus}; packet prep queued...`);
+        await load();
+        pollPrepUntilIdle();
+      } else if (op === "rejection_recorded") {
+        setToast(`${result.card_id} rejected (${String(sideEffect?.reason_code ?? "other")}) - noted for the filter report`);
+        await load();
+      } else {
+        setToast(`${result.card_id} -> ${actualStatus}`);
+        await load();
+      }
     } catch (e) { setToast("ERR " + (e as Error).message); }
   }
   async function drop(statusName: string) {
@@ -2711,8 +3171,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
     setToast(null);
     try {
       const r = await bulkSelectSuggested("bot_possible", "Selected by Geoff");
-      setToast(`added ${r.moved_count} bot job${r.moved_count === 1 ? "" : "s"} to Selected by Geoff`);
+      setToast(`added ${r.moved_count} bot job${r.moved_count === 1 ? "" : "s"} to Selected by Geoff; packets preparing...`);
       await load();
+      if (r.moved_count > 0) pollPrepUntilIdle();
     } catch (e) { setToast("ERR " + (e as Error).message); }
   }
 
@@ -2880,6 +3341,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                                 onOpenPacket={isJobDomain && card.application_id
                                   ? () => setPacketFor({ spec, card })
                                   : undefined}
+                                onOpenChat={onOpenChat
+                                  ? (prompt, target) => onOpenChat(prompt, undefined, undefined, target)
+                                  : undefined}
                                 onOpen={() => setSelected({ spec, card })} />
                             ))}
                           </div>
@@ -2901,6 +3365,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                 onMove={(target) => void moveDomainCardTo(card, target)}
                 onOpenPacket={isJobDomain && card.application_id
                   ? () => setPacketFor({ spec, card })
+                  : undefined}
+                onOpenChat={onOpenChat
+                  ? (prompt, target) => onOpenChat(prompt, undefined, undefined, target)
                   : undefined}
                 onOpen={() => setSelected({ spec, card })} />
             ))}
@@ -3008,6 +3475,38 @@ function MissionDrawer({ id, ledgerUi, onClose }: {
         </>
       )}
     </DrawerShell>
+  );
+}
+
+// Compact, inline "the conversation IS the mission journey" strip — shown inside
+// a chat once its thread is tracked as a mission. Shows the live mission status
+// and the last few governed events, so the journey is visible without leaving
+// the conversation. Read-only; the full timeline stays in MissionDrawer.
+function MissionProgressStrip({ missionId }: { missionId: string }) {
+  const [detail, setDetail] = useState<MissionDetail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setDetail(null); setErr(null);
+    fetchMission(missionId).then((d) => live && setDetail(d))
+      .catch((e) => live && setErr((e as Error).message));
+    return () => { live = false; };
+  }, [missionId]);
+  const mission = (detail?.mission ?? {}) as Record<string, unknown>;
+  const status = String(mission.status ?? (detail ? "open" : "…"));
+  const events = detail?.events ?? [];
+  const recent = events.slice(-3);
+  return (
+    <div className="mission-strip" title="This conversation is tracked as a Ledger mission">
+      <span className="usage-badge muted">mission {missionId} · {status}</span>
+      {err && <span className="muted small">⚠ {err}</span>}
+      {recent.map((ev, i) => (
+        <span className="tag" key={i}>{ev.kind}</span>
+      ))}
+      {events.length > recent.length && (
+        <span className="muted small">+{events.length - recent.length} more</span>
+      )}
+    </div>
   );
 }
 
@@ -3173,6 +3672,9 @@ type ChatThread = {
   agentMode?: string;
   agentPermissionProfile?: string;
   agentLastSeenSequence?: number;
+  // Set once the user elects "Track as mission" — the OPTIONAL governance
+  // wrapper. Local-only; the mission itself lives in the Ledger (id `T-…`).
+  missionId?: string;
 };
 const CHAT_THREADS_KEY = "agent-kanban-cockpit.chatThreads.v1";
 const ACTIVE_THREAD_KEY = "agent-kanban-cockpit.activeThread.v1";
@@ -3355,17 +3857,20 @@ function AgentEventCard({ ev }: { ev: AgentEvent }) {
   }
 }
 
-function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange }: {
+function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange, initialPrompt }: {
   harnessId: string;
   harnesses: AgentHarnessOption[] | null;
   repos: { repo_id: string; remote_url: string }[];
   thread: ChatThread | undefined;
   onThreadChange: (patch: Partial<ChatThread>) => void;
+  initialPrompt?: string;   // e.g. a card's context, seeded from "Ask Claude/Codex"
 }) {
   const [sessionId, setSessionId] = useState<string | null>(thread?.agentSessionId ?? null);
   const [record, setRecord] = useState<AgentSessionRecord | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialPrompt ?? "");
+  // re-seed if a different card's context arrives while the panel is mounted
+  useEffect(() => { if (initialPrompt) setInput(initialPrompt); }, [initialPrompt]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repoId, setRepoId] = useState(thread?.agentRepoId ?? repos[0]?.repo_id ?? "");
@@ -3374,6 +3879,9 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
   const [models, setModels] = useState<AgentModelOption[]>([]);
   const [model, setModel] = useState<string>("");
   const [effort, setEffort] = useState<string>("");
+  // "Track as mission" — the OPTIONAL governance wrapper. Set once promoted.
+  const [missionId, setMissionId] = useState<string | null>(thread?.missionId ?? null);
+  const [promoting, setPromoting] = useState(false);
   const sessionIdRef = useRef(sessionId);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   const closeStreamRef = useRef<(() => void) | null>(null);
@@ -3509,6 +4017,18 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
       setRecord(await fetchAgentSession(sessionId));
     } catch (e) { setError((e as Error).message); }
   }
+  // Track this read-only session as a Ledger mission — reuses the SAME session
+  // (no restart) and grants no writes. Records the mission id on the thread.
+  async function doPromote() {
+    if (!sessionId || missionId || promoting) return;
+    setPromoting(true); setError(null);
+    try {
+      const res = await promoteAgentSession(sessionId);
+      setMissionId(res.mission_id);
+      onThreadChange({ missionId: res.mission_id });
+    } catch (e) { setError((e as Error).message); }
+    finally { setPromoting(false); }
+  }
 
   const harness = harnesses?.find((h) => h.harness_id === harnessId);
   const pending = pendingApprovalsOf(events);
@@ -3520,7 +4040,17 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
         <div className="agent-session-setup">
           <div><b>{harness?.label ?? harnessId}</b>{harness ? ` — ${harness.detail}` : ""}</div>
           {harness && !harness.available ? (
-            <div className="muted">This harness is not available in this deployment.</div>
+            <div className="agent-unavailable">
+              <div className="muted">
+                Unavailable — {harness.detail || "the host worker can't reach this runtime."}
+              </div>
+              <div className="muted small">
+                To enable it: wire the host agent worker (<code>KANBAN_UI_AGENT_SESSIONS_ENABLED=1</code>,{" "}
+                <code>AGENT_WORKER_URL</code>, <code>AGENT_WORKER_TOKEN</code>) and log the runtime in on the
+                worker (<code>claude auth login</code> / <code>codex login</code>). See{" "}
+                <code>docs/runbooks/agent-sessions-activation.md</code>.
+              </div>
+            </div>
           ) : (
             <>
               <label className="chat-field">
@@ -3582,6 +4112,14 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
           </span>
         )}
         <div className="chat-header-right">
+          {missionId ? (
+            <MissionProgressStrip missionId={missionId} />
+          ) : (
+            <button className="clear" onClick={() => void doPromote()} disabled={promoting}
+              title="Track this conversation as a mission — optional governance/tracking, no writes, keeps the same session">
+              {promoting ? "tracking…" : "track as mission"}
+            </button>
+          )}
           {(status === "idle" || status === "active") && (
             <button className="clear" onClick={() => void doInterrupt()}>interrupt</button>
           )}
@@ -4064,7 +4602,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
   roles: string[];
   runtime: ChatRuntime | null;
   draft?: { text: string; nonce: number; conversationId?: string;
-            storyTs?: string } | null;
+            storyTs?: string; target?: string } | null;
   onBack?: () => void;
 }) {
   const [model, setModel] = useState(roles.includes("chat") ? "chat" : roles[0] ?? "");
@@ -4091,6 +4629,8 @@ function ChatView({ roles, runtime, draft, onBack }: {
   const [storyError, setStoryError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [focusTs, setFocusTs] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState(false);
+  const [promoteErr, setPromoteErr] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   // guards hydration races: a slow transcript fetch for a thread the user has
   // already left must not fill the current thread's log
@@ -4129,6 +4669,18 @@ function ChatView({ roles, runtime, draft, onBack }: {
       return merged;
     });
   }
+  // "Track as mission" for a GatewayCore conversation — optional governance,
+  // reuses this thread (no restart), grants no writes. Records the mission id on
+  // the thread so MissionProgressStrip renders the journey inline.
+  async function promoteGatewayChat() {
+    if (currentThread?.missionId || promoting) return;
+    setPromoting(true); setPromoteErr(null);
+    try {
+      const res = await promoteChat(conversationId, currentThread?.lastPrompt ?? "");
+      updateAgentThread({ missionId: res.mission_id });
+    } catch (e) { setPromoteErr((e as Error).message); }
+    finally { setPromoting(false); }
+  }
   function loadConversations() {
     fetchChatConversations()
       .then((body) => setConversations(body.conversations))
@@ -4157,6 +4709,8 @@ function ChatView({ roles, runtime, draft, onBack }: {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
+    // a card's "Ask Claude / Ask Codex" preselects the assistant lane
+    if (draft?.target) setTargetRaw(draft.target);
     if (draft?.text) setInput(draft.text);
     if (!draft?.conversationId) return;
     const changed = draft.conversationId !== conversationIdRef.current;
@@ -4177,7 +4731,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
       void hydrateThread(draft.conversationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft?.conversationId, draft?.nonce, draft?.text, draft?.storyTs]);
+  }, [draft?.conversationId, draft?.nonce, draft?.text, draft?.storyTs, draft?.target]);
   useEffect(() => {
     // first mount: replay whatever the flight recorder has for the default
     // thread, so a reload (or another device) still shows the conversation
@@ -4392,17 +4946,17 @@ function ChatView({ roles, runtime, draft, onBack }: {
                 </button>
               )}
               <label className="chat-field">
-                <span className="muted small">agent</span>
+                <span className="muted small">assistant</span>
                 <select className="select" value={targetRaw}
                   onChange={(e) => setTargetRaw(e.target.value)}
-                  title="GatewayCore runs in-app; agent sessions run on the host worker; specialists open in their own tab">
+                  title="Pick who handles this chat. GatewayCore runs in-app (fast conversation, local + routed models). Claude Code and Codex run coding agent sessions on the host worker — no mission needed to start a read-only one. Specialists open in their own tab.">
                   <option value="GatewayCore">GatewayCore (in-app)</option>
                   {externalChats.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}{c.active ? "" : " (not configured)"}
                     </option>
                   ))}
-                  <optgroup label="Agent Sessions">
+                  <optgroup label="Coding agents (Claude Code · Codex)">
                     {agentHarnessesError && (
                       <option value="agent:__unavailable" disabled>
                         Agent sessions unavailable — {agentHarnessesError}
@@ -4422,7 +4976,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
                   <span className="muted small">model</span>
                   <select className="select" value={model}
                     onChange={(e) => setModel(e.target.value)}
-                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Local Frontier models are a free but experimental, very slow, loopback-only lane. Claude Code/Codex are agentic coding executors, launched from missions — never a chat model.">
+                    title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Local Frontier models are a free but experimental, very slow, loopback-only lane. To run Claude Code or Codex, pick them from the Assistant selector — they are coding agents, not GatewayCore chat models.">
                     <optgroup label="Local (free)">
                       {roles.map((r) => {
                         const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
@@ -4475,13 +5029,6 @@ function ChatView({ roles, runtime, draft, onBack }: {
                         })}
                       </optgroup>
                     )}
-                    <optgroup label="Executors — from missions, not here">
-                      {(runtime?.executors ?? []).map((e) => (
-                        <option key={e.name} value={`executor:${e.name}`} disabled>
-                          {e.name} ({e.family}) — start from a mission, not this dropdown
-                        </option>
-                      ))}
-                    </optgroup>
                   </select>
                 </label>
               )}
@@ -4532,6 +5079,15 @@ function ChatView({ roles, runtime, draft, onBack }: {
             {events.length > 0 && chatMode === "live" && (
               <button className="clear" onClick={() => setEvents([])}>clear</button>
             )}
+            {currentThread?.missionId ? (
+              <MissionProgressStrip missionId={currentThread.missionId} />
+            ) : (
+              <button className="clear" onClick={() => void promoteGatewayChat()} disabled={promoting}
+                title="Track this conversation as a mission — optional governance/tracking, no writes, keeps this thread">
+                {promoting ? "tracking…" : "track as mission"}
+              </button>
+            )}
+            {promoteErr && <span className="muted small">⚠ {promoteErr}</span>}
           </div>
           )}
           {/* Collapsible history: recent chats, tucked away until opened */}
@@ -4562,7 +5118,8 @@ function ChatView({ roles, runtime, draft, onBack }: {
           )}
           {chatTarget.kind === "agent" ? (
             <AgentSessionPanel harnessId={chatTarget.harnessId} harnesses={agentHarnesses}
-              repos={agentRepos} thread={currentThread} onThreadChange={updateAgentThread} />
+              repos={agentRepos} thread={currentThread} onThreadChange={updateAgentThread}
+              initialPrompt={draft?.target === targetRaw ? draft?.text : undefined} />
           ) : chatTarget.kind !== "gateway" ? null : chatMode === "story" ? (
             <div className="chat-log chat-log-story">
               <ThreadTimeline transcript={story} loading={storyLoading}
@@ -4617,11 +5174,13 @@ export function App() {
   const [chatRuntime, setChatRuntime] = useState<ChatRuntime | null>(null);
   const [chatDraft, setChatDraft] =
     useState<{ text: string; nonce: number; conversationId?: string;
-               storyTs?: string } | null>(null);
+               storyTs?: string; target?: string } | null>(null);
   // where the chat was opened from, so the chat's Back button can return there
   const [chatReturnView, setChatReturnView] = useState<View>("domains");
   const [domainNav, setDomainNav] = useState<DomainNavItem[]>([]);
   const [activeDomain, setActiveDomain] = useState(() => initialDomainFromUrl());
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [captureNonce, setCaptureNonce] = useState(0);
   const [updated, setUpdated] = useState<string>("");
   const [selMission, setSelMission] = useState<string | null>(null);
   const [selCard, setSelCard] =
@@ -4707,8 +5266,8 @@ export function App() {
 
   const chatOn = !!cfg?.chat_enabled;
   const openChatWithPrompt = useCallback(
-    (prompt: string, conversationId?: string, storyTs?: string) => {
-      setChatDraft({ text: prompt, conversationId, storyTs, nonce: Date.now() });
+    (prompt: string, conversationId?: string, storyTs?: string, target?: string) => {
+      setChatDraft({ text: prompt, conversationId, storyTs, target, nonce: Date.now() });
       // remember where we came from so Chat's Back button returns there
       setView((prev) => { if (prev !== "chat") setChatReturnView(prev); return "chat"; });
     }, []);
@@ -4760,10 +5319,20 @@ export function App() {
             ))}
           </div>
           <div className="topright">
+            <button className="actbtn" onClick={() => setCaptureOpen(true)}
+              title="Capture an idea, todo, or note — from anywhere. It's saved, not started.">
+              + Capture
+            </button>
             {updated && <span className="muted small">updated {updated}</span>}
             <button className="refresh" onClick={refresh} title="refresh now">↻</button>
           </div>
         </div>
+        {captureOpen && (
+          <CaptureComposer
+            context={view === "domains" ? activeDomain : undefined}
+            onClose={() => setCaptureOpen(false)}
+            onCaptured={() => setCaptureNonce((n) => n + 1)} />
+        )}
         {surfaceFailureCount > 0 && (
           <div className="surface-errors">
             {Object.entries(surfaceErrors).map(([name, msg]) => (
@@ -4794,6 +5363,9 @@ export function App() {
         {view === "observability" && (metrics
           ? <ObservabilityView m={metrics} /> : <div className="loading">…</div>)}
         {view === "usage" && <UsageView />}
+        {view === "inbox" && (
+          <InboxView refreshKey={captureNonce} onOpenChat={openChatWithPrompt} />
+        )}
         {view === "activity" && (activity
           ? <ActivityView a={activity} /> : <div className="loading">…</div>)}
         {/* chat stays MOUNTED so the conversation persists across view switches */}
