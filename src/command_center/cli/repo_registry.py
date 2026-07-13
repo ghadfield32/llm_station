@@ -234,8 +234,14 @@ def run_repo_verify(
 def build_repo_manifest_block(
     *, repo_id: str, remote_url: str, local_path_ref: str, kanban_board_id: str,
     devcontainer_path: str = ".devcontainer/devcontainer.json",
+    risk_ceiling: str = "L2_local_edits",
 ) -> RepoManifest:
-    """Build a DISABLED manifest (blockers listed) for a newly registered repo."""
+    """Build a DISABLED manifest (blockers listed) for a newly registered repo.
+
+    risk_ceiling sets the maximum autonomy the repo may ever reach (L0_read_only /
+    L1_plan_only / L2_local_edits — repos cannot exceed L2). `cc onboard repo
+    --mode` maps onboarding modes onto it.
+    """
     return RepoManifest(
         repo_id=repo_id,
         remote_url=remote_url,
@@ -250,7 +256,7 @@ def build_repo_manifest_block(
         secret_policy="no_runtime_secrets_inside_container",
         codeowners_required=True,
         codeowners_path=".github/CODEOWNERS",
-        risk_ceiling="L2_local_edits",  # type: ignore[arg-type]
+        risk_ceiling=risk_ceiling,  # type: ignore[arg-type]
         kanban_board_id=kanban_board_id,
         local_path_ref=local_path_ref,
         autonomous_edits_enabled=False,
@@ -261,6 +267,7 @@ def build_repo_manifest_block(
 def run_repo_register(
     *, repo_id: str, local_path: str, remote_url: str, kanban_board: str,
     apply: bool = False, config_path: Path = ROOT / AUTONOMY, root: Path = ROOT,
+    risk_ceiling: str = "L2_local_edits",
 ) -> dict[str, Any]:
     cfg = load_autonomy_config(config_path)
     if any(r.repo_id == repo_id for r in cfg.repo_manifests):
@@ -277,6 +284,7 @@ def run_repo_register(
     manifest = build_repo_manifest_block(
         repo_id=repo_id, remote_url=remote_url,
         local_path_ref=f"env:{env_name}", kanban_board_id=kanban_board,
+        risk_ceiling=risk_ceiling,
     )  # validates or raises
     block = yaml.safe_dump([manifest.model_dump(mode="json")], sort_keys=False, indent=2)
     if not apply:

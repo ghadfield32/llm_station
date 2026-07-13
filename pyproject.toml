@@ -4,11 +4,20 @@ version = "4.0.0"
 description = "Typed, validated control plane for a self-hosted agent command center"
 requires-python = ">=3.12"
 dependencies = [
-  "pydantic>=2.10",
+  # Upper bounds below are deliberate, not decoration: the agent-codex/agent-claude
+  # extras pull in a transitive prerelease (openai-codex-cli-bin), which makes uv's
+  # resolver treat prereleases as fair game project-wide unless these are fenced —
+  # confirmed live: httpx floated to 1.0.dev3 (breaks starlette's TestClient) and
+  # pydantic to 2.14.0a1 with no bound at all. Bump the ceiling deliberately, tested,
+  # not as a side effect of an unrelated pinned prerelease.
+  "pydantic>=2.10,<2.14",
   "pyyaml>=6.0",
-  "httpx>=0.28",
+  "httpx>=0.28,<1.0",
   "pydantic-settings>=2.2",
   "tenacity>=8.2",
+  # Fuzzy tier of the content reference resolver (misspelling-tolerant lookup).
+  # Pure-wheel, cross-platform; the semantic tier uses local embeddings (no dep).
+  "rapidfuzz>=3.0",
 ]
 
 # Channel transports are optional: the control plane (validate/render/serve) needs none of
@@ -57,6 +66,16 @@ cc-model-scout = "command_center.registry.model_scout:main"
 cc-usage-digest = "command_center.cli.usage_digest:main"
 cc-verify-env = "command_center.cli.verify_env:main"
 cc-init-env = "command_center.cli.init_env:main"
+
+[tool.uv]
+# openai-codex==0.1.0b3 (agent-codex extra, above) pins openai-codex-cli-bin==0.137.0a4
+# as ITS OWN transitive dependency. A transitive prerelease isn't "user-specified" from
+# uv's point of view, so without this it silently requires --prerelease=allow globally --
+# which then also lets unrelated loose deps (httpx>=0.28, pydantic>=2.10, ...) float into
+# THEIR OWN prereleases (seen: httpx 1.0.dev3, pydantic 2.14.0a1) with no upper bound to
+# stop them. Declaring it here makes uv treat this one prerelease as explicitly requested,
+# so `uv lock` needs no global prerelease flag at all.
+constraint-dependencies = ["openai-codex-cli-bin==0.137.0a4"]
 
 [build-system]
 requires = ["setuptools>=75"]

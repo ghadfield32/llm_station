@@ -4,6 +4,13 @@ schema_version: command-center.models.v1
 # Local-only LiteLLM registry. Cloud coding happens through Claude Code and
 # Codex executors, authenticated separately with subscription/OAuth login.
 # Every role below must render to ollama_chat/... via OLLAMA_API_BASE.
+#
+# Each candidate may carry `status: active|scout` (default active). `active`
+# candidates are routed (rendered into the LiteLLM model_list); `scout`
+# candidates are a watchlist — tracked here, under evaluation, NOT routed —
+# so a proposed model has one home alongside the roster. Inspect with
+# `cc model-status`. Promotion stays human-only: `cc model-promote --role R
+# --candidate ALIAS --approver YOU --apply` flips scout -> active.
 
 roles:
   triage:

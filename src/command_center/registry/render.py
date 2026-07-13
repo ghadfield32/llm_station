@@ -56,7 +56,11 @@ def provider_model(c) -> str:
 def build(reg, canary, promote) -> str:
     lines = ["model_list:"]
     for role, cands in reg.roles.items():
-        ordered = sorted(cands, key=lambda c: c.priority)
+        # Only `active` candidates are routed; `scout` candidates are a watchlist
+        # tracked in models.yaml but never rendered into the live proxy config.
+        ordered = sorted(
+            (c for c in cands if c.status == "active"), key=lambda c: c.priority
+        )
         if role in promote:
             ordered = [c for c in ordered if c.canary_weight > 0] + \
                       [c for c in ordered if c.canary_weight == 0]

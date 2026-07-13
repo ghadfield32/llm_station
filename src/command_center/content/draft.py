@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .llm import chat
+from .llm_client import ContentLLMRequest, LiteLLMContentClient
 from .templates import TEMPLATES, draft_prompts
 
 _HOOK = re.compile(r"HOOK:\s*(.+?)\s*BODY:\s*(.+)", re.S | re.I)
@@ -37,10 +37,16 @@ class Draft:
         return f"{self.hook}\n\n{self.body}"
 
 
-def draft_one(candidate, voice: str, base_url: str, key: str, role: str) -> Draft:
+def draft_one(candidate, voice: str, base_url: str, key: str, role: str,
+              client=None) -> Draft:
+    """Draft one candidate. Goes through the ContentLLMClient seam: the default
+    is the local LiteLLM client, but any client (e.g. a test or a routed policy)
+    can be injected without changing the call sites."""
     system, user = draft_prompts(candidate, voice)
-    raw = chat(base_url, key, role, system, user, temperature=0.5, max_tokens=1200)
-    hook, body = parse_post(raw)
+    client = client or LiteLLMContentClient(base_url, key)
+    resp = client.complete(ContentLLMRequest(system=system, user=user, model=role,
+                                             temperature=0.5, max_tokens=1200))
+    hook, body = parse_post(resp.text)
     if not hook or not body:
         raise ValueError(f"draft for {candidate.key} empty hook/body")
     tmpl = TEMPLATES.get(candidate.kind, TEMPLATES["repo"])[0]

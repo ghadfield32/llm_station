@@ -1,0 +1,89 @@
+# The reference index seed (validated by ContentReferenceConfig). The stable,
+# curated half of "find things by intent, not exact names": each item names a
+# doc / post library / kanban board / config / model lane with the aliases a human
+# would actually say and tags for keyword + semantic retrieval. The resolver also
+# folds in live sources (the posts store, content streams) at index-build time.
+#
+# Invariant (docs/MASTER.md, content-usability lane): no user-facing command
+# relies on exact names only. Exact id is the first fast path, never the only one;
+# a misspelled or vague query still resolves through fuzzy + semantic tiers.
+schema_version: "1"
+
+# Resolver knobs.
+fuzzy_threshold: 72        # RapidFuzz score floor for the fuzzy tier
+ambiguous_margin: 0.06     # if top-1 and top-2 are within this, return top 3
+embed_enabled: true        # semantic tier on (local nomic-embed-text via Ollama)
+embed_model: nomic-embed-text
+index_path: data/reference/index.jsonl
+
+items:
+  - id: linkedin_pipeline
+    kind: doc
+    title: LinkedIn Pipeline
+    aliases: [linkedin posts, linkedin content, post preview, content engine,
+              social post pipeline, the post thing, linkedin engine]
+    tags: [linkedin, content, preview, publishing, posts]
+    source_path: docs/LINKEDIN_PIPELINE.md
+    summary: Drafting, previewing, and validating LinkedIn-style posts before publish.
+
+  - id: content_pipeline_engine
+    kind: config
+    title: Content Engine (gather -> draft -> judge -> stage)
+    aliases: [content pipeline, draft engine, the content engine, post generator,
+              content config]
+    tags: [content, gather, draft, judge, candidates, streams, evidence]
+    source_path: configs/content_pipeline.yaml
+    summary: Evidence-backed candidate gathering, local-model drafting, judge panel.
+
+  - id: board_personal
+    kind: kanban
+    title: Personal Content Board (geoffhadfield32_content)
+    aliases: [personal board, my content kanban, geoff content board,
+              personal linkedin board, the personal kanban]
+    tags: [kanban, appflowy, personal, linkedin, content, queue]
+    summary: AppFlowy 3-column board (In Queue / In Progress / Completed) for the
+      personal LinkedIn identity.
+
+  - id: board_business
+    kind: kanban
+    title: World Model Sports Content Board (world_model_sports_content)
+    aliases: [business board, wms board, sports board, company linkedin board,
+              world model sports kanban, the sports kanban]
+    tags: [kanban, appflowy, business, world model sports, basketball, content]
+    summary: AppFlowy board for the World Model Sports company page content.
+
+  - id: reference_posts_library
+    kind: library
+    title: Reference Posts Library
+    aliases: [reference posts, linkedin examples, example posts, post library,
+              the library with reference posts, sample posts]
+    tags: [library, examples, reference, posts, style]
+    source_path: generated/content-posts.json
+    summary: Stored example/prior posts used for style grounding and preview.
+
+  - id: model_eval_lanes
+    kind: config
+    title: Model-Evaluation Lanes
+    aliases: [model eval, model evaluation, the kanban for model eval,
+              model scout, watchlist, serving benchmarks, model lanes]
+    tags: [models, evaluation, watchlist, serving, frontier, router, benchmarks]
+    # no source_path: the model-eval lane lands in a separate PR; this entry lets
+    # a query like "the kanban for model eval" still resolve by intent.
+    summary: Watchlist, serving SLO/sweep, frontier-router backup, framework evals.
+
+  - id: frontier_router_backup
+    kind: model
+    title: Frontier Router Backup Lane (paid APIs, off by default)
+    aliases: [glm router, glm router post, frontier router, paid model backup,
+              glm backup post, the glm router thing, router escalation]
+    tags: [router, frontier, glm, openrouter, paid, escalation, budget]
+    source_path: configs/content_pipeline.yaml
+    summary: Opt-in paid-model escalation (GLM/Kimi) behind budget + redaction gates.
+
+  - id: master_doc
+    kind: doc
+    title: MASTER architecture doc
+    aliases: [master, master doc, architecture, the big doc, system overview]
+    tags: [architecture, master, overview, standards, lanes]
+    source_path: docs/MASTER.md
+    summary: Canonical architecture + lane definitions for the command center.

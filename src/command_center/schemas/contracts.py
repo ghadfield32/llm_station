@@ -17,6 +17,13 @@ class ModelCandidate(Strict):
     model: str
     priority: int = Field(ge=1)
     local: bool = False
+    # Lifecycle status. `active` candidates are routed (rendered into the LiteLLM
+    # model_list). `scout` candidates are tracked here as a watchlist — under
+    # evaluation, NOT yet routed — so a proposed model has one home alongside the
+    # roster instead of living only in the scout feed. Promotion (scout -> active)
+    # stays human-only: `cc model-promote --role R --candidate ALIAS --approver YOU
+    # --apply`. Default `active` keeps every existing entry valid unchanged.
+    status: Literal["active", "scout"] = "active"
     monthly_budget_usd: float | None = Field(default=None, ge=0)
     canary_weight: float = Field(default=0.0, ge=0.0, le=1.0)
     vram_gb: int | None = Field(default=None, ge=1)
@@ -111,6 +118,20 @@ class ModelRegistry(Strict):
             # at most one canary per role
             if sum(1 for c in cands if c.canary_weight > 0) > 1:
                 raise ValueError(f"role '{role}' has more than one canary")
+            # a role must keep at least one active (routed) candidate — an
+            # all-scout role would render an empty route and silently break.
+            if not any(c.status == "active" for c in cands):
+                raise ValueError(
+                    f"role '{role}' has no active candidate (all scout); routing would be empty"
+                )
+            # scout candidates are not routed, so they cannot also be a canary —
+            # promote to active first, then canary.
+            for c in cands:
+                if c.status == "scout" and c.canary_weight > 0:
+                    raise ValueError(
+                        f"role '{role}' candidate '{c.alias}' is scout but has canary_weight>0; "
+                        "scout models are not routed — promote to active before canarying"
+                    )
         if self.executors:
             pr = [e.priority for e in self.executors]
             if len(pr) != len(set(pr)) or 1 not in pr:
@@ -1518,6 +1539,62 @@ class ContentViewpoint(Strict):
     needs_web: bool = False                      # true -> escalate to the advanced (web) tier
 
 
+# Provider-agnostic content routing. The content engine is local-first: the
+# default policy runs on Ollama (via the local LiteLLM role) and is the ONLY path
+# enabled by default. Paid external policies (GLM/Kimi) are metadata here so the
+# dry-run estimator can price them - they never make a live call from config; a
+# live paid route is operator-gated (budget + redaction + explicit egress). Large
+# hosted models are escalation, not the default post formatter (docs/MASTER.md).
+class ContentModelPrice(Strict):
+    """USD per million tokens for a routable model. Used only by the dry-run cost
+    estimator - naming a model here does not enable or call it."""
+    model: str
+    input_usd_per_mtok: float = Field(ge=0)
+    output_usd_per_mtok: float = Field(ge=0)
+    context_window: int = Field(default=0, ge=0)
+
+
+class ContentLLMPolicy(Strict):
+    name: str
+    primary: str                                 # local role (e.g. "chat") or model id
+    fallback: str = ""
+    allow_paid: bool = False                     # paid egress off unless explicitly true
+    max_request_usd: float = Field(default=0.0, ge=0)
+    require_redaction: bool = False
+    human_approval: bool = False
+
+    @model_validator(mode="after")
+    def _checks(self):
+        # A paid policy MUST carry a budget and demand redaction - no open-ended
+        # paid route, ever. (The default local policy needs neither.)
+        if self.allow_paid:
+            if self.max_request_usd <= 0:
+                raise ValueError(f"policy '{self.name}': allow_paid requires max_request_usd > 0")
+            if not self.require_redaction:
+                raise ValueError(f"policy '{self.name}': allow_paid requires require_redaction")
+        return self
+
+
+class ContentLLMRouting(Strict):
+    default_policy: str = "local_first"
+    policies: list[ContentLLMPolicy] = []
+    prices: list[ContentModelPrice] = []
+
+    @model_validator(mode="after")
+    def _checks(self):
+        names = [p.name for p in self.policies]
+        if len(names) != len(set(names)):
+            raise ValueError("duplicate content_llm policy names")
+        if self.policies:                        # empty = no routing configured (ok)
+            if self.default_policy not in names:
+                raise ValueError(f"default_policy '{self.default_policy}' is not a policy")
+            default = next(p for p in self.policies if p.name == self.default_policy)
+            if default.allow_paid:
+                raise ValueError("default_policy must be local (allow_paid=false) - "
+                                 "the engine is local-first")
+        return self
+
+
 class ContentPipelineConfig(Strict):
     schema_version: str
     source: ContentSource = ContentSource()      # AppFlowy connection (reused)
@@ -1533,6 +1610,7 @@ class ContentPipelineConfig(Strict):
     claims_path: str = "generated/content-claims.json"   # the evidence ledger
     streams: list[ContentStream] = []
     judges: list[ContentViewpoint] = []
+    content_llm: ContentLLMRouting = ContentLLMRouting()  # provider-agnostic routing
 
     @model_validator(mode="after")
     def _checks(self):
@@ -1542,6 +1620,42 @@ class ContentPipelineConfig(Strict):
             raise ValueError("surface_top cannot exceed candidates_per_run")
         if not self.judges:
             raise ValueError("at least one judge viewpoint is required")
+        return self
+
+
+# ---- content_reference.yaml ------------------------------------------------
+# The reference index: the curated half of "find things by intent, not exact
+# names". Each item names a post/library/board/doc/etc. with aliases + tags so a
+# fuzzy/semantic query resolves to it. The resolver also indexes live sources
+# (the posts store, content streams) at build time; this file is the stable seed.
+# Invariant (docs/MASTER.md): no user-facing command relies on exact names only -
+# exact id is just the first fast path in a cascade, never the only path.
+class ReferenceItem(Strict):
+    id: str                                      # stable slug, first fast-path match
+    kind: Literal["doc", "post", "library", "kanban", "config", "repo",
+                  "model", "topic"]
+    title: str
+    aliases: list[str] = []                      # alternate names a human might say
+    tags: list[str] = []                         # keywords (BM25 / semantic signal)
+    source_path: str = ""                        # optional file/dir this points at
+    summary: str = ""                            # one line, indexed for retrieval
+
+
+class ContentReferenceConfig(Strict):
+    schema_version: str
+    items: list[ReferenceItem] = []
+    # Resolver knobs (externalized so no retrieval decision is a buried literal).
+    fuzzy_threshold: int = Field(default=72, ge=0, le=100)   # RapidFuzz score floor
+    ambiguous_margin: float = Field(default=0.06, ge=0, le=1)  # top1-top2 gap -> top-3
+    embed_enabled: bool = True                   # the semantic tier (local nomic-embed)
+    embed_model: str = "nomic-embed-text"
+    index_path: str = "data/reference/index.jsonl"
+
+    @model_validator(mode="after")
+    def _checks(self):
+        ids = [i.id for i in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate reference item ids")
         return self
 
 
@@ -1582,6 +1696,51 @@ class ToolsConfig(Strict):
 
 
 # ---- capabilities.yaml -----------------------------------------------------
+# Tamper-detection policy for capability provenance. The digest field turns
+# "declared provenance" into "verified provenance": a sha256 over the local
+# artifact a capability is backed by, recomputed by check_cross_refs (and so by
+# `make validate`) and failed on drift. We require it only where tampering is
+# both consequential and locally checkable — capability TYPES that execute or
+# get promoted (skill/mcp_server/model_candidate), at risk_tier >= L1, for
+# provenance refs that point at a repository-local file. Remote (URL) and opaque
+# (scheme:opaque) refs can't be hashed here, so they're exempt from the
+# requirement; lower-risk read-only types aren't worth the maintenance tax.
+# These are NAMED knobs, not magic literals — widen the type set or lower the
+# tier here and both the schema requirement and the verifier follow in lockstep.
+DIGEST_REQUIRED_TYPES = frozenset({"skill", "mcp_server", "model_candidate"})
+DIGEST_REQUIRED_MIN_TIER = RiskTier.L1
+
+_RISK_ORDER = {t: i for i, t in enumerate(
+    (RiskTier.L0, RiskTier.L1, RiskTier.L2, RiskTier.L3, RiskTier.L4))}
+_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_URL_RE = re.compile(r"^[a-z][a-z0-9+.-]*://", re.IGNORECASE)
+_SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
+_WIN_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def source_ref_kind(source_ref: str) -> str:
+    """Classify a provenance source_ref so requirement and verification agree.
+
+    "remote"  — a URL (http://, https://, …); content lives off-repo, not hashable here.
+    "opaque"  — a non-path scheme like `operator-local:codex-rtk`; a pointer, not a file.
+    "local"   — a repository-relative path (optionally with a #fragment); hashable.
+    """
+    base = source_ref.split("#", 1)[0].strip()
+    if _URL_RE.match(base):
+        return "remote"
+    if _SCHEME_RE.match(base) and not _WIN_DRIVE_RE.match(base):
+        return "opaque"
+    return "local"
+
+
+def digest_required_for(entry_type: str, risk_tier: RiskTier) -> bool:
+    """A local provenance ref must pin a digest iff its capability is a
+    tamper-relevant type at or above the minimum tier. Single predicate shared by
+    the schema (which requires the field) and the verifier (which recomputes it)."""
+    return (entry_type in DIGEST_REQUIRED_TYPES
+            and _RISK_ORDER[risk_tier] >= _RISK_ORDER[DIGEST_REQUIRED_MIN_TIER])
+
+
 # ARD-style discovery metadata for internal tools, skills, workflows, and model
 # candidates. This is intentionally separate from tools.yaml: tools.yaml is the
 # permission policy judges cite, while this catalog is the routing/discovery
@@ -1598,6 +1757,8 @@ class CapabilityTrust(Strict):
 class CapabilityProvenance(Strict):
     relation: str
     source_ref: str
+    # sha256 over the artifact at source_ref. Optional here; CapabilityEntry makes
+    # it mandatory for tamper-relevant capabilities (see digest_required_for).
     digest: str | None = None
 
     @model_validator(mode="after")
@@ -1609,6 +1770,10 @@ class CapabilityProvenance(Strict):
             raise ValueError("capability provenance relation is required")
         if not self.source_ref:
             raise ValueError("capability provenance source_ref is required")
+        if self.digest is not None and not _DIGEST_RE.match(self.digest):
+            raise ValueError(
+                "capability provenance digest must be 'sha256:<64 lowercase hex>' "
+                "(run `make capabilities-digests` to compute it)")
         return self
 
 
@@ -1652,6 +1817,17 @@ class CapabilityEntry(Strict):
             )
         if not self.owner:
             raise ValueError(f"capability {self.identifier!r} must declare an owner")
+        # Verified-provenance gate: a tamper-relevant capability must pin a digest
+        # for every local artifact it claims to come from. The verifier
+        # (check_cross_refs) then recomputes that digest and fails on drift.
+        if digest_required_for(self.type, self.risk_tier):
+            for prov in self.provenance:
+                if source_ref_kind(prov.source_ref) == "local" and not prov.digest:
+                    raise ValueError(
+                        f"capability {self.identifier!r} is a {self.type} at "
+                        f"{self.risk_tier.value} and must pin a digest for local "
+                        f"provenance {prov.source_ref!r} "
+                        f"(run `make capabilities-digests` to compute it)")
         return self
 
 
