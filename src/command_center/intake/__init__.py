@@ -15,6 +15,7 @@ from .schemas import (
     split_bulk_list,
 )
 from .service import CaptureService
+from .ledger_store import LedgerCaptureStore
 from .store import InMemoryCaptureStore
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "CaptureView",
     "CaptureService",
     "InMemoryCaptureStore",
+    "LedgerCaptureStore",
     "split_bulk_list",
 ]
