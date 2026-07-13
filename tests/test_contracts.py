@@ -14,8 +14,10 @@ from pathlib import Path
 import pytest
 import yaml
 
+import pydantic
+
 from command_center.schemas import CONFIG_CONTRACTS
-from command_center.schemas.contracts import ProactiveConfig
+from command_center.schemas.contracts import LocalFrontierProvidersConfig, ProactiveConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,3 +80,58 @@ def test_daily_self_improvement_scan_cannot_add_extra_artifacts():
     raw["self_improvement_scans"][0]["output_artifacts"] = ["decision_report"]
     with pytest.raises(ValueError, match="may write only"):
         ProactiveConfig.model_validate(raw)
+
+
+# ---- local-frontier-providers.yaml (colibrì lane) ----------------------------------------
+
+def _local_frontier_raw(**over):
+    raw = {
+        "schema_version": "command-center.local-frontier-providers.v1",
+        "enabled": False,
+        "providers": {"colibri": {"base_url_env": "LOCAL_FRONTIER_COLIBRI_BASE_URL"}},
+        "models": {
+            "glm-5.2-colibri": {
+                "provider": "colibri",
+                "context_tokens": 8192,
+                "disk_footprint_gb": 370,
+                "expected_tokens_per_second": {"low": 0.05, "high": 1.06, "source": "test"},
+            }
+        },
+    }
+    raw.update(over)
+    return raw
+
+
+def test_local_frontier_config_defaults_to_disabled():
+    cfg = LocalFrontierProvidersConfig.model_validate(_local_frontier_raw())
+    assert cfg.enabled is False
+
+
+def test_local_frontier_capabilities_force_no_tools_and_no_json_mode():
+    cfg = LocalFrontierProvidersConfig.model_validate(_local_frontier_raw())
+    caps = cfg.models["glm-5.2-colibri"].capabilities
+    assert caps.tools is False
+    assert caps.json_mode is False
+    with pytest.raises(pydantic.ValidationError):
+        LocalFrontierProvidersConfig.model_validate(_local_frontier_raw(models={
+            "glm-5.2-colibri": {
+                "provider": "colibri", "context_tokens": 8192, "disk_footprint_gb": 370,
+                "expected_tokens_per_second": {"low": 0.05, "high": 1.06, "source": "test"},
+                "capabilities": {"tools": True},
+            }
+        }))
+
+
+def test_local_frontier_model_rejects_unknown_provider():
+    raw = _local_frontier_raw()
+    raw["models"]["glm-5.2-colibri"]["provider"] = "not-registered"
+    with pytest.raises(ValueError, match="unknown provider"):
+        LocalFrontierProvidersConfig.model_validate(raw)
+
+
+def test_local_frontier_throughput_estimate_requires_high_gte_low():
+    raw = _local_frontier_raw()
+    raw["models"]["glm-5.2-colibri"]["expected_tokens_per_second"] = {
+        "low": 5.0, "high": 1.0, "source": "test"}
+    with pytest.raises(ValueError, match="high.*>= low"):
+        LocalFrontierProvidersConfig.model_validate(raw)

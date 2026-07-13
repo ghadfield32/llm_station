@@ -547,6 +547,94 @@ class UsageMonitoringConfig(Strict):
         return self
 
 
+# ---- local-frontier-providers.yaml ------------------------------------------
+# A THIRD lane, distinct from both the local-only LiteLLM/Ollama gateway and the paid
+# frontier-router backup lane: an experimental LOOPBACK-only engine (colibrì, or any future
+# disk-streamed/local-server engine) too large to fit VRAM but running entirely on this
+# machine — no API key, no $ cost, no cloud egress. It is NOT a LiteLLM role (ModelRegistry
+# stays ollama-only) and NOT a frontier-router candidate (no provider pricing, no budget caps
+# apply — there is nothing to bill). Like frontier-router-providers.yaml, this file NAMES an
+# env var for the base URL; it holds no value and executes nothing. The actual host the env
+# var resolves to is validated at RUNTIME by check_forbidden_providers.check_local_frontier_providers()
+# and by local_frontier_client — this contract can only assert the env var NAME is sane, not
+# the resolved value. `enabled: false` by default; flipping it on is a deliberate operator
+# decision after Phase 2's smoke test (see docs/MASTER.md "Local frontier lane").
+class LocalFrontierCapabilities(Strict):
+    text: bool = True
+    streaming: bool = True
+    tools: Literal[False] = False        # contract-refuses True: these engines reject tool schemas
+    json_mode: Literal[False] = False    # contract-refuses True: engines reject non-text response_format
+    vision: bool = False
+    audio: bool = False
+
+
+class LocalFrontierProvider(Strict):
+    base_url_env: str                    # env var NAME holding the loopback/private base URL
+    api_key_env: str | None = None       # optional local bearer token; never a FORBIDDEN_KEYS concern
+    api_style: Literal["openai_compatible"] = "openai_compatible"
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.base_url_env:
+            raise ValueError("local frontier provider missing base_url_env")
+        return self
+
+
+class LocalFrontierThroughputEstimate(Strict):
+    """Published, NOT measured-here, tokens/sec range. `source` must say so — this is
+    context for the operator until a real generated/local-frontier-benchmark-report.json
+    exists (see local_frontier_client._last_benchmark_summary), never a substitute for one."""
+    low: float = Field(gt=0)
+    high: float = Field(gt=0)
+    source: str
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.high < self.low:
+            raise ValueError("expected_tokens_per_second.high must be >= low")
+        if not self.source:
+            raise ValueError("expected_tokens_per_second needs a source (this is unverified until measured)")
+        return self
+
+
+class LocalFrontierModel(Strict):
+    provider: str
+    context_tokens: int = Field(ge=1)
+    capabilities: LocalFrontierCapabilities = Field(default_factory=LocalFrontierCapabilities)
+    disk_footprint_gb: float = Field(gt=0)
+    expected_tokens_per_second: LocalFrontierThroughputEstimate
+    kv_slots: int = Field(default=2, ge=1, le=16)
+    max_queue: int = Field(default=2, ge=1)
+    queue_timeout_seconds: int = Field(default=900, ge=1)
+    # Sent as `max_tokens` on every request — REQUIRED, not optional, unlike the paid frontier
+    # lane (which is fast enough that an uncapped reply is merely more expensive). At colibrì's
+    # self-reported 0.05-1.06 tok/s, an uncapped reply can run past queue_timeout_seconds itself
+    # (observed live 2026-07-11: a real cockpit turn with no max_tokens set blew past a 900s
+    # queue_timeout_seconds and surfaced as an opaque "could not reach" transport error, not a
+    # clear timeout). Default kept low on purpose — see docs/MASTER.md "Local frontier lane".
+    max_output_tokens: int = Field(default=200, ge=1)
+
+
+class LocalFrontierProvidersConfig(Strict):
+    schema_version: str
+    enabled: bool = False                # OFF by default — fail closed, same as the router lane
+    providers: dict[str, LocalFrontierProvider]
+    models: dict[str, LocalFrontierModel]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.local-frontier-providers.v1":
+            raise ValueError(
+                "schema_version must be command-center.local-frontier-providers.v1")
+        if not self.providers:
+            raise ValueError("local frontier config must define at least one provider")
+        for model_id, spec in self.models.items():
+            if spec.provider not in self.providers:
+                raise ValueError(
+                    f"local frontier model {model_id!r} references unknown provider {spec.provider!r}")
+        return self
+
+
 # ---- framework-evals.yaml --------------------------------------------------
 # External code-eval frameworks (EvalPlus, BigCodeBench) as SUPPORTING evidence only — the
 # `trust` Literal makes "this can promote a model" unrepresentable. They run against the local
