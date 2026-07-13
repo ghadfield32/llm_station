@@ -49,6 +49,8 @@ def _sample_to_row(s: UsageSample) -> dict:
         "observed_at": s.observed_at, "ingested_at": s.ingested_at,
         "source_hash": s.source_hash, "sample_kind": s.sample_kind.value,
         "cost_usd": s.cost_usd, "cost_source": s.cost_source.value,
+        "api_equivalent_cost_usd": s.api_equivalent_cost_usd,
+        "model": s.model, "effort": s.effort, "context_mode": s.context_mode,
         "window_start": s.window_start, "window_end": s.window_end,
         "aggregation_key": s.aggregation_key}
     for f in _SAMPLE_INT_FIELDS:
@@ -68,6 +70,9 @@ def _row_to_sample(d: dict) -> UsageSample:
         sample_kind=SampleKind(d.get("sample_kind") or "request_delta"),
         cost_usd=d.get("cost_usd"),
         cost_source=CostSource(d.get("cost_source") or "unknown"),
+        api_equivalent_cost_usd=d.get("api_equivalent_cost_usd"),
+        model=d.get("model"), effort=d.get("effort"),
+        context_mode=d.get("context_mode"),
         window_start=d.get("window_start"), window_end=d.get("window_end"),
         aggregation_key=d.get("aggregation_key"), attribution=attribution, **ints)
 

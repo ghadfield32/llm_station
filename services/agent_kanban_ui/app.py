@@ -1787,8 +1787,14 @@ def _feed_agent_usage(client, session_id: str, ev: dict) -> None:
     """Tee a live `rate_limit` AgentEvent into the durable usage store so a
     running Claude session lights up its own Usage card + selector badge. Codex
     limits come from its own provider collector, so only Claude lanes are fed
-    here. Best-effort — a usage-tee failure must never break the browser SSE."""
-    if not (USAGE_ENABLED and USAGE_CLAUDE) or ev.get("type") != "rate_limit":
+    here. Best-effort — a usage-tee failure must never break the browser SSE.
+
+    RETIRED AS A WRITER under USAGE_LEDGER: when the cockpit reads the shared
+    Ledger, the WORKER is the sole authoritative writer (worker_app._run_turn),
+    so this browser-dependent tee stands down to avoid a second writer. It stays
+    active only as the in-memory dev/test fallback (no worker durability)."""
+    if not (USAGE_ENABLED and USAGE_CLAUDE) or USAGE_LEDGER \
+            or ev.get("type") != "rate_limit":
         return
     harness = _harness_of(client, session_id)
     if harness not in _CLAUDE_HARNESSES:
@@ -1901,6 +1907,10 @@ class ActionIn(BaseModel):
 class DomainMoveIn(BaseModel):
     card_id: str
     status: str
+    # Optional rejection metadata, recorded when a job card is moved to
+    # "Rejected / Skip" so the rejection report can suggest filter changes.
+    reason_code: str | None = None
+    reason_note: str | None = None
 
 
 class DomainNoteIn(BaseModel):
@@ -1927,6 +1937,22 @@ class JobSearchCategorySettingsIn(BaseModel):
     keywords: list[str] | None = None
     # required only when CREATING a new category (must name a known variant)
     resume_variant: str | None = None
+
+
+class JobSearchLocationsSettingsIn(BaseModel):
+    # partial update: only provided fields are written; validation happens
+    # against the merged JobSearchConfig so a bad mode/region combo returns 400
+    mode: str | None = None
+    remote_ok: bool | None = None
+    remote_types_allowed: list[str] | None = None
+    employment_types_allowed: list[str] | None = None
+    countries: list[str] | None = None
+    regions: list[str] | None = None
+
+
+class JobSearchLanguagesSettingsIn(BaseModel):
+    spoken: list[str] | None = None
+    require_spoken_for_apply: bool | None = None
 
 
 class StandingAnswerIn(BaseModel):
@@ -2069,6 +2095,130 @@ def _process_selected_job_cards() -> dict[str, Any]:
     }
 
 
+class _JobPrepQueue:
+    """Runs job-card packet preparation OFF the request path so moving a card to
+    'Selected by Geoff' returns immediately instead of blocking on an LLM run.
+
+    A single daemon worker drains requests. Rapid moves (or a bulk-select)
+    coalesce into at most one pending re-run, so N moves do not spawn N runs;
+    process_selected is idempotent (already-prepared cards are skipped), so one
+    coalesced run still prepares every pending card. The run holds
+    _job_finalize_lock so preparation never overlaps a Completed finalize.
+
+    The worker never dies on a failed run: the error is captured and surfaced
+    via /api/job-search/prep-status rather than swallowed or killing the queue.
+    """
+
+    def __init__(self) -> None:
+        self._cv = threading.Condition()
+        self._pending = False
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._runs_completed = 0
+        self._requests_total = 0
+        self._last_finished_at: str | None = None
+        self._last_result: dict[str, Any] | None = None
+        self._last_error: str | None = None
+
+    def _ensure_worker(self) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(
+                target=self._loop, name="job-prep-worker", daemon=True)
+            self._thread.start()
+
+    def request(self) -> dict[str, Any]:
+        with self._cv:
+            self._pending = True
+            self._requests_total += 1
+            self._ensure_worker()
+            self._cv.notify_all()
+            snapshot = self._snapshot_locked()
+        snapshot["operation"] = "process_selected_queued"
+        return snapshot
+
+    def status(self) -> dict[str, Any]:
+        with self._cv:
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> dict[str, Any]:
+        return {
+            "pending": self._pending,
+            "running": self._running,
+            "runs_completed": self._runs_completed,
+            "requests_total": self._requests_total,
+            "last_finished_at": self._last_finished_at,
+            "last_result": self._last_result,
+            "last_error": self._last_error,
+        }
+
+    def _loop(self) -> None:
+        while True:
+            with self._cv:
+                while not self._pending:
+                    self._cv.wait()
+                self._pending = False
+                self._running = True
+            result: dict[str, Any] | None = None
+            error: str | None = None
+            try:
+                with _job_finalize_lock:
+                    result = _process_selected_job_cards()
+            except Exception as exc:  # noqa: BLE001 - worker must not die
+                error = repr(exc)
+            with self._cv:
+                self._running = False
+                self._runs_completed += 1
+                self._last_result = result
+                self._last_error = error
+                self._last_finished_at = datetime.now(UTC).isoformat()
+
+
+_job_prep_queue = _JobPrepQueue()
+
+
+def _record_job_rejection_from_card(
+    card: dict, reason_code: str | None, reason_note: str | None,
+) -> dict[str, Any] | None:
+    """Record why a job card was rejected so the rejection report can suggest
+    filter/scoring changes. A drag with no reason still logs one (as 'other')
+    so the count is honest; the UI supplies a reason code when it can."""
+    from command_center.job_search.rejections import record_rejection
+
+    fields = _card_store_fields(card)
+    job_key = str(fields.get("job_key") or card.get("card_id") or "").strip()
+    if not job_key:
+        return None
+    _, root = _job_search_config_and_root()
+    score = fields.get("fit_score")
+    try:
+        fit_score = int(score) if score not in (None, "") else None
+    except (TypeError, ValueError):
+        fit_score = None
+    try:
+        return record_rejection(
+            root,
+            job_key=job_key,
+            reason_code=(reason_code or "other"),
+            note=reason_note,
+            card_id=str(card.get("card_id") or ""),
+            company=fields.get("company") or card.get("company"),
+            role_title=fields.get("role_title") or card.get("role_title"),
+            location=fields.get("location"),
+            remote_type=fields.get("remote_type"),
+            fit_score=fit_score,
+        )
+    except ValueError:
+        # unknown reason code from a client — fall back to 'other' rather than
+        # 500 the move; the rejection is still captured
+        return record_rejection(
+            root, job_key=job_key, reason_code="other", note=reason_note,
+            card_id=str(card.get("card_id") or ""),
+            company=fields.get("company") or card.get("company"),
+            role_title=fields.get("role_title") or card.get("role_title"),
+            location=fields.get("location"),
+            remote_type=fields.get("remote_type"), fit_score=fit_score)
+
+
 def _note_type_moves_to_interviewing(note_type: str) -> bool:
     lowered = note_type.lower()
     return any(token in lowered for token in (
@@ -2118,7 +2268,16 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
         and body.status in {"Selected by Geoff", "In Progress"}
         and _job_card_needs_packet(card)
     ):
-        side_effect = _process_selected_job_cards()
+        # Queue packet prep instead of running it inline: the move returns
+        # immediately so Geoff can move through cards fast, and the background
+        # worker prepares them. /api/job-search/prep-status reports progress.
+        side_effect = _job_prep_queue.request()
+    elif domain_id == "job_application" and body.status == "Rejected / Skip":
+        rejection = _record_job_rejection_from_card(
+            card, body.reason_code, body.reason_note)
+        if rejection is not None:
+            side_effect = {"operation": "rejection_recorded",
+                           "reason_code": rejection["reason_code"]}
     moved = _find_domain_card(provider, body.card_id)
     return {
         "status": "moved",
@@ -2622,6 +2781,8 @@ def _write_job_search_profile_settings(override: dict[str, Any]) -> dict:
         "job_search": cfg.job_search.model_dump(mode="json"),
         "ranking": cfg.ranking.model_dump(mode="json"),
         "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
+        "locations": cfg.locations.model_dump(mode="json"),
+        "languages": cfg.languages.model_dump(mode="json"),
     }
 
 
@@ -2679,6 +2840,8 @@ def job_search_profile_controls() -> dict:
         "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
         "company_targets": cfg.company_targets.model_dump(mode="json"),
         "executor_fallback": cfg.executor_fallback.model_dump(mode="json"),
+        "locations": cfg.locations.model_dump(mode="json"),
+        "languages": cfg.languages.model_dump(mode="json"),
         "standing_answers": _standing_answers_block(root),
         "dag": _job_search_dag_block(cfg),
     }
@@ -2739,6 +2902,45 @@ def update_job_search_runtime(body: JobSearchRuntimeSettingsIn) -> dict:
     for key, value in body.model_dump(exclude_none=True).items():
         runtime[key] = value
     return _write_job_search_profile_settings(override)
+
+
+def _write_profile_override_or_400(override: dict[str, Any], what: str) -> dict:
+    """Persist a profile-settings override, converting a contract violation
+    (e.g. mode=regions with no region/country) into a 400 instead of a 500."""
+    from pydantic import ValidationError
+
+    try:
+        return _write_job_search_profile_settings(override)
+    except ValidationError as exc:
+        errors = exc.errors()
+        msg = errors[0].get("msg") if errors else f"invalid {what} settings"
+        raise HTTPException(status_code=400, detail=str(msg)) from exc
+
+
+@app.put("/api/job-search/profile-controls/locations")
+def update_job_search_locations(body: JobSearchLocationsSettingsIn) -> dict:
+    """Update the location + work-arrangement filter (the countries/states
+    checklist and remote/hybrid/onsite + full-time toggles). Partial update:
+    only provided fields change. Validated against the merged config, so an
+    empty region list under mode=regions (with no country) returns 400."""
+    _require_profile_writable()
+    override = _read_job_search_profile_settings()
+    section = override.setdefault("locations", {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        section[key] = value
+    return _write_profile_override_or_400(override, "locations")
+
+
+@app.put("/api/job-search/profile-controls/languages")
+def update_job_search_languages(body: JobSearchLanguagesSettingsIn) -> dict:
+    """Update the spoken-languages filter. A posting requiring a language not
+    listed here is hard-excluded from suggestions."""
+    _require_profile_writable()
+    override = _read_job_search_profile_settings()
+    section = override.setdefault("languages", {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        section[key] = value
+    return _write_profile_override_or_400(override, "languages")
 
 
 @app.put("/api/job-search/profile-controls/category/{category_id}")
@@ -2962,13 +3164,36 @@ def bulk_select_suggested(body: BulkSelectIn) -> dict:
         moved.append({"card_id": card_id, "company": card.get("company"),
                       "role_title": card.get("role_title"),
                       "event_id": event.event_id})
+    # Queue background packet prep for the whole batch (respects the daily
+    # selected limit; the rest stay queued for the next run).
+    prep = None
+    if moved and target in {"Selected by Geoff", "In Progress"}:
+        prep = _job_prep_queue.request()
     return {
         "status": "bulk_selected",
         "automation_class": body.automation_class,
         "target": target,
         "moved_count": len(moved),
         "moved": moved,
+        "prep": prep,
     }
+
+
+@app.get("/api/job-search/prep-status")
+def job_search_prep_status() -> dict:
+    """Background packet-prep queue status: whether a run is pending/running and
+    the last run's result/error. The UI polls this to badge 'preparing...' cards
+    and to surface a failed prep instead of leaving a card silently stuck."""
+    return {"operation": "prep_status", **_job_prep_queue.status()}
+
+
+@app.get("/api/job-search/rejections-report")
+def job_search_rejections_report() -> dict:
+    """Aggregate recorded rejections into concrete filter/scoring suggestions."""
+    from command_center.job_search.rejections import rejection_report
+
+    cfg, root = _job_search_config_and_root()
+    return rejection_report(root=root, cfg=cfg)
 
 
 @app.put("/api/job-search/profile-controls/draft-default")

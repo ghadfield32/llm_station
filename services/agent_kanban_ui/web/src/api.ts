@@ -316,9 +316,12 @@ export const fetchDomainCardProgress = (id: string, cardId: string) =>
     `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/progress`);
 export const fetchDomainActions = (id: string) =>
   getJSON<DomainActions>(`/api/domain/${encodeURIComponent(id)}/actions`);
-export const moveDomainCard = (id: string, cardId: string, status: string) =>
+export const moveDomainCard = (
+  id: string, cardId: string, status: string,
+  reason?: { reason_code?: string; reason_note?: string },
+) =>
   postJSON<DomainMoveResult>(`/api/domain/${encodeURIComponent(id)}/move`, {
-    card_id: cardId, status,
+    card_id: cardId, status, ...(reason ?? {}),
   });
 export interface DomainNoteResult {
   status: string;
@@ -463,6 +466,8 @@ export interface JobProfileControls {
   }[];
   company_targets: Record<string, string[]>;
   executor_fallback: Record<string, string>;
+  locations: JobLocations;
+  languages: JobLanguages;
   standing_answers: {
     answers: StandingAnswer[];
     source: string;
@@ -559,6 +564,73 @@ export const updateDraftDefault = (key: string, value: string) =>
     source: string;
     application_questions: JobProfileControls["application_questions"];
   }>("/api/job-search/profile-controls/draft-default", { key, value }, "PUT");
+
+// ---- location + language filters (hybrid geo/language gate) ----------------
+export interface JobLocations {
+  mode: "worldwide" | "countries" | "regions" | string;
+  remote_ok: boolean;
+  remote_types_allowed: string[];
+  employment_types_allowed: string[];
+  countries: string[];
+  regions: string[];
+}
+export interface JobLanguages {
+  spoken: string[];
+  require_spoken_for_apply: boolean;
+}
+export const updateJobSearchLocations = (body: Partial<JobLocations>) =>
+  postJSON<{ status: string; source: string; locations: JobLocations }>(
+    "/api/job-search/profile-controls/locations", body, "PUT");
+export const updateJobSearchLanguages = (body: Partial<JobLanguages>) =>
+  postJSON<{ status: string; source: string; languages: JobLanguages }>(
+    "/api/job-search/profile-controls/languages", body, "PUT");
+
+// ---- background packet-prep queue ------------------------------------------
+export interface PrepStatus {
+  operation: string;
+  pending: boolean;
+  running: boolean;
+  runs_completed: number;
+  requests_total: number;
+  last_finished_at: string | null;
+  last_error: string | null;
+  last_result: Record<string, unknown> | null;
+}
+export const fetchPrepStatus = () =>
+  getJSON<PrepStatus>("/api/job-search/prep-status");
+
+// ---- rejection feedback loop -----------------------------------------------
+export interface RejectionSuggestion {
+  priority: string;
+  area: string;
+  suggestion: string;
+  evidence: unknown;
+}
+export interface RejectionsReport {
+  operation: string;
+  total_rejections: number;
+  counts_by_reason: Record<string, number>;
+  reason_labels: Record<string, string>;
+  suggestions: RejectionSuggestion[];
+  source: string;
+}
+export const fetchRejectionsReport = () =>
+  getJSON<RejectionsReport>("/api/job-search/rejections-report");
+// mirrors command_center.job_search.rejections.REASON_CODES
+export const REJECT_REASONS: { code: string; label: string }[] = [
+  { code: "location", label: "Location / geography wrong" },
+  { code: "remote", label: "Work arrangement wrong (remote/hybrid/onsite)" },
+  { code: "language", label: "Language requirement I don't meet" },
+  { code: "seniority", label: "Seniority mismatch (too junior / too senior)" },
+  { code: "salary", label: "Salary too low or not listed" },
+  { code: "domain", label: "Wrong domain / industry" },
+  { code: "role_type", label: "Wrong kind of work" },
+  { code: "company", label: "Company-specific reason" },
+  { code: "duplicate", label: "Duplicate / already applied" },
+  { code: "stale", label: "Posting expired or stale" },
+  { code: "low_fit", label: "Low overall fit" },
+  { code: "other", label: "Other (see note)" },
+];
 
 export interface BoardRegistryBoard {
   board_id: string;

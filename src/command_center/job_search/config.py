@@ -38,7 +38,10 @@ def merge_profile_settings(base: dict[str, Any],
         return deepcopy(base)
 
     merged = deepcopy(base)
-    for section in ("job_search", "ranking"):
+    # `locations` and `languages` are operator-tunable search settings (not
+    # safety gates); the drawer read-modify-writes the whole section, so a
+    # shallow update is the intended replace-the-section behavior.
+    for section in ("job_search", "ranking", "locations", "languages"):
         values = override.get(section)
         if isinstance(values, dict):
             merged.setdefault(section, {}).update(values)

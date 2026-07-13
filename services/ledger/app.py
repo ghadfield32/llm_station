@@ -227,7 +227,11 @@ CREATE TABLE IF NOT EXISTS model_usage_samples (
     mission_id          TEXT,
     repo_id             TEXT,
     provider_request_id TEXT,
-    source_record_id    TEXT
+    source_record_id    TEXT,
+    model               TEXT,
+    effort              TEXT,
+    context_mode        TEXT,
+    api_equivalent_cost_usd REAL
 );
 
 CREATE TABLE IF NOT EXISTS model_limit_snapshots (
@@ -1218,7 +1222,8 @@ _USAGE_SAMPLE_COLS = (
     "aggregation_key", "repository_scans", "test_runs", "retries", "failed_calls",
     "worker_restarts", "session_resumes", "tenant_id", "workspace_id", "user_id",
     "conversation_id", "agent_session_id", "mission_id", "repo_id",
-    "provider_request_id", "source_record_id")
+    "provider_request_id", "source_record_id",
+    "model", "effort", "context_mode", "api_equivalent_cost_usd")
 _COLLECTION_STATE_COLS = (
     "collector_id", "updated_at", "last_success_at", "last_cursor",
     "last_source_record_id", "last_error", "consecutive_failures", "next_eligible_at",

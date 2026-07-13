@@ -18,6 +18,15 @@ _DIMENSIONS = {
     "conversation": "conversation_id", "session": "agent_session_id",
     "mission": "mission_id", "repo": "repo_id",
 }
+# dimensions that live on the UsageSample itself (not Attribution) — so "top
+# model" / "top effort" are answered from recorded fact, not a guess.
+_SAMPLE_DIMENSIONS = {"model": "model", "effort": "effort", "context": "context_mode"}
+
+
+def _dimension_value(sample: UsageSample, dimension: str) -> str:
+    if dimension in _SAMPLE_DIMENSIONS:
+        return getattr(sample, _SAMPLE_DIMENSIONS[dimension]) or "(unattributed)"
+    return getattr(sample.attribution, _DIMENSIONS[dimension]) or "(unattributed)"
 
 # rankable metrics -> UsageSample attribute name
 _METRICS = {
@@ -50,17 +59,16 @@ def rank_by(samples: list[UsageSample], *, dimension: str, metric: str,
     """Top-N attribution rows for a metric along a dimension. Samples missing
     that dimension roll into a single explicit "(unattributed)" bucket — never
     dropped, never guessed."""
-    if dimension not in _DIMENSIONS:
-        raise ValueError(f"unknown attribution dimension {dimension!r} "
-                         f"(known: {sorted(_DIMENSIONS)})")
+    if dimension not in _DIMENSIONS and dimension not in _SAMPLE_DIMENSIONS:
+        known = sorted({*_DIMENSIONS, *_SAMPLE_DIMENSIONS})
+        raise ValueError(f"unknown attribution dimension {dimension!r} (known: {known})")
     if metric not in _METRICS:
         raise ValueError(f"unknown metric {metric!r} (known: {sorted(_METRICS)})")
 
-    attr = _DIMENSIONS[dimension]
     totals: dict[str, float] = {}
     counts: dict[str, int] = {}
     for s in samples:
-        key = getattr(s.attribution, attr) or "(unattributed)"
+        key = _dimension_value(s, dimension)
         totals[key] = totals.get(key, 0.0) + _metric_value(s, metric)
         counts[key] = counts.get(key, 0) + 1
 

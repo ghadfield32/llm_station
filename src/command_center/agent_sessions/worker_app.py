@@ -77,20 +77,48 @@ class ApprovalIn(BaseModel):
 
 
 _CLAUDE_HARNESSES = ("claude_code_local", "claude_agent")
+_USAGE_HARNESSES = ("claude_code_local", "claude_agent", "codex_agent")
 
 
-def _worker_feed_usage(usage: object, harness: str | None, ev: AgentEvent) -> None:
-    """Ingest a live `rate_limit` AgentEvent into the WORKER's own UsageService,
-    so a session's provider-limit state is captured even with NO browser SSE
-    attached (the headless gap the cockpit-side tee can't cover). Attributed to
-    the session's harness so the two Claude lanes stay distinct. Best-effort;
-    Codex limits come from its own provider collector, not here."""
-    if usage is None or ev.type != "rate_limit" or harness not in _CLAUDE_HARNESSES:
-        return
+def _session_effort(store: SessionStoreProtocol, session_id: str) -> str | None:
+    """Recover the session's requested effort from its durable session_started
+    event (it's not on the SessionRecord). One store read per turn."""
     try:
-        from command_center.usage.collectors.claude_agent import translate_rate_limit_info
-        result = translate_rate_limit_info(ev.payload or {}, ev.ts or "", harness)
-        usage.ingest_collector_result(result)   # type: ignore[attr-defined]
+        for ev in store.events_since(session_id, 0):
+            if ev.type == "session_started" and "requested_effort" in ev.payload:
+                return ev.payload.get("requested_effort")
+    except Exception:
+        pass
+    return None
+
+
+def _worker_feed_usage(usage: object, record: object, effort: str | None,
+                       ev: AgentEvent) -> None:
+    """Ingest a live agent event into the WORKER's own UsageService, so a
+    session's usage is captured even with NO browser SSE attached (the headless
+    gap the cockpit tee can't cover). `rate_limit` -> a provider-limit snapshot
+    (Claude lanes only; Codex limits come from its own collector); `usage` -> an
+    attributed UsageSample (all agent lanes) with model/effort/repo so "top
+    model / top effort" is answered from recorded fact. Best-effort — a usage
+    failure must never break the turn."""
+    if usage is None or record is None:
+        return
+    harness = getattr(record, "harness", None)
+    try:
+        if ev.type == "rate_limit" and harness in _CLAUDE_HARNESSES:
+            from command_center.usage.collectors.claude_agent import translate_rate_limit_info
+            usage.ingest_collector_result(   # type: ignore[attr-defined]
+                translate_rate_limit_info(ev.payload or {}, ev.ts or "", harness))
+        elif ev.type == "usage" and harness in _USAGE_HARNESSES:
+            from command_center.usage.agent_usage import agent_usage_sample
+            sample = agent_usage_sample(
+                ev.payload or {}, runtime_id=harness,
+                session_id=getattr(record, "session_id", None),
+                repo_id=getattr(record, "repo_id", None),
+                conversation_id=getattr(record, "conversation_id", None),
+                model=getattr(record, "model", None), effort=effort,
+                observed_at=ev.ts)
+            usage.store.ingest_sample(sample)   # type: ignore[attr-defined]
     except Exception:
         pass
 
@@ -161,10 +189,13 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         completion, failed (with a durable event naming what happened) on a
         real crash or on interrupt-triggered cancellation."""
         store.set_status(session_id, "active")
-        harness_id = store.get(session_id).harness
+        # snapshot the attribution context ONCE (avoid a store read per event):
+        # model/repo/conversation don't change mid-turn, effort is pinned.
+        turn_record = store.get(session_id) if usage is not None else None
+        turn_effort = _session_effort(store, session_id) if usage is not None else None
         try:
             async for ev in service.send_message(session_id, prompt):
-                _worker_feed_usage(usage, harness_id, ev)   # headless-safe capture
+                _worker_feed_usage(usage, turn_record, turn_effort, ev)
             store.set_status(session_id, "idle")
         except asyncio.CancelledError:
             store.append_event(session_id, AgentEvent(

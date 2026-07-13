@@ -10,6 +10,7 @@ import yaml
 
 from command_center.job_search.achievement_bank import AchievementBank
 from command_center.job_search.automation_policy import classify_automation
+from command_center.job_search.geo_language import FilterEvaluation, evaluate_filters
 from command_center.job_search.schemas import (
     AutomationClass,
     CanonicalJob,
@@ -200,6 +201,8 @@ def _render_explanation(
     config: JobSearchConfig,
     company_tier: str,
     gaps: list[str],
+    *,
+    excluded_reason: str | None = None,
 ) -> str:
     by_id = {a.id: a for a in bank.achievements}
     lines = [f"Fit score: {score}/100 for {job.company} - {job.role_title}.", "", "Score breakdown:"]
@@ -236,7 +239,62 @@ def _render_explanation(
             f"{score} is below the {config.ranking.min_score_to_show} show bar and will not surface "
             "automatically."
         )
+    if excluded_reason:
+        lines.append("")
+        lines.append(
+            "Filtered out of automatic suggestions by your search filters: "
+            f"{excluded_reason}."
+        )
     return "\n".join(lines)
+
+
+def _apply_filter_effects(
+    filters: FilterEvaluation,
+    config: JobSearchConfig,
+    components: list[tuple[str, int]],
+    risks: list[str],
+) -> tuple[int, str | None]:
+    """Fold the location/language/employment verdicts into the score breakdown.
+
+    Returns (total_soft_penalty, excluded_reason). A non-None excluded_reason
+    means a CLEAR mismatch: the caller pushes the score below the show bar and
+    marks the fit SKIP. Soft penalties keep the job visible, ranked lower.
+    """
+    spoken = ", ".join(config.languages.spoken)
+    penalty = 0
+    if filters.location == "ambiguous":
+        amount = config.ranking.location_ambiguous_penalty
+        penalty += amount
+        components.append(("Location unclear (soft penalty)", -amount))
+        risks.append(f"Location: {filters.location_reason}; verify before applying.")
+    if filters.language == "preferred_gap":
+        amount = config.ranking.language_preferred_penalty
+        penalty += amount
+        components.append(("Preferred language you don't speak", -amount))
+        gaps = ", ".join(filters.language_gaps)
+        risks.append(
+            f"Language: {gaps} is preferred but not in your spoken set ({spoken})."
+        )
+    if filters.employment == "mismatch":
+        amount = config.ranking.employment_mismatch_penalty
+        penalty += amount
+        components.append(("Employment-type mismatch (soft penalty)", -amount))
+        risks.append(f"Employment: {filters.employment_reason}.")
+
+    if not filters.hard_excluded:
+        return penalty, None
+
+    if filters.location in {"mismatch", "arrangement_excluded"}:
+        excluded_reason = filters.location_reason
+        components.append((f"Hard-excluded ({filters.location})", 0))
+    else:
+        gaps = ", ".join(filters.language_gaps)
+        excluded_reason = (
+            f"posting requires {gaps}, not in your spoken languages ({spoken})"
+        )
+        components.append(("Hard-excluded (language requirement)", 0))
+    risks.append(f"Filtered out of suggestions: {excluded_reason}.")
+    return penalty, excluded_reason
 
 
 def score_job(job: CanonicalJob, bank: AchievementBank, config: JobSearchConfig) -> FitResult:
@@ -295,8 +353,20 @@ def score_job(job: CanonicalJob, bank: AchievementBank, config: JobSearchConfig)
         components.append(("Manual-required portal/questions", -config.ranking.manual_required_penalty))
         risks.append("Application likely needs Geoff because manual blockers were detected.")
 
+    # Hybrid location/language/employment gate. Soft cases lose points but stay
+    # visible; hard mismatches are pushed below the show bar and marked SKIP so
+    # they never surface automatically (see geo_language.evaluate_filters).
+    filters = evaluate_filters(job, config)
+    penalty, excluded_reason = _apply_filter_effects(filters, config, components, risks)
+    score -= penalty
+
     score = max(0, min(100, score))
-    if score >= config.ranking.min_score_to_recommend_apply:
+    if excluded_reason is not None:
+        score = min(score, max(0, config.ranking.min_score_to_show - 1))
+
+    if excluded_reason is not None:
+        action = FitAction.SKIP
+    elif score >= config.ranking.min_score_to_recommend_apply:
         action = (
             FitAction.APPLY_NOW
             if config.job_search.auto_submit_enabled
@@ -310,7 +380,10 @@ def score_job(job: CanonicalJob, bank: AchievementBank, config: JobSearchConfig)
     if not reasons:
         reasons.append("Some overlap exists, but evidence strength is limited.")
 
-    explanation = _render_explanation(job, bank, components, evidence_ids, score, config, company_tier, gaps)
+    explanation = _render_explanation(
+        job, bank, components, evidence_ids, score, config, company_tier, gaps,
+        excluded_reason=excluded_reason,
+    )
 
     return FitResult(
         score=score,
