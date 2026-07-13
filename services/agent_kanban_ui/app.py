@@ -1540,8 +1540,14 @@ def _feed_agent_usage(client, session_id: str, ev: dict) -> None:
     """Tee a live `rate_limit` AgentEvent into the durable usage store so a
     running Claude session lights up its own Usage card + selector badge. Codex
     limits come from its own provider collector, so only Claude lanes are fed
-    here. Best-effort — a usage-tee failure must never break the browser SSE."""
-    if not (USAGE_ENABLED and USAGE_CLAUDE) or ev.get("type") != "rate_limit":
+    here. Best-effort — a usage-tee failure must never break the browser SSE.
+
+    RETIRED AS A WRITER under USAGE_LEDGER: when the cockpit reads the shared
+    Ledger, the WORKER is the sole authoritative writer (worker_app._run_turn),
+    so this browser-dependent tee stands down to avoid a second writer. It stays
+    active only as the in-memory dev/test fallback (no worker durability)."""
+    if not (USAGE_ENABLED and USAGE_CLAUDE) or USAGE_LEDGER \
+            or ev.get("type") != "rate_limit":
         return
     harness = _harness_of(client, session_id)
     if harness not in _CLAUDE_HARNESSES:

@@ -198,6 +198,15 @@ class UsageSample:
     duration_ms: int = 0
     cost_usd: float | None = None      # None = no dollar figure (see cost_source), NOT $0.00
     cost_source: CostSource = CostSource.UNKNOWN
+    # a subscription lane exposes NO per-turn dollar charge, but the provider
+    # still reports an API-EQUIVALENT value — kept in its OWN field so it is
+    # never confused with actual spend (cost_usd stays None there).
+    api_equivalent_cost_usd: float | None = None
+    # which model/effort/context produced this activity — so "top model" and
+    # "top effort" are answered from recorded fact (see attribution.rank_by).
+    model: str | None = None
+    effort: str | None = None
+    context_mode: str | None = None
     # cost/window bounds — a provider window/daily bucket carries these
     window_start: str | None = None
     window_end: str | None = None

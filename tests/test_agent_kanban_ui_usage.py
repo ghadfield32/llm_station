@@ -103,6 +103,22 @@ def test_claude_rate_limit_event_tees_into_the_usage_store(monkeypatch):
     assert any(lim["bucket_id"] == "five_hour" for lim in claude["limits"])
 
 
+def test_tee_stands_down_as_a_writer_under_usage_ledger(monkeypatch):
+    # when the cockpit reads the shared Ledger, the WORKER is the sole writer;
+    # the browser-dependent tee must NOT also write. It should early-return
+    # before it even builds/touches the usage service.
+    mod, _client = _load(monkeypatch, enabled=True, fake=False)
+    monkeypatch.setattr(mod, "USAGE_CLAUDE", True)
+    monkeypatch.setattr(mod, "USAGE_LEDGER", True)
+    mod._usage_service = None
+    mod._session_harness["s1"] = "claude_code_local"
+    ev = {"type": "rate_limit", "ts": "2026-07-13T00:00:00+00:00",
+          "payload": {"status": "allowed_warning", "rate_limit_type": "five_hour",
+                      "utilization": None, "resets_at": 1783896000}}
+    mod._feed_agent_usage(None, "s1", ev)
+    assert mod._usage_service is None    # tee wrote nothing (never even built it)
+
+
 def test_top_drivers_bad_dimension_is_400(monkeypatch):
     _mod, client = _load(monkeypatch, enabled=True, fake=True)
     client.post("/api/model-usage/refresh")
