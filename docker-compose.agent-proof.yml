@@ -1,0 +1,25 @@
+# Override for isolated agent-session deployment proofs — used exclusively by
+# scripts/run_agent_deployment_proof.ps1, never applied to the production
+# stack. See that script's header comment for the incident this exists to
+# prevent (a wrong-directory `docker compose up` once recreated the REAL
+# llm_station-ledger-1/llm_station-agent-kanban-ui-1 containers).
+#
+# The actual isolation guarantee comes from `-p <proof-project-name>`
+# (verified: docker-compose.yml declares `ledger_data` with no `name:`/
+# `external:` override, so Compose namespaces the volume by project name
+# automatically — a distinct -p value alone guarantees a distinct volume,
+# never llm_station_ledger_data). This override file exists as an explicit,
+# version-controlled statement of that intent, plus one real behavioral
+# difference: proof containers never auto-restart, so a disposable proof
+# stack never silently outlives the proof run across a host reboot.
+#
+# Usage (always via the script above, never invoked directly):
+#   docker compose -f docker-compose.yml -f docker-compose.agent-proof.yml \
+#     -p cc-agent-runtime-proof --env-file .env.agent-proof \
+#     --profile ui up -d ledger agent-kanban-ui
+
+services:
+  ledger:
+    restart: "no"
+  agent-kanban-ui:
+    restart: "no"

@@ -23,7 +23,7 @@ items:
     aliases: [linkedin posts, linkedin content, post preview, content engine,
               social post pipeline, the post thing, linkedin engine]
     tags: [linkedin, content, preview, publishing, posts]
-    source_path: docs/LINKEDIN_PIPELINE.md
+    source_path: docs/linkedin/LINKEDIN_PIPELINE.md
     summary: Drafting, previewing, and validating LinkedIn-style posts before publish.
 
   - id: content_pipeline_engine

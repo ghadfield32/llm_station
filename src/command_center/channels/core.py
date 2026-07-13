@@ -35,6 +35,8 @@ from typing import Any, Callable, Hashable
 import httpx
 
 from .board_state import collect_board_state, load_agent_surface_config
+from .transcript import TurnRecorder
+from .transcript import current_conversation as transcript_conversation
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # src/command_center/channels/ -> repo root
 GROWTHOS_ROOT = REPO_ROOT / "appflowy_kanban" / "growth-os"
@@ -136,11 +138,53 @@ def _wire_kanban_events(dispatch: dict[str, Callable[..., Any]],
                                   board_id=st["board_id"], log=log)
 
 
-def build_system(surface: str) -> str:
-    """The operator brief + the rules of the wall, identical across surfaces (only
-    the surface name varies). It enumerates every capability tier on purpose: a
-    model only uses the abilities its prompt tells it it has, so under-describing
-    the tool layer is why a capable bot acts helpless."""
+def build_system(surface: str, *, tools_available: bool = True, lane: str = "frontier") -> str:
+    """The operator brief + the rules of the wall, identical across LOCAL surfaces
+    (only the surface name varies). It enumerates every capability tier on
+    purpose: a model only uses the abilities its prompt tells it it has, so
+    under-describing the tool layer is why a capable bot acts helpless.
+
+    tools_available=False is for frontier / local-frontier turns only (lane
+    distinguishes the two for wording — "paid" vs "local/free" — the safety
+    reasoning is identical). Neither kind of backend is EVER given a tools schema
+    (see frontier_client.py / local_frontier_client.py) — describing the verb
+    catalogue in prose to a model with no matching schema only invites it to
+    guess at calling something. Observed 2026-07-11: deepseek-v4-pro read the
+    full brief below (including the project_status("betts_basketball") worked
+    example) and emitted a real, structured tool_calls entry for it with a
+    guessed argument name, even though frontier_chat_completion never sent a
+    `tools` field in the request — its serving stack appears to auto-parse
+    native tool-call syntax from output text regardless of what the request
+    declared. GatewayCore._completion refuses to dispatch that (see
+    _no_tools_lane_tool_call_diagnostic); this prompt variant is the
+    complementary fix that stops inviting the attempt in the first place.
+
+    local_frontier gets its OWN, much shorter template (not just a substituted
+    lane_desc in the frontier template) — colibrì-class engines are genuinely
+    disk/compute-bound (measured 2026-07-12: 219 prompt tokens for an
+    8-word user message, almost entirely system-prompt overhead), so prefill
+    token count is a real, measured cost here in a way it isn't for the fast
+    paid frontier lane. Keeps the same two safety properties (no tools, never
+    claim an action happened) in far fewer tokens."""
+    if not tools_available:
+        if lane == "local_frontier":
+            return (
+                "You are a private local AI assistant. You have no tools, no board "
+                "access, and no way to affect any external system. Never claim to "
+                "have taken an action or checked something live. Do not emit "
+                "tool-call syntax — nothing will run it. Be concise."
+            )
+        return f"""You are the Growth OS gateway on {surface}, talking through \
+the paid frontier-router lane. Today is {date.today().isoformat()}.
+This is PLAIN CONVERSATION ONLY. You have NO tools, NO board access, and NO \
+ability to see or change anything in AppFlowy, the kanban boards, or either \
+repo (betts_basketball / command-center) — none of that reaches this lane, by \
+design. If asked to look something up, check a status, or take an action, say \
+plainly that this chat cannot do that and suggest switching to a local chat \
+role for real board/tool access. Do not attempt to call a function or emit \
+tool-call-shaped output (e.g. "**Calling:** `name`") — you were not given a \
+tools schema, nothing will execute it, and doing so anyway misleads whoever \
+reads your answer. Be concise."""
     return f"""You are the Growth OS gateway on {surface}. Today is {date.today().isoformat()}.
 You operate the user's AppFlowy workspace and drive work on the betts_basketball
 and command-center repos through a verified tool layer. The live board is injected
@@ -210,9 +254,22 @@ class GatewayConfig:
     """Per-channel runtime config. Transport tokens/allowlists are NOT here — each
     adapter reads those from its own env names. This is just the model wiring."""
     surface: str                                  # display name, e.g. "Discord"
-    model: str                                    # a models.yaml role alias
+    model: str                                    # a models.yaml role alias, OR
+                                                   # (when frontier_model_id is set) a
+                                                   # display label for the frontier model
     litellm_base: str
     litellm_key: str
+    # Set only for a frontier-router turn (an id from frontier-router-providers.yaml,
+    # e.g. "glm-5.2"). When set, _completion routes to frontier_client instead of
+    # LiteLLM, and board/memory/tool context injection is skipped — see is_frontier.
+    frontier_model_id: str | None = None
+    # Set only for a local-frontier turn (an id from local-frontier-providers.yaml,
+    # e.g. "glm-5.2-colibri" — an experimental loopback-only engine, colibrì today).
+    # When set, _completion routes to local_frontier_client instead of LiteLLM, and
+    # board/memory/tool context injection is skipped — same reasoning as is_frontier,
+    # but for "the backend can't use tools and is painfully slow" rather than "the
+    # backend is a paid third party." Mutually exclusive with frontier_model_id.
+    local_frontier_model_id: str | None = None
     max_history: int = 12
     max_rounds: int = 6
     # Max model turns this gateway runs at once. Sized to the GPU tier's real
@@ -224,8 +281,12 @@ class GatewayConfig:
     max_concurrency: int = 1
 
     @classmethod
-    def build(cls, *, surface: str, model: str,
+    def build(cls, *, surface: str, model: str, frontier_model_id: str | None = None,
+              local_frontier_model_id: str | None = None,
               max_history: int = 12, max_rounds: int = 6) -> "GatewayConfig":
+        if frontier_model_id and local_frontier_model_id:
+            raise ValueError(
+                "frontier_model_id and local_frontier_model_id are mutually exclusive lanes")
         e = env()
         concurrency = e.get("GATEWAY_MAX_CONCURRENCY") or e.get("OLLAMA_NUM_PARALLEL") or "1"
         return cls(
@@ -234,6 +295,8 @@ class GatewayConfig:
             litellm_base=e.get("LITELLM_BASE_URL", "http://localhost:4000/v1").rstrip("/"),
             # the proxy enforces auth; a virtual key wins, else the master key
             litellm_key=e.get("LITELLM_API_KEY") or e.get("LITELLM_MASTER_KEY", ""),
+            frontier_model_id=frontier_model_id,
+            local_frontier_model_id=local_frontier_model_id,
             max_history=max_history,
             max_rounds=max_rounds,
             max_concurrency=max(1, int(concurrency)),
@@ -247,7 +310,18 @@ class GatewayCore:
 
     def __init__(self, cfg: GatewayConfig):
         self.cfg = cfg
-        self.system = build_system(cfg.surface)
+        # A frontier turn is plain conversation: no tools, no board/memory context
+        # travels to the paid provider. See channels/frontier_client.py docstring.
+        self.is_frontier = bool(cfg.frontier_model_id)
+        # A local-frontier turn (colibrì today) gets the same treatment for a different
+        # reason: the engine rejects tool schemas outright and is extremely slow, so a
+        # smaller prompt matters even though nothing leaves the machine. See
+        # channels/local_frontier_client.py docstring.
+        self.is_local_frontier = bool(cfg.local_frontier_model_id)
+        self.no_tools_lane = self.is_frontier or self.is_local_frontier
+        self.system = build_system(
+            cfg.surface, tools_available=not self.no_tools_lane,
+            lane="local_frontier" if self.is_local_frontier else "frontier")
         self.tools, self.dispatch = load_tool_layer(cfg.surface)
         # Live kanban sync: funnel every governed card/todo verb (this surface
         # included) through the kanban event log so the internal UI + AppFlowy
@@ -275,17 +349,98 @@ class GatewayCore:
     async def aclose(self) -> None:
         await self.http.aclose()
 
+    def _no_tools_lane_tool_call_diagnostic(self, msg: dict) -> str | None:
+        """Neither a frontier-router response nor a local-frontier response must ever carry
+        tool_calls — neither client sends a `tools` field in the request (see
+        frontier_chat_completion / local_frontier_chat_completion), so GatewayCore never
+        offered, scoped, or validated anything the model could call. If tool_calls shows up
+        anyway (observed 2026-07-11: deepseek-v4-pro emitted a real, structured call for
+        project_status with a guessed argument name after reading the tool vocabulary in the
+        shared system prompt — its serving stack appears to auto-parse native tool-call syntax
+        from output text regardless of the request), it must never be dispatched: this harness
+        would be letting an unvetted response trigger a real local function call. Returns an
+        operator-facing diagnostic naming exactly what was attempted, or None when clean."""
+        calls = msg.get("tool_calls")
+        if not calls:
+            return None
+        names = [c.get("function", {}).get("name", "?") for c in calls]
+        model_id = self.cfg.frontier_model_id or self.cfg.local_frontier_model_id
+        lane = "frontier" if self.is_frontier else "local-frontier"
+        print(f"[gateway] {lane} model {model_id!r} emitted unsolicited tool_calls "
+              f"{names!r} — refusing to dispatch ({lane} turns are never offered tools)",
+              file=sys.stderr)
+        return (f"gateway safety stop: the {lane} model tried to call {names!r} directly. "
+                f"{lane.capitalize()} turns never receive a tools schema or board/memory "
+                f"context, so nothing was executed — this is provider-side behavior (its "
+                f"serving stack appears to emit tool-call syntax on its own), not a bug in "
+                f"those tools. Switch to a local chat role for real board/tool access.")
+
     async def _completion(self, messages: list, with_tools: bool) -> dict:
+        if self.is_frontier:
+            # Live paid-API path — every gate (lane enabled, redaction, key,
+            # per-request/conversation/monthly budget) lives in frontier_client;
+            # this never touches LiteLLM and never attaches tools.
+            from .frontier_client import frontier_chat_completion
+            conversation = transcript_conversation.get() or "frontier"
+            msg = await frontier_chat_completion(
+                model_id=self.cfg.frontier_model_id, conversation_id=conversation,
+                messages=messages, http=self.http)
+            diag = self._no_tools_lane_tool_call_diagnostic(msg)
+            if diag is not None:
+                msg["tool_calls"] = None
+                msg["content"] = diag
+            return msg
+        if self.is_local_frontier:
+            # Live loopback path — every gate (lane enabled, base URL set, host allowlist)
+            # lives in local_frontier_client; this never touches LiteLLM and never attaches
+            # tools. No budget/cost gating here — there is no $ cost, only a wall-clock one.
+            from .local_frontier_client import local_frontier_chat_completion
+            conversation = transcript_conversation.get() or "local-frontier"
+            msg = await local_frontier_chat_completion(
+                model_id=self.cfg.local_frontier_model_id, conversation_id=conversation,
+                messages=messages, http=self.http)
+            diag = self._no_tools_lane_tool_call_diagnostic(msg)
+            if diag is not None:
+                msg["tool_calls"] = None
+                msg["content"] = diag
+            return msg
         headers = {"Authorization": f"Bearer {self.cfg.litellm_key}"} \
             if self.cfg.litellm_key else {}
         body: dict[str, Any] = {"model": self.cfg.model, "messages": messages}
         if with_tools:
             body["tools"] = self.tools
+        # Same join key as the flight recorder: LiteLLM groups requests that
+        # share a litellm_session_id into one Session Logs view, so the proxy's
+        # spend-log net and our transcripts index by the same conversation id.
+        conversation = transcript_conversation.get()
+        if conversation:
+            body["litellm_session_id"] = f"{self.cfg.surface}:{conversation}"
         r = await self.http.post(
             f"{self.cfg.litellm_base}/chat/completions",
             headers=headers, json=body)
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]
+        data = r.json()
+        msg = data["choices"][0]["message"]
+        # Token counts ride ON the message (popped by the caller before the
+        # message joins history) — a shared self.last_usage would misattribute
+        # usage across concurrent turns.
+        msg["_usage"] = data.get("usage")
+        return msg
+
+    def _leak_diagnostic(self, content: str) -> str | None:
+        """Fail-loud guard shared by BOTH loops: raw tool-call markup a serving
+        path failed to parse must never reach a user surface (see
+        _TOOL_CALL_MARKERS). Returns the operator-facing diagnostic, or None
+        when the content is clean."""
+        if not _leaked_tool_call(content):
+            return None
+        print(f"[gateway] UNPARSED TOOL CALL from model role "
+              f"{self.cfg.model!r}; head: {content[:300]!r}",
+              file=sys.stderr)
+        return (f"gateway misconfiguration: model role {self.cfg.model!r} "
+                f"emitted a tool call the serving path did not parse. This "
+                f"channel needs a tool-robust model role — see "
+                f"configs/models.yaml `chat:`.")
 
     async def run_turn(self, conversation_id: Hashable, user_text: str) -> str:
         """Busy rules wrap the model loop:
@@ -311,11 +466,22 @@ class GatewayCore:
         lines, never an empty/stale block."""
         return {"role": "system", "content": collect_board_state(self.board_knobs)}
 
+    @property
+    def _inject_context(self) -> bool:
+        """Board/growthos-memory re-injection is a local-OLLAMA-lane feature. A frontier
+        turn's messages leave the machine for a paid provider (see
+        channels/frontier_client.py); a local-frontier turn stays on this machine but is
+        tool-blind and painfully slow, so a smaller prompt matters just as much — see
+        channels/local_frontier_client.py. Neither lane gets board/memory context."""
+        return self.board_knobs.enabled and not self.no_tools_lane
+
     def _memory_messages(self, query: str) -> list[dict]:
         """Durable cross-conversation memory relevant to `query`, re-injected like the
-        board (never stored in history). Empty list when memory is disabled or there is
-        nothing to recall, so no empty block is added. collect_memory_state is fail-loud:
-        it renders an ERROR line, never raises into the turn."""
+        board (never stored in history). Empty list when memory is disabled, there is
+        nothing to recall, or this is a frontier/local-frontier turn (see _inject_context).
+        collect_memory_state is fail-loud: it renders an ERROR line, never raises."""
+        if self.no_tools_lane:
+            return []
         from growthos.memory import collect_memory_state
         block = collect_memory_state(query, self.memory_cfg)
         return [{"role": "system", "content": block}] if block else []
@@ -331,34 +497,56 @@ class GatewayCore:
                    "content": "still working on your previous message — one moment."}
             return
         self._inflight.add(conversation_id)
+        # Flight recorder: full-fidelity turn capture at the only seam where the
+        # untruncated story exists (SSE events below stay truncated). Fail-open.
+        rec = TurnRecorder(surface=self.cfg.surface, model=self.cfg.model,
+                           conversation_id=conversation_id, user_text=user_text)
         try:
             async with self._slots:
                 history = self.histories[conversation_id]
                 history.append({"role": "user", "content": user_text})
                 messages = [{"role": "system", "content": self.system}]
-                if self.board_knobs.enabled:
+                if self._inject_context:
                     messages.append(self._board_message())
-                messages += self._memory_messages(user_text)
+                    rec.context("board_state")
+                mem = self._memory_messages(user_text)
+                messages += mem
+                if mem:
+                    rec.context("growthos_memory")
                 messages += list(history)
                 seen: set[tuple[str, str]] = set()
                 refresh = self.board_knobs.refresh_every_rounds
                 for round_idx in range(self.cfg.max_rounds):
                     yield {"type": "round", "n": round_idx + 1}
+                    rec.event("round", n=round_idx + 1)
                     try:
                         msg = await self._completion(messages, with_tools=True)
-                    except httpx.HTTPError as exc:
-                        yield {"type": "final", "content": f"LiteLLM gateway error: {exc}"}
+                    except (httpx.HTTPError, KeyError, IndexError,
+                            ValueError) as exc:
+                        # HTTP failure or a malformed 200 (bad JSON / missing
+                        # choices) — surface an error frame, never a dead stream
+                        rec.final(f"LiteLLM gateway error: {exc!r}")
+                        yield {"type": "final", "content": f"LiteLLM gateway error: {exc!r}"}
                         return
+                    rec.usage(msg.pop("_usage", None))
                     messages.append(msg)
                     calls = msg.get("tool_calls") or []
                     if not calls:
                         content = _clean(msg.get("content") or "")
+                        diag = self._leak_diagnostic(content)
+                        if diag:
+                            history.append({"role": "assistant", "content": diag})
+                            rec.final(diag)
+                            yield {"type": "final", "content": diag}
+                            return
                         history.append({"role": "assistant", "content": content})
+                        rec.final(content)
                         yield {"type": "final", "content": content or "(no response)"}
                         return
                     for call in calls:
                         name = call["function"]["name"]
                         raw = call["function"].get("arguments") or "{}"
+                        rec.tool(name, raw)
                         yield {"type": "tool", "name": name, "args": raw[:200]}
                         if (name, raw) in seen:
                             result = "(repeat suppressed — identical call already made)"
@@ -368,67 +556,86 @@ class GatewayCore:
                                 result = self.dispatch[name](**json.loads(raw))
                             except Exception as exc:
                                 result = f"error: {exc}"
+                        rec.tool_result(name, result)
                         yield {"type": "tool_result", "name": name,
                                "result": str(result)[:300]}
                         messages.append({"role": "tool", "tool_call_id": call["id"],
                                          "content": json.dumps(result, default=str)})
-                    if self.board_knobs.enabled and refresh and (round_idx + 1) % refresh == 0:
+                    if self._inject_context and refresh and (round_idx + 1) % refresh == 0:
                         messages.append(self._board_message())
+                        rec.context("board_state_refresh")
                     mem_refresh = self.memory_cfg.refresh_every_rounds
                     if mem_refresh and (round_idx + 1) % mem_refresh == 0:
                         messages += self._memory_messages(user_text)
+                        rec.context("growthos_memory_refresh")
                 messages.append({"role": "user", "content":
                                  "Tool budget exhausted. Answer now using the tool "
                                  "results above; say plainly what couldn't be done."})
                 try:
                     msg = await self._completion(messages, with_tools=False)
-                except httpx.HTTPError as exc:
-                    yield {"type": "final", "content": f"LiteLLM gateway error: {exc}"}
+                except (httpx.HTTPError, KeyError, IndexError,
+                        ValueError) as exc:
+                    rec.final(f"LiteLLM gateway error: {exc!r}")
+                    yield {"type": "final", "content": f"LiteLLM gateway error: {exc!r}"}
                     return
+                rec.usage(msg.pop("_usage", None))
                 content = _clean(msg.get("content") or "")
+                content = self._leak_diagnostic(content) or content
                 history.append({"role": "assistant", "content": content})
+                rec.final(content or "(no answer after budget)")
                 yield {"type": "final", "content": content or "(no answer after budget)"}
         finally:
+            rec.flush()
             self._inflight.discard(conversation_id)
 
     async def _run_turn(self, conversation_id: Hashable, user_text: str) -> str:
+        rec = TurnRecorder(surface=self.cfg.surface, model=self.cfg.model,
+                           conversation_id=conversation_id, user_text=user_text)
+        try:
+            return await self._run_turn_recorded(conversation_id, user_text, rec)
+        finally:
+            rec.flush()
+
+    async def _run_turn_recorded(self, conversation_id: Hashable, user_text: str,
+                                 rec: "TurnRecorder") -> str:
         history = self.histories[conversation_id]
         history.append({"role": "user", "content": user_text})
         messages = [{"role": "system", "content": self.system}]
-        if self.board_knobs.enabled:        # harness re-injects the single source of truth
+        if self._inject_context:            # harness re-injects the single source of truth
             messages.append(self._board_message())
-        messages += self._memory_messages(user_text)
+            rec.context("board_state")
+        _mem = self._memory_messages(user_text)
+        messages += _mem
+        if _mem:
+            rec.context("growthos_memory")
         messages += list(history)
         seen_calls: set[tuple[str, str]] = set()
         refresh = self.board_knobs.refresh_every_rounds
         for round_idx in range(self.cfg.max_rounds):
+            rec.event("round", n=round_idx + 1)
             try:
                 msg = await self._completion(messages, with_tools=True)
-            except httpx.HTTPError as exc:   # surfaced, never swallowed
-                return f"LiteLLM gateway error: {exc}"
+            except (httpx.HTTPError, KeyError, IndexError,
+                    ValueError) as exc:   # surfaced, never swallowed
+                rec.final(f"LiteLLM gateway error: {exc!r}")
+                return f"LiteLLM gateway error: {exc!r}"
+            rec.usage(msg.pop("_usage", None))
             messages.append(msg)
             calls = msg.get("tool_calls") or []
             if not calls:
                 content = _clean(msg.get("content") or "")
-                if _leaked_tool_call(content):
-                    # fail loud: a tool call the serving path didn't parse must
-                    # not reach the user as raw markup. Log the evidence for the
-                    # operator; return a clean diagnostic that names the cause and
-                    # the fix — never the markup itself (see _TOOL_CALL_MARKERS).
-                    print(f"[gateway] UNPARSED TOOL CALL from model role "
-                          f"{self.cfg.model!r}; head: {content[:300]!r}",
-                          file=sys.stderr)
-                    diag = (f"gateway misconfiguration: model role "
-                            f"{self.cfg.model!r} emitted a tool call the serving "
-                            f"path did not parse. This channel needs a tool-robust "
-                            f"model role — see configs/models.yaml `chat:`.")
+                diag = self._leak_diagnostic(content)
+                if diag:
                     history.append({"role": "assistant", "content": diag})
+                    rec.final(diag)
                     return diag
                 history.append({"role": "assistant", "content": content})
+                rec.final(content or "(no response)")
                 return content or "(no response)"
             for call in calls:
                 name = call["function"]["name"]
                 raw_args = call["function"].get("arguments") or "{}"
+                rec.tool(name, raw_args)
                 key = (name, raw_args)
                 if key in seen_calls:        # deterministic loop-breaker
                     result = ("you already called this with identical "
@@ -441,15 +648,18 @@ class GatewayCore:
                         result = self.dispatch[name](**json.loads(raw_args))
                     except Exception as exc:  # tool errors go back to the model
                         result = f"error: {exc}"
+                rec.tool_result(name, result)
                 messages.append({"role": "tool", "tool_call_id": call["id"],
                                  "content": json.dumps(result, default=str)})
             # re-state the board after mutations so later rounds act on fresh state
-            if self.board_knobs.enabled and refresh and (round_idx + 1) % refresh == 0:
+            if self._inject_context and refresh and (round_idx + 1) % refresh == 0:
                 messages.append(self._board_message())
+                rec.context("board_state_refresh")
             # re-surface durable memory on its own cadence (keeps it in-window on deep turns)
             mem_refresh = self.memory_cfg.refresh_every_rounds
             if mem_refresh and (round_idx + 1) % mem_refresh == 0:
                 messages += self._memory_messages(user_text)
+                rec.context("growthos_memory_refresh")
         # round cap reached: force a text answer from gathered context
         messages.append({"role": "user", "content":
                          "Tool budget exhausted. Answer my original question "
@@ -457,8 +667,12 @@ class GatewayCore:
                          "if something could not be determined."})
         try:
             msg = await self._completion(messages, with_tools=False)
-        except httpx.HTTPError as exc:
-            return f"LiteLLM gateway error: {exc}"
+        except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
+            rec.final(f"LiteLLM gateway error: {exc!r}")
+            return f"LiteLLM gateway error: {exc!r}"
+        rec.usage(msg.pop("_usage", None))
         content = _clean(msg.get("content") or "")
+        content = self._leak_diagnostic(content) or content
         history.append({"role": "assistant", "content": content})
+        rec.final(content or "(no answer after tool budget)")
         return content or "(no answer after tool budget)"

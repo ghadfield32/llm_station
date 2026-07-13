@@ -35,6 +35,17 @@ litellm_settings:
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
+  # Cross-surface net: persist request/response bodies in SpendLogs so the
+  # LiteLLM Admin UI Logs page shows the full story of EVERY call through the
+  # proxy, no matter which surface made it (cockpit, Discord, judges, CLI).
+  # GatewayCore passes litellm_session_id=surface:conversation_id, so Session
+  # Logs group by the same key as the flight recorder. Data stays in the local
+  # litellm-db Postgres. Auto-retention (maximum_spend_logs_retention_period)
+  # is enterprise-gated; prune manually if the DB grows:
+  #   DELETE FROM "LiteLLM_SpendLogs" WHERE "startTime" < now() - interval '30 days';
+  # The per-conversation flight recorder (generated/chat-transcripts/) remains
+  # the primary review surface — this is the safety net underneath it.
+  store_prompts_in_spend_logs: true
 """
 
 
@@ -92,10 +103,13 @@ def main():
         else:
             i += 1
 
-    reg = ModelRegistry.model_validate(yaml.safe_load(open(SRC)))
+    reg = ModelRegistry.model_validate(
+        yaml.safe_load(open(SRC, encoding="utf-8")))
     block = f"{START}\n{build(reg, canary, promote)}\n{END}"
     os.makedirs("generated", exist_ok=True)
-    open(OUT, "w").write(block + "\n" + SETTINGS)
+    # UTF-8 explicitly: Windows' locale default (cp1252) would write bytes the
+    # downstream utf-8 readers (forbidden-provider scan, litellm) reject
+    open(OUT, "w", encoding="utf-8").write(block + "\n" + SETTINGS)
     print(f"rendered {len(reg.roles)} roles -> {OUT}")
     if canary:
         print(f"  canary: {canary}")

@@ -43,6 +43,8 @@ data/improvement/
 data/discovery/
 # runtime ledger state
 data/ledger.db
+# job-search profile, generated resumes, job descriptions, and recruiter notes
+data/job_search/
 generated/improvements-board.json
 *.zip
 "updated files"
@@ -59,12 +61,31 @@ appflowy_kanban/growth-os/_export/
 generated/litellm-config.yaml
 generated/json-schema/
 generated/*.md
+# scan feeds (regenerate: `cc research-digest feed` / `make model-scout`)
+generated/research-digest-feed.json
+generated/model-scout-feed.json
+# content-pipeline outputs (briefs/claims/verifications/reference clusters/style
+# patterns embed personal repo + author summaries; regenerated each run)
+generated/content-brief.json
+generated/content-claims.json
+generated/content-verifications.json
+generated/reference-clusters.json
+generated/reference-people.json
+generated/style-patterns.json
+# post-performance metrics cache; regenerated from platform APIs
+data/performance/
 
 # ── LinkedIn content pipeline runtime state — NEVER commit ──────────────────
 # token store holds the OAuth access token (a secret); ledger/lock are runtime
 generated/linkedin-token.json
 generated/linkedin-published.json
 generated/linkedin-publish.lock
+
+# ── Cockpit shared chat threads — conversation content, per-deployment ───────
+generated/chat-threads.json
+
+# ── Gateway turn transcripts — full-fidelity conversation content, never commit ──
+generated/chat-transcripts/
 
 # ── Content UX runtime artifacts (regenerate: `cc reference index --rebuild`) ─
 # the reference index (with embeddings), HTML previews, and the local posts store
@@ -78,7 +99,6 @@ generated/content-verifications.json
 generated/reference-clusters.json
 generated/reference-people.json
 generated/style-patterns.json
-data/performance/
 
 # ── Cross-conversation memory store — per-deployment runtime state ───────────
 # project/board/user-preference memory; sharing is a deliberate export, not a commit
@@ -87,12 +107,26 @@ generated/memory/
 # ── Kanban event log — source-of-truth event stream, per-deployment runtime ──
 generated/kanban-events.jsonl
 
+# ── Frontier-router usage ledger + benchmark reports — real per-deployment spend
+# data and point-in-time comparison results, regenerate via make frontier-router-* ──
+generated/frontier-router-usage.jsonl
+generated/frontier-benchmark-report.json
+generated/frontier-benchmark-report.md
+
+# ── Local-frontier (colibrì) usage ledger + benchmark reports — same reasoning,
+# regenerate via make colibri-benchmark ──
+generated/local-frontier-usage.jsonl
+generated/local-frontier-benchmark-report.json
+generated/local-frontier-benchmark-report.md
+
 # ── Local staging / scratch ───────────────────────────────────────────────
 _staging/
 .codex_tmp/
 
-# ── Runtime logs (the gateway manager writes gateway.log; regenerated on run) ─
+# ── Runtime logs (the gateway writes a size-bounded, rotating gateway.log; the ─
+#    supervisor writes gateway-supervisor.log; both regenerate on run) ─────────
 *.log
+*.log.*
 
 # ── Capability-evaluation vendored binaries (pinned + re-downloadable; the ──
 #    version + sha256 live in each candidate's install-manifest.json, so the
@@ -110,3 +144,14 @@ Thumbs.db
 # improvement-loop pytest runtime artifacts (cache/proposals are disposable)
 generated/pytest-cache/
 generated/pytest-proposals/
+generated/pytest-tmp*/
+
+# ── Internal board card store — REAL job pipeline data (companies, salaries,
+#    achievement ids). Per-deployment runtime state like kanban-events.jsonl;
+#    never committed. ─────────────────────────────────────────────────────────
+generated/boards/
+
+# ── Cockpit validation screenshots — show the real application pipeline; keep
+#    local as proof, never push. Browser-automation profile dirs likewise. ────
+generated/cockpit-*.png
+.tmp-*/

@@ -18,13 +18,14 @@ core_principles:
 
 profiles:
   - name: python_ml_pipeline
-    # Authoritative deep references live in the target repo (betts_basketball):
-    #   docs/backend/PIPELINE_STANDARDS_TEMPLATE.md         (the 11-step pipeline template)
-    #   docs/backend/engineering/DATA_ENGINEERING_PIPELINE.md (§0.x non-negotiables)
-    #   docs/backend/engineering/LOCAL_FLEET_R2_WORKFLOW.md  (two-machine R2 contract)
-    #   docs/backend/engineering/MULTI_SESSION_R2.md         (concurrent-session safety)
-    #   docs/backend/modeling/UNIFIED_SERVING_GUIDE.md       (serving standards)
-    #   docs/backend/modeling/{BAYESIAN,GBDT,CLUSTERING}_*   (per-model-family guides)
+    # Authoritative deep references live in the target repo (betts_basketball);
+    # local mirror kept for audit at docs/reference/betts-basketball-standards/:
+    #   docs/reference/betts-basketball-standards/PIPELINE_STANDARDS_TEMPLATE.md         (the 11-step pipeline template)
+    #   docs/reference/betts-basketball-standards/DATA_ENGINEERING_PIPELINE.md (§0.x non-negotiables)
+    #   docs/reference/betts-basketball-standards/LOCAL_FLEET_R2_WORKFLOW.md  (two-machine R2 contract)
+    #   docs/reference/betts-basketball-standards/MULTI_SESSION_R2.md         (concurrent-session safety)
+    #   docs/reference/betts-basketball-standards/UNIFIED_SERVING_GUIDE.md       (serving standards)
+    #   docs/reference/betts-basketball-standards/{BAYESIAN,GBDT,CLUSTERING}_*   (per-model-family guides)
     principles:
       - Data science mastery; statistical rigor in every modeling choice; validate against ground truth.
       - Medallion-style staged data flow (bronze hard contracts -> silver -> gold); each stage independently testable and independently callable.

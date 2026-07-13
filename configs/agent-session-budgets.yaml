@@ -1,0 +1,36 @@
+# Governs whether ANTHROPIC_API_KEY / OPENAI_API_KEY may exist anywhere the
+# forbidden-provider scan looks (.env, .env.example, process env,
+# docker-compose.yml). Both are FORBIDDEN by default, same as every other cloud
+# provider key. This file is the ONLY way to unblock them, and only via
+# `make agent-session-egress-check` / `--allow-agent-session-egress`, and only
+# for the agent-session subsystem (Claude Agent / Codex Agent — real filesystem/
+# shell tool access via their own SDKs, see src/command_center/agent_sessions/).
+#
+# It never touches the local LiteLLM chat lane: configs/models.yaml and
+# generated/litellm-config.yaml are checked unconditionally ollama-only
+# regardless of this file (check_models_yaml/check_litellm_config in
+# check_forbidden_providers.py never read this file at all), and it never
+# exempts the separate frontier-router lane's OPENROUTER_API_KEY/ZAI_API_KEY —
+# see ROUTER_LANE_KEYS vs AGENT_SESSION_KEYS, two independent key sets, two
+# independent flags.
+#
+# Enabling this is a deliberate operator decision, same discipline as
+# frontier-router-budgets.yaml: enabled: true with every harness below false is
+# a no-op, not readiness (agent_session_egress_ready() requires at least one
+# harness on).
+# DECIDED 2026-07-11 (Geoff, verified via a live run, not just a policy
+# statement): codex_agent is enabled here. Real finding: CodexAgentHarness
+# never sets OPENAI_API_KEY anywhere — it authenticates by reusing the
+# existing `codex login` CLI session (ChatGPT-subscription auth), so this
+# flag does not actually gate any forbidden key for Codex specifically; it's
+# the deliberate operator record that live use is authorized. Live-verified
+# end to end: real auth, real thread, a real turn, a same-thread follow-up,
+# resume-by-id after a fresh harness instance, interrupt, and zero
+# filesystem mutation (mutation_proof before/after snapshot matched
+# exactly) — see WORKLOG.md "Agent-session chat integration".
+schema_version: command-center.agent-session-budgets.v1
+default:
+  enabled: true
+  harnesses:
+    codex_agent: true
+    claude_agent: false

@@ -7,7 +7,7 @@ run_turn -> reply chunked to Telegram's 4096-char limit.
 Env:
   TELEGRAM_BOT_TOKEN          (required; from @BotFather)
   TELEGRAM_ALLOWED_CHAT_IDS   (optional, comma-separated chat IDs; empty = all)
-See docs/channels.md for the BotFather steps and how to find your chat id.
+See docs/architecture/channels.md for the BotFather steps and how to find your chat id.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ async def run(spec) -> None:
     if not token:
         raise SystemExit(
             "telegram: missing TELEGRAM_BOT_TOKEN - talk to @BotFather to create a "
-            "bot and copy its token into .env. See docs/channels.md")
+            "bot and copy its token into .env. See docs/architecture/channels.md")
     raw = e.get("TELEGRAM_ALLOWED_CHAT_IDS", "")
     allowed = {c.strip() for c in raw.split(",") if c.strip()}
 

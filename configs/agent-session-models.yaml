@@ -1,0 +1,41 @@
+# Per-harness model preference for agent sessions — kept separate from
+# agent-session-budgets.yaml (that file is egress/enablement policy; this one
+# is "which model, and what to do if it's not available in this SDK build").
+#
+# REAL FINDING (2026-07-11): a hardcoded model string is not safe — the
+# pinned openai-codex-cli-bin build can lag behind an operator's global
+# ~/.codex/config.toml model preference (a real live turn failed:
+# "'gpt-5.6-sol' requires a newer version of Codex"). The adapter validates
+# preferred_model against the SDK's OWN live model list (client.models())
+# before ever using it — see adapters/codex_agent.py's _resolve_model.
+#
+# allow_sdk_default_fallback: true means "if preferred_model isn't in this
+# build's list, silently use whatever the SDK itself reports as
+# is_default=True". Set to false to make an unavailable preferred_model a
+# hard failure instead (useful once a specific model is a real policy
+# requirement, not just a preference).
+schema_version: command-center.agent-session-models.v1
+codex_agent:
+  preferred_model: gpt-5.5
+  reasoning_effort: medium
+  allow_sdk_default_fallback: true
+
+# Claude Agent (claude-agent-sdk). Unlike Codex there is NO live model-list RPC:
+# an explicit/preferred model is passed straight to the SDK, which rejects an
+# unknown one at connect time (surfaced as a real error, never swallowed). Leave
+# preferred_model unset to use the SDK's own default model.
+claude_agent:
+  preferred_model: null
+  # Optional per-session INTERNAL budget cap (ClaudeAgentOptions.max_budget_usd).
+  # This is OUR spend guard for the API-billed Claude Agent lane, kept strictly
+  # distinct from the provider's rate-limit quota (RateLimitEvent) — the usage
+  # subsystem never conflates internal budget with provider allowance.
+  max_budget_usd: null
+
+# Claude Code LOCAL lane (the default Claude lane) — drives the installed `claude`
+# CLI with the operator's existing `claude auth login` subscription (NO API key).
+# preferred_model is a CLI alias ('opus'/'sonnet'/'fable') or a full model id;
+# leave unset for the CLI's own default. max_turns bounds a single read-only turn.
+claude_code_local:
+  preferred_model: null
+  max_turns: 20

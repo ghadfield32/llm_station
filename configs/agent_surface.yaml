@@ -4,7 +4,7 @@ schema_version: command-center.agent-surface.v1
 # state and re-injects it into the agent loop as a single source of truth each
 # turn — the model emits intent, deterministic code owns the bookkeeping. Edit
 # this file, then `make validate`. Tracker:
-# docs/backend/projects/AGENT_KANBAN_SURFACE.md.
+# docs/kanban/AGENT_KANBAN_SURFACE.md.
 
 board_state:
   enabled: true

@@ -8,7 +8,7 @@ Env:
   DISCORD_ALLOWED_CHANNEL_IDS  (required, comma-separated ints; falls back to
                                 DISCORD_CHANNEL_ID. DMs from the owner are always allowed)
 Create the bot at https://discord.com/developers/applications (Bot -> token,
-enable MESSAGE CONTENT intent), then invite it. See docs/channels.md.
+enable MESSAGE CONTENT intent), then invite it. See docs/architecture/channels.md.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _config(spec) -> tuple[str, set[int], GatewayConfig]:
             f"discord: missing {', '.join(missing)} - create the bot at "
             "https://discord.com/developers/applications (Bot -> token, enable "
             "MESSAGE CONTENT intent), put both values in .env, and invite it. "
-            "See docs/channels.md")
+            "See docs/architecture/channels.md")
     bad = [c for c in raw.split(",") if c.strip() and not c.strip().isdigit()]
     if bad:
         raise SystemExit(

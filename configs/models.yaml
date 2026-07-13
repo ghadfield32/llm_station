@@ -36,7 +36,7 @@ roles:
   # which parses `<tool_call>{json}</tool_call>` regardless of surrounding prose
   # (0/8). Chat is tool-heavy and the model narrates, so it MUST use a
   # template-parsed model. Keep this role off qwen3-coder. See
-  # docs/channels.md + WORKLOG.md (Channels / gateways).
+  # docs/architecture/channels.md + WORKLOG.md (Channels / gateways).
   chat:
     - {alias: chat-qwen, provider: ollama, model: "qwen3:30b", priority: 1, local: true, monthly_budget_usd: 0, vram_gb: 19, license: Apache-2.0}
 

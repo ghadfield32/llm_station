@@ -76,7 +76,7 @@ Operator commands (`make <target>`; Windows: `.\scripts\cc.ps1 <target>`).
 - `make kanban-board-snapshot` — Write generated/board-snapshot.json for the UI (run on the worker; needs growthos + AppFlowy creds)
 - `make live-smoke` — Print real local model replies through Ollama/LiteLLM. TRIAGE=triage PLANNER=planner JUDGE=local-judge
 - `make repo-install` — Install hooks + devcontainer + standards into a repo. REPO=/path [PROFILE=python_ml_pipeline]
-- `make backup` — restic snapshot (see docs/SETUP-FROM-SCRATCH.md, Backups)
+- `make backup` — restic snapshot (see docs/setup/SETUP-FROM-SCRATCH.md, Backups)
 - `make restore-drill` — Restore latest backup to temp + diff (schedule monthly)
 - `make logs` — Tail all logs
 - `make channels-validate` — Validate configs/channels.yaml (chat transport registry)

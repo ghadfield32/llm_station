@@ -7,6 +7,10 @@ from .contracts import (
     FrontierRouterProvider, FrontierRouterCandidate, FrontierRouterModel,
     FrontierRouterPriceFreshness,
     FrontierRouterProvidersConfig, FrontierRouterBudgetPolicy, FrontierRouterBudgetsConfig,
+    UsageThresholds, UsagePolling, UsageRouting, UsageAlertChannels, UsageRetention,
+    UsageMonitoringConfig,
+    LocalFrontierCapabilities, LocalFrontierProvider, LocalFrontierThroughputEstimate,
+    LocalFrontierModel, LocalFrontierProvidersConfig,
     FrameworkEvalSpec, FrameworkEvalsConfig,
     KNOWN_SCOUT_SOURCES,
     JudgeSpec, JudgeStage, JudgeConfig,
@@ -16,6 +20,7 @@ from .contracts import (
     RepoTarget, DagTarget, DataAssetTarget, ServiceTarget, TargetsConfig,
     KanbanSource, KanbanSection, KanbanConfig,
     KanbanBoardSpec, KanbanBoardsConfig,
+    DomainFieldSpec, DomainEmptyState, DomainSurfaceSpec, DomainSurfacesConfig,
     MemoryRecord, MemoryConfig,
     ContentSource, ContentStatuses, LinkedInApi, LinkedInAccount, ContentConfig,
     ContentStream, ContentViewpoint, ContentPipelineConfig,
@@ -35,6 +40,7 @@ from .contracts import (
     ChannelSpec, ChannelsConfig,
     MissionOpen, JudgeVerdict,
 )
+from ..job_search.schemas import JobSearchConfig
 
 # Map each config file to its top-level contract — used by validate + impact tools.
 CONFIG_CONTRACTS = {
@@ -43,6 +49,8 @@ CONFIG_CONTRACTS = {
     "configs/model-scout-watchlist.yaml": ModelWatchlistConfig,
     "configs/frontier-router-providers.yaml": FrontierRouterProvidersConfig,
     "configs/frontier-router-budgets.yaml": FrontierRouterBudgetsConfig,
+    "configs/usage-monitoring.yaml": UsageMonitoringConfig,
+    "configs/local-frontier-providers.yaml": LocalFrontierProvidersConfig,
     "configs/framework-evals.yaml": FrameworkEvalsConfig,
     "configs/judges.yaml": JudgeConfig,
     "configs/gates.yaml": GatesConfig,
@@ -51,6 +59,7 @@ CONFIG_CONTRACTS = {
     "configs/targets.yaml": TargetsConfig,
     "configs/kanban.yaml": KanbanConfig,
     "configs/kanban_boards.yaml": KanbanBoardsConfig,
+    "configs/domain_surfaces.yaml": DomainSurfacesConfig,
     "configs/memory.yaml": MemoryConfig,
     "configs/content.yaml": ContentConfig,
     "configs/content_pipeline.yaml": ContentPipelineConfig,
@@ -63,6 +72,7 @@ CONFIG_CONTRACTS = {
     "configs/channels.yaml": ChannelsConfig,
     "configs/agent_surface.yaml": AgentSurfaceConfig,
     "configs/autonomy.yaml": AutonomyConfig,
+    "configs/job_search.yaml": JobSearchConfig,
 }
 
 # The improvement loop's contracts. Registered here so the same `make validate` /

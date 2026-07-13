@@ -158,6 +158,7 @@ def _ledger_port() -> str:
 
 def _ui_urls() -> dict[str, str]:
     return {
+        "cockpit": f"http://localhost:{os.environ.get('KANBAN_UI_PORT', '8787')}/",
         "litellm": "http://localhost:4000/ui",
         "ledger": f"http://localhost:{_ledger_port()}/",
         "kuma": "http://localhost:3001",
@@ -219,7 +220,7 @@ def _enable_channel(transport: str) -> bool:
 def c_open(a):
     import webbrowser
     urls = _ui_urls()
-    targets = a if a else ["litellm", "ledger", "kuma"]
+    targets = a if a else ["cockpit", "litellm", "ledger", "kuma"]
     print("opening UIs (also reachable at these URLs over Tailscale):")
     for t in targets:
         url = urls.get(t)
@@ -280,6 +281,13 @@ def c_start(a):
     rc = c_first_boot([])
     if rc:
         return rc
+    # The cockpit is the primary operator surface (configs/ui.yaml enabled: true),
+    # so "one button" must actually start it — it lives behind the ui profile,
+    # which plain `compose up` skips.
+    print("starting the cockpit (agent-kanban-ui, ui profile)")
+    rc = compose("--profile", "ui", "up", "-d", "--build", "agent-kanban-ui")
+    if rc:
+        return rc
     if want_hermes:
         print("starting Hermes (profile) — note: set a real hermes image in docker-compose.yml first")
         compose("--profile", "hermes", "up", "-d")
@@ -288,7 +296,7 @@ def c_start(a):
         c_appflowy_up([])
     if channel:
         rc = c_channel([channel])  # guided: sets up + launches, or prints the token steps
-    c_open(["litellm", "ledger", "kuma"] + (["hermes"] if want_hermes else []))
+    c_open(["cockpit", "litellm", "ledger", "kuma"] + (["hermes"] if want_hermes else []))
     print("\nstart complete. Run a channel anytime with: cc channel <name>  (or: cc gateway)")
     return 0
 
@@ -337,6 +345,13 @@ COMMANDS: dict[str, tuple] = {
                       "human-gated: flip a scout candidate to active (--approver NAME --apply)"),
     "usage-digest": (lambda a: pym("command_center.cli.usage_digest", "--output",
                                    "generated/usage-digest.md", *a), "spend + mission summary"),
+    # local-frontier (colibrì) — read-only, no cost/egress, so unlike frontier-router these ARE
+    # registered here. The heavy step (`make colibri-benchmark`, a real live call that can take
+    # minutes-to-hours) deliberately stays Makefile-only, same separation frontier-router uses.
+    "colibri-preflight": (lambda a: pym("command_center.cli.local_frontier", "preflight", *a),
+                          "disk/RAM/GPU headroom vs. the local-frontier lane's configured model(s)"),
+    "colibri-health": (lambda a: pym("command_center.cli.local_frontier", "health", *a),
+                       "local-frontier lane_enabled/health/selectable per configured model"),
     # channels
     "gateway": (lambda a: pym("command_center.channels", *a), "run enabled chat channels (configs/channels.yaml)"),
     "notify": (lambda a: pym("command_center.cli.notify", *a), "push a proactive digest (brief + active missions) to Discord (--dry-run)"),
@@ -367,6 +382,10 @@ COMMANDS: dict[str, tuple] = {
                          "install/verify the local pre-push merge guard (local_pre_push_and_human_merge posture)"),
     "repo-loop-proof": (lambda a: pym("command_center.cli.repo_loop_proof", *a),
                         "generic bounded-loop proof for any repo (trivial PR -> required checks -> no merge)"),
+    "agent-preflight": (lambda a: pym("command_center.cli.agent_preflight", *a),
+                       "Phase 0 evidence probe for Claude Agent SDK / Codex SDK (--harness all|claude|codex; read-only)"),
+    "agent-worker": (lambda a: pym("command_center.cli.agent_worker", *a),
+                     "start the host-side agent-session worker (FastAPI, token-gated, localhost by default; needs AGENT_WORKER_TOKEN + LEDGER_BASE_URL)"),
     "memory-add": (lambda a: pym("command_center.cli.memory_ops", "add", *a),
                    "add a durable memory (pending until --approved-by; secrets rejected)"),
     "memory-review": (lambda a: pym("command_center.cli.memory_ops", "review", *a),
@@ -383,11 +402,19 @@ COMMANDS: dict[str, tuple] = {
                                "daily observer/draft-only loop: --draft-kanban true drafts Proposed cards; never applies code"),
     "self-improvement-report": (lambda a: pym("command_center.cli.self_improvement", "report", *a),
                                 "write the decision-grade self-improvement report (no cards drafted)"),
+    "research-digest": (lambda a: pym("command_center.cli.research_digest", *a),
+                        "§5.2 intake: validate/report/feed the research source catalog "
+                        "(evaluate sources -> observer-only scan cards)"),
+    "skills-audit": (lambda a: pym("command_center.cli.skills_audit", *a),
+                     "read-only inventory of dependency-shipped Agent Library Skills "
+                     "(.agents/skills SKILL.md); installs nothing"),
     "improve": (lambda a: pym("command_center.cli.self_improvement", "daily", *a),
                 "friendly alias for self-improvement-daily (observer/draft-only)"),
     "demo": (lambda a: pym("command_center.cli.demo", *a),
              "full-loop demo: verify board+repo and document the 14-step loop (no writes, no merge)"),
     "linkedin-publish": (lambda a: pym("command_center.cli.linkedin_publish", *a), "publish approved+due LinkedIn content rows (--login | --apply)"),
+    "job-search": (lambda a: pym("command_center.job_search.cli", *a),
+                   "prepare/manual-first job search workflow: ingest, suggest, materials, followups, retention"),
     "content-preview": (lambda a: pym("command_center.cli.content_preview", *a),
                         "render a post the way LinkedIn shows it (markdown+HTML+text); --post resolves by intent"),
     "content-find": (lambda a: pym("command_center.cli.reference", "find", *a),
@@ -423,7 +450,7 @@ COMMANDS: dict[str, tuple] = {
     "appflowy-up": (c_appflowy_up, "start the AppFlowy board server + curator"),
     # one-button + UIs + channels
     "start": (c_start, "ONE BUTTON: first-boot [+--appflowy] [+--channel NAME] [+--hermes], then open UIs"),
-    "open": (c_open, "open the UIs in your browser (litellm/ledger/kuma[/hermes])"),
+    "open": (c_open, "open the UIs in your browser (cockpit/litellm/ledger/kuma[/hermes])"),
     "channel": (c_channel, "guided favorite-channel setup: cc channel <discord|slack|telegram|whatsapp>"),
     # dev
     "lint": (lambda a: run(sys.executable, "-m", "ruff", "check", "src"), "ruff check src"),

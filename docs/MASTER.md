@@ -6,12 +6,133 @@
 > Deep-dive references for each section are listed in [§12](#12-doc-index-where-the-detail-lives).
 >
 > Last full revision: **2026-06-12**. Latest readiness update:
-> **2026-06-20**. Current source of truth is local `main` synced with
-> `origin/main` at `0ac008c`.
+> **2026-07-11**. Current source of truth is local
+> `feat/research-digest-intake-hygiene-main`, ahead of `main` with the
+> cockpit/chat/job-search work described below (commits `d8e593d` through
+> `7e6b367`, not yet merged).
 
 ---
 
-## Current readiness snapshot (2026-06-20)
+## Current readiness snapshot (2026-07-12)
+
+The **first-party cockpit** (`services/agent_kanban_ui`, optional Docker
+Compose profile `ui`) is the primary operator surface — see
+[reviews/2026-07-08-cockpit-decision.md](reviews/2026-07-08-cockpit-decision.md).
+AppFlowy stays an optional projection; the board-snapshot file it produces is
+now read directly by the typed domain boards (papers/repos/dags/books) so
+those lists show real counts instead of demo fixtures.
+
+**Chat** was evaluated and rebuilt this pass — full detail in §14's
+2026-07-09/10 entry and
+[reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md).
+Headline: GatewayCore + LiteLLM remains the only LOCAL runtime; a first-party
+flight recorder makes every turn on every surface reviewable
+(`GET /api/chat/conversations` → any conversation → its full story, with
+click-through from any kanban card's Story tab to the exact moment); the
+previously-planned ORCA/OmniAgent/OxyGent specialist link-outs were removed
+in favor of the existing LiteLLM model-role dropdown (one gateway, switch by
+role, cloud providers stay behind the forbidden-provider scan on purpose).
+Claude Code and Codex CLI never appear as selectable options in this picker —
+they are agentic coding **executors** (their own subscription/OAuth login,
+driving leased repo worktrees), not conversational chat models. This was a
+real point of operator confusion ("why don't I see Claude Code as a chat
+option"), so as of 2026-07-11 the model `<select>` itself carries an
+always-visible, explicitly-disabled "Executors — from missions, not here"
+optgroup naming both — not just the `/api/chat/runtime` `executor_note` in a
+side panel that's easy to miss on mobile.
+
+**A second, opt-in lane now exists: the frontier-router backup lane**
+(§5.4, §14 2026-07-10 entry) — GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6 via
+OpenRouter, the current top-3 open-weight models on Artificial Analysis's
+July 2026 index, none of which fit local VRAM. Off by default (fails the
+strict `cc validate` provider scan on purpose if a key is ever present
+without the lane being reconciled); Geoff enabled it 2026-07-10
+(`OPENROUTER_API_KEY` in `.env` + `configs/frontier-router-budgets.yaml`
+`default.enabled: true`) to test cost/latency/correctness directly. A
+frontier turn carries **no tools and no board/memory context** — plain
+conversation only, by design, so nothing repo-specific reaches a paid API.
+Real measured results and the honest caveat on the correctness KPI are in
+§14; those measured numbers (median latency, suite pass rate) now also show
+inline in the chat model dropdown itself, not just the side panel.
+
+**A third, experimental lane exists: the local-frontier lane** (§5.4 "Local frontier lane
+(colibrì) — full spec", §14 2026-07-11 entry) — loopback-only, disk-streamed local engines too
+large for VRAM (colibrì / GLM-5.2 744B today). Free, on since 2026-07-11 after a real measured
+run: **0.0563 tokens/sec median** (`make colibri-benchmark LIVE=1`), landing at the pessimistic
+end of the self-reported 0.05–1.06 range — a 100-token reply is genuinely ~30 minutes on this
+machine. Unlike the paid frontier lane there is no $ cost or API key, only a host-allowlist
+invariant (`check_local_frontier_providers`, always on, no egress flag needed). Same "no tools,
+no board/memory context" discipline as the frontier lane. Both Phase 1 (code) and Phase 2
+(engine build + correctness self-test + real 353GB download + live server + benchmark)
+completed 2026-07-11.
+
+**Chat prompts are domain-aware and repo-scoped chat has real context now**
+(§14 2026-07-11 entry). Opening chat from any domain card renders that
+domain's own fields (a repo card shows repo fields, a paper card shows paper
+fields) instead of job-application-shaped fields printing as `None`; opening
+a scoped chat for a registered repo pulls the live manifest, a read-only
+`repo-verify` pass, and recent missions into the starter prompt. New repos
+can be registered from the cockpit itself (Chat → New Scoped Chat →
+"register a repo") instead of only via `cc repo-register`. The mobile "All
+Boards" scroller was re-diagnosed and actually fixed this time (the earlier
+scroll-snap CSS never reached the live DOM element).
+
+**Kanban board moves are now a one-step machine** — no domain card may skip
+a lane, forward or backward; the job-search pipeline is exactly Geoff's 3
+manual gates (select → agent-complete "Needs Geoff" → me-complete
+"Completed"), enforced server-side with a named-next-steps 409 on a skip
+attempt. Full detail in the rewritten §6.7.
+
+**Job-search materials are agent-written by default**, claim-checked against
+`achievement_bank.yml`, reviewable in a Packet Review modal with a linear
+Story tab, edit-in-place, and a request-changes/regenerate loop; finalize
+runs before the governed board event so a blocked submit never logs a move
+it didn't make. An **Application Materials Pipeline Standard v2** (ATS
+resume format, outreach doc, held-claims policy) is in active development
+and testing as of this snapshot — see the flagged note in §6.7; it is not
+yet committed.
+
+**A separate agent lane now exists in a stacked worktree (not yet on `main`).**
+Claude Code and Codex are being built as **Agent Sessions** — real agentic
+runtimes with their own SDK/auth/worktree/execution state, architecturally
+separate from the chat lane (full detail: §4.5). Honest status as of this
+snapshot: the **Codex read-only runtime is real and proven** (pinned
+`openai-codex==0.1.0b3`, reuses the existing `codex login`, 14/14 live
+cockpit-acceptance turns, zero repo mutation; PR #33). **Claude read-only is now
+built in TWO lanes** (PR #36, §4.5): the **default local lane**
+(`claude_code_local`) drives the installed Claude Code CLI with the operator's
+existing `claude auth login` subscription — **no API key, and LIVE-PROVEN on this
+host** (real read-only turn, zero mutation, `apiKeySource: "none"`); plus an
+optional API lane (`claude_agent`, Agent SDK + `ANTHROPIC_API_KEY`) for
+hosted/shared deployments (built + hermetically tested, live deferred). A
+**unified Usage & Limits subsystem** (§4.6)
+is built to lock the four concepts (usage / provider limits / availability /
+internal budget) apart so history is never shown as remaining quota — Phase 1
+foundation + Phase 1.1 hardening (PR #34) and the **first real provider
+collector** (Codex app-server rate limits, `PROVIDER_NATIVE`, multi-bucket,
+live-smoke passed; PR #35) have landed. The **Usage & Limits cockpit surface is
+now built too** (behind `KANBAN_UI_USAGE_ENABLED`): 7 `/api/model-usage*` routes
++ a per-runtime-card dashboard that renders honestly-empty until a collector
+polls (§4.6). The ordered plan to the full "pick either agent, see honest live
+quota, let the pipeline route them" end state — plus the wrapped
+`openai/codex-plugin-cc` bridge — is in §4.8. This whole chain is stacked
+behind PR #32 and is **not** merged to `main` yet, so it is **not** part of the
+live cockpit container below; its evidence is per-branch tests + live smokes,
+not the rebuilt-container probe.
+
+Everything above (excluding the stacked agent lane) is live-probed on a rebuilt
+cockpit container and covered by regression tests
+(`tests/test_gateway_transcript.py`, `tests/test_agent_kanban_ui.py`,
+`tests/test_domain_surfaces.py`, and the `tests/job_search/` suite);
+`cc validate`, ruff, and the frontend `tsc`/`vite build` are clean at each
+commit in the range above. The agent-lane branches carry their own green
+suites (`tests/test_agent_sessions*.py`, `tests/test_agent_preflight.py`,
+`tests/test_codex_usage_collector.py`, the `usage/` suites) with ruff + `mypy
+src/command_center/usage/` clean.
+
+---
+
+### Prior readiness snapshot (2026-06-20) — Phase 0/1 bootstrap, kept for history
 
 Phase 0 source reconciliation is complete. Local `main` is clean, synced with
 `origin/main`, and the remote advertises only `main` plus `setup/github-ready`.
@@ -134,7 +255,7 @@ agent can cross alone.
 ```
 
 Fourteen Mermaid diagrams covering every concern below live in
-[visuals.md](visuals.md).
+[architecture/visuals.md](architecture/visuals.md).
 
 ---
 
@@ -184,6 +305,7 @@ The config files and their contracts:
 | `configs/model-serving-benchmarks.yaml` | **serving** SLO scenarios (TTFT/ITL/TTLT + operating point) — `quality_eval != serving_eval` |
 | `configs/frontier-router-providers.yaml` | paid frontier-API backup lane: provider/model pricing metadata (off by default; not the local lane) |
 | `configs/frontier-router-budgets.yaml` | hard caps + redaction + blocked-payload gate for the frontier-router lane (`enabled: false`) |
+| `configs/local-frontier-providers.yaml` | experimental loopback-only local engine lane (colibrì today): capabilities, disk footprint, self-reported throughput (`enabled: false`) |
 | `configs/judges.yaml` | judge arrays per stage, cross-provider pairing, budgets |
 | `configs/gates.yaml` | L0–L4 risk/approval policy |
 | `configs/environments.yaml` | one environment per activity, isolation rules |
@@ -237,7 +359,7 @@ Access (on the do-not-build list by default).
 | **Proactive Runner** | Scheduled checks on already-done work. Holds no secrets; its strongest autonomous act is opening a gated mission. |
 | **Discord Gateway** | Discord ↔ LiteLLM (`chat`) ↔ the Growth OS action layer. Fail-fast without `DISCORD_BOT_TOKEN`. The `chat` role is qwen3 (instruct), **not** qwen3-coder — chat surfaces narrate before tool calls, and qwen3-coder's Ollama native parser drops those calls (see §14, 2026-06-13). |
 | Uptime Kuma + restic | Health monitoring and backups. |
-| *(optional profile `ui`)* **Agent Kanban UI** | First-party Cline-styled board + observability over the Ledger (missions kanban) and the agent-call log (metrics). **Read-only** — no write path; approve/kill stay in the signed Ledger endpoints, which it links out to. Loopback + Tailscale + password; `configs/ui.yaml` (`agent_kanban_ui`), repurposed from the deferred Hermes WebUI. React/Vite SPA built + served single-container by a FastAPI backend. |
+| *(optional profile `ui`)* **Agent Kanban UI / Cockpit** | First-party PWA cockpit over the Ledger, internal board store, the AppFlowy board-snapshot projection, agent-call log, and GatewayCore chat. Primary nav sits at the **top** on mobile: **All Boards** (typed domain boards — jobs/posts/papers/repos/dags/books/upkeep/missions, live-sourced from `appflowy_board`/`board_store`/`ledger_missions`, never silent fixtures) plus **Controls** (runtime APIs, board registry, job-search/profile settings). Chat is **one gateway, one harness**: GatewayCore + LiteLLM, model switching is a role dropdown (no ORCA/OmniAgent/OxyGent specialist links — removed 2026-07-10), with an **All Chats** review index (`GET /api/chat/conversations`, every conversation across every surface, task-kind badges, delete-per-thread), a per-conversation **flight-recorder full story** (untruncated tool args/results + context provenance, paginated, click-through from any card's Story tab to the exact moment), and **scoped chats** anchored to any registered repo. Board moves are a **one-step machine** — cards advance/retreat one lane at a time, never a skip; jobs enforce Geoff's 3 manual gates (select → agent-complete "Needs Geoff" → me-complete "Completed"). Governed writes can move board cards and edit profile overrides; approve/kill stay in the signed Ledger endpoints and merge/deploy/submit remain structurally unavailable. Loopback + Tailscale; React/Vite SPA built + served single-container by a FastAPI backend. Decision record: [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md). |
 | *(optional profile)* Hermes | **Not adopted — evaluated 2026-06-13 → DEFER.** Hermes Agent is real now (v0.16.0, PyPI/official image); the old "phantom image" note is stale. An isolated spike (see change log + `evaluation/capability-assessment/hermes/DECISION.md`) found cross-session memory works but is just a local `MEMORY.md` (not beyond-stack) and self-improving skills did not auto-fire. LiteLLM + Ollama + the action layer serve its role; revisit only if autonomous skill self-improvement materializes. |
 
 ### The worker (4090 / currently the same workstation)
@@ -261,6 +383,323 @@ bridge; on demand/host: packages, import_books/dags, selftest.
    Ledger UI / a chat channel.
 2. **Merge**: GitHub PR — CODEOWNERS review + required checks. The bot can
    never merge.
+
+---
+
+### 4.5 The agent lane — Agent Sessions (Codex & Claude coding runtimes)
+
+**The one architectural rule for agents:** Claude Code and Codex are **not**
+chat models and never enter GatewayCore. They are agentic *runtimes* — their
+own SDK, tool loop, auth, filesystem/shell authority, resumable session state,
+and execution state. They live in a **separate lane** from the supervised
+`/chat/completions` chat surface. This split is not stylistic; it is the whole
+safety posture (Orca/Omnigent systems separate chat from agent harnesses for
+the same reason). The frontier tool_calls incident (§14, 2026-07-10/11) proved
+it empirically: even a small, explicitly *tool-less* integration crossed a
+dispatch boundary the moment the harness trusted a response field it never
+offered. Widening the ordinary chat surface to something with real shell/FS
+authority would be a bigger version of that same mistake. Anthropic's own
+Agent-SDK docs reinforce the boundary from the other side: third-party
+products must authenticate with an API key, **not** a claude.ai login, and
+should present the runtime as **"Claude Agent"** (not "Claude Code"). So the
+target is fixed:
+
+- **Chat lane** — supervised conversation over GatewayCore + LiteLLM + Ollama
+  (+ the opt-in OpenRouter frontier lane) with curated tools. Unchanged.
+- **Agent lane** — a separate authenticated worker path (host worker →
+  `AgentSessionService` → a Codex/Claude adapter → a leased repo checkout →
+  the Ledger) with durable state, explicit repo/worktree controls,
+  interrupt/resume, and a stronger trust boundary.
+
+**What is BUILT and proven** (stacked worktree `C:\tmp\cc-agent-runtime`, branch
+chain `feat/agent-session-runtime` → `feat/unified-runtime-usage` →
+`feat/codex-usage-collector`; the whole chain is stacked behind PR #32 and is
+**not yet on `main`**):
+
+- `cc agent-preflight` (`cli/agent_preflight.py`) — evidence-only readiness
+  probe (no routing change, no writes, no network). Verified real host facts,
+  incl. the PyPI naming trap (`openai-codex` is OpenAI's; `codex-sdk` is
+  Cleanlab's unrelated product). 14 hermetic tests.
+- **A separately-gated egress flag.** `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` are
+  forbidden by `check_forbidden_providers.py` and are **not** exemptable by the
+  frontier-router flag. A new, fully independent `--allow-agent-session-egress`
+  + `configs/agent-session-budgets.yaml` (default `enabled: false`,
+  per-harness toggles) gates the agent lane's keys only — it never touches the
+  local LiteLLM lane, and neither egress flag exempts the other's keys (proven
+  both directions). 8 tests.
+- **`src/command_center/agent_sessions/`** — normalized `AgentEvent` vocabulary
+  (deliberately distinct from the chat event shape), a `runtime_checkable`
+  `AgentHarness` Protocol (probe/start/send/resolve_approval/interrupt/
+  resume/close), an in-memory `SessionStore` (the *store* owns
+  monotonic/gapless sequence numbers — never trusts a harness value;
+  `events_since` is the reconnect primitive), a deterministic `FakeHarness`
+  test double, and durable **Ledger** persistence via the proven mirrored-DDL
+  pattern (`agent_sessions`/`agent_session_events`/`agent_session_approvals`
+  tables + REST, drift-tested, restart-recovery-tested). `LedgerSessionStore`
+  is a cross-backend drop-in for the in-memory store (same lifecycle
+  assertions pass against a real Ledger app instance).
+- **The real Codex read-only adapter** (`adapters/codex_agent.py`) — pinned
+  `openai-codex==0.1.0b3` (optional extra `agent-codex`), **reuses the existing
+  `codex login` session** (no `OPENAI_API_KEY` needed), dynamic model
+  validation, per-session `config_overrides` (so a newer global
+  `~/.codex/config.toml` can't break a call), persistent external thread IDs,
+  same-thread follow-ups, resume-after-restart, real interrupt, read-only
+  sandboxing, truthful approval semantics, and a **zero-mutation** discipline
+  proven by a hash-before/after harness. **14/14 live cockpit-acceptance turns
+  passed against the real account, zero repo mutation.** PR #33 (marked ready,
+  merge held).
+- **TWO Claude read-only lanes** behind the same `AgentHarness` contract (PR #36):
+  - **`claude_code_local` — the DEFAULT local lane, LIVE-PROVEN** (no API key).
+    `adapters/claude_code_local.py` drives the installed **Claude Code CLI**
+    (`claude -p … --output-format stream-json`) with the operator's existing
+    **`claude auth login` subscription** — verified live (`apiKeySource: "none"`,
+    `subscriptionType: "max"`). Read-only is **defense-in-depth**: `--tools Read
+    Glob Grep` (the actual capability limit) + a `--disallowedTools` writelist +
+    `--permission-mode plan` + `--strict-mcp-config` (zero MCP) +
+    `--disable-slash-commands`, **never `--bare`** (which forces API-key auth),
+    and the subprocess env has `ANTHROPIC_API_KEY` stripped. Durable
+    `external_session_id` (captured from the init event) + `--resume` on restart;
+    real `rate_limit_event` → the `rate_limit` AgentEvent (feeds §4.6);
+    subscription cost recorded honestly (`cost_usd=None`,
+    `api_equivalent_cost_usd` labeled). **Live zero-mutation proof passed** (real
+    read-only turn, Glob+Read, repo untouched). 18 hermetic tests.
+  - **`claude_agent` — the optional API lane** (`adapters/claude_agent.py`,
+    pinned `claude-agent-sdk==0.2.116`, `agent-claude` extra). Same
+    defense-in-depth via `allowed_tools`+`disallowed_tools`+`can_use_tool`, but
+    authenticated by **`ANTHROPIC_API_KEY`** (per Anthropic's embedded-product
+    rules) behind `--allow-agent-session-egress` — for hosted/shared deployments.
+    Built + hermetically proven (26 tests); its live run is deferred (needs the
+    key + egress, an operator decision).
+
+**What is NOT built yet** (honest gaps — see §4.8 for the ordered plan):
+
+- **Claude API lane has no LIVE run yet** (the local subscription lane is
+  live-proven; the SDK/API lane awaits `ANTHROPIC_API_KEY` + egress). The
+  worker→`ClaudeRateLimitCollector.feed()` wiring, cockpit selectability of the
+  Claude lanes, and the full 14-item live battery (one live turn proven) are
+  still pending.
+- **Write-capable execution is unfinished.** Both agents are read-only today.
+  Writable work stays gated behind leased worktrees, mission bindings, branch
+  protection, test evidence, and independent review — none of that write path
+  is wired yet. Codex is *closest* (its read-only runtime exists) but is not a
+  complete pipeline executor.
+- **Cockpit Agent-Sessions UI** beyond the acceptance harness, and the
+  automatic mission routing that would let the pipeline *choose* an agent.
+
+### 4.6 Unified Usage & Limits — one shared metering layer
+
+Not a second dashboard bolted on — a **mandatory shared subsystem**
+(`src/command_center/usage/`) across every chat model **and** every coding
+agent, and the prerequisite before any agent becomes eligible for automatic
+routing. It keeps **four concepts rigorously distinct** so historical usage is
+never shown as remaining provider quota:
+
+1. **Usage** — observed tokens / calls / sessions / cost / duration.
+2. **Provider limits** — provider-*reported* quota buckets + resets.
+3. **Availability** — installed / authed / busy / limited / exhausted /
+   unavailable / unknown.
+4. **Internal budget** — our own caps and routing rules.
+
+**Load-bearing invariants, each proven by a test** (reuse these when adding a
+collector): provider quota is **never** overwritten by an estimate
+(source-priority `PROVIDER_NATIVE > PROVIDER_DERIVED > RECONCILER > FAKE >
+ESTIMATE` — a *fresh* estimate loses to a *stale* provider value); UNKNOWN
+stays unknown and stale is visibly stale (never coerced to 0%); multiple
+provider buckets stay separate (never one flattened %); ingest is idempotent by
+`source_hash`; alerts dedup by `(runtime,subject,kind,threshold,reset)`;
+credentials / raw provider responses / raw ccusage logs never enter the Ledger;
+config structurally refuses `routing.allow_silent_fallback: true`.
+
+**BUILT + pushed:**
+
+- **Phase 1 foundation** (PR #34) — schemas, protocol, store (in-memory + the
+  shared `select_latest_*` source-priority selectors), alerts, attribution,
+  reconciliation, service (ingest → dedup-alert → roll-up), a deterministic
+  `FakeCollector`, durability via 5 Ledger tables (`usage.v1`, mirrored-DDL +
+  drift test), and `configs/usage-monitoring.yaml` (`UsageMonitoringConfig`,
+  in `CONFIG_CONTRACTS`, covered by `make validate`). Reuses
+  `improvement/router_cost.py` for cost math instead of rebuilding it.
+- **Phase 1.1 hardening** (same PR) — (a) **unknown cost is never $0.00**:
+  `cost_usd` is nullable and `CostSource` is a real enum; subscription
+  Codex/Claude activity is `subscription_not_metered`, shown as "cost
+  unavailable". (b) **No cross-collector double-counting**: `SampleKind` where
+  only `request_delta` is additive, so the same activity seen as a session
+  total AND a provider-window total AND a ccusage reconciliation counts once.
+  (c) Attribution **driver facts** (reasoning_tokens, repository_scans,
+  test_runs, retries, failed_calls, worker_restarts, session_resumes). (d)
+  Durable **collector checkpoints** (`model_usage_collection_state`) + DDL
+  indexes + a retention policy that never prunes the evidence behind a routing
+  decision. 50 usage tests.
+- **Phase 2 — the FIRST real provider collector** (PR #35, this branch):
+  `collectors/codex_app_server.py` reads Codex quota via the raw app-server RPC
+  `account/rateLimits/read` (the SDK exposes no named wrapper) off the
+  underlying `AsyncCodexClient`, maps the `primary`/`secondary` RateLimit
+  windows to `PROVIDER_NATIVE` limit snapshots (epoch→ISO reset, window
+  seconds), and derives availability from `rate_limit_reached_type` / worst
+  used-percent. Emits **limits + availability only** — per-turn tokens stay
+  with the adapter's own events so nothing double-counts. Degrades honestly
+  (SDK-absent → UNAVAILABLE, auth fail → AUTHENTICATION_REQUIRED, RPC fail →
+  still AVAILABLE + warning; never raises for an expected condition).
+  `UsageService.run_collector_tracked()` wraps it in a durable collector
+  checkpoint. **Live smoke passed** against the real prolite account; a mypy
+  override covers the optional un-stubbed `openai_codex.*`.
+- **Phase 2.1 — Codex collector COMPLETED (multi-bucket):** a fresh read-only
+  live introspection corrected the roadmap and the collector now imports the
+  full `rate_limits_by_limit_id` view (the default `codex` limit **plus**
+  per-model limits like `codex_bengalfox` = "GPT-5.3-Codex-Spark"), deduping
+  the compatibility windows against the default limit and namespacing the rest
+  `{limit_id}_primary/_secondary`, with per-limit **credits** (only when
+  `hasCredits`, else None). Live smoke now returns **4 provider_native
+  buckets**. 13 collector tests. **Two grounded corrections:** there is **no
+  `account/usage/read`** in the pinned app-server (the JSON-RPC server rejects
+  it as an unknown variant — per-turn tokens instead flow through the adapter's
+  `ThreadTokenUsage` events, not a collector poll), and
+  `account/rateLimits/updated` is a server **notification** the worker wires to
+  a fresh `collect()` refresh (also on reconnect), not a separately-parsed
+  message.
+
+**The authoritative provider sources each remaining collector must use** (so
+they are provider-native, not estimates): **Codex** → app-server
+`account/rateLimits/read` (single-bucket compat `rate_limits` **and**
+multi-bucket `rate_limits_by_limit_id` — usedPercent, windowDurationMins,
+resetsAt, credits, planType) plus the `account/rateLimits/updated` server
+notification as a refresh trigger. *(Note: this pinned app-server exposes no
+`account/usage/read` — token usage comes from per-thread `ThreadTokenUsage`
+events, handled by the adapter, not this collector.)* **Claude** → the SDK's
+structured `RateLimitEvent` **(BUILT — `usage/collectors/claude_agent.py`,
+PR #36)**: status allowed/allowed_warning/rejected; type five_hour / seven_day /
+seven_day_opus / seven_day_sonnet / overage. Because it is EVENT-driven (not
+pollable), the collector is fed by the adapter's `rate_limit` events and its
+`collect()` returns an honest UNKNOWN until one is seen — it records the
+SDK-emitted state, never infers subscription quota from token counts.
+**OpenRouter** → `GET /api/v1/key` (limit, limit_remaining,
+limit_reset, usage_daily/weekly/monthly, byok_usage) — the authoritative
+remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs`
+(+ custom spend-log metadata for per-user/project/request attribution).
+**Ollama** → health = availability only, never a fabricated quota. **ccusage**
+→ reconciler only (never a primary count).
+
+- **Phase 3 — the Usage & Limits cockpit surface is BUILT** (read-only, OFF by
+  default via `KANBAN_UI_USAGE_ENABLED`). Pure view builders
+  (`usage/cockpit_views.py`, no FastAPI/SDK, unit-tested alone) back 7 cockpit
+  routes: `GET /api/model-usage`, `/api/model-usage/{runtime_id}`,
+  `/api/model-limits`, `/api/model-alerts`, `/api/model-usage/collector-health`,
+  `/api/model-usage/top-drivers`, `POST /api/model-usage/refresh`. An in-process
+  `UsageService` singleton (no HTTP hop — the cockpit imports `command_center`
+  directly) renders **honestly empty** when enabled but unpolled (`[]` /
+  UNKNOWN, never fabricated). A new **"Usage & Limits"** cockpit page shows a
+  per-runtime card (availability badge, provider buckets + internal budget as
+  separate bars with used%/reset/credits, rolled usage with honest cost —
+  "subscription (not $-metered)" / "cost unknown", never $0.00), a stale badge,
+  and a collector-health table. 15 tests; `tsc && vite build` clean.
+
+- **Phase 3.2 — Claude usage is now WIRED + the selector has model/effort
+  pickers + badges** (PR #37, `KANBAN_UI_USAGE_CLAUDE`). Runtime-discovered
+  **model + reasoning-effort pickers** (Codex live `client.models()` incl.
+  supported efforts; Claude validated alias catalogs) flow through a new
+  `GET /api/agent-harnesses/{id}/models`; effort is threaded end-to-end and
+  pinned per session (Claude `--effort` / SDK `options.effort` / Codex
+  `model_reasoning_effort`). `/api/agent-harnesses` is enriched with
+  `usage_summary` + `models_endpoint`, and the picker renders a live
+  availability/limit **badge**. The cockpit SSE generator now **tees live
+  `rate_limit` events into the durable usage store** (two Claude lanes kept
+  distinct — `claude_code_local` ≠ `claude_agent` — fixing a real
+  misattribution). Real bug fixed: the Claude collector's hardcoded
+  runtime_id. Operator runbook: `docs/runbooks/agent-sessions-activation.md`.
+
+- **Phase 3.3 — WORKER-owned usage ingestion (headless-safe)** (PR #37,
+  `AGENT_WORKER_USAGE`): the worker feeds its own `UsageService` on `rate_limit`
+  events as a turn runs (`_run_turn`), so a headless session captures usage even
+  with no browser attached (the cockpit SSE tee's gap). Idempotent by `source_hash`.
+- **Phase 3.4 — restart-proof, ONE authoritative usage store** (PR #37): the
+  worker's `UsageService` is now backed by `LedgerUsageStore` when
+  `LEDGER_BASE_URL` is set (durable across restart), and the cockpit — under
+  `KANBAN_UI_USAGE_LEDGER=1` — reads the **same** Ledger, so it renders exactly
+  the rows the worker wrote (not a per-process in-memory illusion). Proven by
+  `test_usage_ledger_durability.py`: an observation ingested through one
+  Ledger-backed service is visible to a brand-new service reading the same
+  Ledger, the two Claude lanes stay distinct, and a re-ingested event stays
+  single. The SSE tee remains a compatibility writer (dedup by `source_hash`).
+
+**What is NOT built yet:** every collector except Codex; the Usage & Limits
+UI's remaining depth (historical charts, reset timelines, routing-evidence
+panel, top-driver *UI*); SSE live push (`/api/model-usage/events/stream`); the
+reconciliation + routing-decisions routes; Ledger-backing the worker usage
+store (restart-durable) + pointing the cockpit reads at the worker (retiring the
+tee as authoritative); and per-model/per-effort usage attribution on samples.
+The core surface (overview, per-runtime detail, limits, alerts, top-drivers,
+collector-health, refresh) + model/effort pickers + selector badges + the Claude
+rate_limit tee + worker-owned headless ingestion are live behind the flags.
+
+### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
+
+`openai/codex-plugin-cc` (latest release v1.0.6, 2026-07-08) runs Codex from
+*inside* Claude Code: `/codex:review`, `/codex:adversarial-review`,
+`/codex:rescue`, `/codex:transfer`, `/codex:status`, `/codex:result`,
+`/codex:cancel`, plus an optional review gate. It is genuinely useful for the
+plan-deeply-in-Claude / execute-or-second-pass-in-Codex / re-check-in-Claude
+loop. **But** its README is explicit that it uses the same local Codex CLI
+auth, runtime, config, and *current workspace* by default, and that its review
+gate can spin a long Claude/Codex loop that drains usage fast. That makes it an
+excellent **local operator convenience**, but the **wrong** thing to promote
+into an authoritative control plane: it writes local job files/logs, isn't
+bound to a leased worktree or our Ledger evidence model, and can't by itself
+satisfy reviewer-independence / approval / routing contracts.
+
+**Decision: adopt it, but only as a bridge adapter *under* the existing
+architecture.** The wrapper must bind every plugin-triggered task to an
+existing agent session + repo registration + worktree lease; record plugin job
+IDs as external job IDs in the Ledger (never copy raw local transcripts into
+durable storage); force **read-only by default**; allow write-capable
+`/codex:rescue` only with a valid mission approval + active worktree lease +
+branch/protected-path enforcement + a declared validation plan; and treat the
+plugin's review gate as an opt-in local helper, never the production
+merge/test/judge gate.
+
+### 4.8 Completion roadmap — the ordered path to "both agents, honest usage, pipeline routing"
+
+Finish the stack in the order the current design already points to (do **not**
+jump straight to "both agents are pipeline executors"):
+
+1. **Stabilize & merge the existing Codex path.** Resolve the PR stack
+   (#32 → #33 → #34 → #35) so the Codex read-only runtime + usage foundation +
+   Codex collector ship to `main` as a real cockpit option, not a stacked-branch
+   achievement. *(Merge decisions are Geoff's.)*
+2. **Lock the shared Usage/Limits semantics before the UI.** Done in Phase 1.1:
+   unknown-cost-≠-$0.00, no double-count, durable collector checkpoints +
+   indexes. This is what makes the later dashboard trustworthy rather than
+   merely attractive.
+3. **Ship the Usage & Limits cockpit surface.** `/api/model-usage`,
+   `/api/model-limits`, `/api/model-alerts` (+ related) routes and the
+   dashboard: selector badges, overview, top-drivers, reset timelines, alerts,
+   routing evidence — showing Codex buckets now, Claude buckets when that
+   adapter exists, OpenRouter per-key remaining credit, LiteLLM spend with
+   attribution, local-runtime health, and "what consumed the most?" from
+   recorded facts.
+4. **Build Claude Agent in parity with Codex** — but to Anthropic's embedding
+   rules, not by mirror-copying Codex: `claude-agent-sdk`, `ANTHROPIC_API_KEY`
+   auth (behind `--allow-agent-session-egress`), `allowed_tools` restricted to
+   Read/Glob/Grep for the read-only phase, constrained `setting_sources`,
+   capture `session_id`, resume via `ClaudeAgentOptions(resume=…)`; present it
+   as **"Claude Agent"**.
+5. **Add the Codex plugin bridge** (§4.7) — once both harnesses are first-class,
+   the plugin is an operator-efficiency layer, not a bootstrap hack.
+6. **Turn both agents into pipeline participants in stages** — read-only roles
+   first (investigator, failure analyst, PR/diff reviewer, independent evidence
+   checker) → then one explicitly-chosen agent executing in a **leased isolated
+   worktree** (no main-checkout writes, no merge authority) → then cross-harness
+   review for high-risk changes (one implements, the other reviews; deterministic
+   judges still mandatory; human merge still final) → only then may the router
+   choose `auto`, and every selection/rejection must persist its availability,
+   limit snapshots, budget state, selected model, and reason.
+
+**End state:** the cockpit lets a user pick **Codex Agent** or **Claude Agent**
+under Agent Sessions, see honest live availability/quota badges, open a session
+against a registered repo, continue/interrupt/resume it, and view structured
+events + usage evidence. The pipeline selects an agent for read-only
+investigation first, then leased-worktree execution, then evidence-based
+automatic routing — with the Codex plugin fitting in as a Claude-side
+convenience layer, never a competing control plane.
 
 ---
 
@@ -384,7 +823,7 @@ Ordered next work (do not skip ahead):
 
 ### 5.2 External AI-agent idea intake — broad prompt first
 
-Use [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md) when
+Use [evaluation/agent-ideas-evaluation-prompt.md](evaluation/agent-ideas-evaluation-prompt.md) when
 the candidate is broader than a single obvious dependency bump: ClawCodex,
 Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, dbt Wizard,
 BigQuery Graph / ADK / A2UI / BigSet, agentcookie, or a generic multi-agent
@@ -396,13 +835,13 @@ What is already done:
 
 1. The broad prompt exists and starts from the implemented stack, not stale
    brainstorming assumptions.
-2. The narrower [capability-evaluation-loop.md](capability-evaluation-loop.md)
+2. The narrower [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md)
    now points back to the broad prompt for wide candidate sweeps.
 3. The no-build list below now rejects candidate bundles that lack a measured
    gap, control-plane overlap matrix, threat model, and pre-registered
    experiment plan.
 4. The first read-only routing/performance pass is complete:
-   [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md).
+   [reviews/routing-performance-candidate-evaluation-2026-06-14.md](reviews/routing-performance-candidate-evaluation-2026-06-14.md).
    Verdict: improve routing natively first; pilot `codebase-memory-mcp` only as
    a manual read-only retrieval benchmark; keep Puppetmaster, MAPPA, Agno/GitWiki,
    A2UI, Docker Model Runner, and dbt skills as patterns/conditional pilots;
@@ -679,6 +1118,282 @@ The deliberate enablement sequence stays: dry-run → price-audit → `make fron
 private repo content) whose first goal is to verify usage/cost/latency/refusal accounting, not
 "is the model smart."
 
+#### Local frontier lane (colibrì) — full spec
+
+A THIRD chat lane, distinct from both the local-only LiteLLM/Ollama gateway and the paid
+frontier-router backup lane above: experimental, loopback-only engines running entirely on this
+machine — no API key, no $ cost, no cloud egress, only a (potentially very long) wall-clock one.
+Added 2026-07-11 after a deep-check of **colibrì** ([github.com/JustVugg/colibri](https://github.com/JustVugg/colibri)),
+a project claiming to run GLM-5.2 (744B MoE) on consumer hardware by keeping ~9.9GB of dense
+weights resident and streaming the remaining ~370GB of routed experts from NVMe.
+
+**Fact-check verdict** (verified against the repo/README/source/HF card, not taken on faith):
+most technical claims hold up — RAM footprint, rejected API params (tools/functions/json_mode/
+custom stops/logprobs/penalties/seed), Windows "Phase 1" status, KV-slot mechanics, the custom
+(non-GGUF/AWQ/GPTQ/MLX) container format. The material risk: **the repo was 10 days old** when
+added (created 2026-07-01), and every published tok/s number (0.05–1.06 tok/s self-reported
+across a 25GB WSL2 box up to a 128GB M5 Max) has no independent reproduction. Treat the
+`expected_tokens_per_second` field in `configs/local-frontier-providers.yaml` as an unverified
+upper/lower bound until `make colibri-benchmark LIVE=1` has actually run on this machine.
+
+**Architecture**: colibrì does NOT go through LiteLLM (unlike the local Ollama roles) and is NOT
+a frontier-router candidate (unlike the paid lane) — it mirrors the frontier-router lane's
+*shape* (a direct-httpx client, gated off by default, no tools/board/memory context) but is its
+own contract, because `ModelRegistry._checks` hard-rejects any local role that isn't
+`provider: ollama`, and `check_litellm_config` flags any `openai/`-prefixed model string in
+`generated/litellm-config.yaml` regardless of the target `base_url` — so the "LiteLLM +
+`openai/` prefix + custom `api_base`" approach a naive integration would reach for is a dead end
+here by design, not an oversight.
+
+Every local-frontier turn must pass, in order (fail-closed, no silent fallback to local Ollama):
+
+1. lane enabled (`configs/local-frontier-providers.yaml` `enabled`) — **false by default**,
+2. model known in `local-frontier-providers.yaml`,
+3. the model's `base_url_env` resolves to an actual value (the engine's server must be running),
+4. that value is loopback / `host.docker.internal` / RFC1918 private / Tailscale (`.ts.net`) —
+   **never** a public hostname, checked both statically (`check_forbidden_providers.
+   check_local_frontier_providers`, unconditional — no `--allow-*-egress` flag needed, since
+   this isn't a cloud-egress gate) and again at call time (`local_frontier_client`, defense in
+   depth against the env var changing between a scan and a live call).
+
+No `tools` field is ever sent (the engine rejects it outright); no board/growthos-memory context
+is attached (same reasoning as the paid frontier lane, plus this backend is painfully slow, so a
+smaller prompt matters even though nothing leaves the machine). `GatewayCore.is_local_frontier`
+drives the same tool-call-refusal diagnostic the frontier lane uses
+(`_no_tools_lane_tool_call_diagnostic`, generalized from the frontier-only version 2026-07-11) —
+a defense-in-depth guard in case plain-text output ever looked tool-call-shaped.
+
+**Operator commands (all read-only, no egress):**
+
+- `cc colibri-preflight` — disk/RAM/GPU headroom vs. the configured model's declared
+  `disk_footprint_gb`. Registered in the main `cc` app (unlike `frontier_router.py`, which stays
+  Makefile-only because it can spend money) since this has no real-world cost.
+- `cc colibri-health` — current `lane_enabled`/`health`/`selectable` per configured model (a
+  short-timeout `/health` probe, stays on loopback).
+- `make colibri-benchmark SUITE=chat LIVE=1 MAX_CASES=3` — the tester: runs the SAME
+  `configs/model-benchmarks.yaml` cases used to judge local incumbents and the paid frontier
+  lane against colibrì (`src/command_center/improvement/local_frontier_benchmark.py`, sharing
+  `benchmark_scoring.score_case` with `frontier_benchmark.py` so both apply the exact same
+  rubric). Headline metric is **tokens/sec + pass_rate**, not cost or latency — there is no
+  price to compare, and latency alone is misleading at sub-1-tok/s speeds. `MAX_CASES` defaults
+  to 3: at colibrì's expected throughput a full suite live run could take hours, so an unbounded
+  default would silently turn a sanity check into an all-afternoon job. Results land in
+  `generated/local-frontier-benchmark-report.json` and feed the chat picker's "measured X tok/s"
+  badge (`local_frontier_client._last_benchmark_summary`) — absent, never fabricated, until that
+  has actually run once.
+
+**Rollout sequence** (Phase 1 code landed 2026-07-11, `enabled: false`; Phase 2 — build the
+engine, download the ~370GB weights, start the server, smoke-test, run the benchmark for real —
+completed the same day):
+
+1. `cc colibri-preflight` to confirm disk/RAM/GPU headroom.
+2. Build colibrì in WSL2 (not native Windows — its Windows port is README-labeled "Phase 1," no
+   GPU/O_DIRECT yet); run colibrì's own correctness tests before trusting it with a 370GB
+   download.
+3. Download the preconverted int4 container (`jlnsrk/GLM-5.2-colibri-int4` on Hugging Face —
+   NOT GGUF/AWQ/GPTQ/MLX, not reusable by Ollama/vLLM).
+4. Start the server, set `LOCAL_FRONTIER_COLIBRI_BASE_URL` in `.env`, smoke-test `/health`,
+   `/v1/models`, one `/v1/chat/completions` call, confirm a `tools`-bearing request is rejected.
+5. Flip `configs/local-frontier-providers.yaml` `enabled: true`.
+6. `make colibri-benchmark SUITE=chat LIVE=1 MAX_CASES=3` for a first REAL measured tok/s number
+   on this machine, replacing the self-reported/unverified label.
+
+**Phase 2 results (2026-07-11, this machine — RTX 4090, 64GB RAM, WSL2 Ubuntu, 24 cores):**
+
+- Engine correctness, independently verified against a PyTorch oracle (not just "it compiled"):
+  32/32 teacher-forcing positions, 20/20 greedy-generation tokens, both exact matches.
+- Real download: 353GB / 150 files in 1h53m over an unauthenticated HF connection. The MTP head
+  files' sizes exactly match upstream issue #8's "known int4, unusable" fingerprint — the server
+  logs `[MTP] attiva` (active) anyway, but per that issue draft acceptance collapses to 0–4% at
+  int4, so treat the numbers below as base (non-speculative) throughput, not an MTP-accelerated
+  best case.
+- Real chat completion, cold cache, first-ever request: 184.5s for a 3-token reply ("Hello
+  there!" — coherent, on-topic) plus 13-token prefill.
+- **`make colibri-benchmark SUITE=chat LIVE=1 MAX_CASES=3` — median 0.0563 tokens/sec**, landing
+  at the pessimistic end of the self-reported 0.05–1.06 range: this machine's real throughput is
+  close to colibrì's own worst-case WSL2 number, not its best-case bare-metal one. A 100-token
+  reply is genuinely ~30 minutes at this rate.
+- **pass_rate: 0/3 (0%) — a suite/capability mismatch, not a quality failure.** The `chat` suite
+  (`configs/model-benchmarks.yaml`) is tool-call-shaped (cases like `chat_search_tool` score
+  `correct_tool_selection` against JSON output), but the local-frontier lane structurally never
+  sends a `tools` schema (same as the paid frontier lane). This is exactly the risk the original
+  colibrì evaluation writeup flagged under "Phase 4 — evaluation gate": reusing the tool-oriented
+  suite unchanged "would repeat the benchmark mismatch you already found with the frontier lane."
+  A genuine text-only suite (instruction adherence, reasoning, long-answer coherence — no tool
+  expectations) is the natural next step before pass_rate means anything for this lane; until
+  then, tokens/sec is the only KPI worth reading from `make colibri-benchmark` here.
+  **Built 2026-07-12**: `configs/model-benchmarks.yaml` suite `chat_text_only` (10 cases —
+  instruction adherence, missing-info abstention, factual extraction, contradiction detection,
+  multi-step reasoning, summarization, no invented tool execution, no false action claims,
+  simulated multi-turn consistency, and a ~475-token needle-in-haystack retrieval case) — no
+  `response_format: json` anywhere, matching every no-tools lane's `json_mode: false`
+  capability. `frontier_benchmark.py` and `local_frontier_benchmark.py` now both default to it
+  instead of the tool-shaped `chat` suite (still available via `--suite chat` for anyone who
+  wants to see the mismatch directly). Same `role: chat` as the original suite, so it's usable
+  by `live_model_benchmark.py`'s declared-experiment A/B path too if a future experiment wants a
+  genuine colibrì-vs-OpenRouter-vs-local-Qwen text-quality comparison — not wired up yet, only
+  the suite itself.
+- `context_tokens` corrected from an 8192 placeholder to the server's real logged value: 4096.
+- Found and fixed a real bug during the live smoke test: `local_frontier_client._health()` built
+  `{base_url}/health` where `base_url` includes the conventional `/v1` suffix, but colibrì's
+  `/health` lives at the server ROOT — every health check was silently hitting a nonexistent
+  `/v1/health` path and getting back a 401 (not a 404), which looked like a broken server rather
+  than a client bug. Fixed + regression-tested — but the fix initially only landed in
+  `src/` on the host; the running `agent-kanban-ui` container had it baked in from an earlier
+  `docker build` and kept serving the pre-fix behavior until rebuilt. `src/` is `COPY`-baked
+  into the image, not live-mounted (unlike `.env`, which IS a live bind mount) — a source fix
+  on the host is invisible to a running container until it's rebuilt.
+- **`LOCAL_FRONTIER_COLIBRI_BASE_URL` needs a DIFFERENT value depending on the caller**, a real
+  gap the first version of this doc glossed over by only testing from the bare Windows host:
+  - From **inside the `agent-kanban-ui` container** (the actual browser-facing path):
+    `http://host.docker.internal:8000/v1` — Docker Desktop's internal bridge correctly routes
+    this to WSL2's loopback-forwarded port.
+  - From the **bare Windows host** (`cc colibri-health`, `make colibri-benchmark` run directly,
+    not via `docker exec`): `host.docker.internal` resolves via the Windows hosts file to this
+    machine's LAN IP, which does NOT reach a service bound to WSL2 loopback — `127.0.0.1` is
+    what actually works there, because WSL2 forwards loopback-to-loopback across the host/WSL2
+    boundary specifically, not LAN-IP-to-loopback.
+  `.env` is set to the container-correct value (`host.docker.internal`) since that's the real
+  product path; **run `cc colibri-health` / `make colibri-benchmark` via
+  `docker exec llm_station-agent-kanban-ui-1 ...`** when the stack is Dockerized, not directly
+  on the host, or they'll report `unreachable` even though the actual feature works fine.
+
+**Full acceptance-gate proof, completed 2026-07-12** (an independent review of the 2026-07-11
+work correctly flagged that every prior test exercised the cockpit's *config/health* surface,
+not a real turn through its own `/api/chat` — that gap is now closed):
+
+- A real request through the cockpit's own `POST /api/chat` (not a direct colibrì call, not a
+  host-side script) — `model: "local-frontier:glm-5.2-colibri"` — returned `HTTP 200` in 675.8s
+  with a coherent, on-topic reply: *"Understood — I'm ready to help with your questions, but I
+  have no access to AppFlowy, GitHub, or any external tools, so I can only provide general
+  guidance."* The model correctly self-reporting zero tool access is itself strong evidence the
+  right (`tools_available=False`) system prompt reached it.
+- The flight recorder (`/snapshot/chat-transcripts/<conversation_id>.jsonl`) confirms every
+  acceptance criterion an independent reviewer listed: `"context_blocks": []` (no board/memory
+  context), correct `model_role`, a real `usage` event (`prompt_tokens: 219, completion_tokens:
+  37, tokens_per_second: 0.0549` — consistent with the earlier `make colibri-benchmark` result),
+  no `tool_calls` anywhere, and the exact final reply text.
+- Getting this one clean round-trip took several real, informative failures first (all fixed or
+  understood, not swept aside):
+  - `local_frontier_chat_completion` never sent `max_tokens` — the very first attempt ran
+    unbounded and blew past `queue_timeout_seconds` itself, surfacing as an opaque "could not
+    reach colibri" transport error instead of a clear timeout. Fixed: `LocalFrontierModel.
+    max_output_tokens` (schema field, default 200, overridden to 40 for colibrì given its
+    measured throughput) is now always sent as `max_tokens`.
+  - **colibrì does not cancel generation on client disconnect.** When a client times out and
+    gives up, the server keeps computing until it finishes or hits its own `queue_timeout_seconds`
+    — an abandoned request can occupy a KV slot for the server's full timeout window, queuing out
+    subsequent requests behind it. Not a bug to fix on our side (nothing to cancel — colibrì's
+    protocol has no cancel primitive), just an operational fact: expect orphaned generations
+    after any client-side timeout, and give the queue time to drain before retrying.
+  - **colibrì's auto-selected RAM budget can cause real swap thrashing.** Launched with no
+    `--ram` flag, it auto-selected ~39GB on this 47GB WSL2 VM; combined with everything else
+    running, the system fell into 7.8GB of swap, degrading *everything* (including simple
+    `/health` checks) far below the already-slow baseline. Relaunching with `--ram 28` (leaving
+    real headroom, matching the external reviewer's suggested 28–32GB range) fixed it — confirmed
+    via `free -h` showing zero swap growth afterward. **Never launch colibrì without an explicit,
+    conservative `--ram` value on a shared machine.**
+  - **colibrì does not isolate KV cache by `conversation_id`** — there's a `cache_slot` request
+    extension (`0 <= cache_slot < kv_slots`, confirmed against the engine's own
+    `openai_server.py`) that `local_frontier_client` didn't send, so every request implicitly
+    shared slot 0. Observed live: prefill cost grew from 13 tokens (first request ever) to 163
+    tokens (a later, unrelated conversation) purely from unrelated prior turns bleeding into the
+    same cache. **Fixed 2026-07-12**: `_cache_slot_for(conversation_id, kv_slots)` deterministically
+    maps each conversation to a stable slot via `sha256` (not Python's builtin `hash()`, which is
+    `PYTHONHASHSEED`-randomized per process and would silently defeat colibrì's own
+    KV-cache-persists-across-restarts feature). Live-verified: the server log echoed `KV slot 0`
+    for a conversation id chosen specifically because it hashes to slot 0, confirming the computed
+    value is what colibrì actually received and used. With `kv_slots=2` distinct conversations can
+    still collide onto the same slot and share cache — that's a capacity limit inherent to a
+    small `kv_slots`, not something this mapping removes.
+  - `queue_timeout_seconds` at the schema default (900s) proved too tight once the above two
+    effects (reduced expert cache under `--ram 28`, growing cache_slot-0 prefill) stacked: a real
+    request completed successfully server-side (`200 OK`, scheduler `completed: 1`, never
+    `timed_out`) mere moments after the *client's* 900s timeout had already fired and given up.
+    Raised to 1800s for real margin — see the config file's own comment for the rationale.
+  - Separately, a `.env`-file scare: the file was found reset to a 9-key minimal version (missing
+    `OPENROUTER_API_KEY`, `LITELLM_MASTER_KEY`, `POSTGRES_PASSWORD`, and others) partway through
+    this work, then later observed at a third, different 24-key state — content that changed
+    between successive reads with no writes issued in between. Root cause undetermined (suspected
+    Docker-Desktop-on-Windows bind-mount sync artifact following the day's multiple WSL2/Docker
+    Desktop restarts); it stabilized on its own. No secret was confirmed lost — the 24-key
+    stabilized version has every key that mattered — but this is worth remembering as a real
+    failure mode of bind-mounting `.env` into a container on this platform, not something to
+    write into `.env` and trust blindly mid-session again without a stability check
+    (`wc -l .env` a few times in a row with no writes in between) first.
+  - A second, unrelated environment surprise while building the text-only benchmark suite (see
+    below): `.venv/Lib/site-packages/__editable__.command_center-4.0.0.pth` — this repo's OWN
+    venv's editable-install pointer — was found pointing at `C:\tmp\cc-agent-runtime\src`, a
+    different worktree entirely (see the "Agent-session chat integration" work). Every plain
+    `python -m command_center.…` invocation was silently running against the WRONG checkout's
+    code (pytest was unaffected — it manipulates `sys.path` itself and correctly resolved this
+    repo throughout). Symptom: a brand-new module (`local_frontier_benchmark.py`, only present
+    here) raised `ModuleNotFoundError` even though it demonstrably existed on disk. Fixed by
+    correcting the `.pth` file's single line to point back at this repo's own `src/` (the venv
+    has no `pip` module installed inside it, so a normal `pip install -e .` re-run silently hits
+    the system Python instead of the venv — editing the `.pth` file directly is the fix that
+    actually reaches the venv). Root cause not confirmed (most likely an earlier `pip install
+    -e .` run from the other worktree while this same venv happened to be active), but worth
+    a periodic sanity check (`python -c "import command_center; print(command_center.__file__)"`
+    should print a path under **this** repo) if `python -m command_center...` commands ever
+    behave inexplicably again.
+
+**Performance-tuning experiments, 2026-07-12** (`--ram 28` + default engine settings, measured
+against the same `"Reply with exactly one short sentence."` prompt, real `/api/chat` calls
+through the cockpit, each compared against the 0.0549 tok/s acceptance-gate baseline):
+
+- `iobench` (the engine's own I/O diagnostic) measured **0.07 GB/s buffered vs 0.99 GB/s
+  `O_DIRECT`** — a dramatic 14x gap in a synthetic 8-thread burst-read pattern. Tempting to read
+  as "free 14x speedup available," but `glm.c`'s own `g_direct` comment already documents that
+  the maintainer tested exactly this (VHDX-backed NVMe, "latenza serializzata ~60ms/req") and
+  found buffered reads win in real inference despite the synthetic numbers — a warning not to
+  trust a diagnostic tool's access pattern as representative of the real workload.
+- **`MTP=0`** (explicitly disabling the already-confirmed-broken int4 MTP head, avoiding even the
+  wasted 24-proposal self-disable probe): **0.0078 tok/s — ~7x slower**, not faster. Likely
+  because MTP's verification pass batches multiple experts' disk reads together (the engine's
+  own "batch-union MoE" behavior extends to MTP verification), and under this storage stack's
+  high per-request latency, batched reads beat strictly-sequential ones even when the draft
+  itself gets rejected. Reverted.
+- **`DIRECT=1`** (enabling `O_DIRECT` on expert slabs, testing the maintainer's stated finding
+  directly rather than trusting it by analogy): **0.0151 tok/s — ~3.6x slower**. Confirms the
+  `g_direct` comment's claim empirically on this specific machine, not just by reading the
+  source. Reverted.
+- **`--topp 0.7`** (adaptive expert top-p — colibrì's own README cites a real, measured "1.6×
+  end-to-end speedup" and "30-40% less disk" from this exact flag on a comparable low-RAM
+  machine; verified that specific claim against the primary source, not just the reviewer's
+  paraphrase, before testing): **0.0427 tok/s — ~22% slower**, and — more importantly than the
+  speed number — the reply came back genuinely incoherent and truncated ("Understood... please
+  provide the following: [...] You are a helpful, skilled, and knowledgeable assistant. I have
+  no"), hallucinating text that isn't part of the actual system prompt. Unlike `MTP=0`/`DIRECT=1`
+  (pure speed regressions, replies stayed coherent), this is a speed-AND-quality regression on
+  this specific run. Matches the README's own caveat that this flag changes which experts are
+  retained — it is a genuine tradeoff knob, not a free win, and on this one real sample the
+  trade didn't pay off in either dimension. A single run is not conclusive (the README's own
+  1.6× figure came from a different machine and, per the methodology gap noted below, likely
+  multiple repetitions) — treat this as a real data point arguing for caution, not a final
+  verdict on `--topp` in general. Reverted.
+- **Conclusion: three tested "obvious" optimizations, three regressions.** `MTP=0`, `DIRECT=1`,
+  and `--topp 0.7` all made a real, measured request slower (and in `--topp`'s case, less
+  coherent too). The maintainer-chosen defaults (MTP on, `O_DIRECT` off, adaptive top-p off)
+  plus the one change already proven necessary here (`--ram 28`, avoiding swap thrashing)
+  represent the practical performance ceiling found so far without deeper engine-level work.
+  Remaining candidates identified but not yet tested, roughly in descending priority: pulling
+  colibrì's upstream changes (13 commits behind as of 2026-07-12, including two real perf
+  commits — `03d9a29` opt-in NVMe/matmul I/O overlap, `704ed49` hot OpenMP thread pool across
+  tiny expert matmuls — a genuine engine-code change, not a runtime-flag guess, and the most
+  promising remaining lever); `PILOT=1` (router-lookahead prefetch, README-labeled
+  experimental); a proper multi-repetition cold/warm A/B methodology (today's tests were each a
+  single real sample under uncontrolled machine conditions — real evidence, but not
+  statistically tight); a RAM sweep above 28 (real risk of repeating the swap-thrashing
+  regression, only worth it in an isolated run with other workloads stopped).
+- **Compact system prompt, implemented 2026-07-12**: `build_system`'s `local_frontier` variant
+  was reusing the paid frontier lane's ~700-character prompt with only the lane description
+  swapped. Colibrì-class engines are genuinely disk/compute-bound, so system-prompt token count
+  is a real, measured cost here (219 prompt tokens for an 8-word user message before this fix).
+  Gave `local_frontier` its own dedicated ~240-character template carrying the same two safety
+  properties (no tools, never claim an action happened) in far fewer tokens — confirmed live:
+  the next real request measured 67 prompt tokens for the same 8-word message.
+
 What is done (legacy detail):
 
 1. `model-scout` now emits an open-weight-only candidate set by default. A source
@@ -928,14 +1643,14 @@ production guidance.
 
 ### 5.5 Whole-system validation prompt
 
-Use [whole-system-validation-prompt.md](whole-system-validation-prompt.md) when
+Use [evaluation/whole-system-validation-prompt.md](evaluation/whole-system-validation-prompt.md) when
 the question is broader than one model, one UI feature, or one external tool:
 "can this entire pipeline keep improving itself, control AppFlowy safely, run
 registered desktop repo work autonomously, route local models cheaply, notify me,
 and prove it did not leak data?"
 
 The attachment-driven reconciliation is recorded in
-[autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md).
+[reviews/autonomous-pipeline-gap-review-2026-06-16.md](reviews/autonomous-pipeline-gap-review-2026-06-16.md).
 It keeps the current single-control-plane architecture and treats the proposal
 as a hardening checklist, not a replacement stack.
 
@@ -1063,7 +1778,7 @@ Full power inside the sandbox, narrow audited power outside it. L3/L4
 
 Every request flows through the same stages, each with a model tier and named
 judges (`configs/judges.yaml`; worked examples in
-[request-routing-examples.md](request-routing-examples.md)):
+[architecture/request-routing-examples.md](architecture/request-routing-examples.md)):
 
 | # | Stage | Tier | Judges (in order) | Escalates to |
 |---|-------|------|-------------------|--------------|
@@ -1132,11 +1847,11 @@ Stage by stage:
 2. **Approve** — a human drags the card to **Approved**. Agents structurally
    cannot do this: `actions.set_status` refuses Approved on every agent
    surface; the bridge applies `ready_statuses: [Approved]` only.
-3. **Dispatch** — `scripts/kanban_bridge.py --apply` (scheduled every 15 min
-   via a *user-run* schtasks one-liner; agent-created persistence is
-   deliberately blocked) opens a Ledger mission per approved card. Imported
-   hashes land in `generated/kanban-imported.json` so reruns never reopen a
-   card.
+3. **Dispatch** — `python -m command_center.cli.kanban_bridge --apply`
+   (scheduled every 15 min via a *user-run* schtasks one-liner; agent-created
+   persistence is deliberately blocked) opens a Ledger mission per approved
+   card. Imported hashes land in `generated/kanban-imported.json` so reruns
+   never reopen a card.
 4. **Writeback** — the bridge stamps `MissionID`, `Status=In Progress`, and
    `LastSync` back onto CardKey cards. Executors post events to the Ledger
    (`POST /mission/{id}/event`); `actions.mission_status(id)` returns status +
@@ -1174,8 +1889,8 @@ Three lanes:
   three ways: **AppFlowy Kanban** (where you act, per-pillar swimlanes), an **email digest** (SMTP,
   Start-Here top-3 + new-since-yesterday + failed sources), and a **chat ping**. Implemented as the
   Airflow DAG `dags/self_improvement_daily.py` + the `improvement scan` CLI; full design + as-built
-  reference in [daily-self-improvement-dag.md](daily-self-improvement-dag.md) and the project tracker
-  [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md).
+  reference in [daily-self-improvement-dag.md](improvement/daily-self-improvement-dag.md) and the project tracker
+  [SELF_IMPROVEMENT_PIPELINE.md](improvement/SELF_IMPROVEMENT_PIPELINE.md).
 
 Stage by stage:
 
@@ -1308,7 +2023,7 @@ CLI); if conversational control is wanted later, wrap *our own* publisher in a t
 MCP — never add an independent publisher.
 
 **Setup is a runbook + a self-check.** The ordered go-live steps are in
-[linkedin-setup.md](linkedin-setup.md); `cc linkedin-publish --preflight` reads the
+[linkedin/linkedin-setup.md](linkedin/linkedin-setup.md); `cc linkedin-publish --preflight` reads the
 real local state (config, boards, env-key presence, token validity — no secrets
 printed) and names the single next action, so the runbook is self-verifying.
 
@@ -1343,6 +2058,95 @@ gates pass (operator-gated, like the model-eval frontier-router lane). Large
 hosted models such as GLM-5.2 are **escalation** models, not default post
 formatters.
 
+### 6.7 The job-search command center (draft/prepare/track → human applies)
+
+A domain workflow, not a separate tracker — the cockpit-native
+`job_search_pipeline_internal` board is the primary Jobs board, with AppFlowy as
+an optional projection/fallback. It finds, scores, and prepares job applications
+while keeping submission itself manual. Validated by
+`JobSearchConfig` (`configs/job_search.yaml`); `auto_submit_enabled: true` is
+schema-rejected, and `AutomationPolicy` sets `mvp_submit_disabled=True` on
+every branch including `bot_possible` — nothing is ever auto-submitted.
+
+**Geoff's 3 manual gates, enforced as a one-step machine** (2026-07-10 — the
+cockpit refuses any lane skip with a 409 naming the legal next step; see the
+`_JOB_TRANSITIONS` map in `services/agent_kanban_ui/app.py`):
+
+```
+1. SELECT   Suggested Jobs -[Geoff drags]-> Selected by Geoff
+            (triggers packet prep automatically — Geoff never touches In Progress)
+2. AGENT COMPLETE   In Progress -[agent finishes]-> Needs Geoff
+            (agent-written resume/cover letter/outreach/answers, claim-checked)
+3. ME COMPLETE      Needs Geoff -[Geoff reviews + Approve & Submit]-> Completed
+            (validated submit -> mark_submitted -> email record -> evidence)
+
+Side branches (one step, either direction):
+  Suggested Jobs <-> Rejected / Skip
+  Needs Geoff <-> In Progress (send back for regeneration)
+  Completed -> Interviewing -> Closed / Archived
+```
+
+Every application gets **agent-written** materials by default
+(`agent_writer.py`, LiteLLM role `chat`): the full achievement bank + STAR
+stories + Geoff-voice master resume bank go in the prompt, every claim is
+checked against `achievement_bank.yml` IDs with a corrective retry on
+failure, and the complete prompt/response for every attempt is persisted to
+`agent_trace.jsonl` per application (never silent — a malformed model
+response raises `AgentWriterError` rather than emitting an unchecked
+packet; failures fall back to the template path, recorded as
+`generation.mode=template_fallback`). A fit score with a full KPI-style
+breakdown and a rich data folder are retained 30 days past last activity
+before compacting to a minimal archive ledger row. Hard-coded manual
+blockers (LinkedIn/Indeed/Workday/Greenhouse/Lever/Ashby portals, EEO/self-ID/
+sponsorship/salary questions) route to `Needs Geoff` — see
+`MANUAL_APPLICATION_RULES.md`.
+
+**Review loop** (the cockpit Packet Review modal, opened from any Jobs
+card): Overview/Resume/Cover Letter/Answers/Recruiter Msg/Follow-ups/
+Checklist/JD/Agent Trace/**Story** tabs, direct edit-in-place on any
+material (recorded as a `manual_edit` story moment), `request-changes` +
+regenerate against accumulated review notes, and **Approve & Submit** —
+the same governed `Completed` move as a drag, gated on `packet_validation.py`
+(errors block, warnings surface). `finalize.py` runs **before** the governed
+event is emitted, so a blocked or duplicate finalize never logs a move it
+didn't make, and an already-`applied` record completes idempotently (no
+duplicate email). The submit gate keys on the durable `applied_at` field,
+not the mutable `status` (a later recruiter note can't re-arm a second
+submission). `record_email.py` always writes `submission_email.html`;
+real SMTP send needs `DISCOVERY_SMTP_HOST/USER/PASSWORD/FROM` +
+`JOB_SEARCH_EMAIL_TO` — unconfigured by default, so submissions are
+`recorded_only` until an operator sets those.
+
+The **Story tab** (`_job_card_story`) is the card's full linear history —
+governed board moves, every agent generation attempt (expandable to the
+full model output), manual edits, notes, and the final submission
+evidence — and every row deep-links into the cockpit Chat view's
+flight-recorder timeline at that exact moment (§4, "open in chat").
+
+*In active development, being tested now:* an **Application Materials
+Pipeline Standard v2** (`docs/job_search/application_materials_standard.md`)
+tightens the writer to an ATS-formatted resume + an 8-heading outreach
+document (replacing the recruiter-message blurb) + SDARL-format answers,
+adds a held-claims policy (`evidence_policy.yml` — claims that require
+Geoff's explicit evidence before the writer may use them) and new
+validation checks (`held_claims`, `contact_extractable`, `no_internal_ids`)
+that block a packet rather than let a policy-restricted claim or leaked
+internal detail reach a submission. Treat this as pre-production until it
+lands in a commit and the readiness snapshot above says so.
+
+Implemented as the Airflow DAG `dags/job_search_daily.py` + the
+`job-search` CLI namespace (`src/command_center/job_search/`); full
+architecture in
+[job_search/JOB_SEARCH_COMMAND_CENTER.md](job_search/JOB_SEARCH_COMMAND_CENTER.md)
+and the living operator FAQ in
+[job_search/READINESS_FAQ.md](job_search/READINESS_FAQ.md).
+
+Operator-tunable daily limits and role-focus keywords can be overridden from
+the cockpit Controls page. Those edits are stored under
+`data/job_search/profile/search_settings.yml` and merged by
+`command_center.job_search.config.load_config()`, so CLI, DAG, and cockpit reads
+share the same effective config without rewriting `configs/job_search.yaml`.
+
 ---
 
 ## 7. Environments and isolation
@@ -1363,6 +2167,19 @@ ID → one branch → one git worktree → one devcontainer → one lease. The L
 unique index on (repo, branch) means two agents *physically cannot* lease the
 same checkout. Any `repo_task` that is persistent or holds secrets fails
 validation — that's how per-task isolation stays real rather than aspirational.
+`.devcontainer/devcontainer.json` pins the runtime so every mission
+builds/tests identically and can't pollute the host or another task.
+
+**Mapping activity → environment:**
+- Orchestration / memory / channels → **cc-control-vps** (always-on brain)
+- Model routing + budgets (LiteLLM) → cc-control-vps
+- Mission audit / approvals / leases → Ledger on cc-control-vps
+- Judge execution → cc-judge
+- Heavy repo builds / DAGs / CV / local models → **cc-worker-4090**
+- Per-task edits → **cc-repo-task** devcontainer (one mission → one branch →
+  one worktree → one devcontainer → one lease)
+- CI validation → GitHub Actions (independent verification after push)
+- Wake-on-LAN / watchdog / backup mirror → cc-relay (optional)
 
 Human access: VS Code Remote Tunnel from the 5080 (or `vscode.dev`, or a
 borrowed machine) into the *same* worktree the agent edits. The agent drives
@@ -1382,7 +2199,7 @@ PR, comment, read CI status.
 The bot **may not**: push main, merge, force-push, delete branches, change
 settings/protections, administer secrets, deploy, publish, bypass checks.
 
-The enforcement stack (full commands in [github-safety.md](github-safety.md)):
+The enforcement stack (full commands in [github/github-safety.md](github/github-safety.md)):
 
 1. **Branch protection on main** — required status checks are the actual
    workflow jobs in this repo (`validate` and `lint-test` from
@@ -1435,9 +2252,22 @@ after any final audit rerun that needs it.
 
 ## 9. Build phases — stage-by-stage setup
 
+> **Deployment reality check (decided 2026-06-13, "Option C"):** the phases
+> below were originally written for a VPS-hosted control plane with a
+> separate 4090 worker. That plan was superseded — the control plane runs
+> entirely on the **4090 desktop** ("vengeance"), reached over Tailscale, no
+> VPS, $0 cost. See [operations/remote-access.md](operations/remote-access.md)
+> for the current design and trade-offs. Phases 1 and 2 below have
+> effectively merged onto one machine; read "VPS" as "the desktop /
+> control-plane host" throughout. Revisit an actual VPS only if 24/7 response
+> while the desktop is off, off-home-network hosting, or WhatsApp's public
+> webhook become real requirements. `docs/setup/INSTALL_WINDOWS.md` and
+> `docs/setup/SETUP-FROM-SCRATCH.md` already reflect this corrected reality;
+> use those for the actual setup path.
+
 ```
-Phase 1   VPS control plane     → the brain runs without the 4090
-Phase 2   4090 worker           → isolated worktrees, local models, VS Code tunnel
+Phase 1   control-plane host    → the brain (currently the 4090 desktop, not a VPS)
+Phase 2   isolation + judges    → worktrees, local models, VS Code tunnel (same host)
 Phase 3   GitHub hardening      → protected main, CI, CODEOWNERS, App over PAT
 Phase 3.5 proactive ops lane    → DAG/data checks, repo stewardship, RCA loop
 Phase 4   workspace expansion   → Coder / OpenHands / Codespaces / WebUI / Mirage (all optional)
@@ -1449,7 +2279,8 @@ need is actually hit.
 
 ### Phase 0 — what you need first
 
-- A VPS (Hetzner/DigitalOcean/Hostinger, 2 vCPU / 4 GB), Ubuntu 24.04.
+- A control-plane host: the 4090 desktop today (a VPS is optional, see the
+  reality check above), Windows or Ubuntu 24.04.
 - A Tailscale account (free Personal tier) on every machine.
 - A GitHub fine-grained PAT scoped as in §8 (App later).
 - **No provider API keys** — do not create or store OpenAI/Anthropic/OpenRouter
@@ -1462,7 +2293,8 @@ need is actually hit.
 ### Phase 1 — control plane (first-boot sequence)
 
 ```bash
-# on the VPS, after Docker + Tailscale are up (Windows: .\scripts\cc.ps1 <target>)
+# on the control-plane host (the 4090 desktop today), after Docker + Tailscale
+# are up (Windows: .\scripts\cc.ps1 <target>)
 git clone <this repo> && cd <repo>
 make setup          # deps, .env, validate, build images
 # edit .env: confirm OLLAMA_API_BASE; do NOT add provider API keys
@@ -1488,11 +2320,11 @@ passes. No skip-Ollama path exists — Ollama is required; calls fail closed.
 **Done when:** live smoke passes; a channel can open a Ledger mission and an
 L3 request shows `awaiting_approval`.
 
-### Phase 2 — 4090 worker + isolation + judges
+### Phase 2 — isolation + judges (same host as Phase 1 today)
 
-1. Tailscale on the 4090; set the VPS `.env`
-   `OLLAMA_API_BASE=http://<4090-tailscale-ip>:11434`; re-run `make models`
-   then `make live-smoke` from the VPS.
+1. Ollama runs on the same control-plane host; no cross-machine
+   `OLLAMA_API_BASE` split is needed under Option C (that step only applies
+   if you later split workers back onto a separate VPS).
 2. `code tunnel` on the 4090; attach from the 5080 / `vscode.dev` / phone.
 3. Executor CLIs: install + authenticate both — Claude Code (`claude`, then
    `/login` and `/status`) and Codex (`codex login status` → "Logged in using
@@ -1511,7 +2343,7 @@ skeptic reviews before a PR is allowed.
 
 ### Phase 3 — GitHub hardening
 
-Work through §8 / [github-safety.md](github-safety.md). **Done when:** the
+Work through §8 / [github/github-safety.md](github/github-safety.md). **Done when:** the
 repo itself blocks merges without passing checks + your review, even if the
 agent misbehaves.
 
@@ -1528,7 +2360,7 @@ gates) · Codespaces fallback · the AppFlowy/agent **WebUI** behind Tailscale +
 password, governed by `configs/ui.yaml` (single-container mode; its
 shell-approval card is a convenience, never the policy layer) · **Mirage VFS**
 only as a read-only data experiment on a throwaway branch (v0.0.1, ~59 stars —
-watch-list, not core; see [optional-mirage.md](optional-mirage.md)) · skip
+watch-list, not core; see [watch-list/optional-mirage.md](watch-list/optional-mirage.md)) · skip
 `local-ai-server` (Mac/MLX-only; LiteLLM already does the job).
 
 ### Phase 5 — home relay (optional)
@@ -1536,17 +2368,19 @@ watch-list, not core; see [optional-mirage.md](optional-mirage.md)) · skip
 Mini-PC preferred over a Pi: Wake-on-LAN for the 4090, watchdog, Tailscale
 subnet router, local backup mirror. Only after Phases 1–2 are stable.
 
-### Current status vs the phases (2026-06-12)
+### Current status vs the phases (2026-06-12, superseded by the 2026-06-13 Option-C decision above)
 
 Done locally: validation green · digest pinned · keys minted · health passing ·
 live smoke passing · models installed · bridge live and scheduled q15min ·
 Discord gateway built (needs token for Phase-2-of-autonomy push
 notifications) · Growth OS selftest 22/22.
-Remaining: rent + provision the VPS · Tailscale split (4090 `OLLAMA_API_BASE`
-from the VPS) · GitHub PAT + branch protection + bot-can't-merge verification ·
+Remaining at the time: rent + provision the VPS · Tailscale split (4090
+`OLLAMA_API_BASE` from the VPS) — **both superseded the next day by Option C
+(no VPS, everything on the 4090 desktop)**, kept here as history. Still
+remaining: GitHub PAT + branch protection + bot-can't-merge verification ·
 Claude Code interactive `/login` · the one-time AppFlowy UI clicks REST can't
 do (per-view filters/sorts, delete blank starter rows) · Linux migration when
-the prod box revives. Full checklist: [STATUS.md](STATUS.md) + [SETUP-FROM-SCRATCH.md](SETUP-FROM-SCRATCH.md) §12.
+the prod box revives. Full checklist: [operations/STATUS.md](operations/STATUS.md) + [setup/SETUP-FROM-SCRATCH.md](setup/SETUP-FROM-SCRATCH.md) §12.
 
 **LinkedIn content pipeline (2026-06-13) — see §6.6.**
 Done by Claude Code (built + verified live against AppFlowy): both content boards
@@ -1558,7 +2392,7 @@ created with the 3-column kanban (`geoffhadfield32_content`,
 as **In Queue** · publisher gate proven (0 due while nothing is approved) ·
 `.mcp.json` keeps a single publish path (no external posting MCP).
 Remaining is all yours (I cannot fake credentials). Full ordered runbook:
-[linkedin-setup.md](linkedin-setup.md); `cc linkedin-publish --preflight` tells you
+[linkedin/linkedin-setup.md](linkedin/linkedin-setup.md); `cc linkedin-publish --preflight` tells you
 the next step at any time. Summary, in order — **personal and the WMS Page are
 separate permission + live-smoke gates; install the scheduler LAST**:
 
@@ -1624,9 +2458,11 @@ make repo-install REPO=… PROFILE=python_ml_pipeline
 make backup / restore-drill
 ```
 
-The breakage map ([breakage-map.md](breakage-map.md), `configs/breakage.yaml`)
-answers "what breaks when I change X" — `make impact` reads your git diff and
-prints the blast radius plus the checks to run before trusting the change.
+The breakage map (`configs/breakage.yaml`) answers "what breaks when I change
+X" — `make impact` reads your git diff and prints the blast radius plus the
+checks to run before trusting the change. (The old static `breakage-map.md`
+summary was removed 2026-07-08 — it had drifted to 6 of the config's 14
+entries; the YAML is the only source of truth now.)
 The full maintenance surface is: **edit a `configs/*.yaml`, run
 `make validate`, then the relevant target.**
 
@@ -1661,7 +2497,11 @@ llm_station/
 │   ├── channels.yaml           chat transports → transport + model alias (tokens stay in .env)
 │   ├── improvement.yaml        experiment definitions (worked set) + improvement-targets.yaml (per-target refs)
 │   ├── discovery.yaml          daily-scan knobs: ranking/triage/code-health/acceptance (DiscoveryConfig)
-│   └── agent_surface.yaml      agent-kanban knobs: re-injection cadence/size, fuzzy addressing, tuning (AgentSurfaceConfig)
+│   ├── agent_surface.yaml      agent-kanban knobs: re-injection cadence/size, fuzzy addressing, tuning (AgentSurfaceConfig)
+│   ├── job_search.yaml         job-search pipeline: ranking, automation classes, manual blockers (JobSearchConfig; auto_submit_enabled is schema-rejected)
+│   ├── agent-session-budgets.yaml  agent lane egress gate (default enabled:false; per-harness codex_agent/claude_agent toggles) — see §4.5
+│   ├── agent-session-models.yaml   per-harness runtime/model validation for Agent Sessions
+│   └── usage-monitoring.yaml   UsageMonitoringConfig (thresholds/polling/routing/alerts/retention; refuses allow_silent_fallback:true) — §4.6
 │
 ├── src/command_center/         INSTALLABLE PACKAGE (uv pip install -e .; run via `make`/`python -m`)
 │   ├── schemas/                PYDANTIC CONTRACTS that validate the YAML
@@ -1687,7 +2527,8 @@ llm_station/
 │   │   ├── knowledge.py        OKF knowledge-bundle CLI (generate, validate)
 │   │   └── kanban_surface.py   agent-kanban digest + N/N gate (make kanban-digest / kanban-surface-validate)
 │   ├── channels/               CHAT TRANSPORTS — one authority, many surfaces
-│   │   ├── core.py             transport-agnostic GatewayCore.run_turn() (LiteLLM tool loop; re-injects board_state)
+│   │   ├── core.py             transport-agnostic GatewayCore.run_turn()/run_turn_events() (LiteLLM tool loop; re-injects board_state; both loops recorded)
+│   │   ├── transcript.py       FLIGHT RECORDER — TurnRecorder writes one JSONL/turn (full tool args/results, context provenance, usage, final) to generated/chat-transcripts/; fail-open + visible write-failure counter; conversation_id contextvar is the join key into agent_calls.jsonl and litellm_session_id
 │   │   ├── board_state.py      harness-owned live board re-injected each turn (Cline focus-chain; fail-loud)
 │   │   ├── discord.py · slack.py · telegram.py · whatsapp.py   thin per-platform adapters
 │   │   └── __main__.py         runner: configs/channels.yaml → launch enabled adapters
@@ -1709,12 +2550,38 @@ llm_station/
 │           ├── charter · sources · triage · report · manifest   observer wall · scanners · dedup · report+sidecar
 │           ├── pipeline · dag_support · validate   orchestrator · Airflow glue · blocking N/N gate
 │           └── delivery/        email digest (stdlib SMTP) + chat ping (board.py drives the Kanban)
-│   └── knowledge/              OKF KNOWLEDGE PRODUCER (observer-only; source → derived bundle)
-│       ├── profile.py          OkfConcept — the strict growth-os-0.1 frontmatter contract
-│       ├── document.py         concept read/write (frontmatter + generated block + human notes)
-│       ├── producers.py        deterministic source→concept extractors (no source → no concept)
-│       ├── bundle.py           assemble concepts + per-section index.md (progressive disclosure)
-│       └── validate.py         the blocking N/N PASS gate
+│   ├── knowledge/               OKF KNOWLEDGE PRODUCER (observer-only; source → derived bundle)
+│   │   ├── profile.py          OkfConcept — the strict growth-os-0.1 frontmatter contract
+│   │   ├── document.py         concept read/write (frontmatter + generated block + human notes)
+│   │   ├── producers.py        deterministic source→concept extractors (no source → no concept)
+│   │   ├── bundle.py           assemble concepts + per-section index.md (progressive disclosure)
+│   │   └── validate.py         the blocking N/N PASS gate
+│   └── job_search/              JOB-SEARCH COMMAND CENTER (draft/prepare/track; submission stays manual — §6.7)
+│       ├── scoring.py · automation_policy.py   fit score + KPI breakdown · automation-class + manual-blocker routing
+│       ├── board.py             job_search_pipeline board fields (apply_url, claude_review_url, score_explanation)
+│       ├── agent_writer.py      LiteLLM role `chat` writes materials (full achievement bank + STAR + Geoff-voice master bank in prompt); claim-ID validation with corrective retry; every prompt/output persisted to agent_trace.jsonl; malformed responses raise AgentWriterError (never silent)
+│       ├── resume_selection.py · achievement_bank.py   claim-checked resume/cover-letter/answer-bank generation (template fallback path) · tagged bullet bank + evidence traceability
+│       ├── packet_validation.py · finalize.py   the submit gate (errors block, warnings surface) · validate → mark_submitted → email record → submission_record.json evidence, run BEFORE the governed Completed event
+│       ├── record_email.py      always writes submission_email.html; real SMTP send via DISCOVERY_SMTP_*+JOB_SEARCH_EMAIL_TO (unconfigured by default → recorded_only)
+│       ├── application_memory.py · retention.py   active-application folder writer + request_changes/regenerate_materials review loop · 30-day memory → minimal archive ledger row
+│       └── profile_ingest.py · followups.py · interview_prep.py   inbox → achievement bank · follow-up packs · interview prep
+│   ├── agent_sessions/          AGENT LANE (§4.5) — Codex/Claude runtimes, SEPARATE from GatewayCore chat
+│   │   ├── events.py            normalized AgentEvent vocabulary (distinct from the chat event shape)
+│   │   ├── protocol.py          runtime_checkable AgentHarness Protocol (probe/start/send/resolve_approval/interrupt/resume/close)
+│   │   ├── store.py             in-memory SessionStore — store owns monotonic/gapless sequence; events_since = reconnect primitive
+│   │   ├── ledger_schema.py     canonical DDL (agent_sessions/_events/_approvals) mirrored into services/ledger, drift-tested
+│   │   ├── ledger_store.py      LedgerSessionStore — durable cross-backend drop-in for SessionStore
+│   │   ├── fake_harness.py      deterministic FakeHarness test double (no SDK/subprocess/network)
+│   │   ├── mutation_proof.py    hash-before/after guard proving read-only adapters never mutate the repo
+│   │   └── adapters/codex_agent.py   REAL Codex read-only adapter (openai-codex 0.1.0b3; reuses `codex login`); claude_agent.py = TODO
+│   ├── usage/                   UNIFIED USAGE & LIMITS (§4.6) — shared across chat models AND agents
+│   │   ├── schemas.py           4 concepts kept distinct + CostSource/SampleKind/CollectionState; source-priority enum
+│   │   ├── protocol.py          CollectorProtocol + UsageStoreProtocol
+│   │   ├── store.py · ledger_store.py   in-memory + Ledger-backed (usage.v1, mirrored DDL, drift-tested); shared select_latest_* selectors
+│   │   ├── service.py           ingest → source-priority → dedup-alert → roll-up; run_collector_tracked() durable checkpoints
+│   │   ├── alerts.py · attribution.py · reconciliation.py   dedup (never on UNKNOWN) · "what used the most?" from fact · cross-source mismatch
+│   │   ├── ledger_schema.py     canonical usage DDL + model_usage_collection_state + indexes/retention
+│   │   └── collectors/          fake.py (deterministic) · codex_app_server.py (REAL PROVIDER_NATIVE); Claude/OpenRouter/LiteLLM/Ollama/ccusage = TODO
 │
 ├── generated/                  DISPOSABLE rendered output — never hand-edited
 │   ├── litellm-config.yaml     rendered gateway config (only ollama_chat/... models)
@@ -1730,13 +2597,16 @@ llm_station/
 │   │   └── judgectl.py         CLI for invoking judges from hooks/scripts
 │   ├── proactive_runner/       thin scheduler for configs/proactive.yaml checks;
 │   │                           holds no secrets; max action = open a gated mission
-│   └── agent_kanban_ui/        OPTIONAL Phase-4 (profile `ui`): read-only FastAPI over
-│                               Ledger + agent-call log; web/ = React/Vite SPA (Cline-styled
-│                               board + observability), built + served single-container
+│   └── agent_kanban_ui/        OPTIONAL Phase-4 (profile `ui`): full-console FastAPI over
+│                               Ledger + agent-call log + typed boards; web/ = React/Vite SPA
+│                               (PWA board, chat, controls, observability), built + served
+│                               single-container
 │
 ├── scripts/                    non-Python wrappers: cc.ps1 (Windows), live_smoke.{ps1,sh}
-├── dags/                       Airflow DAGs: self_improvement_daily.py (observer-only daily scan)
+├── dags/                       Airflow DAGs: self_improvement_daily.py (observer-only daily scan),
+│                               job_search_daily.py (suggest/prepare only — no submit authority)
 ├── knowledge/                  OKF knowledge bundle (Git-backed, derived; `make knowledge-generate`)
+├── data/job_search/             gitignored personal data: profile/, applications_active/, applications_archive/
 ├── tests/                      contract regression tests (pytest; run by CI)
 │
 ├── repo-template/              installed into each onboarded repo by `make repo-install`
@@ -1749,7 +2619,7 @@ llm_station/
 ├── .github/workflows/contracts.yml   CI: this repo's own validate gate
 ├── data/book-checklist.md      275-book curriculum source for the library board
 ├── appflowy_kanban/            Growth OS (see 11.2)
-└── docs/                       the docs set + this one (see §12); backend/ = borrowed standards (§13)
+└── docs/                       the docs set + this one (see §12); reference/betts-basketball-standards/ = borrowed standards (§13)
 ```
 
 ### 11.2 Growth OS (`appflowy_kanban/growth-os/`)
@@ -1811,49 +2681,123 @@ repo takes ~3 minutes: a `projects.yaml` block, then optionally
 
 ## 12. Doc index — where the detail lives
 
+`docs/` is organized as this hub (`MASTER.md`) plus one subject folder per
+area. Within a folder, docs are living references unless marked *(archived)*
+— archived docs sit in `docs/reviews/` with a banner explaining what
+superseded them; kept for history, not as current behavior.
+
 | Doc | What it holds |
 |---|---|
 | [MASTER.md](MASTER.md) | **this doc** — the consolidated system guide |
-| [SETUP-FROM-SCRATCH.md](SETUP-FROM-SCRATCH.md) | **cold-start** — every prerequisite, first boot, and per-channel enablement, in order |
-| [channels.md](channels.md) | chat transports (Discord/Slack/Telegram/WhatsApp): architecture + per-platform setup + how to add a new one |
-| [LINKEDIN_PIPELINE.md](LINKEDIN_PIPELINE.md) | **Living doc** for the LinkedIn/content pipeline — status, architecture, invariants, the content engine, and the improvement roadmap |
-| [linkedin-setup.md](linkedin-setup.md) | **LinkedIn content pipeline runbook** — ordered go-live steps (app → OAuth → live smoke → schedule) + daily operation; `--preflight` self-check |
-| [STATUS.md](STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | multi-session git safety, engineering standards, the uv dependency workflow |
-| [backend/](backend/) | reference standards copied from the betts pipeline (data-engineering, R2/fleet, modeling, serving) — see the N/A note in §13 |
-| [visuals.md](visuals.md) | 14 Mermaid diagrams, one per concern |
-| [model-routing.md](model-routing.md) | lanes, local roles, fail-closed behavior |
-| [model-update.md](model-update.md) | safe model rollout + current local picks |
-| [request-routing-examples.md](request-routing-examples.md) | 8 worked examples: request → route → expected response |
-| [proactive-ops.md](proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
-| [daily-self-improvement-dag.md](daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
-| [whole-system-validation-prompt.md](whole-system-validation-prompt.md) | reusable end-to-end validation prompt for self-improvement, AppFlowy kanban control, registered repo autonomy, notifications, local model routing, forecast-before-action checks, and privacy |
-| [autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md) | attachment reconciliation for the autonomous pipeline proposal: what this repo already covers, what remains, and the ordered hardening path for events, repo manifests, desktop rights, completion verification, and canaries |
-| [github-app-production-auth-review-2026-06-16.md](github-app-production-auth-review-2026-06-16.md) | GitHub App production-auth review: local evidence, current GitHub-doc basis, blockers, and remaining steps before repo autonomy can use GitHub App auth |
-| [github-token-storage-rotation.md](github-token-storage-rotation.md) | GitHub App private-key, installation-token, and owner/admin observer-token storage and rotation policy |
-| [backend/projects/SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
-| [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
-| [knowledge-format.md](knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
-| [breakage-map.md](breakage-map.md) | what breaks when you change something |
-| [environment-map.md](environment-map.md) | environment table + activity mapping |
-| [github-safety.md](github-safety.md) | branch protection commands, PAT/App scopes, deploy gating |
-| [ui-options.md](ui-options.md) | dashboards/ports and per-device access matrix |
-| [ecosystem.md](ecosystem.md) | what's load-bearing vs convenience vs skip (WebUI, Ollama gotchas, local-ai-server) |
-| [optional-mirage.md](optional-mirage.md) | Mirage VFS watch-list verdict + safe Phase-4 experiment shape |
-| [kanban-integration.md](kanban-integration.md) | the bridge contract, sections, writeback, AppFlowy quirks |
-| [autonomy-idea-map.md](autonomy-idea-map.md) | channels/brain/knowledge/wall picture + autonomy phases |
-| [growth-os-engineering.md](growth-os-engineering.md) | Growth OS living engineering reference (module tree, standards, cross-session rules) |
-| [capability-evaluation-loop.md](capability-evaluation-loop.md) | reusable mission brief for evaluating external tools/repos/skills — staged, evidence-first, L2-capped, with command-center mapping |
-| [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md) | broad copy-paste prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, multi-agent frameworks, and similar ideas before any install/adoption |
-| [agentic-process-improvements-2026-06-20.md](agentic-process-improvements-2026-06-20.md) | decision note for Headroom, Airflow RCA, ARD-style metadata, and Gemma 4 12B candidate handling |
-| [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md) | read-only one-by-one verdicts for the broad candidate batch, focused on routing/performance impact and ordered next work |
-| [improvement-loop.md](improvement-loop.md) | **the coded improvement loop** — lifecycle, runner, promotion/canary/rollback, operator CLI (the system improves itself, human-gated) |
-| [experiment-registry.md](experiment-registry.md) | the experiment tables added to the one `ledger.db` — schema, events, negative-result memory, migration |
-| [independent-verification.md](independent-verification.md) | the verifier that checks the work: separation, reproduction, sealed evals, self-verification prevention |
-| [judge-calibration.md](judge-calibration.md) | judges as measured components — precision/recall, safety-first gate, anti-self-certification |
-| [human-attention-governance.md](human-attention-governance.md) | human attention as a constrained resource — queue metrics, morning brief, bottleneck warnings |
-| [improvement-loop-audit.md](improvement-loop-audit.md) | the pre-work discrepancy report (documented vs implemented vs tested) |
-| [improvement-roadmap-phases.md](improvement-roadmap-phases.md) | **measurement-science layers (Phases 1–6)** — mSPRT/CUPED, judge/jury κ-α, anti-Goodhart, bandit scheduling, drift/canary stats, AI-control + observability spec |
+
+**`setup/` — install and cold-start**
+
+| Doc | What it holds |
+|---|---|
+| [setup/GETTING_STARTED.md](setup/GETTING_STARTED.md) | 10-minute quickstart from fresh clone to "the loop is wired" |
+| [setup/SETUP-FROM-SCRATCH.md](setup/SETUP-FROM-SCRATCH.md) | **cold-start** — every prerequisite, first boot, and per-channel enablement, in order |
+| [setup/INSTALL_WINDOWS.md](setup/INSTALL_WINDOWS.md) | native-Windows (PowerShell) install path |
+| [setup/INSTALL_WSL.md](setup/INSTALL_WSL.md) | WSL2/Ubuntu install path + Airflow scheduling |
+| [setup/ADDING_A_REPO.md](setup/ADDING_A_REPO.md) | onboard a second local repo under the autonomy contract |
+| [setup/ADDING_A_KANBAN.md](setup/ADDING_A_KANBAN.md) | register/verify a kanban board against the 7-status/6-verb contract |
+| [setup/TROUBLESHOOTING.md](setup/TROUBLESHOOTING.md) | known gotchas + a symptom → cause → fix table |
+
+**`operations/` — day-to-day running**
+
+| Doc | What it holds |
+|---|---|
+| [operations/OPERATIONS_RUNBOOK.md](operations/OPERATIONS_RUNBOOK.md) | day-to-day operator loop — daily commands, per-mission work, emergency stop |
+| [operations/OPERATOR_COMMANDS.md](operations/OPERATOR_COMMANDS.md) | the 7-command friendly wrapper cheat sheet (`cc setup`/`onboard`/`operate`/`improve`/`demo`) |
+| [operations/RUNNING_DAILY_SELF_IMPROVEMENT.md](operations/RUNNING_DAILY_SELF_IMPROVEMENT.md) | how to run/schedule the observer-only daily self-improvement scan |
+| [operations/remote-access.md](operations/remote-access.md) | the Option-C (desktop + Tailscale, no VPS) remote-access design |
+| [operations/STATUS.md](operations/STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
+
+**`architecture/` — how the system is built**
+
+| Doc | What it holds |
+|---|---|
+| [architecture/visuals.md](architecture/visuals.md) | 14 Mermaid diagrams, one per concern |
+| [architecture/channels.md](architecture/channels.md) | chat transports (Discord/Slack/Telegram/WhatsApp): architecture + per-platform setup + how to add a new one |
+| [architecture/request-routing-examples.md](architecture/request-routing-examples.md) | 8 worked examples: request → route → expected response |
+| [architecture/knowledge-format.md](architecture/knowledge-format.md) | the observer-only OKF knowledge producer (`growth-os-0.1` profile) — a Git-backed, derived projection of system knowledge agents share; never a source of truth |
+| [architecture/ui-options.md](architecture/ui-options.md) | dashboards/ports and per-device access matrix |
+| [architecture/SECURITY_MODEL.md](architecture/SECURITY_MODEL.md) | the two structural walls (kanban approval, GitHub merge), agent can/cannot table, secrets policy |
+
+**`improvement/` — the self-improvement loop**
+
+| Doc | What it holds |
+|---|---|
+| [improvement/improvement-loop.md](improvement/improvement-loop.md) | **the coded improvement loop** — lifecycle, runner, promotion/canary/rollback, operator CLI (the system improves itself, human-gated) |
+| [improvement/improvement-roadmap-phases.md](improvement/improvement-roadmap-phases.md) | **measurement-science layers (Phases 1–6)** — mSPRT/CUPED, judge/jury κ-α, anti-Goodhart, bandit scheduling, drift/canary stats, AI-control + observability spec |
+| [improvement/experiment-registry.md](improvement/experiment-registry.md) | the experiment tables added to the one `ledger.db` — schema, events, negative-result memory, migration |
+| [improvement/independent-verification.md](improvement/independent-verification.md) | the verifier that checks the work: separation, reproduction, sealed evals, self-verification prevention |
+| [improvement/judge-calibration.md](improvement/judge-calibration.md) | judges as measured components — precision/recall, safety-first gate, anti-self-certification |
+| [improvement/human-attention-governance.md](improvement/human-attention-governance.md) | human attention as a constrained resource — queue metrics, morning brief, bottleneck warnings |
+| [improvement/proactive-ops.md](improvement/proactive-ops.md) | proactive lanes, RCA loop, contract-rejected configs |
+| [improvement/daily-self-improvement-dag.md](improvement/daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
+| [improvement/SELF_IMPROVEMENT_PIPELINE.md](improvement/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
+
+**`evaluation/` — reusable mission prompts for evaluating external tools**
+
+| Doc | What it holds |
+|---|---|
+| [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md) | reusable mission brief for evaluating external tools/repos/skills — staged, evidence-first, L2-capped, with command-center mapping |
+| [evaluation/agent-ideas-evaluation-prompt.md](evaluation/agent-ideas-evaluation-prompt.md) | broad copy-paste prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA, codebase-memory-mcp, local-ai-server, multi-agent frameworks, and similar ideas before any install/adoption |
+| [evaluation/whole-system-validation-prompt.md](evaluation/whole-system-validation-prompt.md) | reusable end-to-end validation prompt for self-improvement, AppFlowy kanban control, registered repo autonomy, notifications, local model routing, forecast-before-action checks, and privacy |
+
+**`github/` · `kanban/` · `linkedin/` · `desktop/` · `watch-list/` · `growth-os/` — integrations**
+
+| Doc | What it holds |
+|---|---|
+| [github/github-safety.md](github/github-safety.md) | branch protection commands, PAT/App scopes, deploy gating |
+| [github/github-token-storage-rotation.md](github/github-token-storage-rotation.md) | GitHub App private-key, installation-token, and owner/admin observer-token storage and rotation policy |
+| [kanban/LIVE_KANBAN_SYNC.md](kanban/LIVE_KANBAN_SYNC.md) | the current event-driven kanban sync design (default since 2026-06-20) — event log, 3 sync levels, conflict policy |
+| [kanban/kanban-integration.md](kanban/kanban-integration.md) | AppFlowy REST quirks, bridge commands, one-time board setup (see §6.3 above for the pipeline itself) |
+| [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md) | the agent-kanban-surface tracker — harness-owned board state + intent verbs + observability/tuning + the first-party UI; module tree, stage registry, standards matrix, done/left checklist, honest deviations |
+| [linkedin/LINKEDIN_PIPELINE.md](linkedin/LINKEDIN_PIPELINE.md) | **Living doc** for the LinkedIn/content pipeline — status, architecture, invariants, the content engine, and the improvement roadmap |
+| [linkedin/linkedin-setup.md](linkedin/linkedin-setup.md) | **LinkedIn content pipeline runbook** — ordered go-live steps (app → OAuth → live smoke → schedule) + daily operation; `--preflight` self-check |
+| [desktop/desktop-timeout-takeover-policy.md](desktop/desktop-timeout-takeover-policy.md) | the safety envelope (TTL, per-action timeout, takeover hotkey) for the disabled desktop target |
+| [watch-list/optional-mirage.md](watch-list/optional-mirage.md) | Mirage VFS watch-list verdict + safe Phase-4 experiment shape |
+| [growth-os/growth-os-engineering.md](growth-os/growth-os-engineering.md) | Growth OS living engineering reference (module tree, AppFlowy REST-API gotchas, standards, cross-session rules) |
+
+**`job_search/` — the job-search command center** (see §6.7 above)
+
+| Doc | What it holds |
+|---|---|
+| [job_search/JOB_SEARCH_COMMAND_CENTER.md](job_search/JOB_SEARCH_COMMAND_CENTER.md) | architecture — safe local CLI path, board columns, safety boundary |
+| [job_search/READINESS_FAQ.md](job_search/READINESS_FAQ.md) | **Living doc** — the operator FAQ/runbook: board setup, data retention, executor fallback, filtering, answer bank |
+| [job_search/MANUAL_APPLICATION_RULES.md](job_search/MANUAL_APPLICATION_RULES.md) | canonical list of triggers that route a card to `Needs Geoff` |
+| [job_search/RESUME_CLAIM_POLICY.md](job_search/RESUME_CLAIM_POLICY.md) | every resume bullet must trace to an achievement-bank ID + evidence file |
+| [job_search/JOB_SEARCH_IMPLEMENTATION_PROMPT.md](job_search/JOB_SEARCH_IMPLEMENTATION_PROMPT.md) | copy-paste implementation contract for an agent picking up job-search work |
+| [job_search/PLAN.md](job_search/PLAN.md) | original design doc + phase-by-phase implementation tracker |
+
+**`reference/betts-basketball-standards/`** — external reference standards
+copied from the betts_basketball forecasting pipeline (data-engineering,
+R2/fleet, modeling, serving); see the N/A note in §13.1. Not a spec this repo
+implements.
+
+**`reviews/` — decision records (current) + archived point-in-time (superseded)**
+
+| Doc | What it holds |
+|---|---|
+| [reviews/2026-07-08-cockpit-decision.md](reviews/2026-07-08-cockpit-decision.md) | **current** — first-party cockpit (`agent_kanban_ui`) as primary; AppFlowy stays optional projection; Plane/AFFiNE/Vikunja/OxyGent/ORCA/OmniAgent are not the control plane |
+| [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md) | **current** — chat control/review decision: first-party flight recorder + cockpit timeline is primary, LiteLLM `store_prompts_in_spend_logs` is the cross-surface net, Open WebUI/LibreChat rejected (second-control-plane risk); config snippets + security boundaries |
+
+The rest of `reviews/` is archived, point-in-time (superseded; kept for
+history): autonomy/decision reviews (`autonomous-pipeline-gap-review-2026-06-16.md`,
+`agentic-process-improvements-2026-06-20.md`, `github-app-production-auth-review-2026-06-16.md`,
+`routing-performance-candidate-evaluation-2026-06-14.md`), pre-work audits
+(`improvement-loop-audit.md`), superseded assessments
+(`agent-multiturn-and-memory.md`, `ecosystem.md`, `system-roadmap.md`),
+one-time patch records (`memory-integration-patch.md`), restated status
+snapshots (`desktop-noop-canary-telemetry.md`), folded-into-MASTER originals
+(`environment-map.md`, `autonomy-idea-map.md`), an orphaned borrowed doc
+(`INGESTION_REGISTRY.md`), and job_search docs fully subsumed by
+`READINESS_FAQ.md` (`job_search-APPLICATION_MEMORY.md`,
+`job_search-EXECUTOR_FALLBACK.md`). Each file has a banner explaining what
+superseded it and where the current truth lives — read the banner before the
+body.
 
 ---
 
@@ -1882,23 +2826,28 @@ agents. That's the whole design.
 
 ### 13.1 What does NOT apply here (the forecasting-pipeline standards)
 
-`docs/backend/` holds reference standards copied from the betts_basketball
-**forecasting** pipeline — medallion bronze/silver/gold, Cloudflare R2 transport,
-Airflow DAGs, GPU training, dbt, and Bayesian/GBDT/clustering modeling. **None of
-that runs in this repo.** Command Center is a control plane; its "pipeline" is
-`edit config → validate contract → render generated → serve via LiteLLM / services /
-channels`. The **transferable** standards are applied here — the module tree at the
-top of this doc, a staged + linear flow, no defensive coding / no hardcoded
+`docs/reference/betts-basketball-standards/` holds reference standards copied
+from the betts_basketball **forecasting** pipeline — medallion bronze/silver/
+gold, Cloudflare R2 transport, Airflow DAGs, GPU training, dbt, and
+Bayesian/GBDT/clustering modeling. **None of that runs in this repo.** Command
+Center is a control plane; its "pipeline" is `edit config → validate contract
+→ render generated → serve via LiteLLM / services / channels`. The
+**transferable** standards are applied here — the module tree at the top of
+this doc, a staged + linear flow, no defensive coding / no hardcoded
 fallbacks (the defensive-coding judge enforces it), strict uv/pyproject dependency
 discipline, and the multi-session git rules below. The forecasting-specific pieces
 (R2 advisory locks, DAG run-location, medallion layers, champion promotion) have no
-analog here and must **not** be cargo-culted in. Treat `docs/backend/` as a library
-of principles to borrow, not a spec this repo implements.
+analog here and must **not** be cargo-culted in. Treat
+`docs/reference/betts-basketball-standards/` as a library of principles to
+borrow, not a spec this repo implements — it's actively cited (see
+`configs/standards.yaml`'s `python_ml_pipeline` profile, used to render
+CLAUDE.md/AGENTS.md for other repos this Command Center manages, e.g.
+betts_basketball) but describes a different system than this one.
 
 ### 13.2 Multi-session git safety (the single-writer rules that DO apply)
 
-From `docs/backend/engineering/MULTI_SESSION_R2.md`, the git half applies verbatim
-even though R2 / Railway / Airflow do not:
+From `docs/reference/betts-basketball-standards/MULTI_SESSION_R2.md`, the git
+half applies verbatim even though R2 / Railway / Airflow do not:
 
 - Stage **explicit paths** you own (`git add path/a path/b`); never `git add -A` / `.`.
 - Never force-push to a shared branch, never `--amend` a pushed commit, never `--no-verify`.
@@ -1908,12 +2857,577 @@ even though R2 / Railway / Airflow do not:
 
 The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUTING.md`.
 
+### 13.3 Settled decisions and non-goals (salvaged from the retired system roadmap)
+
+- **One control plane.** Command Center orchestrates; it does not become a
+  second forecasting pipeline, a second model gateway, or a second channel
+  service. Managed repos (like betts_basketball) govern themselves by their
+  own standards — Command Center renders their CLAUDE.md/AGENTS.md but does
+  not run their pipelines.
+- **Desktop-rights-first ordering.** Desktop/browser automation
+  (`appflowy_browser_staging`) stays disabled until measured evidence
+  (no-op canary telemetry, timeout/takeover policy) exists — see
+  `docs/desktop/desktop-timeout-takeover-policy.md`.
+- **Don't import example KPIs as gates.** Metrics borrowed from evaluated
+  external tools/proposals are reference points, not adopted acceptance
+  gates, unless pre-registered through the improvement loop.
+- **No public exposure by default.** Tailnet-only; Claude-mobile remote
+  connectors can't reach it and that trade is accepted (see §7, §10).
+- **Hermes Agent stays optional/deferred**, not the active coordinator —
+  LiteLLM + Ollama already serve its role (§4).
+
 ---
 
 ## 14. Change log
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-07-11/12 — The agent lane: Codex read-only runtime + unified Usage/Limits + first real collector
+
+Full architecture now in **§4.5–§4.8**. This is a **separate lane** from
+GatewayCore chat, built in a stacked worktree (`C:\tmp\cc-agent-runtime`) and
+**not yet merged to `main`** (stacked behind PR #32).
+
+- **Why a separate lane at all.** Claude Code and Codex are agentic runtimes
+  (own SDK/auth/shell-FS authority/resumable state), not chat models. The
+  frontier tool_calls incident (2026-07-10/11 entries) proved a tool-less chat
+  integration can still cross a dispatch boundary by trusting a response field;
+  giving the chat surface real shell/FS authority would be a bigger version of
+  that. Anthropic's Agent-SDK docs independently require API-key (not
+  claude.ai-login) auth for third-party products and the label "Claude Agent".
+- **Egress boundary extended, not loosened.** `ANTHROPIC_API_KEY`/
+  `OPENAI_API_KEY` stay forbidden by default; a new, fully independent
+  `--allow-agent-session-egress` + `configs/agent-session-budgets.yaml`
+  (default off) gates the agent lane's keys only, never the local LiteLLM lane,
+  and never cross-exempts the frontier flag (proven both directions).
+- **Agent Sessions foundation** (`src/command_center/agent_sessions/`):
+  normalized events, an `AgentHarness` Protocol, a store that owns
+  sequence numbers, durable Ledger persistence (agent_sessions/_events/
+  _approvals, mirrored-DDL + drift-tested + restart-recovery-tested), and a
+  deterministic FakeHarness. `cc agent-preflight` is evidence-only.
+- **Real Codex read-only adapter** (`adapters/codex_agent.py`, pinned
+  `openai-codex==0.1.0b3`, reuses the existing `codex login`): persistent
+  external thread IDs, same-thread follow-ups, resume-after-restart, real
+  interrupt, read-only sandbox, truthful approvals, zero-mutation discipline.
+  **14/14 live cockpit-acceptance turns, zero repo mutation.** PR #33 (ready,
+  merge held). **Claude adapter is still TODO.**
+- **Unified Usage & Limits** (`src/command_center/usage/`, PR #34): one shared
+  metering layer keeping usage / provider-limits / availability / internal-budget
+  distinct so history is never shown as remaining quota. Phase 1 foundation +
+  Phase 1.1 hardening (unknown-cost-≠-$0.00 via nullable cost + CostSource; no
+  cross-collector double-count via SampleKind; attribution driver facts; durable
+  collector checkpoints + indexes + retention). 50 usage tests, mirrored
+  `usage.v1` DDL, `configs/usage-monitoring.yaml` in `make validate`.
+- **First real provider collector** (`collectors/codex_app_server.py`, PR #35):
+  reads Codex quota via the raw app-server RPC `account/rateLimits/read`, maps
+  primary/secondary windows to `PROVIDER_NATIVE` limit snapshots + derives
+  availability; emits limits+availability only (tokens stay with adapter events
+  → no double-count); degrades honestly on SDK-absent/auth-fail/RPC-fail.
+  `run_collector_tracked()` adds durable checkpoints. **Live smoke passed**
+  (real prolite account); 10 hermetic tests; ruff + `mypy src/command_center/
+  usage/` clean; full repo suite green except one pre-existing WSL-`bash.EXE`
+  merge_guard flake (exit 127, unrelated, confirmed by stash-and-rerun).
+- **Not built yet** (ordered plan in §4.8): the remaining provider collectors
+  (Claude RateLimitEvent, OpenRouter `/api/v1/key`, LiteLLM `/spend/logs`,
+  Ollama health, ccusage reconciler); the `/api/model-usage` routes + Usage &
+  Limits dashboard (backend is deliberately ahead of the UI); the Claude
+  read-only adapter; write-capable leased-worktree execution; cross-harness
+  review; and evidence-based auto-routing. The `openai/codex-plugin-cc` bridge
+  (§4.7) is adopted only as a wrapped, Ledger/worktree-bound companion — never a
+  competing control plane.
+
+### 2026-07-12 — Local-frontier (colibrì) acceptance gate: closed the real gap, found 4 more real issues
+
+An independent review of yesterday's colibrì work correctly identified that every prior test had
+exercised the cockpit's config/health surface, never a real turn through its own `POST /api/chat`
+— the actual browser-facing path. Closed that gap today; see §5.4 "Full acceptance-gate proof" for
+the complete detail (flight-recorder-verified: `context_blocks: []`, no `tool_calls`, real
+`tokens_per_second: 0.0549`, coherent reply). Getting there surfaced and fixed/documented four more
+real issues beyond yesterday's two: a missing `max_tokens` cap (real bug, fixed), colibrì not
+cancelling generation on client disconnect (operational fact, not a bug), colibrì's auto-RAM-budget
+causing genuine swap thrashing (fixed by launching with an explicit `--ram 28`), and colibrì not
+isolating KV cache by conversation (`cache_slot` unimplemented on our side — known gap, prefill cost
+observed growing 13→163 tokens across a session as a direct result). Also hit and rode out a scary
+`.env`-file instability (content changed between reads with no writes issued — settled on its own,
+cause undetermined, likely a Docker-Desktop-on-Windows bind-mount sync artifact) — no secret loss
+confirmed, but worth remembering as a real failure mode on this platform.
+
+### 2026-07-11 (later) — Local-frontier chat lane (colibrì): a THIRD lane, Phase 1 landed disabled
+
+Deep-checked an externally-drafted proposal to add **colibrì**
+([github.com/JustVugg/colibri](https://github.com/JustVugg/colibri)) — a project claiming to
+run GLM-5.2 (744B MoE) on consumer hardware by streaming ~370GB of quantized experts from NVMe
+— as a local chat option, benchmarked the same way OpenRouter frontier candidates already are.
+
+**Fact-check against the primary source** (not the proposal's claims at face value): most
+technical detail held up — RAM footprint, rejected API params, Windows "Phase 1" status,
+KV-slot mechanics, custom container format. Two things it got wrong: a WSL2 tok/s range that
+conflated two different benchmark configs, and a `parallel_generation` rejected-field claim that
+appears fabricated (no such field in the source). The material risk it undersold: the colibrì
+repo was **10 days old** (created 2026-07-01) with every published tok/s number self-reported
+and zero independent reproduction found.
+
+**Hardware verified on this machine** (corrected stale memory of 32GB RAM — it's actually 64GB):
+RTX 4090 24GB VRAM, 64GB system RAM, WSL2 capped 48GB/16GB swap with GPU passthrough confirmed.
+**Disk was the binding constraint**: WSL2's `ext4.vhdx` looked like 848GB free via `df`, but it's
+a sparse file on the *same* Windows C: drive (only 500GB genuinely free) — WSL2 does not add
+real headroom on this machine, a correction worth remembering for any future "just use WSL2 for
+more room" assumption.
+
+**Architecture correction to the proposal**: the suggested LiteLLM `openai/`-prefixed routing
+would have tripped `check_forbidden_providers.check_litellm_config`'s existing fragment scan
+(`FORBIDDEN_MODEL_FRAGMENTS` includes `"openai/"`, checked regardless of `base_url`) and
+violated `ModelRegistry`'s ollama-only invariant for local roles. Landed instead as a genuine
+**third lane** mirroring the frontier-router lane's shape (direct-httpx, gated off by default,
+no tools/board/memory context) but with its own contract, since it's loopback (no $ cost, no
+API key) rather than paid cloud egress — see §5.4 "Local frontier lane (colibrì) — full spec".
+
+**Phase 0 — disk cleanup** (user-approved per group, not a blanket prune): removed 7 unused
+Docker images (~181GB reclaimed inside Docker's store) spanning llm_station, bball_homography_
+pipeline, and betts_basketball — a dangling image, an unused `vllm/vllm-openai`, two orphaned
+hash-named airflow builds, two superseded backup/pre-migration tags, and one stale
+hyphen-vs-underscore duplicate repo image. Windows-visible free space unchanged until a
+`wsl --shutdown`/Docker Desktop restart compacts the sparse VHDX — deferred rather than
+interrupting the 17 containers that were live across three repos at the time.
+
+**Phase 1 — code landed, `enabled: false`, no live server needed:**
+
+- `LocalFrontierProvider`/`Model`/`ProvidersConfig` contracts (`schemas/contracts.py`), forcing
+  `tools`/`json_mode` capabilities to `False` at the schema level, registered in
+  `CONFIG_CONTRACTS`; new `configs/local-frontier-providers.yaml` (glm-5.2-colibri, disabled).
+- `channels/local_frontier_client.py` — mirrors `frontier_client.py`'s shape (no LiteLLM, no
+  tools ever sent, fail-closed gate errors) without its $-budget logic (no cost, so no ledger
+  cost field — latency + tokens/sec instead); a cheap `/health` probe for the chat picker.
+- `check_forbidden_providers.check_local_frontier_providers` — a host-allowlist invariant
+  (loopback/`host.docker.internal`/private-LAN/Tailscale only), unconditional (no
+  `--allow-*-egress` flag — this isn't cloud egress, there's no key to gate).
+- `GatewayCore`: `is_local_frontier` alongside `is_frontier`, both feeding a shared
+  `no_tools_lane` flag; `_frontier_tool_call_diagnostic` generalized to
+  `_no_tools_lane_tool_call_diagnostic` (names whichever lane is active); `build_system` gained
+  a `lane` parameter so the "talking through the paid frontier-router lane" system-prompt
+  wording doesn't lie to a free local turn. `frontier_model_id`/`local_frontier_model_id` are
+  contract-enforced mutually exclusive.
+- Chat surface: `local-frontier:<id>` prefix alongside `frontier:`, a third `local_frontier_models`
+  array + note on `/api/chat/runtime`, a new disabled "Local Frontier — experimental" optgroup
+  and diagnostic panel in the cockpit (`App.tsx`/`api.ts`, TS-checked clean).
+- **The tester**: extracted `_score_case` out of `frontier_benchmark.py` into a shared
+  `improvement/benchmark_scoring.py` (both harnesses now apply the identical rubric); new
+  `improvement/local_frontier_benchmark.py` runs the SAME `configs/model-benchmarks.yaml` suite
+  colibrì's headline metric is **tokens/sec + pass_rate**, not cost — `--max-cases` defaults to
+  3 given the expected multi-minute-per-reply cost. `cc colibri-preflight`/`cc colibri-health`
+  registered in the main `cc` app (read-only, no cost — unlike `frontier_router.py`, which stays
+  Makefile-only); `make colibri-benchmark` stays Makefile-only for the same reason
+  `frontier-router-benchmark` does (a real, potentially slow, live operation).
+- 26 new/extended tests (contracts, host-allowlist, mocked-transport client behavior, GatewayCore
+  routing + tool-call-refusal regression, mutual exclusivity) — all green; full existing gateway/
+  frontier/contracts suites re-run clean (no regressions); `ruff check` clean; `cc validate` +
+  `cc forbidden-providers` (egress mode, matching this checkout's existing frontier-router state)
+  both pass.
+
+**Phase 2 completed the same day** (see the 2026-07-11 (later) entry above for full detail):
+engine built in WSL2 and independently verified correct against a PyTorch oracle (32/32
+teacher-forcing, 20/20 greedy — not just "it compiled"); real 353GB weights downloaded
+(1h53m); server smoke-tested end to end including one real chat completion from the actual
+744B model; lane enabled; `make colibri-benchmark LIVE=1` run for real — **median 0.0563
+tok/s**, at the pessimistic end of the self-reported range, meaning a 100-token reply is
+genuinely ~30 minutes on this machine. The `chat` suite's 0% pass rate is a tool-call-shaped
+suite mismatch (this lane never gets a `tools` schema), not a quality signal — flagged as a
+known risk in the original evaluation write-up, not a surprise. A live bug was found and fixed
+in the process: the `/health` probe was hitting a nonexistent `/v1/health` path.
+
+### 2026-07-09 — Cockpit PWA mobile polish, All Boards nav, and editable job-search controls
+
+- **Navigation simplified.** The phone/desktop cockpit now treats **All Boards**
+  as the primary board surface. Jobs, Posts, Books, Papers, Repos, DAGs, Upkeep,
+  Missions, and Tasks live there with typed cards. The old top-level Missions
+  and raw AppFlowy Boards views remain URL-addressable for debugging/comparison,
+  but they are not the main mobile nav.
+- **Controls added.** New cockpit Controls view surfaces runtime APIs
+  (Ledger/LiteLLM/AppFlowy/GatewayCore), the `configs/domain_surfaces.yaml`
+  domain registry, the `configs/kanban_boards.yaml` provider registry,
+  job-search daily limits, role-focus keyword categories, profile file paths,
+  and editable application-question defaults.
+- **Board schema editor.** Controls -> All Boards can now add, remove, and
+  update domain boards by writing only `configs/domain_surfaces.yaml` in
+  full-console mode (`KANBAN_UI_DOMAIN_CONFIG_WRITES=1`, writable `./configs`).
+  Every save validates the full file through `DomainSurfacesConfig`; provider
+  registry wiring remains in `configs/kanban_boards.yaml`.
+- **Profile overrides.** `load_config()` now merges
+  `data/job_search/profile/search_settings.yml` over `configs/job_search.yaml`
+  for operator-tunable job-search settings. The cockpit writes only that profile
+  override, validates the merged result through `JobSearchConfig`, and still
+  rejects unsafe changes such as auto-submit.
+- **Mobile formatting.** The top updated timestamp is no longer sticky on
+  phones, board/tab lanes expose top horizontal scrollbars, bottom nav spacing
+  is tighter, cards have larger touch spacing, drawers remain full-screen, and
+  mobile users move cards with `Move to...` instead of drag/drop. Chat recent
+  thread shortcuts use the same top-scrollbar pattern on phones. Horizontal
+  strips now use momentum scrolling, proximity snap, overscroll containment,
+  hidden bottom scrollbars, and viewport-contained bottom navigation; mobile
+  browser checks cover All Boards, Controls, and Chat with no document-level
+  horizontal overflow.
+- **External agent runtime review** *(superseded 2026-07-10 — see the next
+  entry: the `*_CHAT_URL` specialist links described below were removed
+  entirely; kept here for the historical record of the evaluation)*.
+  GatewayCore + LiteLLM remains the cockpit
+  runtime and write authority. ORCA
+  (`https://arxiv.org/abs/2603.02438`) is the best first optional specialist
+  for document-heavy job materials such as PDFs, resumes, screenshots, forms,
+  and tables. OmniAgent/Omnigent
+  (`https://arxiv.org/abs/2606.19341`) is a later specialist for long
+  video/audio and screen-recording evidence. OxyGent is a watch-list candidate
+  for modular agent/tool/model components, dynamic planning, visual debugging,
+  and auditability (`https://github.com/jd-opensource/OxyGent`,
+  `https://arxiv.org/abs/2604.25602`), but it is not an active dependency.
+  The cockpit Chat panel exposes optional `*_CHAT_URL` handoff links and shared
+  recent chat shortcuts backed by compact server metadata; governed writes stay
+  in GatewayCore and the action layer.
+
+### 2026-07-09/10 — Chat flight recorder, chat-control decision, cockpit rework, job-search 3-gate flow
+
+**Chat: from "what did the agent do?" to a reviewable full story.**
+
+- **Flight recorder** (`src/command_center/channels/transcript.py`): every
+  GatewayCore turn — both the SSE loop and the non-streaming loop — writes
+  one JSONL line with FULL tool args/results, injected-context provenance,
+  per-completion token usage, and the final answer to
+  `generated/chat-transcripts/` (gitignored; fail-open with a visible
+  write-failure counter; `GATEWAY_TRANSCRIPTS=0` kill switch). Served via
+  paginated `GET /api/chat/threads/{id}/transcript`.
+- **One join key everywhere**: the recorder's `conversation_id` contextvar
+  tags `agent_calls.jsonl` rows (guarded import) and rides every LiteLLM
+  proxy call as `litellm_session_id=surface:conversation_id`, so transcripts,
+  the agent-call log, and LiteLLM's own Session Logs all index the same key.
+  `store_prompts_in_spend_logs: true` is grafted into the rendered proxy
+  config as a config-only cross-surface audit net.
+- **Chat-control decision** (4-dossier research → 3-judge panel → synthesis,
+  [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md)):
+  the first-party recorder + cockpit timeline is PRIMARY (56–59/70 across
+  judges); LiteLLM's built-in spend-log prompt storage is the cross-surface
+  NET; a dedicated observability layer (Arize Phoenix, single container)
+  stays optional/watch-list; **Open WebUI and LibreChat are REJECTED**
+  (25–28/70) as either control or review surface — both are blind to
+  non-app surfaces (Discord/SMS/CLI turns never touch them), lossy exactly
+  where the flight recorder matters (no slot for tool calls or context),
+  and ship approval-less in-process tool/MCP/agent execute layers that
+  constitute a second control plane.
+- **ORCA/OmniAgent/OxyGent specialist link-outs removed entirely**
+  (2026-07-10), replacing the previous day's "optional handoff links"
+  design. The one-gateway answer to "how do we switch models" is the
+  existing LiteLLM role dropdown — adding OpenAI/Anthropic/OpenRouter is a
+  `configs/models.yaml` + `.env` entry the picker sees immediately; cloud
+  providers stay gated by the forbidden-provider scan as a deliberate
+  operator decision, never an agent's.
+- **All Chats review index** (`GET /api/chat/conversations`): every
+  conversation the flight recorder has seen, across every surface, merged
+  with the shared thread shortcuts; each row carries a task-kind badge
+  (job/repo/paper/dag/chat, inferred from scoped conversation ids like
+  `job_application:job_x` or `repo:llm_station`) and a delete control
+  (`DELETE /api/chat/threads/{id}` clears that chat's thread + transcript
+  only — the governed kanban event log is a separate record and is never
+  touched). **New Scoped Chat** starts one stable `repo:<id>` thread per
+  registered repo (`configs/autonomy.yaml` `repo_manifests`).
+- **Story click-through**: any row in a card's Story tab
+  (`_job_card_story` — board moves, agent attempts, submission evidence)
+  now has "open in chat", landing the operator in that conversation's
+  full-story timeline scrolled and highlighted at that exact moment
+  (`data-ts` anchors).
+- **Mobile scroll trap fixed.** `scroll-snap-type` on the full-height board
+  containers (both the 720px and 640px CSS breakpoints — the bug existed in
+  two places) was hijacking vertical page scroll on iOS: every up/down
+  swipe started inside the horizontal snap scroller and never reached the
+  page. Snap now lives only on short strips (tabs/chips); board/list
+  scrolling works normally. The phone nav bar moved from the bottom to the
+  **top**.
+- **Real board data.** `paper`/`repo`/`dag`/`book` domains previously
+  rendered one fixture card each. A new `appflowy_board` domain source
+  (`services/agent_kanban_ui/app.py` `_appflowy_board_cards`) reads the
+  worker's `board-snapshot.json` read-only, with an honest `origin` +
+  snapshot timestamp + the board's real lanes — live counts: papers 225,
+  repos 60, dags 90. `library` was added to `channels/board_state.UI_BOARDS`
+  so Books fills on the next snapshot regenerate.
+- **network_health told the operator a healthy stack was down** — it
+  probed `localhost` from inside the cockpit container. Fixed to read
+  `LITELLM_BASE_URL`/`OLLAMA_API_BASE` (compose now sets both for the
+  cockpit); remaining AppFlowy/Airflow errors are real outages, not bugs.
+
+**Kanban: one-step-only, and the job pipeline is exactly 3 manual gates.**
+
+- Board-store domain cards now move **one lane at a time**, forward or
+  backward, never a skip — enforced server-side (`_allowed_transitions`,
+  409 on a skip naming the legal next steps) and reflected in the UI's
+  drag/Move-to targets. Jobs use the explicit `_JOB_TRANSITIONS` gate map
+  described in §6.7; other board_store domains use column adjacency.
+- Materials are agent-written by default (`agent_writer.py`, full
+  achievement bank + Geoff-voice master bank in the prompt, claim-ID
+  validated with a corrective retry, every attempt persisted to
+  `agent_trace.jsonl`); the Packet Review modal gained a **Story** tab
+  (linear board/agent/note/submission history) and direct edit-in-place;
+  `finalize.py` runs before the governed `Completed` event so a blocked
+  finalize never logs a move it didn't make, and the submit gate keys on
+  the durable `applied_at` field rather than mutable `status`. Full detail
+  in the rewritten §6.7 above.
+
+Live-probed on the rebuilt cockpit container throughout; 179+ tests added
+across the two days (transcript fidelity/durability/fail-open/join-key,
+domain-surface origin honesty, one-step transition enforcement, chat wall
+regressions); `cc validate`, ruff, and `tsc`/`vite build` clean at each
+commit (`d8e593d`, `c01baec`, `54b62d2`, `d416f93`, `0696a5a`, `7e6b367`).
+
+### 2026-07-11 — Chat prompt depth, repo-scoped chat + registration UI, mobile scroll, dropdown KPI/executor visibility
+
+Follow-up pass on the chat surface and the mobile "All Boards" scroller, prompted
+directly by operator use: the auto-filled chat prompt was too shallow outside
+job-search cards, registering a new repo required the CLI, mobile kanban
+scrolling was still rough despite an earlier scroll-snap attempt, and the
+frontier/executor picker changes from the prior entry needed real measured
+numbers and in-dropdown visibility rather than a side-panel-only note.
+
+- **Chat prompts are now domain-aware, not job-application-shaped.**
+  `_chat_prompt_for_card` (`services/agent_kanban_ui/app.py`) used to hardcode
+  job fields (`fit_score`, `apply_url`, `materials_path`, …) for every domain —
+  a paper/repo/dag/book card's "open in chat" prompt printed those as literal
+  `None` lines, which is exactly what read as shallow/context-free. It now
+  takes the domain's own `spec` and renders each domain's actual
+  `summary_fields`/`drawer_fields` (from `configs/domain_surfaces.yaml`) with
+  real values only; the job-only APPLICATION MEMORY block and submission
+  caveat still fire, but only when `application` data exists.
+- **A new repo-scoped chat context.** `startRepoChat()`'s prompt was a single
+  templated sentence ("Working on registered repo X"). New endpoint
+  `GET /api/chat/repo-context/{repo_id}` (`_repo_chat_context` +
+  `_chat_prompt_for_repo`) assembles the manifest fields from
+  `configs/autonomy.yaml`, a live **read-only** `repo-verify` pass (reusing
+  `cli.repo_registry.run_repo_verify`), and the last 5 Ledger missions against
+  that repo, into one prompt. The chat input is never blocked on this fetch —
+  the old one-line placeholder is set synchronously so the box is usable the
+  instant the thread opens, then swapped for the rich prompt only if the
+  operator hasn't already started typing over it (`prev === placeholder`
+  guard). Verified all four chat entry points (new/thread-reopen/card-scoped/
+  repo-scoped) set input synchronously; only the send button — never the input
+  box — disables while a turn is in flight.
+- **Register a repo from the cockpit.** New `POST /api/repos/register`
+  (mirrors `cc repo-register`) plus a `RegisterRepoCard` form in the Chat
+  view's "New Scoped Chat" panel. `apply=false` (default) only validates and
+  previews the manifest block — no write, no gate beyond chat being enabled;
+  `apply=true` commits to `configs/autonomy.yaml` and requires the same
+  `KANBAN_UI_DOMAIN_CONFIG_WRITES=1` opt-in as every other config editor in
+  the cockpit. A committed manifest always starts
+  `autonomous_edits_enabled=false` — `cc repo-verify`/`cc repo-enable-
+  autonomy` remain separate, human-run steps, never flipped by this endpoint.
+  Live-probing this surfaced a real pre-existing bug in `cli/repo_registry.py`:
+  the local-path env-var name was built as `f"{repo_id.upper()}_LOCAL_PATH"`
+  with no sanitization, so a hyphenated repo id (a common real naming
+  convention — this repo's own two registered repos happen to use
+  underscores, which is why it went unnoticed) produced an invalid POSIX env
+  var name that could never actually be set in `.env`/shell. Fixed to
+  sanitize non-`[A-Za-z0-9_]` characters to `_` before uppercasing.
+- **Mobile "All Boards" scroll, actually fixed this time.** The earlier
+  scroll-snap CSS pass targeted `.domain-kanban.scrollframe-content`, but the
+  live DOM element was a hand-rolled `.domain-top-scroll` + `.domain-kanban`
+  pair with its own `topScrollRefs`/`syncKanbanScroll` — it never carried the
+  `scrollframe-content` class the CSS rules keyed on, so the fix silently
+  never applied. Swapped the "All Boards" kanban lane onto the same
+  `HorizontalScroller` component (`ResizeObserver`-driven width, `syncing`
+  mutex ref) already used correctly elsewhere in the cockpit, and deleted the
+  now-dead manual scroller code/CSS.
+- **Model dropdown gained real KPI results and explicit executor visibility.**
+  The "Frontier (paid, opt-in)" optgroup now reads `frontier_models[].measured`
+  (new `_last_benchmark_summary()` in `frontier_client.py`, parsing
+  `generated/frontier-benchmark-report.json` from the last `make
+  frontier-router-benchmark LIVE=1` run) and shows median latency + suite pass
+  rate inline with the existing cost estimate — real measured numbers, absent
+  until that benchmark has actually run once, never fabricated. A new,
+  always-visible "Executors — from missions, not here" optgroup lists
+  Claude Code / Codex CLI as explicitly disabled options directly in the
+  dropdown (previously this explanation only lived in a side-panel card,
+  easy to miss especially on mobile) — the direct answer to "why don't Claude
+  Code/Codex show up as chat options."
+
+Validation: `npx tsc --noEmit` clean, `npm run build` clean, `uv run ruff
+check` clean, 7 new/updated cockpit backend tests (domain-aware prompt
+shape, job-application prompt regression, repo-context endpoint incl. the
+chat-wall gate, repo-register dry-run/blocked/write-gate/committed-manifest
+cases, the env-var sanitize regression) all green, `frontier_client`/
+`frontier_router_eval` suites still green, `check_forbidden_providers
+--allow-frontier-router-egress` clean. Rebuilt and live-probed the
+`agent-kanban-ui` container end to end: `/api/chat/repo-context/llm_station`
+returns the assembled prompt with a real (container-scoped) verify pass,
+`/api/repos/register` previews correctly with the sanitized env name, and
+`/api/chat/runtime` confirms `frontier_models`/`executors`/`repos` all reach
+the picker.
+
+### 2026-07-10 (later) — Frontier-router chat lane: the top-3 pick, wired, tested, and real money spent to prove it
+
+**Why the chat model picker only showed qwen.** `configs/models.yaml`'s
+`chat:` role has exactly one candidate (`chat-qwen`) — that's the whole
+local model catalog, by design (local-only, `provider: ollama` everywhere,
+enforced by `check_forbidden_providers`). Claude Code and Codex CLI were
+never missing from the picker by accident: `executors:` in the same file is
+a *different* concept — agentic coding harnesses authenticated by their own
+subscription/OAuth login, launched from missions to drive leased repo
+worktrees, never a LiteLLM chat completion. `/api/chat/runtime` now says
+this explicitly (`executor_note`).
+
+**Landed the frontier-router backup lane** from the dormant
+`feat/model-eval-clean` branch (PR never merged; cherry-picked commit
+`54527c9`) — it already had the provider/budget config schema, cost
+estimator, and a fail-closed preflight gate, but deliberately made no live
+call ("`call_frontier` ... REFUSE to make a live call ... requires
+reconciling `check_forbidden_providers` ... an explicit operator opt-in").
+That reconciliation is what shipped this pass:
+
+- **The top-3 pick** (researched 2026-07-10 against OpenRouter's own
+  listings + Artificial Analysis's July 2026 Intelligence Index):
+  **GLM-5.2** (Z.ai, 51.1 index score, #1 open-weight — $0.532/$1.672 per
+  Mtok in/out via OpenRouter), **DeepSeek V4 Pro** (44.3, #2, 1.6T/49B MoE,
+  wins on LiveCodeBench + price — $0.435/$0.87/Mtok), **Kimi K2.6**
+  (Moonshot AI, 44.2, #3, wins SWE-bench Pro 58.6% vs 55.4% — $0.66/$3.41/
+  Mtok). All three added to `configs/frontier-router-providers.yaml` with
+  cited `price_source` URLs and a `2026-07-10` `price_observed_at`.
+- **A new task class**, `cockpit_chat_manual_select`, added to
+  `allowed_task_classes` — a human picking a frontier model in the chat
+  dropdown for one turn, distinct from the lane's original
+  reference-eval/comparison classes, still under every redaction/budget/
+  usage gate.
+- **The live-call path** (`src/command_center/channels/frontier_client.py`,
+  new): reuses `frontier_router_eval.preflight()` for the single-call gates
+  (lane enabled, task class, key present, per-request cap) and adds what a
+  single preflight can't — a persisted usage ledger
+  (`generated/frontier-router-usage.jsonl`, gitignored) with a **monthly**
+  running total (resets each calendar month, paired with
+  `monthly_cap_usd`) and a **lifetime per-conversation** running total
+  (never resets, paired with `per_run_cap_usd` — a long-lived chat thread
+  cannot outrun its cap by waiting for the next month), a block-and-tell
+  secret scanner (`scan_for_secrets` — refuses to send, never silently
+  strips), and the actual OpenAI-compatible HTTP call. `fail_on_missing_
+  usage` is enforced: a provider response with no usage block raises
+  and records nothing, rather than guessing a cost.
+- **A frontier turn carries no tools and no board/growthos-memory
+  context** — a deliberate safety line, not an oversight. `GatewayCore`
+  gained `is_frontier`/`frontier_model_id`; `_completion` routes to
+  `frontier_client` instead of LiteLLM when set; a new `_inject_context`
+  property (`board_knobs.enabled and not is_frontier`) replaced 4 separate
+  `board_knobs.enabled` checks across both turn loops so context injection
+  can't be missed at one call site and caught at another.
+- **Cockpit wiring**: `_get_core`/`_validated_model` accept a
+  `frontier:<id>` model prefix (400 for an unknown id, 503 with the exact
+  reason — lane disabled or no key — for a real-but-unselectable one, never
+  a silent local fallback); `/api/chat/runtime` gained `frontier_models`
+  (live pricing/selectable status per candidate) and `frontier_note`; the
+  model `<select>` gained a "Frontier (paid, opt-in)" optgroup with
+  per-option cost estimates, disabled until selectable; the Chat Runtime
+  side panel gained a dedicated card listing all configured candidates with
+  a ready/not-enabled badge.
+- **A real bug found wiring this in**: `frontier_client.py` first read
+  `os.environ.get(secret_env)` directly — but the cockpit container only
+  gets the `.env` *file* mounted, not every key auto-exported as a
+  container env var, so a key set only in `.env` would have silently never
+  been seen. Fixed to resolve keys through the same `channels.core.env()`
+  merge (`.env` file + live process env) GatewayCore's own LiteLLM key
+  lookup already uses.
+- **Continual KPI-check harness** (`src/command_center/improvement/
+  frontier_benchmark.py`, `make frontier-router-benchmark`): runs
+  `configs/model-benchmarks.yaml` suites — the SAME cases used to judge
+  local incumbents — against the frontier candidates. `--dry-run` (default)
+  is a cost-only preview, no egress, works with the lane disabled. `--live`
+  makes real calls under `frontier_reference_eval` (can never promote a
+  local model) and scores each case against its own declared contract
+  (JSON keys/values, required/forbidden substrings) — no LLM judge, no
+  fabricated quality number.
+- **Enabled 2026-07-10 by Geoff's explicit request** (`OPENROUTER_API_KEY`
+  set in `.env`, `configs/frontier-router-budgets.yaml`
+  `default.enabled: true`) specifically to test cost/latency/correctness.
+  `cc validate`'s default forbidden-provider check now fails on this
+  checkout — **on purpose**: the strict scan never relaxes for a key it
+  finds in `.env`; `make frontier-router-egress-check`
+  (`check_forbidden_providers --allow-frontier-router-egress`) is the
+  correct validation command whenever the lane is active, and confirms the
+  local LiteLLM lane is unaffected either way. `.env.example`'s stray
+  `OPENROUTER_API_KEY=sk-or-your-real-key` (with unrelated `ANSWER_LLM_
+  PROVIDER`/`ANSWER_AGENT_MODEL` vars this repo never reads) was replaced
+  with a commented, correctly-documented placeholder so a fresh clone's
+  `cc validate` stays clean by default.
+- **Live-proved end-to-end**, real money spent (all logged): one smoke
+  call to DeepSeek V4 Pro (`$0.00004`), then the full `chat` suite against
+  all three candidates via `make frontier-router-benchmark LIVE=1`
+  (`$0.0007` total). Real, measured, comparable results:
+
+  | model | median latency | measured cost (3 cases) |
+  |---|---|---|
+  | glm-5.2 | 3.75s | $0.0007 |
+  | deepseek-v4-pro | 6.69s | $0.0006 |
+  | kimi-k2.6 | 13.11s | $0.0077 |
+
+  **Honest caveat — the correctness/pass-rate KPI read 0% for all three,
+  and that is a benchmark-suite mismatch, not a quality verdict.** The
+  `chat` suite's cases (`configs/model-benchmarks.yaml`) expect an EXACT
+  tool name (`search`, `read_item`) or the literal string `"unknown"` for
+  the stop-behavior case — calibrated for a LOCAL model that receives the
+  full tool schema + live board state via GatewayCore's normal context
+  injection. A frontier turn gets neither (by the safety design above), so
+  it cannot know our internal tool vocabulary; the raw responses were
+  reasonable (e.g. Kimi K2.6 on the unknown-stop case: *"I cannot proceed
+  because the repository name is required but has not been provided. I
+  will not invent a repository name"* — the correct safety behavior,
+  worded differently than the expected literal `"unknown"`). A frontier-
+  appropriate case suite (semantic scoring, not exact-tool-name matching)
+  is the real fix and is **not built yet** — tracked as open work, not
+  claimed as done.
+
+Validation: 88 new/updated tests (frontier_client, gateway frontier
+routing, cockpit backend, the benchmark harness, plus fixes to 2 pre-
+existing frontier_router_eval tests that assumed the shipped config stays
+disabled — now self-contained, since the lane's enabled state is a real
+operator decision, not a fixed invariant) — all green and hermetic
+(explicit disabled/enabled config fixtures, mocked HTTP transport, no key
+required to run the suite); the full non-job-search regression suite
+(1000+ tests) green; `cc validate`/cross-refs clean;
+`frontier-router-egress-check` clean in egress mode.
+
+### 2026-07-02 — Research intake productized + gateway/log hygiene + skills audit + card deps
+
+Adjudicated a 2026-07-02 external agent-infrastructure batch (Cline, Agent-Native,
+RushDB, TurboVec, SLayer, STORM, local-ai-server, Library Skills, GLM-5.2,
+AIonDemandCluster, argithub, career-ops, Hermes, Google Agents CLI). Most of it
+recommended things already built (worktree missions, the action layer, durable
+memory, the eval loop) or conflicted with §13; four small deltas were real and are
+implemented here. Nothing new was adopted as a dependency — the batch itself is now
+recorded as the first entry of the research catalog per §5.2.
+
+- **`cc research-digest` + `knowledge/research/source_catalog.yaml`.** Productizes the
+  §5.2 intake: a link batch becomes durable, typed rows validated on load
+  (`command_center.research.catalog`). `cc research-digest feed` emits only rows marked
+  `verdict: evaluate` into `generated/research-digest-feed.json`, which the existing
+  observer-only scan consumes exactly like model-scout — a new `research` feed source +
+  `ResearchSourceScanner` drafts a **read-only (L1) evaluation** card, never an adoption.
+  Confidence is the row's evidence-completeness, so a bare link with no measured gap is
+  correctly low-confidence (§13 as a number). The seed batch was fully adjudicated, so the
+  feed is empty by design.
+- **gateway.log rotation.** `gateway.log` had reached 391 MB, unrotated, at the repo root:
+  the CMD supervisor appended the Python process's stdlib logging with no bound. The
+  channels process now OWNS gateway.log via a `RotatingFileHandler`
+  (`configure_logging`, default 25 MB × 5 = ~150 MB ceiling, env-overridable); the stderr
+  handler is added only on a TTY so the supervised service does not duplicate the stream;
+  the supervisor's own markers moved to `gateway-supervisor.log`. `gateway.ps1 rotate` is
+  the one-time remedy for the existing giant file. (Route artifacts / per-key accounting
+  remain Mission 2 per §5.2; hot-reload was deliberately skipped — it fights the
+  edit-config → validate → render-generated contract.)
+- **`cc skills-audit`.** Read-only inventory of dependency-shipped Agent Library Skills
+  (`.agents/skills/<name>/SKILL.md`) — FastAPI already ships one in the venv that nothing
+  surfaced. Installs/symlinks nothing; the discover → SkillSpector-scan → approval-card →
+  install pipeline stays a pre-approved future shape (L3, scan-required, project-scope-only).
+- **Per-card mission dependencies.** `KanbanBoardSpec.dependency_fields` (opt-in,
+  `blocked_by`/`unblocks`, validated recognised + optional-never-required), a typed
+  `CardDependencies` primitive + `unmet_blockers()` in `kanban_sync/dependencies.py`, and a
+  deterministic `⛔blocked_by:` marker in the board-state render (additive — rows without the
+  field are unchanged). Carries no approval authority; the human wall past L2 is unchanged.
+
+Watch-list (recorded in the catalog with explicit triggers, not built): RushDB / Neo4j
+memory graph, TurboVec, SLayer, GLM-5.2, career-ops. Rejected as contract clashes:
+AIonDemandCluster burst GPU (no-cloud-bill / no-provider-keys / fail-closed) and argithub
+auto-run (untrusted-code execution). All green: `ruff check src tests`, `cc validate`,
+full pytest.
 
 ### 2026-06-20 — Kanban event emission is now the DEFAULT sync path
 
@@ -2322,7 +3836,7 @@ first commit and reconstruct the record git now preserves.
   and per-action timeout controls unset until no-op canary telemetry derives
   them. The target remains `enabled: false`; this is a safety policy
   declaration, not live GUI approval.
-- **Evidence boundary explicit.** [desktop-timeout-takeover-policy.md](desktop-timeout-takeover-policy.md)
+- **Evidence boundary explicit.** [desktop/desktop-timeout-takeover-policy.md](desktop/desktop-timeout-takeover-policy.md)
   records that the current policy is declaration evidence only. No live-GUI
   timing percentile is claimed, no raw screenshots are retained, and the target
   must still pass no-op canary evidence before live actions can be enabled.
@@ -2437,7 +3951,7 @@ first commit and reconstruct the record git now preserves.
   ruleset evidence, so the blocker is now configuration of the branch wall, not
   credential visibility.
 - **Token policy drafted.** Added
-  [github-token-storage-rotation.md](github-token-storage-rotation.md), which
+  [github/github-token-storage-rotation.md](github/github-token-storage-rotation.md), which
   records env-ref-only storage, out-of-repo PEM handling, in-memory installation
   tokens, one-run owner/admin observer token use, and rotation steps. It is not
   a repo-autonomy approval until branch protection verifies.
@@ -2463,7 +3977,7 @@ first commit and reconstruct the record git now preserves.
 ### 2026-06-16 — Autonomous pipeline attachment reconciled
 
 - **What changed.** Added
-  [autonomous-pipeline-gap-review-2026-06-16.md](autonomous-pipeline-gap-review-2026-06-16.md)
+  [reviews/autonomous-pipeline-gap-review-2026-06-16.md](reviews/autonomous-pipeline-gap-review-2026-06-16.md)
   to reconcile the attached autonomous pipeline proposal against the current
   Command Center + Growth OS implementation. The decision is to keep the
   existing single-control-plane architecture and use the proposal as a
@@ -2502,7 +4016,7 @@ first commit and reconstruct the record git now preserves.
   .devcontainer/devcontainer.json`. Cross-reference validation now proves the
   declared devcontainer and CODEOWNERS files exist inside the repository.
 - **GitHub App auth review.** Added
-  [github-app-production-auth-review-2026-06-16.md](github-app-production-auth-review-2026-06-16.md).
+  [reviews/github-app-production-auth-review-2026-06-16.md](reviews/github-app-production-auth-review-2026-06-16.md).
   Local evidence verified the GitHub remote, default branch, branch heads,
   CODEOWNERS, and CI workflow. The app identity is now recorded in
   `configs/autonomy.yaml` as env-var references only:
@@ -2546,7 +4060,7 @@ first commit and reconstruct the record git now preserves.
 ### 2026-06-16 — Whole-system validation prompt added
 
 - **What changed.** Added
-  [whole-system-validation-prompt.md](whole-system-validation-prompt.md), a
+  [evaluation/whole-system-validation-prompt.md](evaluation/whole-system-validation-prompt.md), a
   reusable mission prompt for proving the whole pipeline rather than one
   subsystem: self-improvement, AppFlowy kanban control, registered desktop repo
   autonomy, progress notification, local-only model routing, memory/knowledge
@@ -2756,7 +4270,7 @@ first commit and reconstruct the record git now preserves.
 ### 2026-06-14 — Routing/performance candidate batch evaluated
 
 - **What changed.** Added
-  [routing-performance-candidate-evaluation-2026-06-14.md](routing-performance-candidate-evaluation-2026-06-14.md),
+  [reviews/routing-performance-candidate-evaluation-2026-06-14.md](reviews/routing-performance-candidate-evaluation-2026-06-14.md),
   a read-only, one-by-one evaluation of Puppetmaster, codebase-memory-mcp,
   Semble, abtop, asm, ClawCodex, Agno/GitWiki, SIA, MAPPA, generic multi-agent
   frameworks, dbt Wizard / dbt Agent Skills, OpenClaw / Docker Model Runner,
@@ -2784,7 +4298,7 @@ first commit and reconstruct the record git now preserves.
 ### 2026-06-14 — Broad AI-agent idea evaluation prompt added
 
 - **What changed.** Added
-  [agent-ideas-evaluation-prompt.md](agent-ideas-evaluation-prompt.md), a
+  [evaluation/agent-ideas-evaluation-prompt.md](evaluation/agent-ideas-evaluation-prompt.md), a
   copy-paste mission prompt for evaluating ClawCodex, Agno/GitWiki, SIA, MAPPA,
   codebase-memory-mcp, dbt Wizard, RamiKrispin/local-ai-server, BigQuery Graph /
   ADK / A2UI / BigSet, agentcookie, and generic multi-agent frameworks against
@@ -2803,7 +4317,7 @@ first commit and reconstruct the record git now preserves.
 - **Order of work.** Phase 0 inventory/baseline; Phase 1 read-only experiment
   plans; Phase 2 isolated pilots; Phase 3 feature-flag integration; Phase 4
   monitored canary; Phase 5 human promotion; Phase 6 cleanup/negative-result
-  memory. Use [capability-evaluation-loop.md](capability-evaluation-loop.md) for
+  memory. Use [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md) for
   the detailed staged execution once a broad idea is selected.
 
 ### 2026-06-14 — Kanban row powers extended + validated across agent surfaces
@@ -2850,7 +4364,7 @@ first commit and reconstruct the record git now preserves.
   fresh conversation abstained with zero tools; no board or memory writes.
 - **Tracker synced.** The detailed agent-kanban tracker now carries the same
   row-power contract and honest AppFlowy REST boundary:
-  [AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+  [AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md).
 - **Scratch hygiene.** The sandbox-created `.codex_tmp/` pytest directory was
   ACL-owned by the sandbox identity and could not be deleted by the normal user;
   it is now ignored as local scratch so it cannot pollute git status or
@@ -2900,7 +4414,7 @@ is closed in production.
   `collect_memory_state(query, cfg)` takes the config (loaded once, not per call). No defensive code:
   fail-loud-render mirrors `board_state`, the cadence guard mirrors the board's, the embedder fails
   loud, the store is per-owner + curated-only. Patch doc marked applied:
-  [memory-integration-patch.md](memory-integration-patch.md).
+  [reviews/memory-integration-patch.md](reviews/memory-integration-patch.md).
 - **Live-validated 8/8** (real `qwen3:30b` + `nomic-embed-text` + AppFlowy board). **S1**: remembered
   in conversation A → recalled "black, no sugar" in a **fresh** conversation B → `forget` propagated to
   D. **S2**: a 7-turn conversation recalled focus + deadline at turn 7. **S3**: facts saved in **three
@@ -2950,7 +4464,7 @@ is closed in production.
 ### 2026-06-13 — durable cross-conversation memory (built + proven), embedder VRAM budget, router decision
 
 Executes the `memory_state` design the multi-turn analysis pre-specced (see the entry below
-and [agent-multiturn-and-memory.md](agent-multiturn-and-memory.md)). The board already carried
+and [reviews/agent-multiturn-and-memory.md](reviews/agent-multiturn-and-memory.md)). The board already carried
 durable *work state* across conversations (board_state); this adds durable *conversational*
 memory the same way.
 
@@ -2972,7 +4486,7 @@ memory the same way.
 - **Wiring staged, not applied.** The two touchpoints (`core.py` memory_state injection,
   `assistant.py` verb registration) are the agent-surface session's hot files (core.py was being
   edited minute-by-minute), so the ~10-line, pattern-anchored patch is staged in
-  [memory-integration-patch.md](memory-integration-patch.md) to apply once that session lands.
+  [reviews/memory-integration-patch.md](reviews/memory-integration-patch.md) to apply once that session lands.
   Coordination rule held — none of their files were touched.
 - **Embedder charged against the GPU budget (applied).**
   [vram.py](../src/command_center/registry/vram.py) gained `resident_weight_gb` (data-derived
@@ -3228,7 +4742,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
 
 - **Parity review.** Measured the surface against the two yardsticks (AppFlowy availability+databases,
   Cline look&feel for agent use) and closed the gaps. Full review + per-use-case verdicts in
-  [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md) §6.
+  [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md) §6.
 - **5.1 — regression fixed.** Dropping `set_status` (Phase 2) had removed the agent's ability to triage
   papers/repos/signals and update library/lessons status. New title-addressed `move_item(database, title,
   status)` restores action on **every** board with statuses — loud validation, harness owns the key, Approved
@@ -3295,7 +4809,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
 - **Standards.** All knobs in `configs/agent_surface.yaml` (no literals); decisions data-derived or honestly
   abstaining (no fabricated cadence); fail-loud (no silent fallbacks); no leakage (pre-decision features only);
   AppFlowy/Ledger keep write-authority. `make validate` green · full suite green · ruff clean · mypy
-  baseline-consistent. Tracker: [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+  baseline-consistent. Tracker: [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md).
   **Phase 4 (the first-party Cline-styled web UI in the repurposed WebUI slot) is the remaining, separable lift.**
 
 ### 2026-06-13 — agent kanban surface: Phase 0 (decision + tracker + doc reconcile)
@@ -3306,9 +4820,9 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   the **already-budgeted** Phase-4 WebUI slot (`configs/ui.yaml` / `WebUIConfig`) — repurposed from the
   now-deferred Hermes WebUI/Kanban. Not a §13 "another abstraction layer": it fixes a failure actually hit and
   adds no competing authority boundary. Ordered plan + standards-conformance matrix:
-  [backend/projects/AGENT_KANBAN_SURFACE.md](backend/projects/AGENT_KANBAN_SURFACE.md).
+  [kanban/AGENT_KANBAN_SURFACE.md](kanban/AGENT_KANBAN_SURFACE.md).
 - **Doc reconcile.** Stale Hermes-WebUI references corrected to the first-party repurpose:
-  `configs/ui.yaml` comment, [ui-options.md](ui-options.md) dashboard table, [ecosystem.md](ecosystem.md)
+  `configs/ui.yaml` comment, [architecture/ui-options.md](architecture/ui-options.md) dashboard table, [reviews/ecosystem.md](reviews/ecosystem.md)
   banner. The `WebUIConfig` contract (loopback/password/`governed_by_ledger`/single-container) is unchanged;
   the block key renames to `agent_kanban_ui` in Phase 4. Docs-only; no code/config-value change yet.
 
@@ -3351,7 +4865,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   no fallback); the daily DAG drafts them each morning behind `SELF_IMPROVEMENT_KANBAN` (off by
   default). Observer-only — a human drags to Approved → the bridge opens a gated mission → applied.
   Proven live (a "remove swallowed exceptions" card on the board). Tests: `test_discovery_kanban.py`
-  + `test_dag_support.py`; tracker [SELF_IMPROVEMENT_PIPELINE.md](backend/projects/SELF_IMPROVEMENT_PIPELINE.md).
+  + `test_dag_support.py`; tracker [SELF_IMPROVEMENT_PIPELINE.md](improvement/SELF_IMPROVEMENT_PIPELINE.md).
 - **Multi-turn + cross-conversation memory — proven & assessed.** A live 6-message conversation
   through the shared `GatewayCore` (`model: chat` → `qwen3:30b`): read 13 cards → drafted a card →
   **recalled it with no tool call** (within-conversation memory) → "stage *that* card" → "reject it"
@@ -3363,7 +4877,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   proof covers every channel; only Discord is live. Assessment + tiered, data-derived recommendation
   (instrument first via the agent-call log; `memory_state` re-injection if cross-chat reference shows
   up; persisted histories for restart-durability — no leakage, no hardcoded thresholds):
-  [agent-multiturn-and-memory.md](agent-multiturn-and-memory.md).
+  [reviews/agent-multiturn-and-memory.md](reviews/agent-multiturn-and-memory.md).
 
 ### 2026-06-13 — OKF knowledge bundle + dashboards on the tailnet
 
@@ -3374,9 +4888,9 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   `authority: derived` and points at its source). Clobber-safe generated/human split; data-derived
   freshness (no timestamp churn on unchanged source); a blocking N/N validation gate (frontmatter,
   source-path existence, link resolution, secret scan). First generation: 14 concepts, 7/7 PASS.
-  Design: [knowledge-format.md](knowledge-format.md).
+  Design: [architecture/knowledge-format.md](architecture/knowledge-format.md).
 - **Dashboards on the tailnet.** Airflow / Ledger / LiteLLM / Uptime-Kuma now served over Tailscale
-  (8443 / 10000 / 11000 / 12000) — tailnet-only, verified reachable. [remote-access.md](remote-access.md) updated.
+  (8443 / 10000 / 11000 / 12000) — tailnet-only, verified reachable. [operations/remote-access.md](operations/remote-access.md) updated.
 
 ### 2026-06-13 — self-improvement scan: data-derived ranking + delivery + standards pass
 
@@ -3390,9 +4904,9 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   for per-pillar swimlanes. CLI flags `--email/--board/--ping` + a new-since-yesterday diff.
 - **Standards (principles-only).** Module-tree + 5-stage header on `pipeline.py`; a blocking
   `improvement scan-validate` gate (10/10 — asserts the observer wall + no-leakage); a report
-  manifest sidecar (sha256 + provenance). Verified the `docs/backend/` R2/fleet/Railway/medallion
-  standards are the betts pipeline's and **don't apply here** (no such infra) — applied only the
-  transferable principles. Tracker: `docs/backend/projects/SELF_IMPROVEMENT_PIPELINE.md`.
+  manifest sidecar (sha256 + provenance). Verified the `docs/reference/betts-basketball-standards/`
+  R2/fleet/Railway/medallion standards are the betts pipeline's and **don't apply here** (no such
+  infra) — applied only the transferable principles. Tracker: `docs/improvement/SELF_IMPROVEMENT_PIPELINE.md`.
 - **Zero new deps**; full suite + ladder (validate · scan-validate · evals) green; ruff + mypy clean.
 
 ### 2026-06-13 — model-selection track + routing check + Hermes spike
@@ -3510,7 +5024,7 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   Sources: betts `PIPELINE_STANDARDS_TEMPLATE.md`,
   `DATA_ENGINEERING_PIPELINE.md` §0.x, `LOCAL_FLEET_R2_WORKFLOW.md`,
   `UNIFIED_SERVING_GUIDE.md`. Validated (`validate: PASS`) and test-rendered.
-- **Added [capability-evaluation-loop.md](capability-evaluation-loop.md)**:
+- **Added [evaluation/capability-evaluation-loop.md](evaluation/capability-evaluation-loop.md)**:
   the staged, evidence-first external-tool evaluation prompt (Stage 0–11,
   three separated roles, knockout gates, A/B benchmarks, chaos testing,
   independent verification, five dispositions), with a Part-A mapping onto

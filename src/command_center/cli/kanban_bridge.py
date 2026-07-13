@@ -307,20 +307,27 @@ def main() -> int:
         if not source.enabled:
             continue
         env = merged_env(Path(".env"), Path(source.growthos_root) / ".env")
-        rows = rows_from_appflowy(source, env)
+        try:
+            rows = rows_from_appflowy(source, env)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            print(f"kanban-bridge: source '{source.name}' unreachable ({exc}); skipping this cycle")
+            continue
         drafts = build_drafts(rows[: args.limit], cfg, imported)
         total += len(drafts)
-        for draft in drafts:
-            print(f"- [{draft.risk}] {draft.repo}:{draft.branch} :: {draft.title}")
-            if not args.apply:
-                continue
-            mission_id = open_ledger_mission(ledger_url, draft)
-            imported[draft.card_key] = mission_id
-            print(f"  opened {mission_id}")
-            if draft.card_pre_hash:
-                ctx = appflowy_ctx(source, env)
-                stamp_card(ctx, draft.card_pre_hash, mission_id)
-                print(f"  stamped card {draft.card_pre_hash} -> In Progress")
+        try:
+            for draft in drafts:
+                print(f"- [{draft.risk}] {draft.repo}:{draft.branch} :: {draft.title}")
+                if not args.apply:
+                    continue
+                mission_id = open_ledger_mission(ledger_url, draft)
+                imported[draft.card_key] = mission_id
+                print(f"  opened {mission_id}")
+                if draft.card_pre_hash:
+                    ctx = appflowy_ctx(source, env)
+                    stamp_card(ctx, draft.card_pre_hash, mission_id)
+                    print(f"  stamped card {draft.card_pre_hash} -> In Progress")
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            print(f"kanban-bridge: Ledger unreachable ({exc}); skipping '{source.name}'")
 
     mode = "APPLY" if args.apply else "DRY-RUN"
     print(f"kanban-bridge: {mode} ({total} mission draft(s))")

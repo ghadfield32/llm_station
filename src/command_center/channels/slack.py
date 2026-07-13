@@ -10,7 +10,7 @@ Env:
   SLACK_APP_TOKEN            (required, xapp-...; App-Level Token with connections:write)
   SLACK_ALLOWED_CHANNEL_IDS  (optional, comma-separated channel IDs; empty = all)
 Create the app at https://api.slack.com/apps, enable Socket Mode + Event
-Subscriptions (message.channels / message.im). See docs/channels.md.
+Subscriptions (message.channels / message.im). See docs/architecture/channels.md.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ async def run(spec) -> None:
         raise SystemExit(
             f"slack: missing {', '.join(missing)} - create the app at "
             "https://api.slack.com/apps, enable Socket Mode, and copy the bot "
-            "(xoxb-) + app-level (xapp-) tokens into .env. See docs/channels.md")
+            "(xoxb-) + app-level (xapp-) tokens into .env. See docs/architecture/channels.md")
     raw = e.get("SLACK_ALLOWED_CHANNEL_IDS", "")
     allowed = {c.strip() for c in raw.split(",") if c.strip()}
 

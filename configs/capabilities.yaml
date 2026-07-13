@@ -30,7 +30,7 @@ entries:
       - relation: declaredIn
         source_ref: configs/tools.yaml#tools.github
       - relation: gatedBy
-        source_ref: docs/github-safety.md
+        source_ref: docs/github/github-safety.md
 
   - identifier: urn:air:command-center.local:tool:shell
     display_name: Local shell and RTK command surface
@@ -142,7 +142,7 @@ entries:
     owner: geoff
     risk_tier: L2_local_edits
     summary: Candidate local model to evaluate through model-scout, model-fit, canary, evals, and human promotion only.
-    artifact_ref: docs/agentic-process-improvements-2026-06-20.md#gemma-4-12b
+    artifact_ref: docs/reviews/agentic-process-improvements-2026-06-20.md#gemma-4-12b
     capabilities: [local_model_candidate, coding_eval_candidate, local_resilience_candidate]
     tags: [gemma, ollama, model-scout, canary]
     representative_queries:
@@ -160,8 +160,8 @@ entries:
       - relation: evaluatedFrom
         source_ref: https://deepmind.google/models/gemma/
       - relation: gate
-        source_ref: docs/model-update.md
-        digest: sha256:683ab84a12d7a49b797f73ff2f824e5110bea53f9936c9957cf9658c5cef1762
+        source_ref: docs/MASTER.md#65-the-model-update-pipeline-no-auto-promotion
+        digest: sha256:4809ad8a542096dd09a87adc297537e875a16103b7f8c1af4023db88c813ca5d
 
   - identifier: urn:air:command-center.local:skill:agent-idea-evaluation
     display_name: Agent idea evaluation prompt
@@ -169,7 +169,7 @@ entries:
     owner: geoff
     risk_tier: L1_plan_only
     summary: Structured evaluation rubric for external agent tools, memory systems, model servers, and self-improvement claims.
-    artifact_ref: docs/agent-ideas-evaluation-prompt.md
+    artifact_ref: docs/evaluation/agent-ideas-evaluation-prompt.md
     capabilities: [candidate_decomposition, overlap_review, threat_model, experiment_plan]
     tags: [evaluation, skills, architecture, safety]
     representative_queries:
@@ -179,11 +179,11 @@ entries:
     updated_at: "2026-06-20"
     trust:
       publisher: command-center
-      identity: local-doc:docs/agent-ideas-evaluation-prompt.md
+      identity: local-doc:docs/evaluation/agent-ideas-evaluation-prompt.md
       identity_type: local_doc
       verification: repository-owned prompt; no runtime authority
       attestations: [evaluation_only, no_install_without_approval]
     provenance:
       - relation: declaredIn
-        source_ref: docs/agent-ideas-evaluation-prompt.md
+        source_ref: docs/evaluation/agent-ideas-evaluation-prompt.md
         digest: sha256:3b9d93e8db9a62cc053ea937bce2d111a2d36e613a9def3c7249cc97d56257af

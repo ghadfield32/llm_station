@@ -144,10 +144,11 @@ services:
     networks: [core]
 
   # First-party agent kanban + observability UI (configs/ui.yaml: agent_kanban_ui).
-  # OPTIONAL Phase-4 convenience layer — `--profile ui` to start it. READ-ONLY: it
-  # reads the Ledger (missions kanban) + the agent-call log (metrics, mounted RO),
-  # and has no write path. Loopback-bound; reach over Tailscale; put a password in
-  # front before exposing beyond loopback (the contract forbids otherwise).
+  # OPTIONAL Phase-4 convenience layer — `--profile ui` to start it. This profile
+  # is the full local console: it reads Ledger/AppFlowy/internal boards, exposes
+  # GatewayCore chat, and writes only through governed verbs plus validated
+  # profile/domain config editors. Loopback-bound; reach over Tailscale; put a
+  # password in front before exposing beyond loopback.
   agent-kanban-ui:
     profiles: ["ui"]
     build:
@@ -159,26 +160,64 @@ services:
       - GROWTHOS_AGENT_LOG=/logs/agent_calls.jsonl
       - KANBAN_BOARD_SNAPSHOT=/snapshot/board-snapshot.json
       - KANBAN_UI_CONFIGS=/app/configs
+      # typed domain surfaces: the internal board card store + event log, read
+      # from the same ./generated mount as the board snapshot. In full-console
+      # mode, governed card moves write events into this mount.
+      - KANBAN_EVENT_LOG=/snapshot/kanban-events.jsonl
+      - KANBAN_BOARD_STORE=/snapshot/boards
       - LEDGER_UI_URL=${LEDGER_UI_URL:-}
       # Chat + governed writes turn the UI into a channel. 1 here = full console;
       # remove it (and the growth-os/.env mounts below) for a creds-free read-only
       # board deployment. L3/L4 approve/kill never reach here.
       - KANBAN_UI_CHAT_ENABLED=1
+      # Full-console only: allow Controls -> All Boards to edit
+      # configs/domain_surfaces.yaml after schema validation.
+      - KANBAN_UI_DOMAIN_CONFIG_WRITES=1
+      # Chat flight recorder: full-fidelity per-turn transcripts (tool args,
+      # results, injected context, final answer) under the ./generated mount —
+      # host-persisted, gitignored, never leaves the machine. Set
+      # GATEWAY_TRANSCRIPTS=0 to keep thread metadata only.
+      - GATEWAY_TRANSCRIPT_DIR=/snapshot/chat-transcripts
+      - GATEWAY_TRANSCRIPTS=${GATEWAY_TRANSCRIPTS:-1}
       - LITELLM_BASE_URL=http://litellm:4000/v1
+      # Ollama lives on the HOST (same pattern as AppFlowy below); the chat
+      # tool layer's network_health probe reads this instead of localhost.
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE:-http://host.docker.internal:11434}
+      # Packet writer timeout: qwen3:30b generations take 20-90s alone but
+      # 4-5 min when other GPU stacks (betts_basketball Airflow) contend for
+      # VRAM — the 300s default dies at that margin (observed 2026-07-09).
+      - JOB_SEARCH_WRITER_TIMEOUT=${JOB_SEARCH_WRITER_TIMEOUT:-600}
       # AppFlowy runs as a separate stack on the HOST (not in this compose), so the
       # action layer reaches it via host.docker.internal (the Ollama pattern). This
       # env overrides growth-os/.env's localhost:8081 (growthos Settings: env > .env).
       - APPFLOWY_BASE_URL=${APPFLOWY_UI_BASE_URL:-http://host.docker.internal:8081}
+      # Agent Sessions (Claude Agent / Codex Agent, structurally separate from
+      # GatewayCore chat above — see WORKLOG.md "Agent-session chat
+      # integration"). The worker runs on the HOST (own SDK/CLI auth, same
+      # host.docker.internal pattern as Ollama/AppFlowy), never in this
+      # container. Both flags default OFF; Fake Agent stays off even when
+      # sessions are on unless explicitly enabled for dev use.
+      - KANBAN_UI_AGENT_SESSIONS_ENABLED=${KANBAN_UI_AGENT_SESSIONS_ENABLED:-0}
+      - KANBAN_UI_FAKE_AGENT_ENABLED=${KANBAN_UI_FAKE_AGENT_ENABLED:-0}
+      - AGENT_WORKER_URL=${AGENT_WORKER_URL:-http://host.docker.internal:8791}
+      - AGENT_WORKER_TOKEN=${AGENT_WORKER_TOKEN:-}
     volumes:
       # the agent-call log: read for metrics AND written by the in-app channel
       # (every surface logs its own tool calls). RW when chat is on; for a
       # read-only board deployment this can be :ro (the read-only app never writes).
       - ./appflowy_kanban/growth-os/_export:/logs
-      # board snapshot produced by `make kanban-board-snapshot` on the worker —
-      # mounted read-only so the UI never holds AppFlowy credentials
-      - ./generated:/snapshot:ro
-      # model lanes + judge stages for the Router view (read-only; no secrets)
-      - ./configs:/app/configs:ro
+      # board snapshot + internal board store. Full console mode needs RW here
+      # because drag/drop emits governed kanban events into this mount. For a
+      # read-only board deployment, remove KANBAN_UI_CHAT_ENABLED and change this
+      # back to :ro.
+      - ./generated:/snapshot
+      # model lanes + judge stages for the Router view, plus the validated
+      # domain-surface editor in Controls. For a read-only board deployment,
+      # change this back to :ro and remove KANBAN_UI_DOMAIN_CONFIG_WRITES.
+      - ./configs:/app/configs
+      # job-search application memory and profile controls. The cockpit needs
+      # this mount to show generated packets/follow-ups and edit question presets.
+      - ./data/job_search:/app/data/job_search
       # CHAT/CONSOLE ONLY (remove for read-only): the action layer + GatewayCore.
       # The trust fork — the container gains AppFlowy creds + the LiteLLM key.
       # Writes still go through the governed verbs (Approved structurally refused).

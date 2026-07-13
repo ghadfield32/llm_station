@@ -21,7 +21,8 @@ from ...schemas.base import RiskTier
 
 _LEAKAGE_TOKENS = ("status", "human_decision", "decision", "verdict", "label",
                    "accept", "reject", "promoted", "canary", "rolled")
-_KNOWN_KINDS = {"code_health", "ledger", "papers", "model_registry", "dependencies", "kanban"}
+_KNOWN_KINDS = {"code_health", "ledger", "papers", "model_registry", "dependencies",
+                "kanban", "research"}
 
 
 def gate_checks() -> list[tuple[str, bool, str]]:

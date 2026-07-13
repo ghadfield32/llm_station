@@ -487,6 +487,175 @@ class FrontierRouterBudgetsConfig(Strict):
         return self
 
 
+# ---- usage-monitoring.yaml -------------------------------------------------
+# Thresholds/polling/routing/alerts for the unified runtime Usage/Limits layer
+# (src/command_center/usage/). Distinct from the frontier/agent-session BUDGET
+# configs: those are internal spend caps; this governs how PROVIDER-reported
+# usage/limits/availability are polled, alerted on, and used for routing.
+class UsageThresholds(Strict):
+    warning_percent: float = Field(default=75.0, ge=0, le=100)
+    critical_percent: float = Field(default=90.0, ge=0, le=100)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.critical_percent < self.warning_percent:
+            raise ValueError("critical_percent must be >= warning_percent")
+        return self
+
+
+class UsagePolling(Strict):
+    active_session_seconds: int = Field(default=30, gt=0)
+    idle_seconds: int = Field(default=300, gt=0)
+
+
+class UsageRouting(Strict):
+    block_when_exhausted: bool = True
+    allow_silent_fallback: bool = False
+    reserve_capacity_for_high_risk_missions: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        # Structural enforcement of the "no silent fallback" invariant (KPI:
+        # silent fallbacks = 0): the toggle exists for config symmetry but the
+        # contract refuses True, same fail-closed discipline as the frontier
+        # budget's require_redaction. A router must surface every rejection.
+        if self.allow_silent_fallback:
+            raise ValueError(
+                "allow_silent_fallback must be false — every executor rejection "
+                "must be surfaced, never a silent substitution")
+        return self
+
+
+class UsageAlertChannels(Strict):
+    cockpit: bool = True
+    chat_notification: bool = True
+    ledger: bool = True
+    email_digest: bool = True
+
+
+class UsageRetention(Strict):
+    # Detailed per-request samples are the biggest table; keep them a bounded
+    # window. Aggregates/alerts/routing decisions are cheap + evidential, so
+    # they're kept far longer / indefinitely — the evidence behind a routing
+    # decision is NEVER pruned.
+    request_sample_days: int = Field(default=90, gt=0)
+    keep_aggregates_days: int = Field(default=730, gt=0)
+    keep_alerts_and_routing_indefinitely: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.keep_aggregates_days < self.request_sample_days:
+            raise ValueError(
+                "keep_aggregates_days must be >= request_sample_days "
+                "(aggregates outlive the detailed samples they summarize)")
+        return self
+
+
+class UsageMonitoringConfig(Strict):
+    schema_version: str
+    enabled: bool = True
+    thresholds: UsageThresholds = Field(default_factory=UsageThresholds)
+    polling: UsagePolling = Field(default_factory=UsagePolling)
+    routing: UsageRouting = Field(default_factory=UsageRouting)
+    alerts: UsageAlertChannels = Field(default_factory=UsageAlertChannels)
+    retention: UsageRetention = Field(default_factory=UsageRetention)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.usage-monitoring.v1":
+            raise ValueError(
+                "schema_version must be command-center.usage-monitoring.v1")
+        return self
+
+
+# ---- local-frontier-providers.yaml ------------------------------------------
+# A THIRD lane, distinct from both the local-only LiteLLM/Ollama gateway and the paid
+# frontier-router backup lane: an experimental LOOPBACK-only engine (colibrì, or any future
+# disk-streamed/local-server engine) too large to fit VRAM but running entirely on this
+# machine — no API key, no $ cost, no cloud egress. It is NOT a LiteLLM role (ModelRegistry
+# stays ollama-only) and NOT a frontier-router candidate (no provider pricing, no budget caps
+# apply — there is nothing to bill). Like frontier-router-providers.yaml, this file NAMES an
+# env var for the base URL; it holds no value and executes nothing. The actual host the env
+# var resolves to is validated at RUNTIME by check_forbidden_providers.check_local_frontier_providers()
+# and by local_frontier_client — this contract can only assert the env var NAME is sane, not
+# the resolved value. `enabled: false` by default; flipping it on is a deliberate operator
+# decision after Phase 2's smoke test (see docs/MASTER.md "Local frontier lane").
+class LocalFrontierCapabilities(Strict):
+    text: bool = True
+    streaming: bool = True
+    tools: Literal[False] = False        # contract-refuses True: these engines reject tool schemas
+    json_mode: Literal[False] = False    # contract-refuses True: engines reject non-text response_format
+    vision: bool = False
+    audio: bool = False
+
+
+class LocalFrontierProvider(Strict):
+    base_url_env: str                    # env var NAME holding the loopback/private base URL
+    api_key_env: str | None = None       # optional local bearer token; never a FORBIDDEN_KEYS concern
+    api_style: Literal["openai_compatible"] = "openai_compatible"
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.base_url_env:
+            raise ValueError("local frontier provider missing base_url_env")
+        return self
+
+
+class LocalFrontierThroughputEstimate(Strict):
+    """Published, NOT measured-here, tokens/sec range. `source` must say so — this is
+    context for the operator until a real generated/local-frontier-benchmark-report.json
+    exists (see local_frontier_client._last_benchmark_summary), never a substitute for one."""
+    low: float = Field(gt=0)
+    high: float = Field(gt=0)
+    source: str
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.high < self.low:
+            raise ValueError("expected_tokens_per_second.high must be >= low")
+        if not self.source:
+            raise ValueError("expected_tokens_per_second needs a source (this is unverified until measured)")
+        return self
+
+
+class LocalFrontierModel(Strict):
+    provider: str
+    context_tokens: int = Field(ge=1)
+    capabilities: LocalFrontierCapabilities = Field(default_factory=LocalFrontierCapabilities)
+    disk_footprint_gb: float = Field(gt=0)
+    expected_tokens_per_second: LocalFrontierThroughputEstimate
+    kv_slots: int = Field(default=2, ge=1, le=16)
+    max_queue: int = Field(default=2, ge=1)
+    queue_timeout_seconds: int = Field(default=900, ge=1)
+    # Sent as `max_tokens` on every request — REQUIRED, not optional, unlike the paid frontier
+    # lane (which is fast enough that an uncapped reply is merely more expensive). At colibrì's
+    # self-reported 0.05-1.06 tok/s, an uncapped reply can run past queue_timeout_seconds itself
+    # (observed live 2026-07-11: a real cockpit turn with no max_tokens set blew past a 900s
+    # queue_timeout_seconds and surfaced as an opaque "could not reach" transport error, not a
+    # clear timeout). Default kept low on purpose — see docs/MASTER.md "Local frontier lane".
+    max_output_tokens: int = Field(default=200, ge=1)
+
+
+class LocalFrontierProvidersConfig(Strict):
+    schema_version: str
+    enabled: bool = False                # OFF by default — fail closed, same as the router lane
+    providers: dict[str, LocalFrontierProvider]
+    models: dict[str, LocalFrontierModel]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.local-frontier-providers.v1":
+            raise ValueError(
+                "schema_version must be command-center.local-frontier-providers.v1")
+        if not self.providers:
+            raise ValueError("local frontier config must define at least one provider")
+        for model_id, spec in self.models.items():
+            if spec.provider not in self.providers:
+                raise ValueError(
+                    f"local frontier model {model_id!r} references unknown provider {spec.provider!r}")
+        return self
+
+
 # ---- framework-evals.yaml --------------------------------------------------
 # External code-eval frameworks (EvalPlus, BigCodeBench) as SUPPORTING evidence only — the
 # `trust` Literal makes "this can promote a model" unrepresentable. They run against the local
@@ -911,6 +1080,11 @@ _KANBAN_GRANTABLE_VERBS = frozenset({
 _KANBAN_WALL_VERBS = frozenset({
     "approve_card", "merge", "deploy", "delete_card", "delete_board",
 })
+# The recognised per-card mission-dependency fields (Cline-style dependency chains).
+# `blocked_by`: mission ids that must finish before this card may start. `unblocks`:
+# the inverse edge, for surfacing. A board opts in via KanbanBoardSpec.dependency_fields;
+# they are OPTIONAL per card (never in required_fields) and carry no approval authority.
+_KANBAN_CARD_DEPENDENCY_FIELDS = frozenset({"blocked_by", "unblocks"})
 
 
 class KanbanBoardSpec(Strict):
@@ -924,6 +1098,10 @@ class KanbanBoardSpec(Strict):
     allowed_agent_verbs: list[str]
     forbidden_agent_verbs: list[str]
     blockers: list[str] = Field(default_factory=list)
+    # Optional per-card mission-dependency fields this board supports (blocked_by / unblocks).
+    # Empty = the board has no dependency chains. These are optional per card and must NOT
+    # be listed in required_fields (a card without dependencies is valid).
+    dependency_fields: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _checks(self):
@@ -963,6 +1141,24 @@ class KanbanBoardSpec(Strict):
             raise ValueError(f"kanban board {self.board_id!r} must declare required_fields")
         if len(self.required_fields) != len(set(self.required_fields)):
             raise ValueError(f"kanban board {self.board_id!r} has duplicate required_fields")
+        # dependency_fields: recognised, de-duplicated, and OPTIONAL (never required) —
+        # a mission with no dependencies is valid, so requiring the field would be wrong.
+        dep = set(self.dependency_fields)
+        if len(self.dependency_fields) != len(dep):
+            raise ValueError(f"kanban board {self.board_id!r} has duplicate dependency_fields")
+        unknown_dep = dep - _KANBAN_CARD_DEPENDENCY_FIELDS
+        if unknown_dep:
+            raise ValueError(
+                f"kanban board {self.board_id!r} dependency_fields may only be "
+                f"{sorted(_KANBAN_CARD_DEPENDENCY_FIELDS)}; got: {sorted(unknown_dep)}"
+            )
+        required_dep = dep & set(self.required_fields)
+        if required_dep:
+            raise ValueError(
+                f"kanban board {self.board_id!r} dependency_fields {sorted(required_dep)} "
+                "must stay optional; a card without dependencies is valid, so they cannot "
+                "be in required_fields"
+            )
         # verb contract: allowed/forbidden disjoint; wall verbs always forbidden;
         # allowed may only be grantable verbs (never the wall verbs).
         allowed = set(self.allowed_agent_verbs)
@@ -1002,6 +1198,118 @@ class KanbanBoardsConfig(Strict):
         board_ids = [b.board_id for b in self.boards]
         if len(board_ids) != len(set(board_ids)):
             raise ValueError("duplicate kanban board_ids")
+        return self
+
+
+# ---- domain_surfaces.yaml ---------------------------------------------------
+# Typed cockpit surfaces: each domain renders its objects with its own card
+# grammar in agent_kanban_ui (jobs look like jobs, posts preview like posts).
+# A domain BINDS to a data source — a registry board's internal card store, the
+# Ledger's missions, or committed demo fixtures — and lists the governed verbs
+# its cards may offer. The wall is the same wall as kanban boards: no domain may
+# offer approve/merge/deploy/delete, and the validator enforces it structurally.
+_DOMAIN_SOURCES = ("board_store", "ledger_missions", "fixtures",
+                   "appflowy_board")
+_DOMAIN_CARD_COMPONENTS = frozenset({
+    "job_application", "linkedin_post", "book", "paper", "repo", "dag",
+    "machine_upkeep", "mission", "generic_task",
+})
+_DOMAIN_FIELD_KINDS = ("text", "badge", "score", "money", "url", "datetime",
+                       "markdown", "list", "progress")
+
+
+class DomainFieldSpec(Strict):
+    name: str
+    label: str
+    kind: Literal["text", "badge", "score", "money", "url", "datetime",
+                  "markdown", "list", "progress"] = "text"
+
+
+class DomainEmptyState(Strict):
+    title: str
+    hint: str
+    command: str | None = None   # the exact cc command that fills this surface
+
+
+class DomainSurfaceSpec(Strict):
+    domain_id: str
+    title: str
+    card_component: str
+    source: Literal["board_store", "ledger_missions", "fixtures",
+                    "appflowy_board"]
+    board_id: str | None = None          # required iff source == board_store
+    # required iff source == appflowy_board: the snapshot board name — a
+    # READ-ONLY projection of the worker's board-snapshot.json (no writes)
+    board: str | None = None
+    columns: list[str] = Field(default_factory=list)
+    column_actions: dict[str, str] = Field(default_factory=dict)
+    summary_fields: list[DomainFieldSpec] = Field(default_factory=list)
+    drawer_fields: list[DomainFieldSpec] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
+    empty_state: DomainEmptyState
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.domain_id):
+            raise ValueError(f"domain_id {self.domain_id!r} must be a stable id")
+        if self.card_component not in _DOMAIN_CARD_COMPONENTS:
+            raise ValueError(
+                f"domain {self.domain_id!r} card_component must be one of "
+                f"{sorted(_DOMAIN_CARD_COMPONENTS)}; got {self.card_component!r}")
+        if self.source == "board_store" and not self.board_id:
+            raise ValueError(
+                f"domain {self.domain_id!r} with source board_store needs board_id")
+        if self.source != "board_store" and self.board_id:
+            raise ValueError(
+                f"domain {self.domain_id!r} board_id only applies to board_store")
+        if self.source == "appflowy_board" and not self.board:
+            raise ValueError(
+                f"domain {self.domain_id!r} with source appflowy_board needs "
+                f"board (the snapshot board name)")
+        if self.source != "appflowy_board" and self.board:
+            raise ValueError(
+                f"domain {self.domain_id!r} board only applies to appflowy_board")
+        if len(self.columns) != len(set(self.columns)):
+            raise ValueError(f"domain {self.domain_id!r} has duplicate columns")
+        unknown_columns = set(self.column_actions) - set(self.columns)
+        if unknown_columns:
+            raise ValueError(
+                f"domain {self.domain_id!r} column_actions reference unknown "
+                f"column(s): {sorted(unknown_columns)}")
+        actions = set(self.allowed_actions)
+        if len(self.allowed_actions) != len(actions):
+            raise ValueError(f"domain {self.domain_id!r} has duplicate allowed_actions")
+        wall = actions & _KANBAN_WALL_VERBS
+        if wall:
+            raise ValueError(
+                f"domain {self.domain_id!r} may never offer wall verb(s): {sorted(wall)}")
+        ungrantable = actions - _KANBAN_GRANTABLE_VERBS
+        if ungrantable:
+            raise ValueError(
+                f"domain {self.domain_id!r} allowed_actions may only grant "
+                f"{sorted(_KANBAN_GRANTABLE_VERBS)}; got: {sorted(ungrantable)}")
+        bad_column_actions = {
+            column: action for column, action in self.column_actions.items()
+            if action not in _KANBAN_GRANTABLE_VERBS
+        }
+        if bad_column_actions:
+            raise ValueError(
+                f"domain {self.domain_id!r} column_actions may only use grantable "
+                f"kanban verbs; got: {bad_column_actions}")
+        return self
+
+
+class DomainSurfacesConfig(Strict):
+    schema_version: str
+    domains: list[DomainSurfaceSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if self.schema_version != "command-center.domain-surfaces.v1":
+            raise ValueError("schema_version must be command-center.domain-surfaces.v1")
+        ids = [d.domain_id for d in self.domains]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate domain_ids")
         return self
 
 
@@ -1557,7 +1865,7 @@ class EvalCase(Strict):
 # SUITE. Implementers can read this REF (id/category/description) but NOT the suite
 # CONTENT — the inputs and expected answers live under `source`, an access-controlled
 # path the verifier/eval-service reads and the implementer's harness does not. This is
-# filesystem SEPARATION, not cryptographic secrecy (see docs/independent-verification.md).
+# filesystem SEPARATION, not cryptographic secrecy (see docs/improvement/independent-verification.md).
 class EvalSuiteRef(Strict):
     id: str
     category: Literal["sealed", "adversarial", "historical", "rotating",
@@ -1647,7 +1955,7 @@ class UIConfig(Strict):
 # is an inline literal — and the cadence is data-derived (the Phase-3 learner in
 # command_center.kanban.tuning takes over from these defaults once it beats them
 # on logged outcomes, abstaining below `tuning.min_decisions`). See
-# docs/backend/projects/AGENT_KANBAN_SURFACE.md.
+# docs/kanban/AGENT_KANBAN_SURFACE.md.
 BoardName = Literal["mission_intake", "todos", "missions"]
 
 

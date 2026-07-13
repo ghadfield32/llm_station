@@ -155,6 +155,13 @@ health:  ## Check every service health endpoint
 	@for s in "litellm:4000/health/liveliness" "judge-gate:8088/health" "ledger:$(LEDGER_HOST_PORT)/health"; do \
 	  n=$${s%%:*}; p=$${s#*:}; printf "%-12s " $$n; curl -fsS http://localhost:$$p >/dev/null 2>&1 && echo OK || echo DOWN; done
 
+agent-worker-health:  ## Scripted deployment proof: host worker reachable directly AND from inside the deployed cockpit container via host.docker.internal.
+	@printf "%-28s " "host-worker (direct)"; curl -fsS http://127.0.0.1:$${AGENT_WORKER_PORT:-8791}/health >/dev/null 2>&1 && echo OK || echo "DOWN (start with: .\\scripts\\start_agent_worker.ps1 start)"
+	@printf "%-28s " "cockpit -> host-worker"; \
+	docker compose exec -T agent-kanban-ui python -c \
+	  "import httpx,sys; r=httpx.get('http://host.docker.internal:$${AGENT_WORKER_PORT:-8791}/health', timeout=5); sys.exit(0 if r.status_code==200 else 1)" \
+	  >/dev/null 2>&1 && echo OK || echo "DOWN (is the agent-kanban-ui container running? docker compose --profile ui up -d agent-kanban-ui)"
+
 models:  ## Validate+render, pull local tags, restart litellm
 	@$(MAKE) render
 	@for t in $$($(PY) -c "import yaml; print(' '.join(yaml.safe_load(open('configs/models.yaml')).get('local_whitelist',[])))"); do echo "ollama pull $$t"; OLLAMA_HOST=$(OLLAMA_HOST) ollama pull $$t || echo "(skip $$t)"; done
@@ -208,6 +215,15 @@ frontier-router-price-audit:  ## Flag stale frontier-router provider prices (nev
 frontier-router-egress-check:  ## Forbidden-providers check in EGRESS mode (permits budgeted router keys; local lane stays strict).
 	@$(PY) -m command_center.cli.check_forbidden_providers --allow-frontier-router-egress
 
+agent-session-egress-check:  ## Forbidden-providers check in AGENT-SESSION EGRESS mode (permits ANTHROPIC/OPENAI keys only if configs/agent-session-budgets.yaml enables a harness; local lane + frontier lane stay strict).
+	@$(PY) -m command_center.cli.check_forbidden_providers --allow-agent-session-egress
+
+frontier-router-benchmark:  ## Continual top-3 KPI check (configs/model-benchmarks.yaml suite vs frontier candidates). SUITE= LIVE=1 for real calls (spends money if the lane is enabled).
+	@$(PY) -m command_center.improvement.frontier_benchmark --suite $(or $(SUITE),chat) $(if $(LIVE),--live,)
+
+colibri-benchmark:  ## Continual KPI check for the local-frontier lane (configs/model-benchmarks.yaml suite vs colibrì). SUITE= LIVE=1 for real calls (no $ cost, but can take minutes-to-hours). MAX_CASES= caps cases/candidate (default 3).
+	@$(PY) -m command_center.improvement.local_frontier_benchmark --suite $(or $(SUITE),chat) $(if $(LIVE),--live,) --max-cases $(or $(MAX_CASES),3)
+
 model-fit:  ## Which installed Ollama models fit the GPU budget. CTX= MODEL= ENV= VRAM=
 	@$(PY) -m command_center.cli.model_fit $(if $(CTX),--ctx $(CTX),) $(if $(MODEL),--model $(MODEL),) $(if $(ENV),--env $(ENV),) $(if $(VRAM),--vram-gb $(VRAM),)
 
@@ -235,8 +251,8 @@ repo-install:  ## Install hooks + devcontainer + standards into a repo. REPO=/pa
 	@$(PY) -m command_center.cli.render_standards $(or $(PROFILE),python_ml_pipeline) "$(REPO)"
 	@echo "installed into $(REPO) — run 'cd $(REPO) && pre-commit install'"
 
-backup:  ## restic snapshot (see docs/SETUP-FROM-SCRATCH.md, Backups)
-	@echo "wire to your restic repo (see docs/SETUP-FROM-SCRATCH.md, Backups section)"
+backup:  ## restic snapshot (see docs/setup/SETUP-FROM-SCRATCH.md, Backups)
+	@echo "wire to your restic repo (see docs/setup/SETUP-FROM-SCRATCH.md, Backups section)"
 
 restore-drill:  ## Restore latest backup to temp + diff (schedule monthly)
 	@echo "restore into /tmp/restore-drill and diff"

@@ -7,7 +7,11 @@ schema_version: command-center.frontier-router-budgets.v1
 # enabled budget without usage accounting + human approval for live repo context.
 
 default:
-  enabled: false
+  # 2026-07-10: enabled by Geoff's explicit request (OPENROUTER_API_KEY set in
+  # .env) to test cost/latency/correctness/turns for the top-3 frontier pick
+  # (GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6). Caps below are unchanged from the
+  # original design — reduce them here first if real spend needs a tighter leash.
+  enabled: true
   monthly_cap_usd: 10.00
   per_run_cap_usd: 1.00
   per_request_cap_usd: 0.25
@@ -23,6 +27,10 @@ allowed_task_classes:
   - long_context_comparison
   - local_failure_fallback
   - external_framework_calibration
+  # A human explicitly picked a frontier model in the cockpit Chat model dropdown for one
+  # conversation turn — never an autonomous escalation. Same redaction/budget/usage gates as
+  # every other task class; require_human_approval_for_live_repo_context still applies.
+  - cockpit_chat_manual_select
 
 # Payload classes that must NEVER be sent to a paid provider (enforced before any call).
 blocked_payloads:

@@ -13,7 +13,7 @@ Env:
   WHATSAPP_ALLOWED_NUMBERS    (optional, comma-separated E.164 senders; empty = all)
   WHATSAPP_WEBHOOK_HOST        (default 0.0.0.0)
   WHATSAPP_WEBHOOK_PORT        (default 8080)
-See docs/channels.md for the Meta app + webhook + tunnel steps.
+See docs/architecture/channels.md for the Meta app + webhook + tunnel steps.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ async def run(spec) -> None:
     if missing:
         raise SystemExit(
             f"whatsapp: missing {', '.join(missing)} - set up a Meta app with the "
-            "WhatsApp product and copy its tokens into .env. See docs/channels.md")
+            "WhatsApp product and copy its tokens into .env. See docs/architecture/channels.md")
     raw = e.get("WHATSAPP_ALLOWED_NUMBERS", "")
     allowed = {n.strip() for n in raw.split(",") if n.strip()}
     host = e.get("WHATSAPP_WEBHOOK_HOST", "0.0.0.0")

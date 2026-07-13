@@ -282,7 +282,7 @@ desktop_noop_canaries:
     evidence_policy: redacted_json_only
     screenshot_policy: none
     redaction_policy: no_raw_content_no_secrets_no_clipboard
-    human_takeover_policy_ref: docs/desktop-timeout-takeover-policy.md
+    human_takeover_policy_ref: docs/desktop/desktop-timeout-takeover-policy.md
     measurement_fields:
       - snapshot_load_ms
       - target_verify_ms
@@ -338,7 +338,7 @@ desktop_action_latency_canaries:
       - action_roundtrip_ms
     evidence_policy: redacted_json_only
     redaction_policy: no_raw_content_no_secrets_no_clipboard
-    human_takeover_policy_ref: docs/desktop-timeout-takeover-policy.md
+    human_takeover_policy_ref: docs/desktop/desktop-timeout-takeover-policy.md
     production_enabling: false
     blockers: []
 

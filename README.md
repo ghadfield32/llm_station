@@ -9,9 +9,9 @@ Kept **lean on purpose** — a command center, not an enterprise platform. The t
 it repeatable and hard to break is a **typed contract layer**: every editable config validates
 against a Pydantic model before it can do anything ([the idea, in five lines](#the-contract-model)).
 
-> **Deep docs:** [`docs/SETUP-FROM-SCRATCH.md`](docs/SETUP-FROM-SCRATCH.md) is the annotated cold-start ·
+> **Deep docs:** [`docs/setup/SETUP-FROM-SCRATCH.md`](docs/setup/SETUP-FROM-SCRATCH.md) is the annotated cold-start ·
 > [`docs/MASTER.md`](docs/MASTER.md) is the full system guide (every pipeline, the module tree, the change log) ·
-> [`docs/STATUS.md`](docs/STATUS.md) tracks live progress. This README gets you **built and chatting**; those cover everything else.
+> [`docs/operations/STATUS.md`](docs/operations/STATUS.md) tracks live progress. This README gets you **built and chatting**; those cover everything else.
 
 ---
 
@@ -84,6 +84,44 @@ sign up a user, put the creds in `appflowy_kanban/growth-os/.env`, and run `setu
 `appflowy-init` uses AppFlowy's shipped localhost defaults — fine for local/tailnet; **rotate the
 secrets before any public exposure**.
 
+### 5 — Cockpit on desktop and phone
+
+The first-party cockpit is the main product surface now; AppFlowy is optional
+projection/fallback. Start it with:
+
+```bash
+docker compose --profile ui up -d --build agent-kanban-ui
+```
+
+Local desktop URL:
+
+```text
+http://127.0.0.1:8787
+```
+
+Private phone/laptop URL over Tailscale Serve (the hostname is *your*
+machine's tailnet name — find it with `tailscale status`; on this deployment
+it is `vengeance.taile6a055.ts.net`):
+
+```text
+https://<your-machine>.<your-tailnet>.ts.net:8787/
+```
+
+Install it from the browser as a PWA named **Kanban**. The main nav is **All
+Boards** plus **Controls**: All Boards contains Jobs, Posts, Books, Papers,
+Repos, DAGs, Upkeep, Missions, and Tasks; Controls exposes runtime APIs, the
+board registry, editable All Boards schema, job-search daily limits/role-focus
+overrides, and profile defaults. The Chat tab uses **GatewayCore + LiteLLM**
+as the active runtime and can reopen shared recent thread shortcuts by
+conversation id on desktop and phone. Phone layouts use contained top-scroll
+strips with momentum scrolling for wide tabs, lanes, and chat shortcuts.
+Optional specialist handoff links can be configured with
+`ORCA_CHAT_URL`, `OMNIAGENT_CHAT_URL`/`OMNIGENT_CHAT_URL`, and
+`OXYGENT_CHAT_URL`; ORCA is the best first pilot for document/PDF job
+materials, OmniAgent is a later video/audio specialist, and OxyGent remains a
+framework watch-list item rather than a dependency. Details:
+[`docs/setup/COCKPIT_QUICKSTART.md`](docs/setup/COCKPIT_QUICKSTART.md).
+
 ---
 
 ## Ways to run it
@@ -111,7 +149,7 @@ So: use **`cc start` for the first boot**, then **`docker compose up -d` / `cc u
 The portable `cc` command also adds conveniences the raw compose file can't: `cc open` (open the
 dashboards), `cc channel <name>` (guided channel setup), `cc start --appflowy`/`--hermes`. Run
 `uv run cc help` for the full list. The **Hermes** UI is opt-in (`cc start --hermes`) and currently a
-placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/STATUS.md)).
+placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/operations/STATUS.md)).
 
 ---
 
@@ -240,15 +278,15 @@ The full system — every pipeline stage, the module tree, model lanes, and the 
   out-of-scope rewrites) — not legitimate boundary validation.
 - **Standards everywhere.** `configs/standards.yaml` renders into `CLAUDE.md`/`AGENTS.md` for each
   onboarded repo and is mounted into Judge Gate — executors get the same rules your judges enforce.
-- **The GitHub wall** ([`docs/github-safety.md`](docs/github-safety.md)). branch protection, scoped
+- **The GitHub wall** ([`docs/github/github-safety.md`](docs/github/github-safety.md)). branch protection, scoped
   PAT → GitHub App, required CI, CODEOWNERS, human-gated deploy. The agent can push a feature branch
   and open a PR; it can **never** merge/deploy/publish.
 - **Security.** LiteLLM is pinned by **digest** (not pip — the March 2026 PyPI compromise); virtual
   keys are scoped + budgeted; `.env` never enters a sandbox.
 
-More surfaces: [`docs/ui-options.md`](docs/ui-options.md) (phone, CLI, VS Code Remote Tunnel,
-dashboards) · [`docs/channels.md`](docs/channels.md) (per-platform token steps) ·
-[`docs/kanban-integration.md`](docs/kanban-integration.md) (AppFlowy cards → Ledger missions).
+More surfaces: [`docs/architecture/ui-options.md`](docs/architecture/ui-options.md) (phone, CLI, VS Code Remote Tunnel,
+dashboards) · [`docs/architecture/channels.md`](docs/architecture/channels.md) (per-platform token steps) ·
+[`docs/kanban/kanban-integration.md`](docs/kanban/kanban-integration.md) (AppFlowy cards → Ledger missions).
 
 ---
 
@@ -262,7 +300,7 @@ dashboards) · [`docs/channels.md`](docs/channels.md) (per-platform token steps)
 - You pay only **your own electricity/hardware**.
 
 The only *optional* recurring cost is a **VPS (~$5–12/mo)** if you later want an always-on "brain"
-that stays up when your workstation/4090 sleep (Phase 1 in [SETUP-FROM-SCRATCH](docs/SETUP-FROM-SCRATCH.md)).
+that stays up when your workstation/4090 sleep (Phase 1 in [SETUP-FROM-SCRATCH](docs/setup/SETUP-FROM-SCRATCH.md)).
 Not required — skip it and run on one machine.
 
 ---
