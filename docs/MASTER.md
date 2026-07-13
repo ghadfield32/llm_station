@@ -330,26 +330,49 @@ The config files and their contracts:
 
 | Machine | Role | Why it's here |
 |---------|------|---------------|
-| **VPS** ($5–12/mo, 2 vCPU / 4 GB) | always-on brain | Must be up when the house, 4090, and 5080 are all off. The load-bearing decision — the brain can't live on hardware that sleeps. |
-| **RTX 4090 desktop** | heavy worker + local model tier | Runs DAGs/CV, the git worktrees agents edit, and the free local models (Qwen/Devstral) for triage and cheap judging. |
-| **RTX 5080 laptop** | human workstation | VS Code Remote Tunnel into the 4090's worktree; dashboards. You drive; the agent works. |
-| **Pi / mini-PC** (optional) | home relay only | Wake-on-LAN for the 4090, watchdog, backup mirror. Skip unless needed; a mini-PC beats a Pi at 2026 prices. |
+| **RTX 4090 desktop** | current always-on control plane + heavy worker + local model tier | Runs Command Center, Betts DAGs/CV, the git worktrees agents edit, and the free local models (Qwen/Devstral). |
+| **RTX 5080 laptop** | portable human/dev/candidate lane | Interviews, VS Code/Tailscale into the 4090, dashboards, live/sample CV, and bounded 16 GB-fit experiments; never a household availability dependency. |
+| **Life Center host** (planned) | stationary storage + household applications | Separate four-bay data plane; current purchase default is a 12 TB-class mirror plus appdata NVMe, separate backup, UPS, and stable home services—not an AI worker. |
+| **VPS** (deferred optional) | future off-home control plane only if a measured need appears | Revisit for 24/7 response while the desktop is off, off-home hosting, or a required public webhook; not part of current Option C. |
+
+The verified hardware, workload split, reliability gates, and planned separate
+Life Center/storage host are recorded in
+[`operations/HARDWARE_AND_LIFE_CENTER_PLAN.md`](operations/HARDWARE_AND_LIFE_CENTER_PLAN.md).
+That decision keeps the always-on 4090 desktop as the current Betts/CV/model
+worker and keeps the mobile 5080 laptop out of every household availability
+dependency. The desktop's failed memory was replaced with new DDR5 and is
+operator-tested as reliable. The Life Center's mandatory security, recovery,
+agent-authority, and data-admission gates are in
+[`operations/LIFE_CENTER_SECURITY_BASELINE.md`](operations/LIFE_CENTER_SECURITY_BASELINE.md).
+The design is adopted, but no Life Center hardware, private infrastructure
+repository, service, backup target, or security gate is yet recorded as
+implemented. The measured desktop baseline and provisional Gate 0 purchasing
+decision are in
+[`operations/LIFE_CENTER_GATE0.md`](operations/LIFE_CENTER_GATE0.md); Gate 0
+identifies the `SAX1V1R` Spectrum router and its separate-modem path, selects one
+UDR7 as the initial replacement, registers daily aggregate-only growth tracking,
+and defines initial recovery targets. The confirmed service is Internet Ultra
+at 600 Mb/s advertised download. The selected layout keeps the Life Center,
+modem, UDR7, and UPS in the upstairs office with one direct Cat6 2.5 GbE run to
+the downstairs desktop; no initial switch or extra access point is required. It
+remains open on cable/noise acceptance, the 30-day growth result, exact
+server-platform SKUs, and purchase-day validation.
 
 The brain reaches the muscle over a **Tailscale private mesh** — no public
 SSH, no public dashboards. All web UIs bind to 127.0.0.1 and are reached over
 Tailscale. Nothing is public unless you deliberately add Caddy + Cloudflare
 Access (on the do-not-build list by default).
 
-> **Current state (2026-06-12):** everything still runs on the Windows
-> workstation; the VPS/4090 split and the Linux migration
-> (`growth-os/deploy/linux/MIGRATION.md`) are the standing next steps when the
-> prod box revives.
+> **Current state (2026-07-13):** `llm_station` runs on the Windows RTX 4090
+> desktop and is reached over Tailscale. The separate Life Center is a planned
+> data/application host. A VPS is deferred unless the explicit needs above
+> materialize.
 
 ---
 
 ## 4. Architecture — what runs where
 
-### The control plane (Docker Compose, on the VPS / currently local)
+### The control plane (Docker Compose, currently on the desktop; VPS deferred)
 
 | Service | Job |
 |---|---|
@@ -2711,6 +2734,9 @@ superseded them; kept for history, not as current behavior.
 | [operations/OPERATOR_COMMANDS.md](operations/OPERATOR_COMMANDS.md) | the 7-command friendly wrapper cheat sheet (`cc setup`/`onboard`/`operate`/`improve`/`demo`) |
 | [operations/RUNNING_DAILY_SELF_IMPROVEMENT.md](operations/RUNNING_DAILY_SELF_IMPROVEMENT.md) | how to run/schedule the observer-only daily self-improvement scan |
 | [operations/remote-access.md](operations/remote-access.md) | the Option-C (desktop + Tailscale, no VPS) remote-access design |
+| [operations/HARDWARE_AND_LIFE_CENTER_PLAN.md](operations/HARDWARE_AND_LIFE_CENTER_PLAN.md) | verified desktop/laptop inventory, workload ownership, hardware-health gates, and the separate Life Center boundary |
+| [operations/LIFE_CENTER_SECURITY_BASELINE.md](operations/LIFE_CENTER_SECURITY_BASELINE.md) | mandatory Life Center threat model, least-privilege controls, recovery rules, agent authority tiers, and deployment/data-admission gates |
+| [operations/LIFE_CENTER_GATE0.md](operations/LIFE_CENTER_GATE0.md) | measured desktop capacity baseline, router findings, provisional chassis/drive/backup/UPS choices, budget, and remaining Gate 0 exits |
 | [operations/STATUS.md](operations/STATUS.md) | done / in-progress / TODO-in-order — the multi-session work tracker |
 
 **`architecture/` — how the system is built**
