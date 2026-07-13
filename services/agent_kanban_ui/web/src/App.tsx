@@ -23,8 +23,8 @@ import {
   reclassifyJobApplications, ReclassifyResult, bulkSelectSuggested,
   AgentEvent, AgentHarnessOption, AgentSessionRecord, AgentModelOption,
   closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
-  fetchAgentSession, fetchHarnessModels, interruptAgentSession, resolveAgentApproval,
-  resumeAgentSession, sendAgentMessage, streamAgentEvents,
+  fetchAgentSession, fetchHarnessModels, interruptAgentSession, promoteAgentSession,
+  resolveAgentApproval, resumeAgentSession, sendAgentMessage, streamAgentEvents,
   UsageStatus, UsageLimit, CollectorHealth,
   fetchModelUsage, fetchCollectorHealth, refreshModelUsage,
 } from "./api";
@@ -3173,6 +3173,9 @@ type ChatThread = {
   agentMode?: string;
   agentPermissionProfile?: string;
   agentLastSeenSequence?: number;
+  // Set once the user elects "Track as mission" — the OPTIONAL governance
+  // wrapper. Local-only; the mission itself lives in the Ledger (id `T-…`).
+  missionId?: string;
 };
 const CHAT_THREADS_KEY = "agent-kanban-cockpit.chatThreads.v1";
 const ACTIVE_THREAD_KEY = "agent-kanban-cockpit.activeThread.v1";
@@ -3374,6 +3377,9 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
   const [models, setModels] = useState<AgentModelOption[]>([]);
   const [model, setModel] = useState<string>("");
   const [effort, setEffort] = useState<string>("");
+  // "Track as mission" — the OPTIONAL governance wrapper. Set once promoted.
+  const [missionId, setMissionId] = useState<string | null>(thread?.missionId ?? null);
+  const [promoting, setPromoting] = useState(false);
   const sessionIdRef = useRef(sessionId);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   const closeStreamRef = useRef<(() => void) | null>(null);
@@ -3509,6 +3515,18 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
       setRecord(await fetchAgentSession(sessionId));
     } catch (e) { setError((e as Error).message); }
   }
+  // Track this read-only session as a Ledger mission — reuses the SAME session
+  // (no restart) and grants no writes. Records the mission id on the thread.
+  async function doPromote() {
+    if (!sessionId || missionId || promoting) return;
+    setPromoting(true); setError(null);
+    try {
+      const res = await promoteAgentSession(sessionId);
+      setMissionId(res.mission_id);
+      onThreadChange({ missionId: res.mission_id });
+    } catch (e) { setError((e as Error).message); }
+    finally { setPromoting(false); }
+  }
 
   const harness = harnesses?.find((h) => h.harness_id === harnessId);
   const pending = pendingApprovalsOf(events);
@@ -3592,6 +3610,16 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
           </span>
         )}
         <div className="chat-header-right">
+          {missionId ? (
+            <span className="usage-badge muted" title="This conversation is tracked as a Ledger mission">
+              tracked · {missionId}
+            </span>
+          ) : (
+            <button className="clear" onClick={() => void doPromote()} disabled={promoting}
+              title="Track this conversation as a mission — optional governance/tracking, no writes, keeps the same session">
+              {promoting ? "tracking…" : "track as mission"}
+            </button>
+          )}
           {(status === "idle" || status === "active") && (
             <button className="clear" onClick={() => void doInterrupt()}>interrupt</button>
           )}
