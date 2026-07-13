@@ -142,3 +142,60 @@ def test_permalink_unknown_item_is_404(monkeypatch):
     _mod, client = _load(monkeypatch)
     assert client.get("/api/work/never-seen/resolve").status_code == 404
     assert client.get("/work/never-seen", follow_redirects=False).status_code == 404
+
+
+# ── chat creation (preview / commit) ──────────────────────────────────────────
+
+def _plan():
+    return {"conversation_id": "chat-1", "capture_batch_id": "b1",
+            "items": [
+                {"ref": "feas", "title": "CV feasibility", "kind": "research",
+                 "primary_board": {"board_id": "basketball_cv",
+                                   "domain_id": "basketball_cv"},
+                 "secondary_boards": [{"board_id": "research",
+                                       "domain_id": "research"}]},
+                {"ref": "lic", "title": "Licensing", "kind": "research",
+                 "primary_board": {"board_id": "research", "domain_id": "research"}}],
+            "edges": [{"from_ref": "lic", "to_ref": "feas", "relation": "blocks"}]}
+
+
+def test_chat_preview_is_side_effect_free(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    r = client.post("/api/chat/work-items/preview", json=_plan())
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["preview"] is True
+    assert len(body["created"]) == 2
+    # nothing persisted — the real graph is still empty
+    assert client.get("/api/work-items").json() == []
+
+
+def test_chat_commit_creates_connected_work_with_links(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    r = client.post("/api/chat/work-items/commit", json=_plan())
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["preview"] is False
+    assert len(client.get("/api/work-items").json()) == 2   # two canonical items
+    feas = next(c for c in body["created"] if c["work_item"]["title"] == "CV feasibility")
+    assert feas["primary_placement"]["board_id"] == "basketball_cv"
+    assert {lk["kind"] for lk in feas["links"]} >= {"graph", "board"}
+    # the returned task permalink actually resolves
+    wid = feas["work_item"]["work_item_id"]
+    assert client.get(f"/api/work/{wid}/resolve").status_code == 200
+
+
+def test_chat_commit_rejects_cycle_atomically(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    bad = {"conversation_id": "c1",
+           "items": [{"ref": "a", "title": "A"}, {"ref": "b", "title": "B"}],
+           "edges": [{"from_ref": "a", "to_ref": "b", "relation": "blocks"},
+                     {"from_ref": "b", "to_ref": "a", "relation": "blocks"}]}
+    assert client.post("/api/chat/work-items/commit", json=bad).status_code == 409
+    assert client.get("/api/work-items").json() == []       # nothing written
+
+
+def test_chat_endpoints_disabled_is_503(monkeypatch):
+    _mod, client = _load(monkeypatch, enabled=False)
+    assert client.post("/api/chat/work-items/preview", json=_plan()).status_code == 503
+    assert client.post("/api/chat/work-items/commit", json=_plan()).status_code == 503

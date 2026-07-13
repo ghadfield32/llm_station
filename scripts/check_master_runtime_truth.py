@@ -28,6 +28,7 @@ REQUIRED_SECTIONS = (
     "### 4.5",                        # the agent lane
     "### 4.6",                        # unified Usage & Limits
     "### 4.8",                        # chat-first product surface + Universal Capture
+    "### 4.9",                        # canonical work graph + navigation receipts
     "## 5. Model lanes and routing",
     "## 11. Module tree",
     "## 14. Change log",
@@ -46,6 +47,10 @@ REQUIRED_FILES = (
     ("docs/runbooks/agent-sessions-activation.md", "agent-sessions-activation.md"),
     # Universal Capture (PR #44) — the intake record MASTER §4.8 documents.
     ("src/command_center/intake/schemas.py", "src/command_center/intake/"),
+    # Canonical work graph (§4.9, PRs #48/#50/#51 + chat receipts).
+    ("src/command_center/work_graph/schemas.py", "work_graph/schemas.py"),
+    ("src/command_center/work_graph/ledger_schema.py", "work_graph/ledger_schema.py"),
+    ("src/command_center/work_graph/planner.py", "work_graph/planner.py"),
 )
 
 # claims that were true once and would now be a lie — must never reappear
@@ -69,6 +74,10 @@ REQUIRED_ENDPOINTS = (
     ("/api/board-module", ("services/agent_kanban_ui/app.py",)),
     ("/api/captures", ("services/agent_kanban_ui/app.py",)),
     ("/api/intake/inbox", ("services/agent_kanban_ui/app.py",)),
+    # canonical work graph (§4.9) — documented AND implemented.
+    ("/api/work-graph", ("services/agent_kanban_ui/app.py",)),
+    ("/api/chat/work-items/preview", ("services/agent_kanban_ui/app.py",)),
+    ("/api/chat/work-items/commit", ("services/agent_kanban_ui/app.py",)),
 )
 
 

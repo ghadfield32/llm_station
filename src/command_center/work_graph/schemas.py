@@ -127,3 +127,75 @@ class PermalinkResolution(BaseModel):
     canonical_status: CanonicalStatus
     target: ResourceLink                 # the one place to land
     links: list[ResourceLink] = Field(default_factory=list)
+
+
+# ── Chat mutation receipts ────────────────────────────────────────────────────
+# When Chat (or Capture) turns an idea into work, it returns STRUCTURED receipts,
+# not only prose: every created item carries its own clickable links so the
+# transcript stays navigable after reload. Summaries are the compact projections
+# the receipt embeds (the full objects live in the graph).
+
+class WorkItemSummary(BaseModel):
+    work_item_id: str
+    title: str
+    kind: WorkItemKind
+    canonical_status: CanonicalStatus
+    primary_board_id: str | None = None
+
+
+class WorkPlacementSummary(BaseModel):
+    placement_id: str
+    board_id: str
+    domain_id: str
+    is_primary: bool
+
+
+class WorkEdgeSummary(BaseModel):
+    edge_id: str
+    from_work_item_id: str
+    to_work_item_id: str
+    relation: WorkRelation
+    blocking: bool
+    reason: str | None = None
+
+
+class RoutingQuestion(BaseModel):
+    """A point where the router could not decide alone — surfaced for the human
+    to answer rather than guessed (populated by later classification phases)."""
+    ref: str
+    question: str
+    options: list[str] = Field(default_factory=list)
+
+
+class BoardSuggestion(BaseModel):
+    ref: str
+    board_id: str
+    reason: str
+
+
+class TaskCreationReceipt(BaseModel):
+    """The navigable result of creating ONE canonical work item: its summary, the
+    board placements it got, the edges it participates in, and backend-generated
+    links. warnings carry non-fatal notes (e.g. an item created with no board)."""
+    work_item: WorkItemSummary
+    primary_placement: WorkPlacementSummary | None = None
+    secondary_placements: list[WorkPlacementSummary] = Field(default_factory=list)
+    incoming_edges: list[WorkEdgeSummary] = Field(default_factory=list)
+    outgoing_edges: list[WorkEdgeSummary] = Field(default_factory=list)
+    links: list[ResourceLink] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TaskBatchReceipt(BaseModel):
+    """The result of committing (or previewing) a whole plan of connected work.
+    ``preview=True`` means NOTHING was persisted — the ids are provisional and the
+    graph is unchanged. linked_existing / needs_confirmation / board_suggestions
+    are populated by later classification+routing phases; empty here."""
+    conversation_id: str
+    capture_batch_id: str | None = None
+    preview: bool = False
+    created: list[TaskCreationReceipt] = Field(default_factory=list)
+    linked_existing: list[TaskCreationReceipt] = Field(default_factory=list)
+    needs_confirmation: list[RoutingQuestion] = Field(default_factory=list)
+    board_suggestions: list[BoardSuggestion] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

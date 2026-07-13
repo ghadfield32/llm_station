@@ -50,8 +50,26 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   (Pre-existing UNRELATED Windows flake: test_local_frontier_client live-usage
   test — 10ms MockTransport sleep < monotonic granularity → tokens_per_second
   None; not touched by this branch.)
-- NEXT: merge #40 + #48 + C-2 + permalink; structured Chat creation receipts
-  (TaskCreationReceipt/TaskBatchReceipt) so chat-created todos link back.
+- Phase E DONE (chat creation receipts): NEW `work_graph/planner.py`
+  `ChatWorkPlanner` + receipt/summary schemas (`TaskCreationReceipt`/
+  `TaskBatchReceipt`/`WorkItemSummary`/`WorkPlacementSummary`/`WorkEdgeSummary`/
+  `RoutingQuestion`/`BoardSuggestion`). Takes a STRUCTURED plan (items+placements+
+  edges) → connected work + navigable receipts (clickable links per item). Cockpit
+  `POST /api/chat/work-items/preview` (side-effect-free — validated in a sandbox
+  seeded from the real graph, provisional ids, nothing persisted) + `/commit`
+  (validates whole plan first → invalid plan writes NOTHING = atomic). Refs wire
+  edges (plan ref OR existing work_item_id). No free-text auto-routing (Phase G).
+  Planning only: creates no mission, no wall verb. Tests: 9 planner (preview
+  zero-side-effect, one-item-per-plan-item + multi-placement, cycle-atomic,
+  existing-ref edge, no-mission, empty/dup-ref reject) + 4 cockpit. MASTER §4.9 +
+  truth-check §4.9/files/endpoints + digest re-record.
+- MERGE STRANDING found+fixed 07-13: GitHub SQUASH-merged #50/#51 DOWN the stack
+  (into feat/work-graph & feat/work-graph-ledger), NOT to main; #48 still OPEN with
+  C-1+C-2 only → permalink stranded, nothing on main. Consolidated everything onto
+  `feat/work-graph-complete` (= feat/work-graph-ledger tree = C-1+C-2+permalink) +
+  Phase E; ONE PR → main; #48 to be closed as superseded.
+- NEXT: merge the consolidated PR; Work Map + Connected-Work drawer UI (Phase F);
+  capture→work conversion; classification/routing (Phase G).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

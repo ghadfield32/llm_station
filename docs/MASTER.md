@@ -824,6 +824,70 @@ agents still requires the host Agent Worker to be running and logged in (see §9
 
 ---
 
+### 4.9 Canonical work graph and navigation receipts — one task identity, many board views (PRs #48, #50, #51 + chat receipts)
+
+A todo that belongs to three boards is **one** durable `WorkItem` with three
+`WorkPlacement` projections — never three unrelated cards that can drift in
+title, status, or completion. This is the identity spine deep links, chat
+receipts, and the Work Map all hang off. `src/command_center/work_graph/` owns
+it; the Ledger owns the durable record.
+
+**Contracts (`work_graph/schemas.py`).** `WorkItem` (one `canonical_status`
+shared everywhere), `WorkPlacement` (a per-board projection; its
+`placement_stage` is board-local and NEVER contradicts the canonical status),
+`WorkEdge` (typed `WorkItem ↔ WorkItem` relation — board membership is a
+placement, never an edge), `WorkEvent` (append-only history), and
+`ResourceLink` (backend-generated navigation receipt; the browser renders
+`href` verbatim and never assembles route URLs). One primary board maximum;
+zero is allowed while an item sits in the Universal Inbox.
+
+**Cycle policy (`WorkGraphService`).** Blocking/structural relations
+(`blocks`, `parent_of`, `implements`, `supersedes`, `derived_from`) are
+kept **acyclic** — closing a cycle is rejected (409). Informational relations
+(`related_to`, `informs`, `supports`, `duplicates`) **may** cycle. Removing a
+placement soft-removes only that projection; the canonical item and its history
+survive. API: `POST/GET /api/work-items[/{id}[/links]]`, `…/status`,
+`…/placements[/{pid}]`, `POST/DELETE /api/work-edges[/{id}]`,
+`GET /api/work-graph[/{id}]`.
+
+**Durable persistence (PR #50).** `work_graph/ledger_schema.py` (`workgraph.v1`:
+`work_items`, `work_placements`, `work_edges`, `work_events`) + a byte-identical
+mirror in `services/ledger/app.py` (drift-tested) + `LedgerWorkGraphStore` — the
+same store surface as in-memory, so the service runs unchanged. Selected by
+`KANBAN_UI_WORKGRAPH_LEDGER=1`; the graph then survives a cockpit/worker restart
+(item ids are permanent enough for permalinks).
+
+**Stable permalinks (PR #51).** Every item has a durable route `GET /work/<id>`
+that 302-redirects into the SPA at the **backend-chosen** canonical target
+(primary board › any active board › Work Map) — the link survives a board move,
+a renamed board, or a removed projection. `GET /api/work/{id}/resolve` returns
+the target + full link receipt as JSON.
+
+**Chat creation receipts (`work_graph/planner.py`).** `ChatWorkPlanner` turns a
+**structured** plan (items + placements + typed edges) into connected work and
+returns a `TaskBatchReceipt` — every created item carries its own clickable
+`ResourceLink`s so the transcript stays navigable after reload.
+`POST /api/chat/work-items/preview` is **side-effect-free** (validated against a
+sandbox seeded from the real graph; provisional ids; nothing persisted);
+`POST /api/chat/work-items/commit` validates the whole plan first so an invalid
+plan (cycle, unknown ref) writes **nothing** — commit is atomic. Deliverable
+splitting / board auto-routing / duplicate detection from free text is a later
+phase: no evidence-backed calibration → **no silent auto-routing**. Creating
+work items/placements/edges is **planning, not a mission** — it starts no
+execution and touches no wall verb; writes still require the mission + lease +
+approval wall.
+
+**Readiness status.** Contracts + graph service + durable Ledger store +
+permalink resolver + chat receipts are **BUILT + HERMETIC_PROVEN**
+(`tests/test_work_graph*.py`, `tests/test_agent_kanban_ui_workgraph.py` — graph
+correctness, cycle policy, durability across restart, permalink resolution,
+preview-is-side-effect-free, commit atomicity, no-mission safety). Next phases:
+the Work Map + Connected-Work drawer UI, capture→work conversion, and
+classification/routing — none of which change the identity/placement/link
+contract above.
+
+---
+
 ## 5. Model lanes and routing
 
 LiteLLM is **local-only** in this repo. Every LiteLLM role renders to
@@ -3007,6 +3071,29 @@ The full version (with the no-defensive-coding and uv rules) lives in `CONTRIBUT
 
 Newest first. Dates are from the docs themselves; early entries predate the
 first commit and reconstruct the record git now preserves.
+
+### 2026-07-13 — Canonical work graph, durable persistence, permalinks, chat receipts (PRs #48, #50, #51 + Phase E)
+
+One task identity, many board views. Full detail in **§4.9**. BUILT +
+HERMETIC_PROVEN; consolidated into one PR → `main` (`feat/work-graph-complete`).
+
+- **PR #48 — canonical contracts + graph service.** `WorkItem` /
+  `WorkPlacement` / `WorkEdge` / `WorkEvent` / `ResourceLink`; one canonical
+  status projected onto every board; blocking/structural edges acyclic (409 on
+  cycle), informational edges may cycle; board membership is a placement, not an
+  edge; backend-generated links. `POST/GET /api/work-items…`, `…/placements`,
+  `/api/work-edges`, `/api/work-graph[/{id}]`.
+- **PR #50 — durable Ledger store.** `workgraph.v1` schema (mirror-DDL + drift
+  test) + `LedgerWorkGraphStore`; the graph survives restart under
+  `KANBAN_UI_WORKGRAPH_LEDGER=1`. Same mirror pattern as the #47 capture store.
+- **PR #51 — stable permalinks.** `GET /work/<id>` 302-redirects to the
+  backend-chosen canonical target (primary board › any board › Work Map);
+  `GET /api/work/{id}/resolve` returns target + link receipt.
+- **Phase E — chat creation receipts.** `ChatWorkPlanner` +
+  `POST /api/chat/work-items/preview` (side-effect-free) / `…/commit` (atomic;
+  an invalid plan writes nothing) → `TaskBatchReceipt` with clickable links per
+  item. Structured plan in, navigable receipts out — no free-text auto-routing
+  yet. Planning only: creates no mission, touches no wall verb.
 
 ### 2026-07-13 — Chat-first product surface, board modules, no-repo boards, Universal Capture (PRs #41–#44)
 
