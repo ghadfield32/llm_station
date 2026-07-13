@@ -1160,3 +1160,31 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 .usage-health { margin-top: 22px; }
 .usage-err { color: var(--bad); font-size: 11px; max-width: 320px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- job location/language filter + prep badge + rejection insights ---- */
+.job-prep-badge { background: var(--warn); color: #1b1b1b; font-weight: 600; }
+.job-filter-settings h3 { margin: 14px 0 6px; }
+.filter-toggle-row { display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px; margin: 6px 0; }
+.filter-toggle-label { color: var(--muted); font-size: 12px; }
+.chip-check { display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border); border-radius: 12px; padding: 2px 8px;
+  font-size: 12px; cursor: pointer; }
+.chip-check.chip-on { border-color: var(--accent); color: var(--accent); }
+.filter-wide { display: block; margin: 8px 0; }
+.filter-wide input { width: 100%; }
+.filter-states { margin: 8px 0; }
+.state-chip-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+  max-height: 168px; overflow-y: auto; padding: 4px;
+  border: 1px solid var(--border); border-radius: 8px; }
+.filter-note { color: var(--muted); font-size: 12px; margin-top: 8px;
+  line-height: 1.4; }
+.rejection-insights { margin-top: 6px; }
+.rejection-suggestions { list-style: none; margin: 8px 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px; }
+.rej-sugg { border-left: 3px solid var(--border); padding: 4px 10px;
+  font-size: 12px; line-height: 1.4; }
+.rej-sugg.rej-high { border-left-color: var(--bad); }
+.rej-sugg.rej-medium { border-left-color: var(--warn); }
+.rej-sugg.rej-low { border-left-color: var(--muted); }
+.rej-area { font-weight: 600; color: var(--muted); text-transform: capitalize; }

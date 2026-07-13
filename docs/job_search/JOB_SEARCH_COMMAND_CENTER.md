@@ -155,6 +155,63 @@ The AppFlowy schema for `job_search_pipeline` is registered in
 `appflowy_kanban/growth-os/config/schema.yaml`, and the board is registered in
 `configs/kanban_boards.yaml`.
 
+## Search Filters (Location + Language), Feedback, and Background Prep
+
+Three operator-facing controls layer on top of the pipeline above. All three
+are editable in the cockpit `Job presets` drawer and via the CLI; the filters
+also live in `configs/job_search.yaml` (`locations`, `languages`) and can be
+overridden per-operator in `data/job_search/profile/search_settings.yml`.
+
+### Location + language filter (hybrid enforcement)
+
+`locations` gates jobs by geography and work arrangement; `languages` gates by
+required language. Enforcement is **hybrid**:
+
+- A **clear mismatch** is hard-excluded from Suggested Jobs (score forced below
+  the show bar, fit action `SKIP`): an onsite/hybrid role in a US state that is
+  not on your list, a foreign onsite role, an excluded work arrangement, or a
+  posting that *requires* a language you do not speak.
+- An **ambiguous** posting stays visible but ranked lower (soft penalty): an
+  unknown or national-only location, a merely *preferred* language, or a noisy
+  employment-type signal (e.g. "contract" when you filter for full-time).
+- Remote roles pass the geography check whenever `locations.remote_ok` is true.
+
+`locations.mode` is `worldwide | countries | regions`. `remote_types_allowed`
+is the remote/hybrid/onsite allowlist; `employment_types_allowed` (e.g.
+`[full_time]`) is a soft-only signal. Edit from the drawer's states/DC checklist
+plus the remote/hybrid/onsite + full-time toggles, or:
+
+```powershell
+# PUT /api/job-search/profile-controls/locations  and  .../languages
+```
+
+Scoring lives in `src/command_center/job_search/geo_language.py`; the score
+breakdown on each card names the exact filter effect.
+
+### Rejection feedback loop
+
+Moving a Jobs card to `Rejected / Skip` prompts for a reason (the cockpit picker
+mirrors `rejections.REASON_CODES`); it is recorded to
+`data/job_search/rejections/rejections.jsonl`. The report aggregates reasons and
+proposes concrete changes, distinguishing a *filter gap* (a job the filter
+should have caught) from a filter that is already working:
+
+```powershell
+uv run cc job-search reject <job_key> --reason location --note "too far"
+uv run cc job-search rejections-report
+# GET /api/job-search/rejections-report ; cockpit: Job Search -> Rejections & weaknesses
+```
+
+### Background packet prep (fast selection)
+
+Moving a card to `Selected by Geoff` (or the `Add all` bulk button) no longer
+blocks on packet generation. The move returns immediately and queues prep on a
+single background worker, so you can move through many cards fast; each card
+shows `preparing packet…` until the worker advances it to `Needs Geoff`. Queue
+health (including a failed run) is at `GET /api/job-search/prep-status`. The
+Geoff-selection wall is unchanged: prep still runs only for cards Geoff selected,
+and nothing is submitted automatically.
+
 ## Validation Commands
 
 Use a short pytest temp path on Windows to avoid path-length and sandbox temp
