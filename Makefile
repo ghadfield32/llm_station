@@ -11,7 +11,7 @@ LITELLM_DIGEST ?= ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0
 
 .PHONY: help setup verify verify-base validate schema render up bootstrap down keys health \
         models models-canary models-promote models-rollback \
-        model-scout model-fit proactive-validate proactive-smoke targets-validate kanban-validate kanban-bridge appflowy-audit tools-validate evals cross-refs ui-validate \
+        model-scout model-fit proactive-validate proactive-smoke targets-validate kanban-validate kanban-bridge appflowy-audit tools-validate capabilities-digests capabilities-verify evals cross-refs ui-validate \
         standards-validate forbidden-providers usage-digest usage-report live-smoke impact mission-dryrun env-smoke repo-install backup restore-drill logs \
         gateway channels-validate lint test doctor first-boot models-light appflowy-init appflowy-up \
         improvement-validate improvement-list improvement-register improvement-baseline \
@@ -68,6 +68,12 @@ appflowy-audit:  ## Read-only audit of AppFlowy board fields/views/blank starter
 
 tools-validate:  ## Validate configs/tools.yaml (tool permission registry)
 	@$(PY) -c "import yaml; from command_center.schemas import ToolsConfig; ToolsConfig.model_validate(yaml.safe_load(open('configs/tools.yaml'))); print('tools-validate: PASS')"
+
+capabilities-digests:  ## Print recomputed digests for capability provenance (paste into configs/capabilities.yaml)
+	@$(PY) -m command_center.cli.capability_digest
+
+capabilities-verify:  ## Recompute capability provenance digests and fail on drift
+	@$(PY) -m command_center.cli.capability_digest --check
 
 evals:  ## Run the routing/judge regression suite against gates (no model calls)
 	@$(PY) -m command_center.cli.run_evals

@@ -5,6 +5,44 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os-engineering.md` + `docs/autonomy-idea-map.md`; this is the
 fast "has this been done?" index. Dates are when the line was written.
 
+## CodeSOTA frontier-watch leaderboard feed
+- WHY 06-24: "Papers Without Code" LinkedIn post → wanted easy leaderboard ingest. paperswithcode.co
+  (the post's tool) is UI-ONLY (no API/export) → dropped. CodeSOTA is the live keyless JSON sibling.
+- VERIFIED 06-24: CodeSOTA GET /api/tasks (24 areas/149 tasks/1302 results) + /api/sota/{task}?tier=sota
+  return application/json, no auth/sign-up. Covers swe-bench/autonomous-coding(Terminal-Bench 2.0)/
+  code-generation(LiveCodeBench Pro)/coding-agents. Snapshots stamped reg-2026-06-23 (fresh).
+- SCOPE 06-24: it's FRONTIER-WATCH AWARENESS, not open-weight discovery — no license/params/quant/
+  vram/ollama_tag, picks are closed (Claude/Gemini/GPT). CANNOT pass _classify_model_scout (needs
+  open_weight+local-readiness). aider-polyglot stays the open-weight-local coding signal.
+- ADD 06-24: discovery/codesota.py — fetch_codesota_records() maps /api/sota picks → generic
+  ModelRegistryScanner._classify records (candidate=SOTA, incumbent=best SAME-benchmark runner-up).
+  Per-row benchmark.id+score_metric guard drops cross-benchmark contaminants (saw a swe-bench row
+  nested under terminal-bench-2). Fail-loud: transport raises; unknown task id raises. httpx injectable.
+- WIRE 06-24: registered `codesota` (kind model_registry, pillar updated_metrics) in dag_support
+  SOURCE_REGISTRY. Tests: test_codesota.py (6, offline fixtures) + test_dag_support codesota scan_one.
+  Live + offline green; discovery suite no-regression; project ruff clean.
+- ROOT-CAUSED 06-24: my `airflow variables set ...` instruction FAILED ("airflow not recognized").
+  Cause (layered): airflow not in venv/PATH → not a dep of THIS branch (no pyproject/compose entry) →
+  Airflow runtime lives ONLY on unmerged feat/airflow-dag-doctor (PR #30, `airflow standalone`, profile
+  airflow, `cc dag up`, vars set via `docker compose exec -T airflow airflow ...`). My host command was
+  wrong for this branch. Also: NO ingestion populates any improvement_feed_* — all feeds are empty "[]".
+- SELF-FETCH 06-24: chose live fetch over manual `variables set` (which FAILED: airflow not on this
+  branch). dag_support.LIVE_FETCHERS{codesota: fetch_codesota_records} + fetch_records(spec, variable_get):
+  live sources pull fresh at scan time (no Variable), others read improvement_feed_<name> via injected
+  getter. DAG _fetch delegates (Variable.get injected); removed now-unused json import. Fails loud (live
+  fetcher raise propagates to isolate guard). Done on feat/content-usability-preview-search (DAG file is
+  byte-identical to feat/airflow-dag-doctor, so correct wherever Airflow runs; converges to main clean).
+- VALIDATED 06-24: live fetch_records({'name':'codesota'},stub) → 5 live records, Variable never touched.
+  test_dag_support +3 routing tests (live-bypasses-variable / non-live-reads-variable / failure-not-
+  swallowed). ruff clean (F821 fixed: import dag_support module). Affected suites 30 pass. Full suite:
+  1 fail = test_merge_guard WSL-bash flake (shutil.which picks C:\Windows\System32\bash.EXE=WSL, can't
+  see C:\...\Temp path → 127; passes under Git Bash/CI) — pre-existing, unrelated to CodeSOTA.
+- STANDARDS 06-24: pasted "Standards" are the basketball-pipeline template; docs/backend/* here are
+  basketball copies. Applies: no-defensive/data-derived/fail-loud (met), no new pkg, no new endpoint,
+  explicit git add. N/A: parquet/atomic_io/R2/DuckDB-serving/fleet stations/dbt/GBDT/Bayesian.
+- NEXT: confirm self-fetch wiring + target branch (feat/airflow-dag-doctor); then `cc dag up` →
+  scan consumes codesota live. Optionally add more task ids to DEFAULT_TASKS.
+
 ## Kanban emission = default sync path
 - WHY 06-20: live-sync engine merged (#19) but emission was opt-in (KANBAN_EMIT_EVENTS=1).
   North-star wants it as the STANDARD path for every governed kanban write.

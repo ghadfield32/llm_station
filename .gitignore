@@ -66,6 +66,20 @@ generated/linkedin-token.json
 generated/linkedin-published.json
 generated/linkedin-publish.lock
 
+# ── Content UX runtime artifacts (regenerate: `cc reference index --rebuild`) ─
+# the reference index (with embeddings), HTML previews, and the local posts store
+data/reference/
+generated/preview/
+generated/content-posts.json
+# content-engine generated outputs (briefs/claims/analysis) — disposable, never commit
+generated/content-brief.json
+generated/content-claims.json
+generated/content-verifications.json
+generated/reference-clusters.json
+generated/reference-people.json
+generated/style-patterns.json
+data/performance/
+
 # ── Cross-conversation memory store — per-deployment runtime state ───────────
 # project/board/user-preference memory; sharing is a deliberate export, not a commit
 generated/memory/

@@ -11,10 +11,12 @@ report and an Airflow log) rather than a swallowed exception or a silently missi
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 from ..registry import ExperimentRegistry
 from .charter import ObserverCharter
+from .codesota import fetch_codesota_records
 from .pillars import Pillar
 from .pipeline import ScanPipeline
 from .config import load_discovery_config
@@ -38,12 +40,37 @@ SOURCE_REGISTRY: list[dict] = [
     {"name": "arxiv", "kind": "papers", "pillar": "full_idea", "config": {}},
     {"name": "litellm_registry", "kind": "model_registry",
      "pillar": "updated_metrics", "config": {}},
+    # Frontier-watch awareness: keyless CodeSOTA leaderboard picks (closed + open SOTA).
+    # A LIVE-FETCH source (see LIVE_FETCHERS) — it pulls fresh at scan time via
+    # `discovery.codesota.fetch_codesota_records()`, so there is NO Variable to set.
+    {"name": "codesota", "kind": "model_registry",
+     "pillar": "updated_metrics", "config": {}},
     {"name": "pip_audit", "kind": "dependencies", "pillar": "code_quality", "config": {}},
     {"name": "kanban_cycle_time", "kind": "kanban", "pillar": "automation", "config": {}},
 ]
 
 # A fetch maps a source spec -> its already-parsed records (the DAG owns the live call).
 Fetch = Callable[[dict], list[dict]]
+
+# Live-fetch sources pull their own records at scan time instead of reading a pre-ingested
+# `improvement_feed_<name>` Variable. Used for keyless feeds (no auth/secret) so there is no
+# manual `airflow variables set` step and the data is never stale. A fetcher that raises is
+# NOT swallowed — the per-source isolate guard records it as a visible failed source.
+LIVE_FETCHERS: dict[str, Callable[[], list[dict]]] = {
+    "codesota": fetch_codesota_records,
+}
+
+
+def fetch_records(spec: dict, variable_get: Callable[[str], str]) -> list[dict]:
+    """Records for one feed source. A source registered in LIVE_FETCHERS pulls fresh at scan
+    time (keyless, automatable — no Variable to set); every other source reads its pre-ingested
+    `improvement_feed_<name>` Variable via the injected `variable_get` (the DAG passes a real
+    Airflow `Variable.get`; tests pass a stub). The Variable indirection stays the default."""
+    name = spec["name"]
+    live = LIVE_FETCHERS.get(name)
+    if live is not None:
+        return live()
+    return json.loads(variable_get(f"improvement_feed_{name}"))
 
 
 def build_scanner(spec: dict, registry: ExperimentRegistry,
