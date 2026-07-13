@@ -16,11 +16,12 @@ recorded here.
 Proceed on this provisional basis:
 
 ```text
-Life Center chassis    Fractal Design Node 804 (FD-CA-NODE-804-BL-W)
+Life Center chassis    serviceable four-or-more-bay Intel-iGPU value-tier tower
 Primary pool           2 x 12 TB new CMR NAS HDD, ZFS mirror
-Appdata                1–2 TB NVMe; 2 TB preferred
-Local backup           WD Elements Desktop 16 TB (WDBWLG0160HBK-NESN),
-                       encrypted and disconnected outside backup windows
+Appdata                2 TB NVMe by default; 1 TB only with a written clean
+                       appdata forecast below 400–500 GiB after cleanup
+Local backup           new encrypted 16 TB-class external HDD, disconnected
+                       outside scheduled backup, verification, and restore work
 Off-site               Backblaze B2, client-side encrypted, initially only
                        the irreplaceable/selected expensive-to-recreate set
 UPS                    APC Back-UPS Pro BR1000MS, 1000 VA / 600 W, USB, sine wave
@@ -410,12 +411,12 @@ between floors.
 
 ### Chassis
 
-Select **Fractal Design Node 804**, product code `FD-CA-NODE-804-BL-W`, if it is
-available new from a reputable seller at purchase time. It supports micro-ATX,
-eight dedicated 3.5-inch positions, two 2.5-inch positions, additional flexible
-positions, ATX power supplies, and extensive fan placement. This supplies more
-than the required four bays without proprietary drive trays or an appliance OS.
-See the [official specifications](https://www.fractal-design.com/products/cases/node/node-804/black/).
+Select a serviceable value-tier tower with at least four 3.5-inch bays, two
+future empty bays where practical, standard replaceable components, and direct
+drive cooling. A Fractal Design Node 804, `FD-CA-NODE-804-BL-W`, remains a
+qualified chassis candidate if its purchase-day total is the best value; it is
+not the default requirement. Do not pay for ECC, BMC/IPMI, or a server platform
+unless a documented measured need justifies its cost and operating burden.
 
 Before order, lock a compatible Intel-iGPU micro-ATX platform with:
 
@@ -442,19 +443,21 @@ it has materially better local price/support and passes the same test.
 
 ### Backup destinations
 
-1. **Separate local:** WD Elements Desktop 16 TB,
-   `WDBWLG0160HBK-NESN`, encrypted and disconnected except for scheduled backup,
-   verification, and restore drills. USB is acceptable for backup, not for the
-   primary ZFS mirror. Verify SMART visibility, new/authorized retail warranty,
-   full-surface test, and client-side encryption before admission.
+1. **Separate local:** buy a new encrypted 16 TB-class external HDD, connected
+   only for scheduled backup, verification, and restore drills. It must be at
+   least as large as the protected primary set; compare qualified 16, 18, and
+   20 TB models on purchase day and choose the best new, warranty-backed value.
+   USB is acceptable for backup, not for the primary ZFS mirror. Verify SMART
+   visibility, new/authorized retail warranty, full-surface test, and
+   client-side encryption before admission.
 2. **Off-site:** Backblaze B2 pay-as-you-go with client-side encryption and a
    narrowly scoped append/write credential. Protect deletion/retention with a
    separate operator identity and enable object immutability where compatible
-   with the selected backup tool. Backblaze currently lists **$6.95/TB/month**;
-   a 2 TB initial protected set is about **$13.90/month**, and 3 TB about
-   **$20.85/month**, before future pricing/tax. Do not send reproducible Docker
-   images, public base models, frame caches, or replaceable media off-site by
-   default. See [official B2 pricing](https://www.backblaze.com/cloud-storage/pricing).
+   with the selected backup tool. Use a 0.5–1 TB highest-value starting set
+   (roughly $3.48–$6.95/month at the cited $6.95/TB-month planning rate, before
+   tax/future pricing). Do not send reproducible Docker images, public base
+   models, frame caches, or replaceable media off-site by default. See
+   [official B2 pricing](https://www.backblaze.com/cloud-storage/pricing).
 
 The external disk and B2 are independent recovery layers, not mirrors managed by
 the production host. A backup is not accepted until a restore is proven.
@@ -515,14 +518,14 @@ Use a planning range, not a quote:
 
 | Component group | Planning range before tax |
 | --- | ---: |
-| Node 804 host platform, 32 GB, 2 TB NVMe, PSU/cooling/cables | $700–$1,000 |
+| Value-tier four-bay Intel-iGPU host, 32 GB, 2 TB NVMe, PSU/cooling/cables | exact purchase-day quote required |
 | Two new 12 TB CMR NAS drives | $800–$860 target |
-| Separate 16 TB local backup | $300–$500 |
+| New 16 TB-class encrypted local backup | $300–$500 target; required initial recovery layer |
 | 1000 VA sine-wave UPS | $150–$250 |
 | UDR7 network gateway | $279 current list price |
 | Direct Cat6 inter-floor run, terminations, patching | $50–$600 DIY-to-professional allowance |
-| **Initial hardware total** | **$2,279–$3,489** |
-| B2 for 2–3 TB selected off-site data | **$13.90–$20.85/month** |
+| **Initial hardware total including local backup** | **$2,279–$3,489** |
+| B2 for 0.5–1 TB selected off-site data | **about $3.48–$6.95/month** |
 
 No switch or extra access point is in the initial total. The downstairs-server
 fallback adds a UniFi Flex Mini 2.5G (`USW-Flex-2.5G-5`, currently $49) and an
@@ -544,7 +547,8 @@ Gate 0 is complete only after:
 - the upstairs Life Center location passes its acoustic/thermal review, or the
   documented downstairs switch/second-UPS fallback is selected;
 - the motherboard, CPU, RAM, NVMe, PSU, fans, and SATA cabling are exact SKUs;
-- the separate backup and off-site budget are accepted;
+- the full-capacity encrypted local-backup drive and off-site budget are
+  included in the purchase plan;
 - the 2026-08-13 growth report exists (or the owner explicitly accepts the
   uncertainty for a 12 TB purchase);
 - the selected RPO/RTO targets and backup operating cost are accepted; and
