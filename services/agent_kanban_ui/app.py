@@ -1087,6 +1087,9 @@ class BoardModuleIn(BaseModel):
     title: str
     description: str = ""
     icon: str = ""
+    # life = no repository (Books/Health/…); repository/hybrid drive repo work and
+    # must name >=1 repo. Default life: the common new personal board is repo-less.
+    execution_scope: str = "life"
     repo_ids: list[str] = Field(default_factory=list)
     columns: list[str] = Field(default_factory=list)
     chat_enabled: bool = True
@@ -1173,10 +1176,18 @@ def create_board_module(body: BoardModuleIn) -> dict:
     if any(d.get("domain_id") == board_id for d in dom.get("domains", [])):
         raise HTTPException(status_code=409, detail=f"domain {board_id!r} already exists")
 
-    repo_ids = [r.strip() for r in body.repo_ids if r.strip()] or [board_id]
+    scope = body.execution_scope if body.execution_scope in ("life", "repository", "hybrid") else "life"
+    repo_ids = [r.strip() for r in body.repo_ids if r.strip()]
+    if scope == "life":
+        repo_ids = []                       # no fake board-id-as-repo workaround
+    elif not repo_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"a {scope} board must name at least one repo_id "
+                   "(use execution_scope 'life' for a repo-less board)")
     board_spec = {
         "board_id": board_id, "provider": "command_center_ui", "workspace_ref": "self",
-        "board_ref": board_id, "repo_ids": repo_ids,
+        "board_ref": board_id, "execution_scope": scope, "repo_ids": repo_ids,
         "status_mapping": dict(_KANBAN_STATUS_LABELS),
         "required_fields": ["MissionID", "RepoID", "Risk", "LastSync", "Section"],
         "allowed_agent_verbs": list(_KANBAN_ALLOWED_VERBS),
@@ -1205,10 +1216,11 @@ def create_board_module(body: BoardModuleIn) -> dict:
     _write_yaml_file(_kanban_boards_path(), next_reg)
     _write_domain_config(next_dom)      # re-validates + writes domain_surfaces.yaml
     _audit_config_write("board_module.create", {
-        "board_id": board_id, "title": body.title.strip(), "repo_ids": repo_ids,
-        "icon": body.icon, "chat_enabled": body.chat_enabled})
+        "board_id": board_id, "title": body.title.strip(), "execution_scope": scope,
+        "repo_ids": repo_ids, "icon": body.icon, "chat_enabled": body.chat_enabled})
     return {"board_id": board_id, "domain_id": board_id, "title": body.title.strip(),
-            "provider": "command_center_ui", "card_component": "generic_task",
+            "provider": "command_center_ui", "execution_scope": scope,
+            "card_component": "generic_task",
             "columns": columns, "repo_ids": repo_ids, "chat_enabled": body.chat_enabled}
 
 
@@ -2635,6 +2647,7 @@ def board_registry() -> dict:
         boards.append({
             "board_id": board.get("board_id"),
             "provider": board.get("provider"),
+            "execution_scope": board.get("execution_scope", "repository"),
             "workspace_ref": board.get("workspace_ref"),
             "board_ref": board.get("board_ref"),
             "repo_ids": board.get("repo_ids", []),

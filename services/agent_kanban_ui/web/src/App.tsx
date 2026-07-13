@@ -6,6 +6,7 @@ import {
   ChatRuntime, DomainActions, DomainCard, DomainCardDetail, DomainCardProgress,
   DomainCards, DomainSchema, DomainSpec,
   FieldSpec, JobProfileControls,
+  ExecutionScope,
   boardIdFromTitle, createBoardModule, createDomainSchema, deleteDomainSchema,
   fetchBoardRegistry,
   MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
@@ -1744,6 +1745,7 @@ function CreateBoardWizard({ editable, onClose, onCreated }: {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("");
+  const [scope, setScope] = useState<ExecutionScope>("life");
   const [reposText, setReposText] = useState("");
   const [columnsText, setColumnsText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1751,13 +1753,14 @@ function CreateBoardWizard({ editable, onClose, onCreated }: {
   const boardId = boardIdFromTitle(title);
   const repoIds = reposText.split(",").map((s) => s.trim()).filter(Boolean);
   const columns = columnsText.split(",").map((s) => s.trim()).filter(Boolean);
+  const needsRepo = scope !== "life";
   async function create() {
     if (!boardId || busy) return;
     setBusy(true); setMsg(null);
     try {
       const res = await createBoardModule({
         title: title.trim(), description: description.trim(), icon: icon.trim(),
-        repo_ids: repoIds, columns });
+        execution_scope: scope, repo_ids: repoIds, columns });
       onCreated(res.board_id);
       onClose();
     } catch (e) { setMsg((e as Error).message); }
@@ -1779,19 +1782,25 @@ function CreateBoardWizard({ editable, onClose, onCreated }: {
           <input value={description} disabled={!editable || busy}
             placeholder="what this board is for (optional)"
             onChange={(e) => setDescription(e.target.value)} /></label>
-        <label>Repositories<input value={reposText} disabled={!editable || busy}
-          placeholder="repo ids, comma-separated (optional)"
+        <label>Kind<select className="select" value={scope} disabled={!editable || busy}
+          onChange={(e) => setScope(e.target.value as ExecutionScope)}>
+          <option value="life">life — personal, no repository</option>
+          <option value="repository">repository — drives repo work</option>
+          <option value="hybrid">hybrid — notes + repo work</option>
+        </select></label>
+        <label>Repositories<input value={reposText} disabled={!editable || busy || !needsRepo}
+          placeholder={needsRepo ? "repo ids, comma-separated (required)" : "not used for a life board"}
           onChange={(e) => setReposText(e.target.value)} /></label>
         <label>Columns<input value={columnsText} disabled={!editable || busy}
           placeholder="leave blank for the standard workflow"
           onChange={(e) => setColumnsText(e.target.value)} /></label>
       </div>
       <div className="schema-preview">
-        <div className="muted small">Preview — a new board module:</div>
+        <div className="muted small">Preview — a new {scope} board module:</div>
         <ul className="muted small">
           <li>board id <code>{boardId || "—"}</code> · generic-task cards · chat enabled</li>
           <li>columns: {columns.length ? columns.join(", ") : "Backlog, Ready, In Progress, Done, Blocked, Rejected, Awaiting Approval"}</li>
-          <li>repos: {repoIds.length ? repoIds.join(", ") : boardId || "—"}</li>
+          <li>repos: {needsRepo ? (repoIds.length ? repoIds.join(", ") : "⚠ name at least one") : "none (life board)"}</li>
           <li>governance: wall verbs (approve / merge / deploy / delete) stay forbidden; human approval unchanged</li>
         </ul>
       </div>

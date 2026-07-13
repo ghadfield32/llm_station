@@ -43,6 +43,27 @@ def test_valid_board_accepts():
     KanbanBoardSpec(**_board())
 
 
+def test_board_defaults_to_repository_scope():
+    # every existing board (which never set execution_scope) stays a repository board
+    assert KanbanBoardSpec(**_board()).execution_scope == "repository"
+
+
+def test_life_board_may_be_repo_less():
+    # a life board (Health, Books, …) drives no repository, so an empty repo_ids
+    # is valid — the first-class replacement for the fake board-id-as-repo hack
+    board = KanbanBoardSpec(**_board(
+        provider="command_center_ui", workspace_ref="self",
+        execution_scope="life", repo_ids=[]))
+    assert board.execution_scope == "life"
+    assert board.repo_ids == []
+
+
+def test_repository_scope_still_requires_a_repo():
+    import pytest
+    with pytest.raises(ValueError, match="at least one repo_id"):
+        KanbanBoardSpec(**_board(execution_scope="repository", repo_ids=[]))
+
+
 def test_appflowy_workspace_ref_must_be_env_reference():
     with pytest.raises(ValueError, match="env reference"):
         KanbanBoardSpec(**_board(workspace_ref="my-workspace-uuid"))

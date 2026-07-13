@@ -248,10 +248,12 @@ export const deleteDomainSchema = (domainId: string) =>
 
 // Create a whole board MODULE (kanban board + generic_task domain surface) from
 // one typed request — the guided Create-Board flow. Safe governance defaults.
+export type ExecutionScope = "life" | "repository" | "hybrid";
 export interface BoardModuleIn {
   title: string;
   description?: string;
   icon?: string;
+  execution_scope?: ExecutionScope;
   repo_ids?: string[];
   columns?: string[];
   chat_enabled?: boolean;
@@ -261,6 +263,7 @@ export interface BoardModuleResult {
   domain_id: string;
   title: string;
   provider: string;
+  execution_scope: ExecutionScope;
   card_component: string;
   columns: string[];
   repo_ids: string[];
