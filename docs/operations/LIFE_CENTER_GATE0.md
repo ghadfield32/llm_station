@@ -18,9 +18,11 @@ Proceed on this provisional basis:
 ```text
 Life Center chassis    Fractal Design Node 804 (FD-CA-NODE-804-BL-W)
 Primary pool           2 x 12 TB new CMR NAS HDD, ZFS mirror
-Appdata                1–2 TB NVMe; 2 TB preferred
-Local backup           WD Elements Desktop 16 TB (WDBWLG0160HBK-NESN),
-                       encrypted and disconnected outside backup windows
+Appdata                2 TB NVMe by default; 1 TB only with a written clean
+                       appdata forecast below 400–500 GiB after cleanup
+Local backup           initially, a dedicated old-laptop encrypted append-only
+                       repository for a measured critical subset below 1.2 TiB;
+                       WD Elements 16 TB becomes mandatory at its trigger
 Off-site               Backblaze B2, client-side encrypted, initially only
                        the irreplaceable/selected expensive-to-recreate set
 UPS                    APC Back-UPS Pro BR1000MS, 1000 VA / 600 W, USB, sine wave
@@ -442,19 +444,23 @@ it has materially better local price/support and passes the same test.
 
 ### Backup destinations
 
-1. **Separate local:** WD Elements Desktop 16 TB,
-   `WDBWLG0160HBK-NESN`, encrypted and disconnected except for scheduled backup,
-   verification, and restore drills. USB is acceptable for backup, not for the
-   primary ZFS mirror. Verify SMART visibility, new/authorized retail warranty,
-   full-surface test, and client-side encryption before admission.
+1. **Separate local:** a healthy old 2 TB laptop may initially hold only the
+   measured critical subset below 1.2 TiB as a dedicated encrypted append-only
+   repository. It is not a worker, cache, browser, or general desktop. It must
+   pass SMART short/long tests, a sustained write plus read/surface test,
+   encryption/recovery-key verification, append-only delete-denial, and sample
+   file/database restores. WD Elements Desktop 16 TB, `WDBWLG0160HBK-NESN`, is
+   the encrypted disconnected full-pool target when any trigger in
+   [`LIFE_CENTER_IMPLEMENTATION_READINESS.md`](LIFE_CENTER_IMPLEMENTATION_READINESS.md)
+   is met. USB is acceptable for backup, not for the primary ZFS mirror.
 2. **Off-site:** Backblaze B2 pay-as-you-go with client-side encryption and a
    narrowly scoped append/write credential. Protect deletion/retention with a
    separate operator identity and enable object immutability where compatible
-   with the selected backup tool. Backblaze currently lists **$6.95/TB/month**;
-   a 2 TB initial protected set is about **$13.90/month**, and 3 TB about
-   **$20.85/month**, before future pricing/tax. Do not send reproducible Docker
-   images, public base models, frame caches, or replaceable media off-site by
-   default. See [official B2 pricing](https://www.backblaze.com/cloud-storage/pricing).
+   with the selected backup tool. Use a 0.5–1 TB highest-value starting set
+   (roughly $3.48–$6.95/month at the cited $6.95/TB-month planning rate, before
+   tax/future pricing). Do not send reproducible Docker images, public base
+   models, frame caches, or replaceable media off-site by default. See
+   [official B2 pricing](https://www.backblaze.com/cloud-storage/pricing).
 
 The external disk and B2 are independent recovery layers, not mirrors managed by
 the production host. A backup is not accepted until a restore is proven.
@@ -517,12 +523,13 @@ Use a planning range, not a quote:
 | --- | ---: |
 | Node 804 host platform, 32 GB, 2 TB NVMe, PSU/cooling/cables | $700–$1,000 |
 | Two new 12 TB CMR NAS drives | $800–$860 target |
-| Separate 16 TB local backup | $300–$500 |
+| Dedicated old-laptop critical backup | reuse only after every qualification gate passes |
+| Separate 16 TB local backup | deferred $300–$500 until full-pool trigger |
 | 1000 VA sine-wave UPS | $150–$250 |
 | UDR7 network gateway | $279 current list price |
 | Direct Cat6 inter-floor run, terminations, patching | $50–$600 DIY-to-professional allowance |
-| **Initial hardware total** | **$2,279–$3,489** |
-| B2 for 2–3 TB selected off-site data | **$13.90–$20.85/month** |
+| **Initial hardware total without deferred USB backup** | **$1,979–$2,989** |
+| B2 for 0.5–1 TB selected off-site data | **about $3.48–$6.95/month** |
 
 No switch or extra access point is in the initial total. The downstairs-server
 fallback adds a UniFi Flex Mini 2.5G (`USW-Flex-2.5G-5`, currently $49) and an
@@ -544,7 +551,8 @@ Gate 0 is complete only after:
 - the upstairs Life Center location passes its acoustic/thermal review, or the
   documented downstairs switch/second-UPS fallback is selected;
 - the motherboard, CPU, RAM, NVMe, PSU, fans, and SATA cabling are exact SKUs;
-- the separate backup and off-site budget are accepted;
+- the dedicated-laptop critical-backup conditions pass, or the full-pool USB
+  backup is included in the purchase; and the off-site budget is accepted;
 - the 2026-08-13 growth report exists (or the owner explicitly accepts the
   uncertainty for a 12 TB purchase);
 - the selected RPO/RTO targets and backup operating cost are accepted; and

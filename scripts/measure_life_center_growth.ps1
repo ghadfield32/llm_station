@@ -2,7 +2,8 @@
 # No filenames, file contents, credentials, device identifiers, or network
 # addresses are written. Targets overlap intentionally and must not be summed.
 param(
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot "..\generated\life-center-growth")
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot "..\generated\life-center-growth"),
+    [string]$BackupScopeManifest = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,6 +11,8 @@ $timestamp = [DateTimeOffset]::Now
 $runId = $timestamp.ToString("yyyyMMdd-HHmmss")
 $outputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
+if (-not $BackupScopeManifest) { $BackupScopeManifest = Join-Path $outputDirectory "backup-scope.json" }
+$BackupScopeManifest = [IO.Path]::GetFullPath($BackupScopeManifest)
 
 $homePath = $env:USERPROFILE
 if (-not $homePath) {
@@ -84,7 +87,29 @@ function Measure-Target {
     }
 }
 
-$rows = foreach ($target in $targets) { Measure-Target -Target $target }
+function Get-BackupScopeTargets {
+    param([string]$ManifestPath)
+    if (-not (Test-Path -LiteralPath $ManifestPath)) { return @() }
+    $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    if ($null -eq $manifest.targets -or @($manifest.targets).Count -eq 0) {
+        throw "Backup scope manifest must define at least one target."
+    }
+    $allowedClasses = @("authoritative-retained", "critical-backup", "offsite-protected")
+    $seen = @{}
+    $result = foreach ($target in @($manifest.targets)) {
+        $name = [string]$target.name; $class = [string]$target.class; $path = [string]$target.path
+        if ($name -notmatch "^[a-z0-9][a-z0-9_-]{2,63}$") { throw "Backup target name must be a stable id: $name" }
+        if ($seen.ContainsKey($name)) { throw "Duplicate backup target: $name" }
+        if ($class -notin $allowedClasses) { throw "Unsupported backup target class: $class" }
+        if (-not $path) { throw "Backup target $name is missing path" }
+        $seen[$name] = $true
+        @{ Name = $name; Class = $class; Path = $path }
+    }
+    return @($result)
+}
+
+$scopeTargets = Get-BackupScopeTargets -ManifestPath $BackupScopeManifest
+$rows = foreach ($target in @($targets) + @($scopeTargets)) { Measure-Target -Target $target }
 
 $drive = Get-PSDrive -Name C
 $rows += [pscustomobject]@{
@@ -122,4 +147,7 @@ $summary = $rows | Select-Object Target, Class, Exists,
     @{Name="GiB"; Expression={[math]::Round($_.Bytes / 1GB, 2)}},
     FileCount, ErrorCount
 $summary | Format-Table -AutoSize
+if ($scopeTargets.Count -eq 0) {
+    Write-Host "No backup-scope.json found; authoritative, critical, and off-site totals remain unclassified."
+}
 Write-Host "Aggregate snapshot $runId recorded in $outputDirectory"

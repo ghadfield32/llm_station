@@ -35,6 +35,11 @@ Future stationary Life Center host — stable data/application appliance
 ├── AdGuard Home only after DNS recovery is tested
 ├── password manager only after backup/restore and recovery are proven
 └── Home Assistant OS in an isolated VM initially, or a dedicated device later
+
+Old laptops — optional, non-authoritative recovery/utility tier
+├── one dedicated encrypted append-only critical-backup node, or restore test node
+├── replaceable cache or bounded worker only when separately admitted
+└── never a distributed filesystem, production dependency, or mixed backup/worker role
 ```
 
 The laptop must not be the only host or only data copy for household services.
@@ -47,6 +52,11 @@ The durable end state adds a stationary storage host. Until then, home services
 may be tested on the desktop with noncritical sample data, but the desktop is not
 the permanent Life Center because Betts, CV, model inference, Docker, and WSL
 already contend for the same CPU, memory, disk, and reboot window.
+
+The precise backup, appdata-NVMe, and purchase gates are maintained in
+[`LIFE_CENTER_IMPLEMENTATION_READINESS.md`](LIFE_CENTER_IMPLEMENTATION_READINESS.md).
+The optional fourth-tier admission and containment rules are in
+[`AUXILIARY_NODE_STANDARD.md`](AUXILIARY_NODE_STANDARD.md).
 
 ## Evidence quality and corrections
 
