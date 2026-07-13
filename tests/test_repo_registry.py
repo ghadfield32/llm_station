@@ -226,3 +226,59 @@ def test_register_dry_run_does_not_write_and_blocks_duplicate(tmp_path):
         repo_id="llm_station", local_path="C:/x", remote_url="https://github.com/x/llm.git",
         kanban_board="llm_station_command_center", config_path=cfg, root=tmp_path, apply=False)
     assert dup["status"] == "blocked"
+
+
+# ── surgical autonomy-enable writer ───────────────────────────────────────
+
+_ENABLE_FIXTURE = (
+    "schema_version: command-center.autonomy.v1\n"
+    "# header comment that must survive an enable\n"
+    "repo_manifests:\n"
+    "  - repo_id: alpha\n"
+    "    risk_ceiling: L2_local_edits\n"
+    "    autonomous_edits_enabled: true\n"
+    "    blockers: []\n"
+    "  - repo_id: beta\n"
+    "    risk_ceiling: L2_local_edits\n"
+    "    merge_wall: local_pre_push_and_human_merge\n"
+    "    autonomous_edits_enabled: false\n"
+    "    blockers:\n"
+    "    - repo_autonomy_not_yet_verified\n"
+    "    - second_blocker\n"
+    "desktop_targets: []\n"
+)
+
+
+def test_enable_manifest_in_text_is_surgical_and_comment_preserving():
+    out = repo_registry._enable_manifest_in_text(_ENABLE_FIXTURE, "beta")
+    # target flipped + blockers emptied; old blocker items dropped
+    assert "    autonomous_edits_enabled: true\n" in out
+    assert "    blockers: []\n" in out
+    assert "repo_autonomy_not_yet_verified" not in out
+    assert "second_blocker" not in out
+    # comment, sibling manifest, and the following top-level section are untouched
+    assert "# header comment that must survive an enable\n" in out
+    assert "  - repo_id: alpha\n" in out
+    assert "    merge_wall: local_pre_push_and_human_merge\n" in out
+    assert out.endswith("desktop_targets: []\n")
+    # the diff is exactly the 2 target lines vs the old 3 (flag + blockers list)
+    before = _ENABLE_FIXTURE.splitlines()
+    after = out.splitlines()
+    # only blockers shrank: "blockers:" + 2 items (3 lines) -> "blockers: []" (1 line)
+    assert len(before) - len(after) == 2
+    # parses, and only beta changed
+    by = {r["repo_id"]: r for r in yaml.safe_load(out)["repo_manifests"]}
+    assert by["beta"]["autonomous_edits_enabled"] is True
+    assert by["beta"]["blockers"] == []
+    assert by["alpha"]["autonomous_edits_enabled"] is True
+
+
+def test_enable_manifest_in_text_idempotent_on_already_clean_blockers():
+    once = repo_registry._enable_manifest_in_text(_ENABLE_FIXTURE, "beta")
+    twice = repo_registry._enable_manifest_in_text(once, "beta")
+    assert twice == once
+
+
+def test_enable_manifest_in_text_unknown_repo_raises():
+    with pytest.raises(ValueError, match="not found"):
+        repo_registry._enable_manifest_in_text(_ENABLE_FIXTURE, "missing")

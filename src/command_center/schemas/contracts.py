@@ -17,6 +17,13 @@ class ModelCandidate(Strict):
     model: str
     priority: int = Field(ge=1)
     local: bool = False
+    # Lifecycle status. `active` candidates are routed (rendered into the LiteLLM
+    # model_list). `scout` candidates are tracked here as a watchlist — under
+    # evaluation, NOT yet routed — so a proposed model has one home alongside the
+    # roster instead of living only in the scout feed. Promotion (scout -> active)
+    # stays human-only: `cc model-promote --role R --candidate ALIAS --approver YOU
+    # --apply`. Default `active` keeps every existing entry valid unchanged.
+    status: Literal["active", "scout"] = "active"
     monthly_budget_usd: float | None = Field(default=None, ge=0)
     canary_weight: float = Field(default=0.0, ge=0.0, le=1.0)
     vram_gb: int | None = Field(default=None, ge=1)
@@ -111,6 +118,20 @@ class ModelRegistry(Strict):
             # at most one canary per role
             if sum(1 for c in cands if c.canary_weight > 0) > 1:
                 raise ValueError(f"role '{role}' has more than one canary")
+            # a role must keep at least one active (routed) candidate — an
+            # all-scout role would render an empty route and silently break.
+            if not any(c.status == "active" for c in cands):
+                raise ValueError(
+                    f"role '{role}' has no active candidate (all scout); routing would be empty"
+                )
+            # scout candidates are not routed, so they cannot also be a canary —
+            # promote to active first, then canary.
+            for c in cands:
+                if c.status == "scout" and c.canary_weight > 0:
+                    raise ValueError(
+                        f"role '{role}' candidate '{c.alias}' is scout but has canary_weight>0; "
+                        "scout models are not routed — promote to active before canarying"
+                    )
         if self.executors:
             pr = [e.priority for e in self.executors]
             if len(pr) != len(set(pr)) or 1 not in pr:

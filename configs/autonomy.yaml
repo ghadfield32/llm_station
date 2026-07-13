@@ -163,9 +163,8 @@ repo_manifests:
     required_status_check_contexts:
     - Unit Tests
     merge_wall: local_pre_push_and_human_merge
-    autonomous_edits_enabled: false
-    blockers:
-    - repo_autonomy_not_yet_verified
+    autonomous_edits_enabled: true
+    blockers: []
 
 desktop_targets:
   - target_id: appflowy_browser_staging
