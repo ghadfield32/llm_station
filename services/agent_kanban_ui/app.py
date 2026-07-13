@@ -65,6 +65,12 @@ CAPTURE_ENABLED = os.environ.get("KANBAN_UI_CAPTURE_ENABLED", "1") == "1"
 # Durable capture: back the Inbox with the Ledger (survives restart) instead of
 # the in-memory store. Off by default so a Ledger-less dev cockpit still works.
 CAPTURE_LEDGER = os.environ.get("KANBAN_UI_CAPTURE_LEDGER", "") == "1"
+# Canonical work graph (WorkItem/placement/edge). Benign in-memory list, no repo/
+# Ledger/config side effects → defaults on. Durable Ledger persistence is Phase C-2.
+WORKGRAPH_ENABLED = os.environ.get("KANBAN_UI_WORKGRAPH_ENABLED", "1") == "1"
+# Durable work graph: back it with the Ledger (survives restart → the work-item
+# ids are permanent enough for deep links). Off by default for a Ledger-less dev.
+WORKGRAPH_LEDGER = os.environ.get("KANBAN_UI_WORKGRAPH_LEDGER", "") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -1338,6 +1344,162 @@ def intake_inbox() -> dict:
     return _require_capture().inbox()
 
 
+# ── Canonical work graph — one WorkItem, many board placements, typed edges ────
+# A task on three boards is ONE work item with three placements, never three
+# unrelated cards. Creating work items/placements/edges is planning, NOT a
+# mission — write-capable execution stays behind the mission + lease + wall.
+_workgraph_service = None   # type: ignore[var-annotated]
+
+
+def _get_workgraph_service():
+    global _workgraph_service
+    if _workgraph_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.work_graph import (
+            InMemoryWorkGraphStore,
+            LedgerWorkGraphStore,
+            WorkGraphService,
+        )
+        if WORKGRAPH_LEDGER:
+            store = LedgerWorkGraphStore(
+                httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            store = InMemoryWorkGraphStore()
+        _workgraph_service = WorkGraphService(
+            store,
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda prefix: f"{prefix}-" + secrets.token_hex(5))
+    return _workgraph_service
+
+
+def _require_workgraph():
+    if not WORKGRAPH_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="the work graph is disabled (set KANBAN_UI_WORKGRAPH_ENABLED=1)")
+    return _get_workgraph_service()
+
+
+class WorkItemIn(BaseModel):
+    title: str
+    description: str = ""
+    kind: str = "todo"
+    owner: str | None = None
+    priority: str | None = None
+    due_at: str | None = None
+    capture_id: str | None = None
+    conversation_id: str | None = None
+    mission_id: str | None = None
+
+
+class WorkStatusIn(BaseModel):
+    status: str
+
+
+class WorkPlacementIn(BaseModel):
+    board_id: str
+    domain_id: str
+    is_primary: bool = False
+    placement_stage: str | None = None
+    card_component: str = "generic_task"
+
+
+class WorkEdgeIn(BaseModel):
+    from_work_item_id: str
+    to_work_item_id: str
+    relation: str
+    reason: str | None = None
+
+
+def _wg_call(fn, *args, **kwargs):
+    """Translate a graph-integrity violation (cycle/dup primary) → 409, an unknown
+    ref → 404. Keeps the human-legible reason."""
+    from command_center.work_graph import WorkGraphError
+    try:
+        return fn(*args, **kwargs)
+    except WorkGraphError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/work-items", status_code=201)
+def create_work_item(body: WorkItemIn) -> dict:
+    svc = _require_workgraph()
+    item = _wg_call(svc.create_item, body.title, **body.model_dump(exclude={"title"}))
+    return {"item": item.model_dump(), "links": [lk.model_dump()
+                                                 for lk in svc.links_for(item.work_item_id)]}
+
+
+@app.get("/api/work-items")
+def list_work_items() -> list:
+    return [i.model_dump() for i in _require_workgraph().list_items()]
+
+
+@app.get("/api/work-items/{work_item_id}")
+def get_work_item(work_item_id: str) -> dict:
+    svc = _require_workgraph()
+    item = _wg_call(svc.get_item, work_item_id)
+    return {"item": item.model_dump(),
+            "placements": [p.model_dump()
+                           for p in svc._store.placements_for(work_item_id)],
+            "links": [lk.model_dump() for lk in svc.links_for(work_item_id)]}
+
+
+@app.get("/api/work-items/{work_item_id}/links")
+def get_work_item_links(work_item_id: str) -> list:
+    svc = _require_workgraph()
+    return [lk.model_dump() for lk in _wg_call(svc.links_for, work_item_id)]
+
+
+@app.post("/api/work-items/{work_item_id}/status")
+def set_work_item_status(work_item_id: str, body: WorkStatusIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.set_status, work_item_id, body.status).model_dump()
+
+
+@app.post("/api/work-items/{work_item_id}/placements", status_code=201)
+def add_work_placement(work_item_id: str, body: WorkPlacementIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.add_placement, work_item_id, body.board_id, body.domain_id,
+                    is_primary=body.is_primary, placement_stage=body.placement_stage,
+                    card_component=body.card_component).model_dump()
+
+
+@app.delete("/api/work-items/{work_item_id}/placements/{placement_id}")
+def remove_work_placement(work_item_id: str, placement_id: str) -> dict:
+    svc = _require_workgraph()
+    _wg_call(svc.remove_placement, placement_id)
+    return {"ok": True}
+
+
+@app.post("/api/work-edges", status_code=201)
+def create_work_edge(body: WorkEdgeIn) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.add_edge, body.from_work_item_id, body.to_work_item_id,
+                    body.relation, reason=body.reason).model_dump()
+
+
+@app.delete("/api/work-edges/{edge_id}")
+def remove_work_edge(edge_id: str) -> dict:
+    svc = _require_workgraph()
+    _wg_call(svc.remove_edge, edge_id)
+    return {"ok": True}
+
+
+@app.get("/api/work-graph")
+def whole_work_graph() -> dict:
+    return _require_workgraph().graph().model_dump()
+
+
+@app.get("/api/work-graph/{work_item_id}")
+def work_graph_neighbourhood(work_item_id: str, depth: int = 1) -> dict:
+    svc = _require_workgraph()
+    return _wg_call(svc.graph, work_item_id, depth=depth).model_dump()
+
+
 @app.get("/api/domain/{domain_id}/cards")
 def domain_cards(domain_id: str) -> dict:
     spec = _domain_spec(domain_id)
@@ -1660,6 +1822,10 @@ class ActionIn(BaseModel):
 class DomainMoveIn(BaseModel):
     card_id: str
     status: str
+    # Optional rejection metadata, recorded when a job card is moved to
+    # "Rejected / Skip" so the rejection report can suggest filter changes.
+    reason_code: str | None = None
+    reason_note: str | None = None
 
 
 class DomainNoteIn(BaseModel):
@@ -1686,6 +1852,22 @@ class JobSearchCategorySettingsIn(BaseModel):
     keywords: list[str] | None = None
     # required only when CREATING a new category (must name a known variant)
     resume_variant: str | None = None
+
+
+class JobSearchLocationsSettingsIn(BaseModel):
+    # partial update: only provided fields are written; validation happens
+    # against the merged JobSearchConfig so a bad mode/region combo returns 400
+    mode: str | None = None
+    remote_ok: bool | None = None
+    remote_types_allowed: list[str] | None = None
+    employment_types_allowed: list[str] | None = None
+    countries: list[str] | None = None
+    regions: list[str] | None = None
+
+
+class JobSearchLanguagesSettingsIn(BaseModel):
+    spoken: list[str] | None = None
+    require_spoken_for_apply: bool | None = None
 
 
 class StandingAnswerIn(BaseModel):
@@ -1828,6 +2010,130 @@ def _process_selected_job_cards() -> dict[str, Any]:
     }
 
 
+class _JobPrepQueue:
+    """Runs job-card packet preparation OFF the request path so moving a card to
+    'Selected by Geoff' returns immediately instead of blocking on an LLM run.
+
+    A single daemon worker drains requests. Rapid moves (or a bulk-select)
+    coalesce into at most one pending re-run, so N moves do not spawn N runs;
+    process_selected is idempotent (already-prepared cards are skipped), so one
+    coalesced run still prepares every pending card. The run holds
+    _job_finalize_lock so preparation never overlaps a Completed finalize.
+
+    The worker never dies on a failed run: the error is captured and surfaced
+    via /api/job-search/prep-status rather than swallowed or killing the queue.
+    """
+
+    def __init__(self) -> None:
+        self._cv = threading.Condition()
+        self._pending = False
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._runs_completed = 0
+        self._requests_total = 0
+        self._last_finished_at: str | None = None
+        self._last_result: dict[str, Any] | None = None
+        self._last_error: str | None = None
+
+    def _ensure_worker(self) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(
+                target=self._loop, name="job-prep-worker", daemon=True)
+            self._thread.start()
+
+    def request(self) -> dict[str, Any]:
+        with self._cv:
+            self._pending = True
+            self._requests_total += 1
+            self._ensure_worker()
+            self._cv.notify_all()
+            snapshot = self._snapshot_locked()
+        snapshot["operation"] = "process_selected_queued"
+        return snapshot
+
+    def status(self) -> dict[str, Any]:
+        with self._cv:
+            return self._snapshot_locked()
+
+    def _snapshot_locked(self) -> dict[str, Any]:
+        return {
+            "pending": self._pending,
+            "running": self._running,
+            "runs_completed": self._runs_completed,
+            "requests_total": self._requests_total,
+            "last_finished_at": self._last_finished_at,
+            "last_result": self._last_result,
+            "last_error": self._last_error,
+        }
+
+    def _loop(self) -> None:
+        while True:
+            with self._cv:
+                while not self._pending:
+                    self._cv.wait()
+                self._pending = False
+                self._running = True
+            result: dict[str, Any] | None = None
+            error: str | None = None
+            try:
+                with _job_finalize_lock:
+                    result = _process_selected_job_cards()
+            except Exception as exc:  # noqa: BLE001 - worker must not die
+                error = repr(exc)
+            with self._cv:
+                self._running = False
+                self._runs_completed += 1
+                self._last_result = result
+                self._last_error = error
+                self._last_finished_at = datetime.now(UTC).isoformat()
+
+
+_job_prep_queue = _JobPrepQueue()
+
+
+def _record_job_rejection_from_card(
+    card: dict, reason_code: str | None, reason_note: str | None,
+) -> dict[str, Any] | None:
+    """Record why a job card was rejected so the rejection report can suggest
+    filter/scoring changes. A drag with no reason still logs one (as 'other')
+    so the count is honest; the UI supplies a reason code when it can."""
+    from command_center.job_search.rejections import record_rejection
+
+    fields = _card_store_fields(card)
+    job_key = str(fields.get("job_key") or card.get("card_id") or "").strip()
+    if not job_key:
+        return None
+    _, root = _job_search_config_and_root()
+    score = fields.get("fit_score")
+    try:
+        fit_score = int(score) if score not in (None, "") else None
+    except (TypeError, ValueError):
+        fit_score = None
+    try:
+        return record_rejection(
+            root,
+            job_key=job_key,
+            reason_code=(reason_code or "other"),
+            note=reason_note,
+            card_id=str(card.get("card_id") or ""),
+            company=fields.get("company") or card.get("company"),
+            role_title=fields.get("role_title") or card.get("role_title"),
+            location=fields.get("location"),
+            remote_type=fields.get("remote_type"),
+            fit_score=fit_score,
+        )
+    except ValueError:
+        # unknown reason code from a client — fall back to 'other' rather than
+        # 500 the move; the rejection is still captured
+        return record_rejection(
+            root, job_key=job_key, reason_code="other", note=reason_note,
+            card_id=str(card.get("card_id") or ""),
+            company=fields.get("company") or card.get("company"),
+            role_title=fields.get("role_title") or card.get("role_title"),
+            location=fields.get("location"),
+            remote_type=fields.get("remote_type"), fit_score=fit_score)
+
+
 def _note_type_moves_to_interviewing(note_type: str) -> bool:
     lowered = note_type.lower()
     return any(token in lowered for token in (
@@ -1877,7 +2183,16 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
         and body.status in {"Selected by Geoff", "In Progress"}
         and _job_card_needs_packet(card)
     ):
-        side_effect = _process_selected_job_cards()
+        # Queue packet prep instead of running it inline: the move returns
+        # immediately so Geoff can move through cards fast, and the background
+        # worker prepares them. /api/job-search/prep-status reports progress.
+        side_effect = _job_prep_queue.request()
+    elif domain_id == "job_application" and body.status == "Rejected / Skip":
+        rejection = _record_job_rejection_from_card(
+            card, body.reason_code, body.reason_note)
+        if rejection is not None:
+            side_effect = {"operation": "rejection_recorded",
+                           "reason_code": rejection["reason_code"]}
     moved = _find_domain_card(provider, body.card_id)
     return {
         "status": "moved",
@@ -2381,6 +2696,8 @@ def _write_job_search_profile_settings(override: dict[str, Any]) -> dict:
         "job_search": cfg.job_search.model_dump(mode="json"),
         "ranking": cfg.ranking.model_dump(mode="json"),
         "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
+        "locations": cfg.locations.model_dump(mode="json"),
+        "languages": cfg.languages.model_dump(mode="json"),
     }
 
 
@@ -2438,6 +2755,8 @@ def job_search_profile_controls() -> dict:
         "job_categories": [c.model_dump(mode="json") for c in cfg.job_categories],
         "company_targets": cfg.company_targets.model_dump(mode="json"),
         "executor_fallback": cfg.executor_fallback.model_dump(mode="json"),
+        "locations": cfg.locations.model_dump(mode="json"),
+        "languages": cfg.languages.model_dump(mode="json"),
         "standing_answers": _standing_answers_block(root),
         "dag": _job_search_dag_block(cfg),
     }
@@ -2498,6 +2817,45 @@ def update_job_search_runtime(body: JobSearchRuntimeSettingsIn) -> dict:
     for key, value in body.model_dump(exclude_none=True).items():
         runtime[key] = value
     return _write_job_search_profile_settings(override)
+
+
+def _write_profile_override_or_400(override: dict[str, Any], what: str) -> dict:
+    """Persist a profile-settings override, converting a contract violation
+    (e.g. mode=regions with no region/country) into a 400 instead of a 500."""
+    from pydantic import ValidationError
+
+    try:
+        return _write_job_search_profile_settings(override)
+    except ValidationError as exc:
+        errors = exc.errors()
+        msg = errors[0].get("msg") if errors else f"invalid {what} settings"
+        raise HTTPException(status_code=400, detail=str(msg)) from exc
+
+
+@app.put("/api/job-search/profile-controls/locations")
+def update_job_search_locations(body: JobSearchLocationsSettingsIn) -> dict:
+    """Update the location + work-arrangement filter (the countries/states
+    checklist and remote/hybrid/onsite + full-time toggles). Partial update:
+    only provided fields change. Validated against the merged config, so an
+    empty region list under mode=regions (with no country) returns 400."""
+    _require_profile_writable()
+    override = _read_job_search_profile_settings()
+    section = override.setdefault("locations", {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        section[key] = value
+    return _write_profile_override_or_400(override, "locations")
+
+
+@app.put("/api/job-search/profile-controls/languages")
+def update_job_search_languages(body: JobSearchLanguagesSettingsIn) -> dict:
+    """Update the spoken-languages filter. A posting requiring a language not
+    listed here is hard-excluded from suggestions."""
+    _require_profile_writable()
+    override = _read_job_search_profile_settings()
+    section = override.setdefault("languages", {})
+    for key, value in body.model_dump(exclude_none=True).items():
+        section[key] = value
+    return _write_profile_override_or_400(override, "languages")
 
 
 @app.put("/api/job-search/profile-controls/category/{category_id}")
@@ -2721,13 +3079,36 @@ def bulk_select_suggested(body: BulkSelectIn) -> dict:
         moved.append({"card_id": card_id, "company": card.get("company"),
                       "role_title": card.get("role_title"),
                       "event_id": event.event_id})
+    # Queue background packet prep for the whole batch (respects the daily
+    # selected limit; the rest stay queued for the next run).
+    prep = None
+    if moved and target in {"Selected by Geoff", "In Progress"}:
+        prep = _job_prep_queue.request()
     return {
         "status": "bulk_selected",
         "automation_class": body.automation_class,
         "target": target,
         "moved_count": len(moved),
         "moved": moved,
+        "prep": prep,
     }
+
+
+@app.get("/api/job-search/prep-status")
+def job_search_prep_status() -> dict:
+    """Background packet-prep queue status: whether a run is pending/running and
+    the last run's result/error. The UI polls this to badge 'preparing...' cards
+    and to surface a failed prep instead of leaving a card silently stuck."""
+    return {"operation": "prep_status", **_job_prep_queue.status()}
+
+
+@app.get("/api/job-search/rejections-report")
+def job_search_rejections_report() -> dict:
+    """Aggregate recorded rejections into concrete filter/scoring suggestions."""
+    from command_center.job_search.rejections import rejection_report
+
+    cfg, root = _job_search_config_and_root()
+    return rejection_report(root=root, cfg=cfg)
 
 
 @app.put("/api/job-search/profile-controls/draft-default")

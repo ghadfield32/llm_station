@@ -369,6 +369,79 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 """.strip()
 
+# Durable work-graph schema. MIRROR of the canonical source of truth in
+# src/command_center/work_graph/ledger_schema.py (SCHEMA_SQL). Duplicated here
+# because this container can't import the package; kept identical by
+# tests/test_work_graph_ledger_schema.py, which fails on any drift. Additive.
+WORKGRAPH_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS work_items (
+    work_item_id      TEXT PRIMARY KEY,
+    title             TEXT NOT NULL,
+    description       TEXT,
+    kind              TEXT NOT NULL DEFAULT 'todo',
+    canonical_status  TEXT NOT NULL DEFAULT 'backlog',
+    primary_board_id  TEXT,
+    owner             TEXT,
+    priority          TEXT,
+    due_at            TEXT,
+    capture_id        TEXT,
+    capture_batch_id  TEXT,
+    packet_id         TEXT,
+    conversation_id   TEXT,
+    mission_id        TEXT,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS work_placements (
+    placement_id    TEXT PRIMARY KEY,
+    work_item_id    TEXT NOT NULL,
+    board_id        TEXT NOT NULL,
+    domain_id       TEXT NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0,
+    placement_stage TEXT,
+    card_component  TEXT NOT NULL DEFAULT 'generic_task',
+    local_fields    TEXT,
+    created_at      TEXT NOT NULL,
+    removed_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS work_edges (
+    edge_id            TEXT PRIMARY KEY,
+    from_work_item_id  TEXT NOT NULL,
+    to_work_item_id    TEXT NOT NULL,
+    relation           TEXT NOT NULL,
+    blocking           INTEGER NOT NULL DEFAULT 0,
+    reason             TEXT,
+    evidence_refs      TEXT,
+    created_by         TEXT,
+    created_at         TEXT NOT NULL,
+    removed_at         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS work_events (
+    event_seq    INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_item_id TEXT NOT NULL,
+    ts           TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    payload      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_work_placements_item
+    ON work_placements (work_item_id);
+CREATE INDEX IF NOT EXISTS ix_work_placements_board
+    ON work_placements (board_id);
+CREATE INDEX IF NOT EXISTS ix_work_edges_from ON work_edges (from_work_item_id);
+CREATE INDEX IF NOT EXISTS ix_work_edges_to ON work_edges (to_work_item_id);
+CREATE INDEX IF NOT EXISTS ix_work_events_item
+    ON work_events (work_item_id, event_seq);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    TEXT PRIMARY KEY,
+    applied_at TEXT
+);
+""".strip()
+
 
 # Experiment lifecycle edges + the human-only wall, mirrored from
 # command_center.improvement.lifecycle. The Ledger enforces the structural walls
@@ -405,6 +478,9 @@ def init_db():
         c.executescript(CAPTURE_SCHEMA_SQL)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("capture.v1", _now()))
+        c.executescript(WORKGRAPH_SCHEMA_SQL)
+        c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+                  "VALUES (?, ?)", ("workgraph.v1", _now()))
         c.executescript("""
         CREATE TABLE IF NOT EXISTS missions (
             id TEXT PRIMARY KEY,
@@ -1329,6 +1405,159 @@ def get_capture_events(capture_id: str):
         rows = c.execute("SELECT * FROM capture_events WHERE capture_id=? "
                          "ORDER BY event_seq", (capture_id,)).fetchall()
     return [{"capture_id": r["capture_id"], "ts": r["ts"], "kind": r["kind"],
+             "payload": json.loads(r["payload"]) if r["payload"] else {}} for r in rows]
+
+
+# ── Durable work graph — backend for the cockpit's LedgerWorkGraphStore ────────
+_WORK_ITEM_COLS = (
+    "work_item_id", "title", "description", "kind", "canonical_status",
+    "primary_board_id", "owner", "priority", "due_at", "capture_id",
+    "capture_batch_id", "packet_id", "conversation_id", "mission_id",
+    "created_at", "updated_at")
+
+
+def _placement_to_dict(r) -> dict:
+    d = dict(r)
+    d["is_primary"] = bool(d["is_primary"])
+    d["local_fields"] = json.loads(d["local_fields"]) if d.get("local_fields") else {}
+    return d
+
+
+def _edge_to_dict(r) -> dict:
+    d = dict(r)
+    d["blocking"] = bool(d["blocking"])
+    d["evidence_refs"] = json.loads(d["evidence_refs"]) if d.get("evidence_refs") else []
+    return d
+
+
+@app.post("/work-item")
+def upsert_work_item(body: dict):
+    vals = [body.get(col) for col in _WORK_ITEM_COLS]
+    with closing(_db()) as c:
+        c.execute(f"INSERT OR REPLACE INTO work_items ({', '.join(_WORK_ITEM_COLS)}) "
+                  f"VALUES ({', '.join('?' * len(_WORK_ITEM_COLS))})", vals)
+        c.commit()
+        row = c.execute("SELECT * FROM work_items WHERE work_item_id=?",
+                        (body["work_item_id"],)).fetchone()
+    return dict(row)
+
+
+@app.get("/work-items")
+def list_work_items_ledger():
+    with closing(_db()) as c:
+        rows = c.execute("SELECT * FROM work_items ORDER BY rowid").fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.get("/work-item/{work_item_id}")
+def get_work_item_ledger(work_item_id: str):
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM work_items WHERE work_item_id=?",
+                        (work_item_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, f"no such work item: {work_item_id}")
+    return dict(row)
+
+
+@app.post("/work-placement")
+def upsert_placement(body: dict):
+    with closing(_db()) as c:
+        c.execute(
+            "INSERT OR REPLACE INTO work_placements (placement_id, work_item_id, "
+            "board_id, domain_id, is_primary, placement_stage, card_component, "
+            "local_fields, created_at, removed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (body["placement_id"], body["work_item_id"], body["board_id"],
+             body["domain_id"], int(bool(body.get("is_primary"))),
+             body.get("placement_stage"), body.get("card_component", "generic_task"),
+             json.dumps(body.get("local_fields") or {}), body["created_at"],
+             body.get("removed_at")))
+        c.commit()
+        row = c.execute("SELECT * FROM work_placements WHERE placement_id=?",
+                        (body["placement_id"],)).fetchone()
+    return _placement_to_dict(row)
+
+
+@app.get("/work-placement/{placement_id}")
+def get_placement_ledger(placement_id: str):
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM work_placements WHERE placement_id=?",
+                        (placement_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, f"no such placement: {placement_id}")
+    return _placement_to_dict(row)
+
+
+@app.get("/work-placements")
+def list_placements_ledger(work_item_id: Optional[str] = None,
+                           board_id: Optional[str] = None, active_only: int = 1):
+    q, params, conds = "SELECT * FROM work_placements", [], []
+    if work_item_id is not None:
+        conds.append("work_item_id=?"); params.append(work_item_id)
+    if board_id is not None:
+        conds.append("board_id=?"); params.append(board_id)
+    if active_only:
+        conds.append("removed_at IS NULL")
+    if conds:
+        q += " WHERE " + " AND ".join(conds)
+    with closing(_db()) as c:
+        rows = c.execute(q, params).fetchall()
+    return [_placement_to_dict(r) for r in rows]
+
+
+@app.post("/work-edge")
+def upsert_edge(body: dict):
+    with closing(_db()) as c:
+        c.execute(
+            "INSERT OR REPLACE INTO work_edges (edge_id, from_work_item_id, "
+            "to_work_item_id, relation, blocking, reason, evidence_refs, created_by, "
+            "created_at, removed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (body["edge_id"], body["from_work_item_id"], body["to_work_item_id"],
+             body["relation"], int(bool(body.get("blocking"))), body.get("reason"),
+             json.dumps(body.get("evidence_refs") or []), body.get("created_by"),
+             body["created_at"], body.get("removed_at")))
+        c.commit()
+        row = c.execute("SELECT * FROM work_edges WHERE edge_id=?",
+                        (body["edge_id"],)).fetchone()
+    return _edge_to_dict(row)
+
+
+@app.get("/work-edge/{edge_id}")
+def get_edge_ledger(edge_id: str):
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM work_edges WHERE edge_id=?", (edge_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, f"no such edge: {edge_id}")
+    return _edge_to_dict(row)
+
+
+@app.get("/work-edges")
+def list_edges_ledger(active_only: int = 1):
+    q = "SELECT * FROM work_edges"
+    if active_only:
+        q += " WHERE removed_at IS NULL"
+    with closing(_db()) as c:
+        rows = c.execute(q).fetchall()
+    return [_edge_to_dict(r) for r in rows]
+
+
+@app.post("/work-item/{work_item_id}/event")
+def add_work_event(work_item_id: str, body: dict):
+    with closing(_db()) as c:
+        c.execute("INSERT INTO work_events (work_item_id, ts, kind, payload) "
+                  "VALUES (?,?,?,?)",
+                  (work_item_id, body["ts"], body["kind"],
+                   json.dumps(body.get("payload") or {})))
+        c.commit()
+    return {"ok": True}
+
+
+@app.get("/work-item/{work_item_id}/events")
+def get_work_events(work_item_id: str):
+    with closing(_db()) as c:
+        rows = c.execute("SELECT * FROM work_events WHERE work_item_id=? "
+                         "ORDER BY event_seq", (work_item_id,)).fetchall()
+    return [{"event_seq": r["event_seq"], "work_item_id": r["work_item_id"],
+             "ts": r["ts"], "kind": r["kind"],
              "payload": json.loads(r["payload"]) if r["payload"] else {}} for r in rows]
 
 

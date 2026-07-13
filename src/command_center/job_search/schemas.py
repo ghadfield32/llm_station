@@ -81,6 +81,15 @@ class JobSearchRanking(Strict):
     missing_salary_penalty: int = Field(default=3, ge=0, le=20)
     manual_required_penalty: int = Field(default=5, ge=0, le=20)
     target_company_bonus: int = Field(default=6, ge=0, le=20)
+    # Soft penalties for the hybrid location/language gate. A CLEAR mismatch
+    # (onsite in an excluded place, or a required language you don't speak) is
+    # hard-excluded from suggestions in scoring; these penalties only apply to
+    # the AMBIGUOUS cases that stay visible but rank lower.
+    location_ambiguous_penalty: int = Field(default=8, ge=0, le=30)
+    language_preferred_penalty: int = Field(default=6, ge=0, le=30)
+    # Employment-type mismatch is treated as a SOFT signal only (free-text
+    # detection is noisy); a full-time filter never hard-excludes.
+    employment_mismatch_penalty: int = Field(default=6, ge=0, le=30)
 
     @model_validator(mode="after")
     def _checks(self):
@@ -167,6 +176,70 @@ class CompanyTargets(Strict):
     major_other: list[str] = []
 
 
+class LocationFilter(Strict):
+    """Operator-tunable geography + work-arrangement gate for the daily search.
+
+    mode:
+      - worldwide: no geography restriction (work-arrangement + employment
+        filters still apply).
+      - countries: keep onsite/hybrid roles only in `countries`.
+      - regions: keep onsite/hybrid roles only in `regions` (states/metros)
+        and/or `countries`.
+    Remote roles pass the geography check when `remote_ok` is true, regardless
+    of country/region. Scoring hard-excludes clear mismatches (a known non-target
+    location, or a work arrangement you excluded) and soft-penalizes ambiguous
+    postings (unknown/national-only location) so they stay visible, ranked lower.
+    """
+
+    mode: Literal["worldwide", "countries", "regions"] = "worldwide"
+    remote_ok: bool = True
+    # A posting whose remote_type is a known value NOT in this list is a hard
+    # mismatch. `unknown` is never hard-excluded (treated as ambiguous instead).
+    remote_types_allowed: list[RemoteType] = [
+        RemoteType.REMOTE,
+        RemoteType.HYBRID,
+        RemoteType.ONSITE,
+    ]
+    # Best-effort employment-type allowlist (e.g. ["full_time"]). Empty = no
+    # filter. Matched against employment cues in the posting text.
+    employment_types_allowed: list[str] = []
+    countries: list[str] = []
+    # States / metros / free-text places matched against the posting location.
+    regions: list[str] = []
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.remote_types_allowed:
+            raise ValueError("locations.remote_types_allowed cannot be empty")
+        if len(self.remote_types_allowed) != len(set(self.remote_types_allowed)):
+            raise ValueError("locations.remote_types_allowed has duplicates")
+        if self.mode == "countries" and not self.countries:
+            raise ValueError("locations.mode=countries needs at least one country")
+        if self.mode == "regions" and not (self.regions or self.countries):
+            raise ValueError(
+                "locations.mode=regions needs at least one region or country"
+            )
+        return self
+
+
+class LanguageFilter(Strict):
+    """Languages Geoff speaks, used to gate jobs with a language requirement.
+
+    A posting that REQUIRES a language not in `spoken` is hard-excluded from
+    suggestions; a language that is merely preferred / "a plus" is a soft
+    penalty. English requirements never gate when English is spoken.
+    """
+
+    spoken: list[str] = ["English"]
+    require_spoken_for_apply: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not self.spoken:
+            raise ValueError("languages.spoken cannot be empty")
+        return self
+
+
 class ExecutorFallback(Strict):
     primary: str
     fallback: str
@@ -193,6 +266,8 @@ class JobSearchConfig(Strict):
     job_categories: list[JobCategory]
     executor_fallback: ExecutorFallback
     company_targets: CompanyTargets = Field(default_factory=CompanyTargets)
+    locations: LocationFilter = Field(default_factory=LocationFilter)
+    languages: LanguageFilter = Field(default_factory=LanguageFilter)
 
     @model_validator(mode="after")
     def _checks(self):

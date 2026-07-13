@@ -5,6 +5,49 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Chat-first cockpit + Universal Capture + Work Graph (2026-07-13)
+- MERGED to main: chat-first Assistant chooser — Claude/Codex selectable, no
+  "start from a mission" dead-end (#41); Track-as-mission for agent + gateway
+  chats, reuses the session/thread, inert L0 mission (#42/#43); "Open in chat /
+  Ask Claude / Ask Codex" on every card, seeded from chat_prompt (#43); atomic
+  board-module wizard — kanban board + generic_task surface, wall verbs forbidden,
+  write-gated, audited (#43); first-class no-repo `life` boards via
+  KanbanBoardSpec.execution_scope (#44); Universal Capture — IMMUTABLE
+  CaptureRecord + Inbox, bulk-split, in `src/command_center/intake/` (#44); MASTER
+  §4.8 + truth-check extensions (#45/#46); durable Ledger CaptureStore —
+  `intake/ledger_schema.py` + `ledger_store.py`, mirror-DDL + drift test,
+  KANBAN_UI_CAPTURE_LEDGER=1 (#47).
+- OPEN, green, mergeable: #40 usage normalization (conflict fixed 07-13 →
+  re-recorded merged MASTER digest 547bc3ec); #48 work-graph (below).
+- Work graph #48 (`src/command_center/work_graph/`): ONE canonical WorkItem, many
+  board WorkPlacements (never duplicated cards), typed WorkEdges. Board membership
+  is a placement (item→board), not an edge. Cycle policy: blocking/structural
+  (blocks/parent_of/implements/supersedes/derived_from) ACYCLIC → 409;
+  informational (related_to/informs/supports/duplicates) may cycle. One primary
+  board; soft-remove preserves the item; links are BACKEND-generated. Cockpit
+  /api/work-items[/{id}[/links]] /placements /work-edges /work-graph[/{id}].
+- Phase C-2 DONE (branch `feat/work-graph-ledger`, stacked on #48): durable
+  Ledger persistence, same mirror-DDL pattern as #47. NEW
+  `work_graph/ledger_schema.py` (`workgraph.v1`: work_items/work_placements/
+  work_edges/work_events) + byte-mirror `WORKGRAPH_SCHEMA_SQL` in
+  `services/ledger/app.py` (+ upsert/get/list/event REST routes) +
+  `work_graph/ledger_store.py` (`LedgerWorkGraphStore`, same surface as in-memory,
+  404→KeyError). Cockpit `_get_workgraph_service` picks it under
+  KANBAN_UI_WORKGRAPH_LEDGER=1. Tests: drift guard + 7 round-trip/durability
+  (item/placement/edge/status/events survive a fresh service over the same
+  ledger.db; one-primary + cycle rules enforced across "restart"). Full suite
+  green via PYTHONPATH=worktree/src (editable install → main checkout otherwise).
+- NEXT: merge #40 + #48 + Phase C-2; /work/<id> permalink resolver → structured
+  Chat creation receipts (TaskCreationReceipt).
+- DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
+  lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
+  AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1
+  start). GOTCHAS: `docker compose up -d` SKIPS the profile-gated agent-kanban-ui
+  (use `--profile ui up -d agent-kanban-ui`); ruleset protect-main-command-center
+  requires 1 code-owner review (solo → set required approvals 0, or admin bypass);
+  local checkout was on feat/life-center-foundation (#46 base), `git checkout main`
+  for #47/#48; empty-reply from :8787 = curled mid-restart, not a crash.
+
 ## Unified runtime Usage / Limits / Availability (src/command_center/usage/)
 - PHASE 3 — USAGE & LIMITS COCKPIT API + UI 07-12 (same branch
   `feat/codex-usage-collector`, extends PR #35). The backend layer becomes a
