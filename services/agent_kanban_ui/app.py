@@ -62,6 +62,9 @@ DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "
 # side effects), so it defaults ON (opt-out). Captures are in-memory for now; a
 # durable Ledger-backed store is the immediate follow-up.
 CAPTURE_ENABLED = os.environ.get("KANBAN_UI_CAPTURE_ENABLED", "1") == "1"
+# Durable capture: back the Inbox with the Ledger (survives restart) instead of
+# the in-memory store. Off by default so a Ledger-less dev cockpit still works.
+CAPTURE_LEDGER = os.environ.get("KANBAN_UI_CAPTURE_LEDGER", "") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -1241,9 +1244,17 @@ def _get_capture_service():
         import secrets
         from datetime import datetime, timezone
 
-        from command_center.intake import CaptureService, InMemoryCaptureStore
+        from command_center.intake import (
+            CaptureService,
+            InMemoryCaptureStore,
+            LedgerCaptureStore,
+        )
+        if CAPTURE_LEDGER:
+            store = LedgerCaptureStore(httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            store = InMemoryCaptureStore()
         _capture_service = CaptureService(
-            InMemoryCaptureStore(),
+            store,
             clock=lambda: datetime.now(timezone.utc).isoformat(),
             id_factory=lambda: "cap-" + secrets.token_hex(5))
     return _capture_service
