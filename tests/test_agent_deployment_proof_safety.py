@@ -22,7 +22,27 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "run_agent_deployment_proof.ps1"
 
 PWSH = shutil.which("pwsh") or shutil.which("powershell")
-pytestmark = pytest.mark.skipif(PWSH is None, reason="pwsh/powershell not on PATH")
+
+# The script (deliberately) trusts nothing but `git branch --show-current` for
+# its own branch invariant -- so on a detached HEAD (e.g. actions/checkout's
+# default for pull_request-triggered runs, checked out at the merge commit)
+# there is no real branch for either the script or this suite to name, and
+# `-ExpectedBranch ""` doesn't even bind (PowerShell rejects an empty string
+# for a Mandatory [string] parameter). Skip cleanly, same as the no-pwsh case
+# -- these invariants are proven wherever there IS an attached branch (dev
+# machines, push-triggered CI), which is every real invocation of this script.
+_ON_DETACHED_HEAD = PWSH is not None and not subprocess.run(
+    ["git", "-C", str(REPO_ROOT), "branch", "--show-current"],
+    capture_output=True, text=True, check=True).stdout.strip()
+
+pytestmark = pytest.mark.skipif(
+    PWSH is None, reason="pwsh/powershell not on PATH")
+
+needs_attached_branch = pytest.mark.skipif(
+    _ON_DETACHED_HEAD,
+    reason="HEAD is detached (e.g. a PR-triggered actions/checkout merge-commit "
+           "checkout) -- there is no real branch for the script or this test to "
+           "name, so the branch invariant can't be exercised here")
 
 
 def run_script(**kwargs) -> subprocess.CompletedProcess:
@@ -54,6 +74,7 @@ def test_script_exists():
     assert SCRIPT.is_file()
 
 
+@needs_attached_branch
 def test_happy_path_dry_run_passes(in_worktree_proof_env):
     result = run_script(
         WorktreeRoot=str(REPO_ROOT), ExpectedBranch=_current_branch(),
@@ -64,6 +85,7 @@ def test_happy_path_dry_run_passes(in_worktree_proof_env):
     assert not in_worktree_proof_env.exists()   # -DryRun never writes the file
 
 
+@needs_attached_branch
 def test_refuses_llm_station_project_name(tmp_path):
     result = run_script(
         WorktreeRoot=str(REPO_ROOT), ExpectedBranch=_current_branch(),
@@ -74,6 +96,7 @@ def test_refuses_llm_station_project_name(tmp_path):
     assert "llm_station" in result.stdout
 
 
+@needs_attached_branch
 def test_refuses_project_name_without_proof_in_it(tmp_path):
     result = run_script(
         WorktreeRoot=str(REPO_ROOT), ExpectedBranch=_current_branch(),
@@ -92,6 +115,7 @@ def test_refuses_wrong_branch(tmp_path):
     assert "does not match ExpectedBranch" in result.stdout
 
 
+@needs_attached_branch
 def test_refuses_wrong_root_the_real_incident_scenario():
     """The actual incident: a cwd drift pointed Docker at a DIFFERENT real
     checkout entirely. That checkout is a real git repo (so root resolution
@@ -109,6 +133,7 @@ def test_refuses_wrong_root_the_real_incident_scenario():
     assert "REFUSED" in result.stdout
 
 
+@needs_attached_branch
 def test_refuses_proof_env_named_dotenv(tmp_path):
     result = run_script(
         WorktreeRoot=str(REPO_ROOT), ExpectedBranch=_current_branch(),
@@ -118,6 +143,7 @@ def test_refuses_proof_env_named_dotenv(tmp_path):
     assert "must not be named '.env'" in result.stdout
 
 
+@needs_attached_branch
 def test_refuses_proof_env_outside_worktree(tmp_path):
     outside = tmp_path / "outside" / ".env.agent-proof"
     result = run_script(
@@ -127,6 +153,7 @@ def test_refuses_proof_env_outside_worktree(tmp_path):
     assert "is not inside WorktreeRoot" in result.stdout
 
 
+@needs_attached_branch
 def test_refuses_missing_proof_env_without_generateenv(in_worktree_proof_env):
     result = run_script(
         WorktreeRoot=str(REPO_ROOT), ExpectedBranch=_current_branch(),
@@ -137,6 +164,7 @@ def test_refuses_missing_proof_env_without_generateenv(in_worktree_proof_env):
     assert "-GenerateEnv" in result.stdout
 
 
+@needs_attached_branch
 def test_no_clobber_existing_proof_env_is_never_regenerated(in_worktree_proof_env):
     in_worktree_proof_env.write_text("SENTINEL_MARKER=do-not-overwrite-me\n")
 
