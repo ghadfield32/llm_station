@@ -195,6 +195,40 @@ services:
       start_period: 20s
     networks: [core]
 
+  # Apache Airflow (profile: airflow) — runs dags/self_improvement_daily.py on a
+  # daily schedule (or on the SCAN_REQUEST asset). Single-node `standalone`
+  # (scheduler + webserver + triggerer + SQLite), which matches this control
+  # plane's low-volume daily cadence; no separate metadata DB to operate.
+  # OBSERVER-ONLY: the DAG holds no write/promote/merge creds — its only outputs
+  # are Proposed Backlog cards + one report (tests/test_self_improvement_dag.py).
+  # Not started by default; bring up with `cc dag up` (or
+  # `docker compose --profile airflow up -d airflow`), then `cc dag doctor`.
+  airflow:
+    profiles: ["airflow"]
+    build:
+      context: .
+      dockerfile: services/airflow/Dockerfile
+    restart: unless-stopped
+    command: standalone
+    environment:
+      - AIRFLOW__CORE__LOAD_EXAMPLES=false
+      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+      # The DAG's observer-only flags (see dags/self_improvement_daily.py). Card
+      # drafting stays OFF here — flip via Kanban/env only when wired.
+      - SELF_IMPROVEMENT_APPLY=true
+      - SELF_IMPROVEMENT_KANBAN=false
+      - LEDGER_DB_PATH=/opt/airflow/ledger/ledger.db
+      - PYTHONPATH=/opt/airflow/repo/src
+    volumes:
+      - ./dags:/opt/airflow/dags:ro            # the DAG, read-only
+      - ./src:/opt/airflow/repo/src:ro         # command_center package (live, no rebuild)
+      - ./configs:/opt/airflow/repo/configs:ro # read-only config the scanners read
+      - ./data:/opt/airflow/ledger             # ledger.db the ObserverCharter writes
+      - airflow_data:/opt/airflow              # AIRFLOW_HOME state (db, cfg, logs)
+    ports: ["127.0.0.1:8080:8080"]
+    networks: [core]
+
   # Caddy intentionally omitted — reach everything over Tailscale. If you ever
   # need public URLs, add a caddy service + Cloudflare Access here.
 
@@ -206,3 +240,4 @@ volumes:
   litellm_db_data:
   ledger_data:        # back up: missions, leases, approvals
   kuma_data:
+  airflow_data:       # Airflow metadata db + config + logs (AIRFLOW_HOME)
