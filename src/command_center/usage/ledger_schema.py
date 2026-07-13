@@ -67,7 +67,11 @@ CREATE TABLE IF NOT EXISTS model_usage_samples (
     mission_id          TEXT,
     repo_id             TEXT,
     provider_request_id TEXT,
-    source_record_id    TEXT
+    source_record_id    TEXT,
+    model               TEXT,
+    effort              TEXT,
+    context_mode        TEXT,
+    api_equivalent_cost_usd REAL
 );
 
 CREATE TABLE IF NOT EXISTS model_limit_snapshots (

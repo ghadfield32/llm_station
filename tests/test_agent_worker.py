@@ -31,7 +31,10 @@ def _auth():
 def test_worker_owned_usage_captures_a_rate_limit_headlessly():
     # the worker's own UsageService ingests a live rate_limit event with NO
     # browser attached (the headless gap the cockpit tee can't cover), and
-    # exposes it for the cockpit to proxy. Codex/API-lane events are ignored.
+    # exposes it for the cockpit to proxy. Codex rate limits come from the Codex
+    # provider collector, so a codex_agent rate_limit is ignored here.
+    import types
+
     from command_center.agent_sessions import worker_app as wa
     from command_center.agent_sessions.events import AgentEvent
     from command_center.usage.service import UsageService
@@ -42,8 +45,12 @@ def test_worker_owned_usage_captures_a_rate_limit_headlessly():
                     "rate_limit_type": "five_hour", "utilization": None,
                     "resets_at": 1783896000})
     ev.ts = "2026-07-12T00:00:00+00:00"
-    wa._worker_feed_usage(usage, "claude_code_local", ev)
-    wa._worker_feed_usage(usage, "codex_agent", ev)      # ignored (own collector)
+    claude = types.SimpleNamespace(harness="claude_code_local", session_id="s1",
+                                   repo_id="r", conversation_id="c", model="opus")
+    codex = types.SimpleNamespace(harness="codex_agent", session_id="s2",
+                                  repo_id="r", conversation_id="c", model="gpt-5.5")
+    wa._worker_feed_usage(usage, claude, None, ev)
+    wa._worker_feed_usage(usage, codex, None, ev)        # ignored (own collector)
     app = wa.build_app(store=SessionStore(), token=TOKEN, usage_service=usage)
     client = TestClient(app)
     rows = client.get("/api/model-usage", headers=_auth()).json()
