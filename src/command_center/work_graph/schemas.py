@@ -191,7 +191,8 @@ class TaskBatchReceipt(BaseModel):
     ``preview=True`` means NOTHING was persisted — the ids are provisional and the
     graph is unchanged. linked_existing / needs_confirmation / board_suggestions
     are populated by later classification+routing phases; empty here."""
-    conversation_id: str
+    conversation_id: str | None = None
+    capture_id: str | None = None
     capture_batch_id: str | None = None
     preview: bool = False
     created: list[TaskCreationReceipt] = Field(default_factory=list)

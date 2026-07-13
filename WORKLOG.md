@@ -70,8 +70,22 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   the complete tree, then merged origin/main = #40/#48/#49/#52; work_graph files
   taken as additions-only supersets, #40 usage routes preserved in app.py); ONE PR
   → main carries just permalink + receipts. Digest re-recorded vs merged MASTER.
-- NEXT: merge the consolidated PR; Work Map + Connected-Work drawer UI (Phase F);
-  capture→work conversion; classification/routing (Phase G).
+- MERGED to main 07-13: #54 (permalink + Phase E) + #55 (frontier flake fix).
+- Capture→work conversion DONE (branch `feat/capture-to-work`, off updated main):
+  a Universal Capture becomes connected work via the SAME planner. NEW
+  `CaptureService.mark_converted` (appends a `link` CaptureEvent with
+  work_item_ids + moves capture to `routed` — never destroyed). `WorkPlanIn`
+  gains `capture_id` (threaded to `WorkItem.capture_id` = work→capture provenance)
+  and `conversation_id` is now OPTIONAL (capture/daily-intake origins have no
+  chat; `TaskBatchReceipt.conversation_id`/`capture_id` widened too). Cockpit
+  `POST /api/captures/{id}/work-preview` (side-effect-free) + `/convert` (commits
+  the plan, THEN marks the capture routed — work side atomic; capture untouched on
+  a bad plan). Tests: 2 intake unit + 5 cockpit (provenance stamped, preview
+  side-effect-free, cycle→409 leaves capture `captured`, unknown→404, graph-off→
+  503). MASTER §4.9 capture-conversion + truth-check convert endpoint + digest.
+  274 passed via PYTHONPATH=worktree/src.
+- NEXT: Work Map + Connected-Work drawer UI (Phase F); classification/routing
+  (Phase G — free text → structured plan feeding preview/convert).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1
