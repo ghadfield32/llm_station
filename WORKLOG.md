@@ -187,6 +187,24 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- USAGE RESTART-PROOF + ONE AUTHORITATIVE STORE 07-12 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). Completes the "worker owns
+  ingestion → durable LedgerUsageStore → cockpit reads durable result" wiring
+  (the last gap from worker-owned ingestion). The WORKER's UsageService is now
+  backed by `LedgerUsageStore` when `LEDGER_BASE_URL` is set (it always is —
+  the worker already requires it for sessions), so provider-limit observations
+  survive a restart. The COCKPIT, under `KANBAN_UI_USAGE_LEDGER=1`, backs its
+  own UsageService with a LedgerUsageStore against the SAME `LEDGER_BASE_URL`,
+  so it READS the very rows the worker wrote — one authoritative durable store,
+  not a per-process in-memory illusion. The SSE tee remains a compatibility
+  writer (idempotent by source_hash, so tee + worker feeding the same event
+  dedups). +2 tests (`test_usage_ledger_durability.py`): a claude_code_local
+  rate_limit ingested through one Ledger-backed service is visible to a BRAND
+  NEW service reading the same Ledger (restart proof), the two Claude lanes stay
+  distinct, and a re-ingested event stays single (idempotent). ruff + mypy
+  clean; full suite green. Runbook adds `AGENT_WORKER_USAGE=1` +
+  `KANBAN_UI_USAGE_LEDGER=1`. NEXT (documented): retire the cockpit tee once the
+  worker is the sole writer in a deployment; SSE becomes presentation-only.
 - WORKER-OWNED USAGE INGESTION (headless-safe) 07-12 (same branch
   `feat/agent-cockpit-pickers`, extends PR #37). Closes the cockpit-tee gap: the
   cockpit SSE tee only ingests while a browser stream is open, so a HEADLESS

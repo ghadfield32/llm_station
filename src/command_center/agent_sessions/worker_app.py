@@ -131,8 +131,19 @@ def build_app(*, store: SessionStoreProtocol | None = None,
     usage: Any = usage_service
     if usage is None and os.environ.get("AGENT_WORKER_USAGE", "") == "1":
         from command_center.usage.service import UsageService as _UsageService
-        from command_center.usage.store import UsageStore as _UsageStore
-        usage = _UsageService(_UsageStore())
+        ledger_base = os.environ.get("LEDGER_BASE_URL")
+        if ledger_base:
+            # DURABLE: the worker writes provider-limit observations to the same
+            # Ledger the cockpit reads (when KANBAN_UI_USAGE_LEDGER=1), so a
+            # worker/cockpit restart preserves the latest known limits and there
+            # is ONE authoritative store. Ingestion is idempotent by source_hash.
+            import httpx
+            from command_center.usage.ledger_store import LedgerUsageStore
+            usage = _UsageService(
+                LedgerUsageStore(httpx.Client(base_url=ledger_base, timeout=30)))
+        else:
+            from command_center.usage.store import UsageStore as _UsageStore
+            usage = _UsageService(_UsageStore())
 
     # PROCESS-LOCAL only, same discipline as AgentSessionService's own
     # _active_harnesses cache: the single source of truth for "is a turn

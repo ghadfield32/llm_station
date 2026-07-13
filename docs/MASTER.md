@@ -598,9 +598,16 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
 - **Phase 3.3 — WORKER-owned usage ingestion (headless-safe)** (PR #37,
   `AGENT_WORKER_USAGE`): the worker feeds its own `UsageService` on `rate_limit`
   events as a turn runs (`_run_turn`), so a headless session captures usage even
-  with no browser attached (the cockpit SSE tee's gap). Worker read endpoints
-  `GET /api/model-usage[/{runtime_id}]` let the cockpit proxy the worker as the
-  single authoritative read path (next micro-step). Idempotent by `source_hash`.
+  with no browser attached (the cockpit SSE tee's gap). Idempotent by `source_hash`.
+- **Phase 3.4 — restart-proof, ONE authoritative usage store** (PR #37): the
+  worker's `UsageService` is now backed by `LedgerUsageStore` when
+  `LEDGER_BASE_URL` is set (durable across restart), and the cockpit — under
+  `KANBAN_UI_USAGE_LEDGER=1` — reads the **same** Ledger, so it renders exactly
+  the rows the worker wrote (not a per-process in-memory illusion). Proven by
+  `test_usage_ledger_durability.py`: an observation ingested through one
+  Ledger-backed service is visible to a brand-new service reading the same
+  Ledger, the two Claude lanes stay distinct, and a re-ingested event stays
+  single. The SSE tee remains a compatibility writer (dedup by `source_hash`).
 
 **What is NOT built yet:** every collector except Codex; the Usage & Limits
 UI's remaining depth (historical charts, reset timelines, routing-evidence

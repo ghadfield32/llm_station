@@ -81,6 +81,11 @@ USAGE_CODEX = os.environ.get("KANBAN_UI_USAGE_CODEX", "") == "1"
 # not polled), so this gate registers the two Claude usage lanes AND turns on the
 # SSE usage tee (_feed_agent_usage).
 USAGE_CLAUDE = os.environ.get("KANBAN_UI_USAGE_CLAUDE", "") == "1"
+# Back the cockpit's UsageService with the durable Ledger (the SAME store the
+# host worker writes to) instead of a per-process in-memory store — so the page
+# survives a restart and reads the worker's headless-captured usage. Falls back
+# to in-memory + the SSE tee when off (dev/test default).
+USAGE_LEDGER = os.environ.get("KANBAN_UI_USAGE_LEDGER", "") == "1"
 USAGE_FAKE = os.environ.get("KANBAN_UI_USAGE_FAKE", "") == "1"
 AGENT_WORKER_URL = os.environ.get(
     "AGENT_WORKER_URL", "http://host.docker.internal:8791").rstrip("/")
@@ -1223,8 +1228,17 @@ def _get_usage_service():
     global _usage_service
     if _usage_service is None:
         from command_center.usage.service import UsageService
-        from command_center.usage.store import UsageStore
-        _usage_service = UsageService(UsageStore())
+        if USAGE_LEDGER and LEDGER_BASE_URL:
+            # read the SAME durable Ledger the worker writes to (restart-proof,
+            # one authoritative store) instead of a per-process in-memory store
+            import httpx
+            from command_center.usage.ledger_store import LedgerUsageStore
+            store = LedgerUsageStore(
+                httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            from command_center.usage.store import UsageStore
+            store = UsageStore()   # type: ignore[assignment]
+        _usage_service = UsageService(store)
         _usage_collectors.clear()
         if USAGE_FAKE:
             from command_center.usage.collectors.fake import FakeCollector

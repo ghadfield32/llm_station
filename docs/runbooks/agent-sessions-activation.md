@@ -26,6 +26,7 @@ Three things must all be true:
 # same shell/user that ran `codex login` and `claude auth login`
 $env:LEDGER_BASE_URL   = "http://127.0.0.1:8090"     # your running Ledger
 $env:AGENT_WORKER_TOKEN = "<generate a strong secret>"
+$env:AGENT_WORKER_USAGE = "1"    # worker records provider limits to the Ledger (durable, headless-safe)
 # optional: install the agent SDK extras so the API lanes probe too
 #   uv sync --extra agent-codex --extra agent-claude
 uv run cc agent-worker        # binds localhost:8791 by default
@@ -59,6 +60,7 @@ AGENT_WORKER_TOKEN=<same secret as the worker>
 KANBAN_UI_USAGE_ENABLED=1        # so the selector can show usage/limit badges
 KANBAN_UI_USAGE_CODEX=1          # register the Codex rate-limit collector
 KANBAN_UI_USAGE_CLAUDE=1         # tee live Claude rate_limit events into the usage store
+KANBAN_UI_USAGE_LEDGER=1         # read the SAME durable Ledger the worker writes (restart-proof, one authoritative store)
 ```
 
 Rebuild/restart the cockpit **from this branch** (it must contain
