@@ -1092,6 +1092,12 @@ class KanbanBoardSpec(Strict):
     provider: Literal["appflowy", "command_center_ui"]
     workspace_ref: str
     board_ref: str
+    # execution_scope decides whether the board drives a repository. `life` boards
+    # (Health, Books, Personal Tasks…) run NO repository work — outputs live in the
+    # Ledger/board store — so they legitimately carry an empty repo_ids. `repository`
+    # and `hybrid` boards drive repo work and must name ≥1 repo. Default preserves
+    # every existing board (which never set this) as a repository board.
+    execution_scope: Literal["life", "repository", "hybrid"] = "repository"
     repo_ids: list[str]
     status_mapping: dict[str, str]
     required_fields: list[str]
@@ -1117,8 +1123,10 @@ class KanbanBoardSpec(Strict):
             )
         if not self.board_ref:
             raise ValueError(f"kanban board {self.board_id!r} needs a board_ref")
-        if not self.repo_ids:
-            raise ValueError(f"kanban board {self.board_id!r} must list at least one repo_id")
+        if self.execution_scope != "life" and not self.repo_ids:
+            raise ValueError(
+                f"kanban board {self.board_id!r} ({self.execution_scope}) must list at "
+                "least one repo_id; only execution_scope='life' boards may be repo-less")
         if len(self.repo_ids) != len(set(self.repo_ids)):
             raise ValueError(f"kanban board {self.board_id!r} has duplicate repo_ids")
         # status_mapping must cover exactly the canonical workflow statuses.

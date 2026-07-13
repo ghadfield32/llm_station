@@ -6,10 +6,14 @@ import {
   ChatRuntime, DomainActions, DomainCard, DomainCardDetail, DomainCardProgress,
   DomainCards, DomainSchema, DomainSpec,
   FieldSpec, JobProfileControls,
+  ExecutionScope,
   boardIdFromTitle, createBoardModule, createDomainSchema, deleteDomainSchema,
   fetchBoardRegistry,
-  MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
+  InboxData,
+  MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig,
+  createCapture, createCaptureBatch, fetchActivity,
   fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
+  fetchInbox,
   fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse, TranscriptTurn,
   ChatConversation, fetchChatConversations, deleteChatConversation,
   fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
@@ -29,9 +33,10 @@ import {
   fetchModelUsage, fetchCollectorHealth, refreshModelUsage,
 } from "./api";
 
-type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat";
+type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox";
 const NAV: { id: View; label: string }[] = [
   { id: "domains", label: "All Boards" },
+  { id: "inbox", label: "Inbox" },
   { id: "settings", label: "Controls" },
   { id: "router", label: "Router" },
   { id: "diagnostics", label: "Status" },
@@ -448,6 +453,116 @@ function fmtCost(cost: number | null, source: string): string {
   if (source === "subscription_not_metered") return "subscription (not $-metered)";
   return "cost unknown";
 }
+// Global Capture composer — a rough thought becomes a durable, recoverable
+// intake record. Capturing NEVER starts work; it's saved to the Inbox for later
+// classification/routing. A bulk paste is split into one capture per idea.
+function CaptureComposer({ context, onClose, onCaptured }: {
+  context?: string; onClose: () => void; onCaptured: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [bulk, setBulk] = useState(false);
+  const [mode, setMode] = useState("save_only");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  async function save() {
+    if (!text.trim() || busy) return;
+    setBusy(true); setMsg(null);
+    const extra = { requested_mode: mode, current_board_id: context };
+    try {
+      if (bulk) {
+        const r = await createCaptureBatch(text, extra);
+        setMsg(`saved ${r.count} capture${r.count === 1 ? "" : "s"} to the Inbox`);
+      } else {
+        await createCapture({ raw_content: text, ...extra });
+        setMsg("saved to the Inbox");
+      }
+      setText("");
+      onCaptured();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="capture-overlay" onClick={onClose}>
+      <div className="capture-composer" onClick={(e) => e.stopPropagation()}>
+        <div className="settings-card-head">
+          <h3>Capture{context ? ` · ${context}` : ""}</h3>
+          <button className="editbtn" onClick={onClose}>close</button>
+        </div>
+        <textarea className="capture-text" value={text} autoFocus rows={5}
+          placeholder="What are you thinking about? (a note, todo, idea, post, paper, or a repo task)"
+          onChange={(e) => setText(e.target.value)} />
+        <div className="capture-controls">
+          <label className="capture-check">
+            <input type="checkbox" checked={bulk}
+              onChange={(e) => setBulk(e.target.checked)} /> bulk list (one capture per line/bullet)
+          </label>
+          <label className="chat-field"><span className="muted small">process</span>
+            <select className="select" value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="save_only">Save only</option>
+              <option value="prepare_later">Prepare later (daily)</option>
+              <option value="prepare_now">Prepare now</option>
+              <option value="create_task">Create a task</option>
+            </select>
+          </label>
+          <button className="actbtn" disabled={busy || !text.trim()} onClick={() => void save()}>
+            {busy ? "saving…" : "Capture"}
+          </button>
+        </div>
+        <div className="muted small">
+          Saved, not started — nothing runs until you prepare or route it.
+          {msg && <> · {msg}</>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The Universal Inbox — every capture, grouped into its lane. Recoverable here
+// even after it's routed. Read-only for now (classification/routing are later).
+function InboxView({ refreshKey, onOpenChat }: {
+  refreshKey: number;
+  onOpenChat?: (prompt: string, conversationId?: string, storyTs?: string, target?: string) => void;
+}) {
+  const [inbox, setInbox] = useState<InboxData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchInbox().then((d) => live && setInbox(d)).catch((e) => live && setErr((e as Error).message));
+    return () => { live = false; };
+  }, [refreshKey]);
+  if (err) return <div className="error">Inbox unavailable — {err}</div>;
+  if (!inbox) return <div className="loading">…</div>;
+  if (inbox.total === 0) {
+    return <div className="empty">No captures yet. Use <b>+ Capture</b> to save an idea, todo, or note.</div>;
+  }
+  return (
+    <div className="inbox-view">
+      <div className="muted small">{inbox.total} capture{inbox.total === 1 ? "" : "s"} · saved, not started</div>
+      <div className="inbox-columns">
+        {inbox.columns.map((col) => (
+          <section className="inbox-col" key={col.name}>
+            <h3>{col.name.replace(/_/g, " ")} <span className="status-pill">{col.captures.length}</span></h3>
+            {col.captures.map((c) => (
+              <div className="inbox-card" key={c.capture_id}>
+                <div className="inbox-card-body">{c.preview}</div>
+                <div className="inbox-card-meta muted small">
+                  {c.capture_kind ?? "unclassified"}
+                  {c.suggested_board_id ? ` → ${c.suggested_board_id}` : ""}
+                  {c.batch_id ? " · batch" : ""} · {c.requested_mode.replace(/_/g, " ")}
+                </div>
+                <button className="actbtn" onClick={() =>
+                  onOpenChat?.(`Help me think through this captured idea and prepare a readiness packet:\n\n${c.preview}`)}>
+                  Open in chat
+                </button>
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function UsageView() {
   const [statuses, setStatuses] = useState<UsageStatus[] | null>(null);
   const [health, setHealth] = useState<CollectorHealth[]>([]);
@@ -1744,6 +1859,7 @@ function CreateBoardWizard({ editable, onClose, onCreated }: {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState("");
+  const [scope, setScope] = useState<ExecutionScope>("life");
   const [reposText, setReposText] = useState("");
   const [columnsText, setColumnsText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1751,13 +1867,14 @@ function CreateBoardWizard({ editable, onClose, onCreated }: {
   const boardId = boardIdFromTitle(title);
   const repoIds = reposText.split(",").map((s) => s.trim()).filter(Boolean);
   const columns = columnsText.split(",").map((s) => s.trim()).filter(Boolean);
+  const needsRepo = scope !== "life";
   async function create() {
     if (!boardId || busy) return;
     setBusy(true); setMsg(null);
     try {
       const res = await createBoardModule({
         title: title.trim(), description: description.trim(), icon: icon.trim(),
-        repo_ids: repoIds, columns });
+        execution_scope: scope, repo_ids: repoIds, columns });
       onCreated(res.board_id);
       onClose();
     } catch (e) { setMsg((e as Error).message); }
@@ -1779,19 +1896,25 @@ function CreateBoardWizard({ editable, onClose, onCreated }: {
           <input value={description} disabled={!editable || busy}
             placeholder="what this board is for (optional)"
             onChange={(e) => setDescription(e.target.value)} /></label>
-        <label>Repositories<input value={reposText} disabled={!editable || busy}
-          placeholder="repo ids, comma-separated (optional)"
+        <label>Kind<select className="select" value={scope} disabled={!editable || busy}
+          onChange={(e) => setScope(e.target.value as ExecutionScope)}>
+          <option value="life">life — personal, no repository</option>
+          <option value="repository">repository — drives repo work</option>
+          <option value="hybrid">hybrid — notes + repo work</option>
+        </select></label>
+        <label>Repositories<input value={reposText} disabled={!editable || busy || !needsRepo}
+          placeholder={needsRepo ? "repo ids, comma-separated (required)" : "not used for a life board"}
           onChange={(e) => setReposText(e.target.value)} /></label>
         <label>Columns<input value={columnsText} disabled={!editable || busy}
           placeholder="leave blank for the standard workflow"
           onChange={(e) => setColumnsText(e.target.value)} /></label>
       </div>
       <div className="schema-preview">
-        <div className="muted small">Preview — a new board module:</div>
+        <div className="muted small">Preview — a new {scope} board module:</div>
         <ul className="muted small">
           <li>board id <code>{boardId || "—"}</code> · generic-task cards · chat enabled</li>
           <li>columns: {columns.length ? columns.join(", ") : "Backlog, Ready, In Progress, Done, Blocked, Rejected, Awaiting Approval"}</li>
-          <li>repos: {repoIds.length ? repoIds.join(", ") : boardId || "—"}</li>
+          <li>repos: {needsRepo ? (repoIds.length ? repoIds.join(", ") : "⚠ name at least one") : "none (life board)"}</li>
           <li>governance: wall verbs (approve / merge / deploy / delete) stay forbidden; human approval unchanged</li>
         </ul>
       </div>
@@ -4827,6 +4950,8 @@ export function App() {
   const [chatReturnView, setChatReturnView] = useState<View>("domains");
   const [domainNav, setDomainNav] = useState<DomainNavItem[]>([]);
   const [activeDomain, setActiveDomain] = useState(() => initialDomainFromUrl());
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [captureNonce, setCaptureNonce] = useState(0);
   const [updated, setUpdated] = useState<string>("");
   const [selMission, setSelMission] = useState<string | null>(null);
   const [selCard, setSelCard] =
@@ -4965,10 +5090,20 @@ export function App() {
             ))}
           </div>
           <div className="topright">
+            <button className="actbtn" onClick={() => setCaptureOpen(true)}
+              title="Capture an idea, todo, or note — from anywhere. It's saved, not started.">
+              + Capture
+            </button>
             {updated && <span className="muted small">updated {updated}</span>}
             <button className="refresh" onClick={refresh} title="refresh now">↻</button>
           </div>
         </div>
+        {captureOpen && (
+          <CaptureComposer
+            context={view === "domains" ? activeDomain : undefined}
+            onClose={() => setCaptureOpen(false)}
+            onCaptured={() => setCaptureNonce((n) => n + 1)} />
+        )}
         {surfaceFailureCount > 0 && (
           <div className="surface-errors">
             {Object.entries(surfaceErrors).map(([name, msg]) => (
@@ -4999,6 +5134,9 @@ export function App() {
         {view === "observability" && (metrics
           ? <ObservabilityView m={metrics} /> : <div className="loading">…</div>)}
         {view === "usage" && <UsageView />}
+        {view === "inbox" && (
+          <InboxView refreshKey={captureNonce} onOpenChat={openChatWithPrompt} />
+        )}
         {view === "activity" && (activity
           ? <ActivityView a={activity} /> : <div className="loading">…</div>)}
         {/* chat stays MOUNTED so the conversation persists across view switches */}

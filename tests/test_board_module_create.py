@@ -59,7 +59,9 @@ def test_create_board_module_writes_both_configs_with_safe_governance(monkeypatc
     assert board["provider"] == "command_center_ui"
     assert _WALL <= set(board["forbidden_agent_verbs"])
     assert _WALL.isdisjoint(board["allowed_agent_verbs"])
-    assert board["repo_ids"] == ["my_books"]        # defaulted (no repo given)
+    # a new personal board is a LIFE board: no repository, no fake board-id-as-repo
+    assert board["execution_scope"] == "life"
+    assert board["repo_ids"] == []
     from command_center.schemas.contracts import KanbanBoardsConfig
     KanbanBoardsConfig.model_validate(reg)          # the written file is valid
 
@@ -75,6 +77,25 @@ def test_create_board_module_writes_both_configs_with_safe_governance(monkeypatc
     # the create was audited
     audit = (tmp_path / "config_audit.jsonl").read_text(encoding="utf-8").splitlines()
     assert any(json.loads(line)["board_id"] == "my_books" for line in audit)
+
+
+def test_repository_board_requires_a_repo(monkeypatch, tmp_path):
+    mod, tc = _load(monkeypatch, tmp_path)
+    # a repository-scope board with no repo is rejected (no fake board-id fallback)
+    r = tc.post("/api/board-module",
+                json={"title": "CV Pipeline", "execution_scope": "repository"})
+    assert r.status_code == 400
+    # with a repo it's created and carries the scope + repo through
+    ok = tc.post("/api/board-module", json={
+        "title": "CV Pipeline", "execution_scope": "repository",
+        "repo_ids": ["betts_basketball"]})
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["execution_scope"] == "repository"
+    reg = yaml.safe_load((tmp_path / "kanban_boards.yaml").read_text(encoding="utf-8"))
+    board = next(b for b in reg["boards"] if b["board_id"] == "cv_pipeline")
+    assert board["repo_ids"] == ["betts_basketball"]
+    from command_center.schemas.contracts import KanbanBoardsConfig
+    KanbanBoardsConfig.model_validate(reg)
 
 
 def test_duplicate_board_is_409(monkeypatch, tmp_path):
