@@ -166,7 +166,8 @@ def test_completion_live_call_never_sends_tools_and_records_ledger(tmp_path, mon
         # (elapsed_s==0.0 would make tokens_per_second silently None) — a real (slow) call
         # never has this problem; a short real sleep here is more honest than patching the
         # global clock, which would also break asyncio's own internal scheduling.
-        await asyncio.sleep(0.01)
+        # 50ms clears Windows' ~15.6ms monotonic granularity (10ms could round to 0 there).
+        await asyncio.sleep(0.05)
         seen_bodies.append(json.loads(request.content))
         return httpx.Response(200, json=payload)
 
