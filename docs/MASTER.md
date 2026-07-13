@@ -620,16 +620,28 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
   Ledger-backed service is visible to a brand-new service reading the same
   Ledger, the two Claude lanes stay distinct, and a re-ingested event stays
   single. The SSE tee remains a compatibility writer (dedup by `source_hash`).
+- **Phase 3.5 — agent `usage`-event normalization + tee retired as writer**
+  (PR #37): each turn's `usage` event becomes an attributed `UsageSample`
+  (`usage/agent_usage.py`) with honest cost (subscription → `cost_usd=None` +
+  `api_equivalent_cost_usd` in its own field, never $0.00; API lane → real
+  `cost_usd`) and correct uncached-token math. `UsageSample` gained
+  `model`/`effort`/`context_mode`/`api_equivalent_cost_usd` (additive usage.v1
+  columns), the worker feeds `usage` events durably for ALL agent lanes, and
+  `attribution.rank_by` supports `model`/`effort`/`context` dimensions — so "top
+  model / top effort / top uncached-context session" is answered from recorded
+  fact. Under `KANBAN_UI_USAGE_LEDGER` the cockpit SSE tee **stands down as a
+  writer** (the worker is the sole authoritative writer; the tee is only the
+  in-memory dev fallback).
 
 **What is NOT built yet:** every collector except Codex; the Usage & Limits
 UI's remaining depth (historical charts, reset timelines, routing-evidence
-panel, top-driver *UI*); SSE live push (`/api/model-usage/events/stream`); the
-reconciliation + routing-decisions routes; Ledger-backing the worker usage
-store (restart-durable) + pointing the cockpit reads at the worker (retiring the
-tee as authoritative); and per-model/per-effort usage attribution on samples.
-The core surface (overview, per-runtime detail, limits, alerts, top-drivers,
-collector-health, refresh) + model/effort pickers + selector badges + the Claude
-rate_limit tee + worker-owned headless ingestion are live behind the flags.
+panel, and the **top-driver UI** that renders the now-available per-model/
+per-effort samples); SSE live push (`/api/model-usage/events/stream`); the
+reconciliation + routing-decisions routes. The core surface (overview,
+per-runtime detail, limits, alerts, top-drivers API, collector-health, refresh)
++ model/effort pickers + selector badges + Claude rate_limit tee + worker-owned
+headless ingestion + restart-proof shared-Ledger store + attributed usage
+samples are live behind the flags.
 
 ### 4.7 The Codex-side Claude plugin bridge (planned, wrapped — not adopted raw)
 

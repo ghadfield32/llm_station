@@ -187,6 +187,31 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   evidence-based executor routing that consumes model_routing_decisions.
 
 ## Agent-session chat integration (Claude Agent / Codex Agent)
+- AGENT `usage` EVENT NORMALIZATION + TEE RETIRED AS WRITER 07-13 (same branch
+  `feat/agent-cockpit-pickers`, extends PR #37). The observability-correctness
+  slice: turns each agent turn's `usage` event into an attributed UsageSample so
+  "what used the most and why?" (top model / top effort / top uncached-context
+  session) is answered from recorded fact. (1) UsageSample gains `model`,
+  `effort`, `context_mode`, `api_equivalent_cost_usd` — additive columns in the
+  usage.v1 DDL (canonical `ledger_schema.py` + byte-mirror `services/ledger/
+  app.py` + `_USAGE_SAMPLE_COLS`, drift test green; `ledger_store` round-trips
+  them). (2) NEW `usage/agent_usage.py::agent_usage_sample(payload, runtime_id,
+  session_id, repo_id, conversation_id, model, effort, ...)` → a REQUEST_DELTA
+  UsageSample with honest cost (subscription: `cost_usd=None` +
+  `cost_source=subscription_not_metered` + `api_equivalent_cost_usd` in its own
+  field, NEVER $0.00; API lane: real `cost_usd`+`provider_reported`) and correct
+  uncached-token math (input = uncached + cache_create + cache_read; cached =
+  the cache portion). (3) The WORKER feeds `usage` events too (all agent lanes,
+  not just Claude) in `_run_turn` — model from the session record, effort
+  recovered from the session_started event — so headless usage is durably
+  attributed. (4) `attribution.rank_by` now supports `model`/`effort`/`context`
+  dimensions (sample-level, not just Attribution), so top_drivers can rank by
+  them. (5) TEE RETIRED AS WRITER: the cockpit SSE tee stands down when
+  `USAGE_LEDGER` (the worker is the sole authoritative writer); it stays only as
+  the in-memory dev fallback. +11 tests (translator honesty + uncached math, API
+  vs subscription cost, rank_by model/effort, Ledger round-trip of the new
+  fields, worker usage feed, tee-stands-down-under-Ledger). ruff + mypy clean;
+  full suite green. NEXT: top-driver UI + charts consuming these samples.
 - MASTER.md TRUTH-CHECK GATE 07-12 (same branch `feat/agent-cockpit-pickers`,
   extends PR #37). Encodes "a phase is not complete until docs/MASTER.md
   describes it" as an automated check. `scripts/check_master_runtime_truth.py`

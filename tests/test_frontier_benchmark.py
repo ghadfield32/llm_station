@@ -18,7 +18,7 @@ def _case(**over):
 
 def test_score_case_json_missing_key_fails():
     case = _case(response_format="json", required_json_keys=["risk_tier"])
-    result = fb._score_case(case, '{"other": 1}')
+    result = fb.score_case(case, '{"other": 1}')
     assert result["ok"] is False
     assert any("missing required key" in r for r in result["reasons"])
 
@@ -26,28 +26,28 @@ def test_score_case_json_missing_key_fails():
 def test_score_case_json_matches_expected_values():
     case = _case(response_format="json", required_json_keys=["risk_tier"],
                 expected_json_values={"risk_tier": "L0_read_only"})
-    result = fb._score_case(case, '{"risk_tier": "L0_read_only"}')
+    result = fb.score_case(case, '{"risk_tier": "L0_read_only"}')
     assert result["ok"] is True and result["reasons"] == []
 
 
 def test_score_case_invalid_json_fails():
     case = _case(response_format="json", required_json_keys=["risk_tier"])
-    result = fb._score_case(case, "not json at all")
+    result = fb.score_case(case, "not json at all")
     assert result["ok"] is False
     assert any("not valid JSON" in r for r in result["reasons"])
 
 
 def test_score_case_forbidden_substring_fails():
     case = _case(forbidden_contains=["password"])
-    result = fb._score_case(case, "here is the password: hunter2")
+    result = fb.score_case(case, "here is the password: hunter2")
     assert result["ok"] is False
     assert any("forbidden substring" in r for r in result["reasons"])
 
 
 def test_score_case_expected_substring_required():
     case = _case(expected_contains=["hello"])
-    assert fb._score_case(case, "hello there")["ok"] is True
-    assert fb._score_case(case, "goodbye")["ok"] is False
+    assert fb.score_case(case, "hello there")["ok"] is True
+    assert fb.score_case(case, "goodbye")["ok"] is False
 
 
 def test_dry_run_uses_real_suite_and_pricing_no_egress():
