@@ -68,6 +68,9 @@ CAPTURE_LEDGER = os.environ.get("KANBAN_UI_CAPTURE_LEDGER", "") == "1"
 # Canonical work graph (WorkItem/placement/edge). Benign in-memory list, no repo/
 # Ledger/config side effects → defaults on. Durable Ledger persistence is Phase C-2.
 WORKGRAPH_ENABLED = os.environ.get("KANBAN_UI_WORKGRAPH_ENABLED", "1") == "1"
+# Durable work graph: back it with the Ledger (survives restart → the work-item
+# ids are permanent enough for deep links). Off by default for a Ledger-less dev.
+WORKGRAPH_LEDGER = os.environ.get("KANBAN_UI_WORKGRAPH_LEDGER", "") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -1356,10 +1359,16 @@ def _get_workgraph_service():
 
         from command_center.work_graph import (
             InMemoryWorkGraphStore,
+            LedgerWorkGraphStore,
             WorkGraphService,
         )
+        if WORKGRAPH_LEDGER:
+            store = LedgerWorkGraphStore(
+                httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            store = InMemoryWorkGraphStore()
         _workgraph_service = WorkGraphService(
-            InMemoryWorkGraphStore(),
+            store,
             clock=lambda: datetime.now(timezone.utc).isoformat(),
             id_factory=lambda prefix: f"{prefix}-" + secrets.token_hex(5))
     return _workgraph_service
