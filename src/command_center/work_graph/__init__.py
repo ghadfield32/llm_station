@@ -18,6 +18,7 @@ from .schemas import (
     WorkItem,
     WorkPlacement,
 )
+from .ledger_store import LedgerWorkGraphStore
 from .service import WorkGraphError, WorkGraphService
 from .store import InMemoryWorkGraphStore
 
@@ -34,4 +35,5 @@ __all__ = [
     "WorkGraphError",
     "WorkGraphService",
     "InMemoryWorkGraphStore",
+    "LedgerWorkGraphStore",
 ]

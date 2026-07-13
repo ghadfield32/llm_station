@@ -26,9 +26,19 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   informational (related_to/informs/supports/duplicates) may cycle. One primary
   board; soft-remove preserves the item; links are BACKEND-generated. Cockpit
   /api/work-items[/{id}[/links]] /placements /work-edges /work-graph[/{id}].
-  In-memory; durable Ledger persistence = Phase C-2 (NEXT, same mirror-DDL pattern).
-- NEXT: merge #40 + #48; Phase C-2 durable work-graph Ledger store → /work/<id>
-  permalink resolver → structured Chat creation receipts (TaskCreationReceipt).
+- Phase C-2 DONE (branch `feat/work-graph-ledger`, stacked on #48): durable
+  Ledger persistence, same mirror-DDL pattern as #47. NEW
+  `work_graph/ledger_schema.py` (`workgraph.v1`: work_items/work_placements/
+  work_edges/work_events) + byte-mirror `WORKGRAPH_SCHEMA_SQL` in
+  `services/ledger/app.py` (+ upsert/get/list/event REST routes) +
+  `work_graph/ledger_store.py` (`LedgerWorkGraphStore`, same surface as in-memory,
+  404→KeyError). Cockpit `_get_workgraph_service` picks it under
+  KANBAN_UI_WORKGRAPH_LEDGER=1. Tests: drift guard + 7 round-trip/durability
+  (item/placement/edge/status/events survive a fresh service over the same
+  ledger.db; one-primary + cycle rules enforced across "restart"). Full suite
+  green via PYTHONPATH=worktree/src (editable install → main checkout otherwise).
+- NEXT: merge #40 + #48 + Phase C-2; /work/<id> permalink resolver → structured
+  Chat creation receipts (TaskCreationReceipt).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1
