@@ -6,7 +6,7 @@ import {
   ChatRuntime, DomainActions, DomainCard, DomainCardDetail, DomainCardProgress,
   DomainCards, DomainSchema, DomainSpec,
   FieldSpec, JobProfileControls,
-  createDomainSchema, deleteDomainSchema,
+  boardIdFromTitle, createBoardModule, createDomainSchema, deleteDomainSchema,
   fetchBoardRegistry,
   MissionDetail, MissionEvent, Metrics, ModelLanes, Status, UIConfig, fetchActivity,
   fetchBoards, fetchBoardsLive, fetchChatRuntime, fetchConfig, fetchDomainActions,
@@ -1734,6 +1734,77 @@ function DomainSchemaEditor({ initial, mode, editable, onClose, onSaved }: {
   );
 }
 
+// Guided Create-Board flow: name → (optional repos/columns) → preview → create.
+// Produces a whole board module (kanban board + generic_task surface) via the
+// typed /api/board-module endpoint. Generic-first; the user can upgrade the card
+// component + fields later with the "edit" (DomainSchemaEditor) flow.
+function CreateBoardWizard({ editable, onClose, onCreated }: {
+  editable: boolean; onClose: () => void; onCreated: (boardId: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [icon, setIcon] = useState("");
+  const [reposText, setReposText] = useState("");
+  const [columnsText, setColumnsText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const boardId = boardIdFromTitle(title);
+  const repoIds = reposText.split(",").map((s) => s.trim()).filter(Boolean);
+  const columns = columnsText.split(",").map((s) => s.trim()).filter(Boolean);
+  async function create() {
+    if (!boardId || busy) return;
+    setBusy(true); setMsg(null);
+    try {
+      const res = await createBoardModule({
+        title: title.trim(), description: description.trim(), icon: icon.trim(),
+        repo_ids: repoIds, columns });
+      onCreated(res.board_id);
+      onClose();
+    } catch (e) { setMsg((e as Error).message); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="schema-editor">
+      <div className="settings-card-head">
+        <h3>Create Board</h3>
+        <button className="editbtn" onClick={onClose}>close</button>
+      </div>
+      <div className="schema-form-grid">
+        <label>Name<input value={title} disabled={!editable || busy} autoFocus
+          placeholder="e.g. Books, Health, Papers"
+          onChange={(e) => setTitle(e.target.value)} /></label>
+        <label>Icon<input value={icon} disabled={!editable || busy}
+          placeholder="emoji (optional)" onChange={(e) => setIcon(e.target.value)} /></label>
+        <label className="schema-form-wide">Description
+          <input value={description} disabled={!editable || busy}
+            placeholder="what this board is for (optional)"
+            onChange={(e) => setDescription(e.target.value)} /></label>
+        <label>Repositories<input value={reposText} disabled={!editable || busy}
+          placeholder="repo ids, comma-separated (optional)"
+          onChange={(e) => setReposText(e.target.value)} /></label>
+        <label>Columns<input value={columnsText} disabled={!editable || busy}
+          placeholder="leave blank for the standard workflow"
+          onChange={(e) => setColumnsText(e.target.value)} /></label>
+      </div>
+      <div className="schema-preview">
+        <div className="muted small">Preview — a new board module:</div>
+        <ul className="muted small">
+          <li>board id <code>{boardId || "—"}</code> · generic-task cards · chat enabled</li>
+          <li>columns: {columns.length ? columns.join(", ") : "Backlog, Ready, In Progress, Done, Blocked, Rejected, Awaiting Approval"}</li>
+          <li>repos: {repoIds.length ? repoIds.join(", ") : boardId || "—"}</li>
+          <li>governance: wall verbs (approve / merge / deploy / delete) stay forbidden; human approval unchanged</li>
+        </ul>
+      </div>
+      {msg && <div className="error">ERR {msg}</div>}
+      <div className="settings-head-actions">
+        <button className="actbtn" disabled={!editable || busy || !boardId} onClick={() => void create()}>
+          {busy ? "creating…" : "Create board"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function BoardControlsPanel({ schema, registry, err, onSaved }: {
   schema: DomainSchema | null; registry: BoardRegistry | null; err: string | null;
   onSaved: () => void;
@@ -1741,6 +1812,7 @@ function BoardControlsPanel({ schema, registry, err, onSaved }: {
   const domains = schema?.domains ?? [];
   const editable = !!schema?.writable;
   const [editing, setEditing] = useState<{ mode: "create" | "update"; domain: DomainSpec } | null>(null);
+  const [wizard, setWizard] = useState(false);
   return (
     <section className="settings-card settings-card-wide">
       <div className="settings-card-head">
@@ -1750,12 +1822,19 @@ function BoardControlsPanel({ schema, registry, err, onSaved }: {
             {editable ? "editable" : "read-only"}
           </span>
           <span className="status-pill">{domains.length} boards</span>
-          <button className="actbtn" disabled={!editable}
+          <button className="actbtn" disabled={!editable} onClick={() => setWizard(true)}>
+            Create board
+          </button>
+          <button className="editbtn" disabled={!editable}
             onClick={() => setEditing({ mode: "create", domain: newDomainSpec(domains) })}>
-            add board
+            advanced
           </button>
         </div>
       </div>
+      {wizard && (
+        <CreateBoardWizard editable={editable} onClose={() => setWizard(false)}
+          onCreated={() => onSaved()} />
+      )}
       {err && <div className="error">ERR {err}</div>}
       {schema && (
         <div className="diag-table">

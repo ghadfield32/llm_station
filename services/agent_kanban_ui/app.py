@@ -517,6 +517,56 @@ def _domain_spec(domain_id: str) -> dict:
     raise HTTPException(status_code=404, detail=f"unknown domain {domain_id!r}")
 
 
+# ── Board-module create (kanban board + domain surface, atomic) ───────────────
+def _kanban_boards_path() -> Path:
+    return CONFIGS_DIR / "kanban_boards.yaml"
+
+
+def _read_board_registry_data() -> dict[str, Any]:
+    path = _kanban_boards_path()
+    if not path.is_file():
+        return {"schema_version": "command-center.kanban-boards.v1", "boards": []}
+    return _read_yaml_file(path)
+
+
+def _validate_board_registry(data: dict[str, Any], *, status_code: int = 400) -> None:
+    from command_center.schemas.contracts import KanbanBoardsConfig
+    try:
+        KanbanBoardsConfig.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"invalid kanban_boards.yaml: {exc}") from exc
+
+
+# governance defaults for a new internal board — the human wall is FIXED here
+_KANBAN_STATUS_LABELS = {
+    "backlog": "Backlog", "ready": "Ready", "in_progress": "In Progress",
+    "done": "Done", "blocked": "Blocked", "rejected": "Rejected",
+    "awaiting_approval": "Awaiting Approval"}
+_KANBAN_ALLOWED_VERBS = ["add_mission_card", "stage_card", "start_todo",
+                         "finish_todo", "block_card", "reject_card"]
+_KANBAN_WALL_VERBS = ["approve_card", "merge", "deploy", "delete_card", "delete_board"]
+
+
+def _slug_board_id(title: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", (title or "").strip().lower()).strip("_")
+    return slug
+
+
+def _audit_config_write(action: str, detail: dict[str, Any]) -> None:
+    """Append an audit record for a config-mutating write. Best-effort JSONL next
+    to the configs — the create is the source of truth, so a failed audit must not
+    fail the create, but every board-module create is recorded here."""
+    from datetime import datetime, timezone
+    rec = {"ts": datetime.now(timezone.utc).isoformat(), "action": action, **detail}
+    try:
+        with (CONFIGS_DIR / "config_audit.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec) + "\n")
+    except Exception:
+        pass
+
+
 # snapshot board field -> the domain card grammar the typed components render
 _APPFLOWY_FIELD_MAPS: dict[str, dict[str, str]] = {
     "paper": {"Title": "title", "Authors": "authors", "Abstract": "abstract",
@@ -1028,6 +1078,20 @@ class DomainSurfaceIn(BaseModel):
     empty_state: dict[str, Any] = Field(default_factory=dict)
 
 
+class BoardModuleIn(BaseModel):
+    """Normalized 'create a board module' request — produces BOTH a kanban board
+    (the repo/verb/status contract) and its domain surface (card grammar), with
+    generic_task cards so every board gets the same chat + pipeline treatment.
+    Governance defaults are FIXED (wall verbs always forbidden; human approval /
+    merge unchanged). The browser never writes YAML — this is the typed seam."""
+    title: str
+    description: str = ""
+    icon: str = ""
+    repo_ids: list[str] = Field(default_factory=list)
+    columns: list[str] = Field(default_factory=list)
+    chat_enabled: bool = True
+
+
 @app.get("/api/domains")
 def domains() -> dict:
     """The typed-surface registry: card grammar + source binding + empty states,
@@ -1087,6 +1151,65 @@ def delete_domain_schema(domain_id: str) -> dict:
     next_data = dict(data)
     next_data["domains"] = next_domains
     return _write_domain_config(next_data)
+
+
+@app.post("/api/board-module", status_code=201)
+def create_board_module(body: BoardModuleIn) -> dict:
+    """Create a whole board MODULE from one typed request: a kanban board (the
+    repo/verb/status contract) + its domain surface (generic_task card grammar),
+    so every board — including user-created ones — gets the same chat + pipeline
+    + usage treatment. Governance defaults are FIXED: wall verbs stay forbidden,
+    human approval/merge is unchanged. Atomic (both configs validate before either
+    is written), write-gated, and audited. The browser never emits YAML."""
+    _require_domain_config_writable()   # CHAT_ENABLED + DOMAIN_CONFIG_WRITES + writable
+    board_id = _slug_board_id(body.title)
+    if not board_id:
+        raise HTTPException(status_code=400, detail="title must yield a non-empty board id")
+
+    reg = _read_board_registry_data()
+    if any(b.get("board_id") == board_id for b in reg.get("boards", [])):
+        raise HTTPException(status_code=409, detail=f"board {board_id!r} already exists")
+    dom = _domain_config()
+    if any(d.get("domain_id") == board_id for d in dom.get("domains", [])):
+        raise HTTPException(status_code=409, detail=f"domain {board_id!r} already exists")
+
+    repo_ids = [r.strip() for r in body.repo_ids if r.strip()] or [board_id]
+    board_spec = {
+        "board_id": board_id, "provider": "command_center_ui", "workspace_ref": "self",
+        "board_ref": board_id, "repo_ids": repo_ids,
+        "status_mapping": dict(_KANBAN_STATUS_LABELS),
+        "required_fields": ["MissionID", "RepoID", "Risk", "LastSync", "Section"],
+        "allowed_agent_verbs": list(_KANBAN_ALLOWED_VERBS),
+        "forbidden_agent_verbs": list(_KANBAN_WALL_VERBS), "blockers": []}
+    columns = ([c.strip() for c in body.columns if c.strip()]
+               or list(_KANBAN_STATUS_LABELS.values()))
+    surface = _clean_domain_surface({
+        "domain_id": board_id, "title": body.title.strip(),
+        "card_component": "generic_task", "source": "board_store", "board_id": board_id,
+        "columns": columns, "column_actions": {},
+        "summary_fields": [{"name": "title", "label": "Title"},
+                           {"name": "status", "label": "Status"}],
+        "drawer_fields": [{"name": "description", "label": "Description"},
+                          {"name": "notes", "label": "Notes"}],
+        "allowed_actions": ["stage_card", "start_todo", "finish_todo",
+                            "block_card", "reject_card"],
+        "empty_state": {"title": f"No {body.title.strip()} cards yet",
+                        "hint": body.description.strip() or "Add a card to get started."}})
+
+    # Validate BOTH before writing EITHER — never a half-created module.
+    next_reg = {"schema_version": reg.get("schema_version", "command-center.kanban-boards.v1"),
+                "boards": [*reg.get("boards", []), board_spec]}
+    next_dom = {**dom, "domains": [*dom.get("domains", []), surface]}
+    _validate_board_registry(next_reg)
+    _validate_domain_config(next_dom)
+    _write_yaml_file(_kanban_boards_path(), next_reg)
+    _write_domain_config(next_dom)      # re-validates + writes domain_surfaces.yaml
+    _audit_config_write("board_module.create", {
+        "board_id": board_id, "title": body.title.strip(), "repo_ids": repo_ids,
+        "icon": body.icon, "chat_enabled": body.chat_enabled})
+    return {"board_id": board_id, "domain_id": board_id, "title": body.title.strip(),
+            "provider": "command_center_ui", "card_component": "generic_task",
+            "columns": columns, "repo_ids": repo_ids, "chat_enabled": body.chat_enabled}
 
 
 @app.get("/api/domain/{domain_id}/cards")

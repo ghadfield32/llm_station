@@ -245,6 +245,31 @@ export const updateDomainSchema = (domainId: string, domain: DomainSpec) =>
   postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, domain, "PUT");
 export const deleteDomainSchema = (domainId: string) =>
   postJSON<DomainSchema>(`/api/domain-schema/${encodeURIComponent(domainId)}`, {}, "DELETE");
+
+// Create a whole board MODULE (kanban board + generic_task domain surface) from
+// one typed request — the guided Create-Board flow. Safe governance defaults.
+export interface BoardModuleIn {
+  title: string;
+  description?: string;
+  icon?: string;
+  repo_ids?: string[];
+  columns?: string[];
+  chat_enabled?: boolean;
+}
+export interface BoardModuleResult {
+  board_id: string;
+  domain_id: string;
+  title: string;
+  provider: string;
+  card_component: string;
+  columns: string[];
+  repo_ids: string[];
+  chat_enabled: boolean;
+}
+export const createBoardModule = (body: BoardModuleIn) =>
+  postJSON<BoardModuleResult>("/api/board-module", body, "POST");
+export const boardIdFromTitle = (title: string) =>
+  title.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");
 export const fetchDomainCards = (id: string) =>
   getJSON<DomainCards>(`/api/domain/${encodeURIComponent(id)}/cards`);
 export const fetchDomainCard = (id: string, cardId: string) =>
