@@ -24,7 +24,7 @@ import {
   AgentEvent, AgentHarnessOption, AgentSessionRecord, AgentModelOption,
   closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
   fetchAgentSession, fetchHarnessModels, interruptAgentSession, promoteAgentSession,
-  resolveAgentApproval, resumeAgentSession, sendAgentMessage, streamAgentEvents,
+  promoteChat, resolveAgentApproval, resumeAgentSession, sendAgentMessage, streamAgentEvents,
   UsageStatus, UsageLimit, CollectorHealth,
   fetchModelUsage, fetchCollectorHealth, refreshModelUsage,
 } from "./api";
@@ -3011,6 +3011,38 @@ function MissionDrawer({ id, ledgerUi, onClose }: {
   );
 }
 
+// Compact, inline "the conversation IS the mission journey" strip — shown inside
+// a chat once its thread is tracked as a mission. Shows the live mission status
+// and the last few governed events, so the journey is visible without leaving
+// the conversation. Read-only; the full timeline stays in MissionDrawer.
+function MissionProgressStrip({ missionId }: { missionId: string }) {
+  const [detail, setDetail] = useState<MissionDetail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setDetail(null); setErr(null);
+    fetchMission(missionId).then((d) => live && setDetail(d))
+      .catch((e) => live && setErr((e as Error).message));
+    return () => { live = false; };
+  }, [missionId]);
+  const mission = (detail?.mission ?? {}) as Record<string, unknown>;
+  const status = String(mission.status ?? (detail ? "open" : "…"));
+  const events = detail?.events ?? [];
+  const recent = events.slice(-3);
+  return (
+    <div className="mission-strip" title="This conversation is tracked as a Ledger mission">
+      <span className="usage-badge muted">mission {missionId} · {status}</span>
+      {err && <span className="muted small">⚠ {err}</span>}
+      {recent.map((ev, i) => (
+        <span className="tag" key={i}>{ev.kind}</span>
+      ))}
+      {events.length > recent.length && (
+        <span className="muted small">+{events.length - recent.length} more</span>
+      )}
+    </div>
+  );
+}
+
 const ACTIONS: Record<string, { verb: string; label: string }[]> = {
   mission_intake: [
     { verb: "stage_card", label: "Stage → Ready" },
@@ -3611,9 +3643,7 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
         )}
         <div className="chat-header-right">
           {missionId ? (
-            <span className="usage-badge muted" title="This conversation is tracked as a Ledger mission">
-              tracked · {missionId}
-            </span>
+            <MissionProgressStrip missionId={missionId} />
           ) : (
             <button className="clear" onClick={() => void doPromote()} disabled={promoting}
               title="Track this conversation as a mission — optional governance/tracking, no writes, keeps the same session">
@@ -4129,6 +4159,8 @@ function ChatView({ roles, runtime, draft, onBack }: {
   const [storyError, setStoryError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
   const [focusTs, setFocusTs] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState(false);
+  const [promoteErr, setPromoteErr] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
   // guards hydration races: a slow transcript fetch for a thread the user has
   // already left must not fill the current thread's log
@@ -4166,6 +4198,18 @@ function ChatView({ roles, runtime, draft, onBack }: {
       saveChatThreads(merged);
       return merged;
     });
+  }
+  // "Track as mission" for a GatewayCore conversation — optional governance,
+  // reuses this thread (no restart), grants no writes. Records the mission id on
+  // the thread so MissionProgressStrip renders the journey inline.
+  async function promoteGatewayChat() {
+    if (currentThread?.missionId || promoting) return;
+    setPromoting(true); setPromoteErr(null);
+    try {
+      const res = await promoteChat(conversationId, currentThread?.lastPrompt ?? "");
+      updateAgentThread({ missionId: res.mission_id });
+    } catch (e) { setPromoteErr((e as Error).message); }
+    finally { setPromoting(false); }
   }
   function loadConversations() {
     fetchChatConversations()
@@ -4563,6 +4607,15 @@ function ChatView({ roles, runtime, draft, onBack }: {
             {events.length > 0 && chatMode === "live" && (
               <button className="clear" onClick={() => setEvents([])}>clear</button>
             )}
+            {currentThread?.missionId ? (
+              <MissionProgressStrip missionId={currentThread.missionId} />
+            ) : (
+              <button className="clear" onClick={() => void promoteGatewayChat()} disabled={promoting}
+                title="Track this conversation as a mission — optional governance/tracking, no writes, keeps this thread">
+                {promoting ? "tracking…" : "track as mission"}
+              </button>
+            )}
+            {promoteErr && <span className="muted small">⚠ {promoteErr}</span>}
           </div>
           )}
           {/* Collapsible history: recent chats, tucked away until opened */}

@@ -3092,6 +3092,14 @@ class AgentPromoteIn(BaseModel):
     summary: str = ""
 
 
+class ChatPromoteIn(BaseModel):
+    """'Track as mission' for a GatewayCore conversation (no agent session).
+    Same inert tracking contract; nothing here grants writes."""
+    conversation_id: str
+    summary: str = ""
+    repo: str = ""
+
+
 # ── Usage & Limits routes (read-only; in-process UsageService) ────────────────
 # NOTE: the literal /api/model-usage/* paths are declared BEFORE the
 # /api/model-usage/{runtime_id} catch-all so FastAPI's in-order matching does
@@ -3303,6 +3311,40 @@ def promote_agent_session(session_id: str, body: AgentPromoteIn) -> dict:
             status_code=502, detail=f"ledger error at {LEDGER_BASE_URL}: {exc}") from exc
     return {"mission_id": mid, "status": mission.get("status", "open"),
             "session_id": session_id, "conversation_id": conversation_id}
+
+
+@app.post("/api/chat/promote")
+def promote_chat(body: ChatPromoteIn) -> dict:
+    """'Track as mission' for a GatewayCore conversation (no agent session).
+
+    Same INERT tracking-mission contract as the agent-session promote: L0
+    (read-only), requires_approval=False, NO branch — so nothing executes and no
+    write capability is granted. It links the conversation via the append-only
+    event log. A mission is never required to chat; this is opt-in tracking so a
+    plain conversation can be monitored on the missions board without losing
+    context. Writes remain gated behind lease + worktree + approval, unchanged."""
+    conversation_id = (body.conversation_id or "").strip()
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="conversation_id is required")
+    action = (body.summary or "").strip() or f"Tracked cockpit chat {conversation_id}"
+    repo = (body.repo or "").strip() or "unknown"
+    try:
+        mr = httpx.post(f"{LEDGER_BASE_URL}/mission", json={
+            "action": action, "repo": repo, "branch": "",
+            "risk": "L0", "requires_approval": False}, timeout=15)
+        mr.raise_for_status()
+        mission = mr.json()
+        mid = mission["id"]
+        er = httpx.post(f"{LEDGER_BASE_URL}/mission/{mid}/event", json={
+            "kind": "note", "payload": {
+                "event": "chat_conversation_link", "conversation_id": conversation_id,
+                "promoted_from": "cockpit_gateway_chat"}}, timeout=15)
+        er.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"ledger error at {LEDGER_BASE_URL}: {exc}") from exc
+    return {"mission_id": mid, "status": mission.get("status", "open"),
+            "conversation_id": conversation_id}
 
 
 _AGENT_EVENT_POLL_SECONDS = 0.5

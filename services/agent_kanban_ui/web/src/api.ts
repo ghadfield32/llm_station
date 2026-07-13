@@ -854,6 +854,17 @@ export interface AgentPromoteResult {
 export const promoteAgentSession = (sessionId: string, summary = "") =>
   postJSON<AgentPromoteResult>(
     `/api/agent-sessions/${encodeURIComponent(sessionId)}/promote`, { summary });
+
+// "Track as mission" for a GatewayCore conversation (no agent session). Same
+// inert tracking mission; grants no writes. Returns the mission id.
+export interface ChatPromoteResult {
+  mission_id: string;
+  status: string;
+  conversation_id: string;
+}
+export const promoteChat = (conversationId: string, summary = "") =>
+  postJSON<ChatPromoteResult>(
+    "/api/chat/promote", { conversation_id: conversationId, summary });
 export async function closeAgentSession(sessionId: string): Promise<AgentStatusAck> {
   const r = await fetch(`/api/agent-sessions/${encodeURIComponent(sessionId)}`,
     { method: "DELETE" });
