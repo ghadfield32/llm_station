@@ -3,6 +3,7 @@ only when the budget is enabled with redaction + usage accounting. The local lan
 """
 import textwrap
 
+import pytest
 
 from command_center.cli import check_forbidden_providers as cfp
 
@@ -165,5 +166,73 @@ def test_agent_session_egress_never_relaxes_the_local_litellm_lane(tmp_path, mon
     calls = []
     monkeypatch.setattr(cfp, "check_models_yaml", lambda errors: calls.append("models"))
     monkeypatch.setattr(cfp, "check_litellm_config", lambda errors: calls.append("litellm"))
+    monkeypatch.setattr(cfp, "check_local_frontier_providers",
+                        lambda errors: calls.append("local_frontier"))
     cfp.main(allow_router_egress=True, allow_agent_session_egress=True)
-    assert calls == ["models", "litellm"]
+    assert calls == ["models", "litellm", "local_frontier"]
+
+
+# ---- local-frontier host allowlist (not a cloud-egress concern — no key involved) ----------
+
+@pytest.mark.parametrize("base_url", [
+    "http://127.0.0.1:8000/v1",
+    "http://localhost:8000/v1",
+    "http://host.docker.internal:8000/v1",
+    "http://192.168.1.50:8000/v1",
+    "http://10.0.0.5:8000/v1",
+    "http://mymachine.ts.net:8000/v1",
+])
+def test_assert_local_frontier_host_allowed_permits_local_hosts(base_url):
+    cfp.assert_local_frontier_host_allowed(base_url)  # must not raise
+
+
+@pytest.mark.parametrize("base_url", [
+    "http://evil.example.com:8000/v1",
+    "http://8.8.8.8:8000/v1",
+    "https://api.openai.com/v1",
+])
+def test_assert_local_frontier_host_allowed_rejects_public_hosts(base_url):
+    with pytest.raises(ValueError, match="not loopback|non-private"):
+        cfp.assert_local_frontier_host_allowed(base_url)
+
+
+def test_check_local_frontier_providers_passes_when_unset(monkeypatch):
+    monkeypatch.delenv("LOCAL_FRONTIER_COLIBRI_BASE_URL", raising=False)
+    monkeypatch.setattr(cfp, "dotenv_kv", lambda path: {})
+    errors: list[str] = []
+    cfp.check_local_frontier_providers(errors)
+    assert errors == []
+
+
+def test_check_local_frontier_providers_passes_for_loopback(monkeypatch):
+    monkeypatch.setattr(cfp, "dotenv_kv", lambda path: {})
+    monkeypatch.setenv("LOCAL_FRONTIER_COLIBRI_BASE_URL", "http://127.0.0.1:8000/v1")
+    errors: list[str] = []
+    cfp.check_local_frontier_providers(errors)
+    assert errors == []
+
+
+def test_check_local_frontier_providers_rejects_public_host(monkeypatch):
+    monkeypatch.setattr(cfp, "dotenv_kv", lambda path: {})
+    monkeypatch.setenv("LOCAL_FRONTIER_COLIBRI_BASE_URL", "http://evil.example.com:8000/v1")
+    errors: list[str] = []
+    cfp.check_local_frontier_providers(errors)
+    assert len(errors) == 1
+    assert "not loopback" in errors[0]
+
+
+def test_local_frontier_check_runs_unconditionally_in_main(tmp_path, monkeypatch):
+    """No --allow-*-egress flag required — this isn't a cloud-egress gate (no key, nothing
+    bills), it's a "never point local-frontier at a public host" invariant that always runs,
+    same as the local Ollama-lane checks (mirrors
+    test_agent_session_egress_never_relaxes_the_local_litellm_lane's call-order technique)."""
+    calls: list[str] = []
+    monkeypatch.setattr(cfp, "check_env_files", lambda errors, forbidden: calls.append("env"))
+    monkeypatch.setattr(cfp, "check_process_env", lambda errors, forbidden: calls.append("process"))
+    monkeypatch.setattr(cfp, "check_compose", lambda errors, forbidden: calls.append("compose"))
+    monkeypatch.setattr(cfp, "check_models_yaml", lambda errors: calls.append("models"))
+    monkeypatch.setattr(cfp, "check_litellm_config", lambda errors: calls.append("litellm"))
+    monkeypatch.setattr(cfp, "check_local_frontier_providers",
+                        lambda errors: calls.append("local_frontier"))
+    cfp.main()
+    assert calls[-1] == "local_frontier"

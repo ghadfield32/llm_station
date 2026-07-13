@@ -55,6 +55,17 @@ Real measured results and the honest caveat on the correctness KPI are in
 §14; those measured numbers (median latency, suite pass rate) now also show
 inline in the chat model dropdown itself, not just the side panel.
 
+**A third, experimental lane exists: the local-frontier lane** (§5.4 "Local frontier lane
+(colibrì) — full spec", §14 2026-07-11 entry) — loopback-only, disk-streamed local engines too
+large for VRAM (colibrì / GLM-5.2 744B today). Free, on since 2026-07-11 after a real measured
+run: **0.0563 tokens/sec median** (`make colibri-benchmark LIVE=1`), landing at the pessimistic
+end of the self-reported 0.05–1.06 range — a 100-token reply is genuinely ~30 minutes on this
+machine. Unlike the paid frontier lane there is no $ cost or API key, only a host-allowlist
+invariant (`check_local_frontier_providers`, always on, no egress flag needed). Same "no tools,
+no board/memory context" discipline as the frontier lane. Both Phase 1 (code) and Phase 2
+(engine build + correctness self-test + real 353GB download + live server + benchmark)
+completed 2026-07-11.
+
 **Chat prompts are domain-aware and repo-scoped chat has real context now**
 (§14 2026-07-11 entry). Opening chat from any domain card renders that
 domain's own fields (a repo card shows repo fields, a paper card shows paper
@@ -288,6 +299,7 @@ The config files and their contracts:
 | `configs/model-serving-benchmarks.yaml` | **serving** SLO scenarios (TTFT/ITL/TTLT + operating point) — `quality_eval != serving_eval` |
 | `configs/frontier-router-providers.yaml` | paid frontier-API backup lane: provider/model pricing metadata (off by default; not the local lane) |
 | `configs/frontier-router-budgets.yaml` | hard caps + redaction + blocked-payload gate for the frontier-router lane (`enabled: false`) |
+| `configs/local-frontier-providers.yaml` | experimental loopback-only local engine lane (colibrì today): capabilities, disk footprint, self-reported throughput (`enabled: false`) |
 | `configs/judges.yaml` | judge arrays per stage, cross-provider pairing, budgets |
 | `configs/gates.yaml` | L0–L4 risk/approval policy |
 | `configs/environments.yaml` | one environment per activity, isolation rules |
@@ -1043,6 +1055,282 @@ The deliberate enablement sequence stays: dry-run → price-audit → `make fron
 (with the key set + budget enabled) → a tiny budgeted smoke test (≤$0.10, ≤2k in / 500 out, no
 private repo content) whose first goal is to verify usage/cost/latency/refusal accounting, not
 "is the model smart."
+
+#### Local frontier lane (colibrì) — full spec
+
+A THIRD chat lane, distinct from both the local-only LiteLLM/Ollama gateway and the paid
+frontier-router backup lane above: experimental, loopback-only engines running entirely on this
+machine — no API key, no $ cost, no cloud egress, only a (potentially very long) wall-clock one.
+Added 2026-07-11 after a deep-check of **colibrì** ([github.com/JustVugg/colibri](https://github.com/JustVugg/colibri)),
+a project claiming to run GLM-5.2 (744B MoE) on consumer hardware by keeping ~9.9GB of dense
+weights resident and streaming the remaining ~370GB of routed experts from NVMe.
+
+**Fact-check verdict** (verified against the repo/README/source/HF card, not taken on faith):
+most technical claims hold up — RAM footprint, rejected API params (tools/functions/json_mode/
+custom stops/logprobs/penalties/seed), Windows "Phase 1" status, KV-slot mechanics, the custom
+(non-GGUF/AWQ/GPTQ/MLX) container format. The material risk: **the repo was 10 days old** when
+added (created 2026-07-01), and every published tok/s number (0.05–1.06 tok/s self-reported
+across a 25GB WSL2 box up to a 128GB M5 Max) has no independent reproduction. Treat the
+`expected_tokens_per_second` field in `configs/local-frontier-providers.yaml` as an unverified
+upper/lower bound until `make colibri-benchmark LIVE=1` has actually run on this machine.
+
+**Architecture**: colibrì does NOT go through LiteLLM (unlike the local Ollama roles) and is NOT
+a frontier-router candidate (unlike the paid lane) — it mirrors the frontier-router lane's
+*shape* (a direct-httpx client, gated off by default, no tools/board/memory context) but is its
+own contract, because `ModelRegistry._checks` hard-rejects any local role that isn't
+`provider: ollama`, and `check_litellm_config` flags any `openai/`-prefixed model string in
+`generated/litellm-config.yaml` regardless of the target `base_url` — so the "LiteLLM +
+`openai/` prefix + custom `api_base`" approach a naive integration would reach for is a dead end
+here by design, not an oversight.
+
+Every local-frontier turn must pass, in order (fail-closed, no silent fallback to local Ollama):
+
+1. lane enabled (`configs/local-frontier-providers.yaml` `enabled`) — **false by default**,
+2. model known in `local-frontier-providers.yaml`,
+3. the model's `base_url_env` resolves to an actual value (the engine's server must be running),
+4. that value is loopback / `host.docker.internal` / RFC1918 private / Tailscale (`.ts.net`) —
+   **never** a public hostname, checked both statically (`check_forbidden_providers.
+   check_local_frontier_providers`, unconditional — no `--allow-*-egress` flag needed, since
+   this isn't a cloud-egress gate) and again at call time (`local_frontier_client`, defense in
+   depth against the env var changing between a scan and a live call).
+
+No `tools` field is ever sent (the engine rejects it outright); no board/growthos-memory context
+is attached (same reasoning as the paid frontier lane, plus this backend is painfully slow, so a
+smaller prompt matters even though nothing leaves the machine). `GatewayCore.is_local_frontier`
+drives the same tool-call-refusal diagnostic the frontier lane uses
+(`_no_tools_lane_tool_call_diagnostic`, generalized from the frontier-only version 2026-07-11) —
+a defense-in-depth guard in case plain-text output ever looked tool-call-shaped.
+
+**Operator commands (all read-only, no egress):**
+
+- `cc colibri-preflight` — disk/RAM/GPU headroom vs. the configured model's declared
+  `disk_footprint_gb`. Registered in the main `cc` app (unlike `frontier_router.py`, which stays
+  Makefile-only because it can spend money) since this has no real-world cost.
+- `cc colibri-health` — current `lane_enabled`/`health`/`selectable` per configured model (a
+  short-timeout `/health` probe, stays on loopback).
+- `make colibri-benchmark SUITE=chat LIVE=1 MAX_CASES=3` — the tester: runs the SAME
+  `configs/model-benchmarks.yaml` cases used to judge local incumbents and the paid frontier
+  lane against colibrì (`src/command_center/improvement/local_frontier_benchmark.py`, sharing
+  `benchmark_scoring.score_case` with `frontier_benchmark.py` so both apply the exact same
+  rubric). Headline metric is **tokens/sec + pass_rate**, not cost or latency — there is no
+  price to compare, and latency alone is misleading at sub-1-tok/s speeds. `MAX_CASES` defaults
+  to 3: at colibrì's expected throughput a full suite live run could take hours, so an unbounded
+  default would silently turn a sanity check into an all-afternoon job. Results land in
+  `generated/local-frontier-benchmark-report.json` and feed the chat picker's "measured X tok/s"
+  badge (`local_frontier_client._last_benchmark_summary`) — absent, never fabricated, until that
+  has actually run once.
+
+**Rollout sequence** (Phase 1 code landed 2026-07-11, `enabled: false`; Phase 2 — build the
+engine, download the ~370GB weights, start the server, smoke-test, run the benchmark for real —
+completed the same day):
+
+1. `cc colibri-preflight` to confirm disk/RAM/GPU headroom.
+2. Build colibrì in WSL2 (not native Windows — its Windows port is README-labeled "Phase 1," no
+   GPU/O_DIRECT yet); run colibrì's own correctness tests before trusting it with a 370GB
+   download.
+3. Download the preconverted int4 container (`jlnsrk/GLM-5.2-colibri-int4` on Hugging Face —
+   NOT GGUF/AWQ/GPTQ/MLX, not reusable by Ollama/vLLM).
+4. Start the server, set `LOCAL_FRONTIER_COLIBRI_BASE_URL` in `.env`, smoke-test `/health`,
+   `/v1/models`, one `/v1/chat/completions` call, confirm a `tools`-bearing request is rejected.
+5. Flip `configs/local-frontier-providers.yaml` `enabled: true`.
+6. `make colibri-benchmark SUITE=chat LIVE=1 MAX_CASES=3` for a first REAL measured tok/s number
+   on this machine, replacing the self-reported/unverified label.
+
+**Phase 2 results (2026-07-11, this machine — RTX 4090, 64GB RAM, WSL2 Ubuntu, 24 cores):**
+
+- Engine correctness, independently verified against a PyTorch oracle (not just "it compiled"):
+  32/32 teacher-forcing positions, 20/20 greedy-generation tokens, both exact matches.
+- Real download: 353GB / 150 files in 1h53m over an unauthenticated HF connection. The MTP head
+  files' sizes exactly match upstream issue #8's "known int4, unusable" fingerprint — the server
+  logs `[MTP] attiva` (active) anyway, but per that issue draft acceptance collapses to 0–4% at
+  int4, so treat the numbers below as base (non-speculative) throughput, not an MTP-accelerated
+  best case.
+- Real chat completion, cold cache, first-ever request: 184.5s for a 3-token reply ("Hello
+  there!" — coherent, on-topic) plus 13-token prefill.
+- **`make colibri-benchmark SUITE=chat LIVE=1 MAX_CASES=3` — median 0.0563 tokens/sec**, landing
+  at the pessimistic end of the self-reported 0.05–1.06 range: this machine's real throughput is
+  close to colibrì's own worst-case WSL2 number, not its best-case bare-metal one. A 100-token
+  reply is genuinely ~30 minutes at this rate.
+- **pass_rate: 0/3 (0%) — a suite/capability mismatch, not a quality failure.** The `chat` suite
+  (`configs/model-benchmarks.yaml`) is tool-call-shaped (cases like `chat_search_tool` score
+  `correct_tool_selection` against JSON output), but the local-frontier lane structurally never
+  sends a `tools` schema (same as the paid frontier lane). This is exactly the risk the original
+  colibrì evaluation writeup flagged under "Phase 4 — evaluation gate": reusing the tool-oriented
+  suite unchanged "would repeat the benchmark mismatch you already found with the frontier lane."
+  A genuine text-only suite (instruction adherence, reasoning, long-answer coherence — no tool
+  expectations) is the natural next step before pass_rate means anything for this lane; until
+  then, tokens/sec is the only KPI worth reading from `make colibri-benchmark` here.
+  **Built 2026-07-12**: `configs/model-benchmarks.yaml` suite `chat_text_only` (10 cases —
+  instruction adherence, missing-info abstention, factual extraction, contradiction detection,
+  multi-step reasoning, summarization, no invented tool execution, no false action claims,
+  simulated multi-turn consistency, and a ~475-token needle-in-haystack retrieval case) — no
+  `response_format: json` anywhere, matching every no-tools lane's `json_mode: false`
+  capability. `frontier_benchmark.py` and `local_frontier_benchmark.py` now both default to it
+  instead of the tool-shaped `chat` suite (still available via `--suite chat` for anyone who
+  wants to see the mismatch directly). Same `role: chat` as the original suite, so it's usable
+  by `live_model_benchmark.py`'s declared-experiment A/B path too if a future experiment wants a
+  genuine colibrì-vs-OpenRouter-vs-local-Qwen text-quality comparison — not wired up yet, only
+  the suite itself.
+- `context_tokens` corrected from an 8192 placeholder to the server's real logged value: 4096.
+- Found and fixed a real bug during the live smoke test: `local_frontier_client._health()` built
+  `{base_url}/health` where `base_url` includes the conventional `/v1` suffix, but colibrì's
+  `/health` lives at the server ROOT — every health check was silently hitting a nonexistent
+  `/v1/health` path and getting back a 401 (not a 404), which looked like a broken server rather
+  than a client bug. Fixed + regression-tested — but the fix initially only landed in
+  `src/` on the host; the running `agent-kanban-ui` container had it baked in from an earlier
+  `docker build` and kept serving the pre-fix behavior until rebuilt. `src/` is `COPY`-baked
+  into the image, not live-mounted (unlike `.env`, which IS a live bind mount) — a source fix
+  on the host is invisible to a running container until it's rebuilt.
+- **`LOCAL_FRONTIER_COLIBRI_BASE_URL` needs a DIFFERENT value depending on the caller**, a real
+  gap the first version of this doc glossed over by only testing from the bare Windows host:
+  - From **inside the `agent-kanban-ui` container** (the actual browser-facing path):
+    `http://host.docker.internal:8000/v1` — Docker Desktop's internal bridge correctly routes
+    this to WSL2's loopback-forwarded port.
+  - From the **bare Windows host** (`cc colibri-health`, `make colibri-benchmark` run directly,
+    not via `docker exec`): `host.docker.internal` resolves via the Windows hosts file to this
+    machine's LAN IP, which does NOT reach a service bound to WSL2 loopback — `127.0.0.1` is
+    what actually works there, because WSL2 forwards loopback-to-loopback across the host/WSL2
+    boundary specifically, not LAN-IP-to-loopback.
+  `.env` is set to the container-correct value (`host.docker.internal`) since that's the real
+  product path; **run `cc colibri-health` / `make colibri-benchmark` via
+  `docker exec llm_station-agent-kanban-ui-1 ...`** when the stack is Dockerized, not directly
+  on the host, or they'll report `unreachable` even though the actual feature works fine.
+
+**Full acceptance-gate proof, completed 2026-07-12** (an independent review of the 2026-07-11
+work correctly flagged that every prior test exercised the cockpit's *config/health* surface,
+not a real turn through its own `/api/chat` — that gap is now closed):
+
+- A real request through the cockpit's own `POST /api/chat` (not a direct colibrì call, not a
+  host-side script) — `model: "local-frontier:glm-5.2-colibri"` — returned `HTTP 200` in 675.8s
+  with a coherent, on-topic reply: *"Understood — I'm ready to help with your questions, but I
+  have no access to AppFlowy, GitHub, or any external tools, so I can only provide general
+  guidance."* The model correctly self-reporting zero tool access is itself strong evidence the
+  right (`tools_available=False`) system prompt reached it.
+- The flight recorder (`/snapshot/chat-transcripts/<conversation_id>.jsonl`) confirms every
+  acceptance criterion an independent reviewer listed: `"context_blocks": []` (no board/memory
+  context), correct `model_role`, a real `usage` event (`prompt_tokens: 219, completion_tokens:
+  37, tokens_per_second: 0.0549` — consistent with the earlier `make colibri-benchmark` result),
+  no `tool_calls` anywhere, and the exact final reply text.
+- Getting this one clean round-trip took several real, informative failures first (all fixed or
+  understood, not swept aside):
+  - `local_frontier_chat_completion` never sent `max_tokens` — the very first attempt ran
+    unbounded and blew past `queue_timeout_seconds` itself, surfacing as an opaque "could not
+    reach colibri" transport error instead of a clear timeout. Fixed: `LocalFrontierModel.
+    max_output_tokens` (schema field, default 200, overridden to 40 for colibrì given its
+    measured throughput) is now always sent as `max_tokens`.
+  - **colibrì does not cancel generation on client disconnect.** When a client times out and
+    gives up, the server keeps computing until it finishes or hits its own `queue_timeout_seconds`
+    — an abandoned request can occupy a KV slot for the server's full timeout window, queuing out
+    subsequent requests behind it. Not a bug to fix on our side (nothing to cancel — colibrì's
+    protocol has no cancel primitive), just an operational fact: expect orphaned generations
+    after any client-side timeout, and give the queue time to drain before retrying.
+  - **colibrì's auto-selected RAM budget can cause real swap thrashing.** Launched with no
+    `--ram` flag, it auto-selected ~39GB on this 47GB WSL2 VM; combined with everything else
+    running, the system fell into 7.8GB of swap, degrading *everything* (including simple
+    `/health` checks) far below the already-slow baseline. Relaunching with `--ram 28` (leaving
+    real headroom, matching the external reviewer's suggested 28–32GB range) fixed it — confirmed
+    via `free -h` showing zero swap growth afterward. **Never launch colibrì without an explicit,
+    conservative `--ram` value on a shared machine.**
+  - **colibrì does not isolate KV cache by `conversation_id`** — there's a `cache_slot` request
+    extension (`0 <= cache_slot < kv_slots`, confirmed against the engine's own
+    `openai_server.py`) that `local_frontier_client` didn't send, so every request implicitly
+    shared slot 0. Observed live: prefill cost grew from 13 tokens (first request ever) to 163
+    tokens (a later, unrelated conversation) purely from unrelated prior turns bleeding into the
+    same cache. **Fixed 2026-07-12**: `_cache_slot_for(conversation_id, kv_slots)` deterministically
+    maps each conversation to a stable slot via `sha256` (not Python's builtin `hash()`, which is
+    `PYTHONHASHSEED`-randomized per process and would silently defeat colibrì's own
+    KV-cache-persists-across-restarts feature). Live-verified: the server log echoed `KV slot 0`
+    for a conversation id chosen specifically because it hashes to slot 0, confirming the computed
+    value is what colibrì actually received and used. With `kv_slots=2` distinct conversations can
+    still collide onto the same slot and share cache — that's a capacity limit inherent to a
+    small `kv_slots`, not something this mapping removes.
+  - `queue_timeout_seconds` at the schema default (900s) proved too tight once the above two
+    effects (reduced expert cache under `--ram 28`, growing cache_slot-0 prefill) stacked: a real
+    request completed successfully server-side (`200 OK`, scheduler `completed: 1`, never
+    `timed_out`) mere moments after the *client's* 900s timeout had already fired and given up.
+    Raised to 1800s for real margin — see the config file's own comment for the rationale.
+  - Separately, a `.env`-file scare: the file was found reset to a 9-key minimal version (missing
+    `OPENROUTER_API_KEY`, `LITELLM_MASTER_KEY`, `POSTGRES_PASSWORD`, and others) partway through
+    this work, then later observed at a third, different 24-key state — content that changed
+    between successive reads with no writes issued in between. Root cause undetermined (suspected
+    Docker-Desktop-on-Windows bind-mount sync artifact following the day's multiple WSL2/Docker
+    Desktop restarts); it stabilized on its own. No secret was confirmed lost — the 24-key
+    stabilized version has every key that mattered — but this is worth remembering as a real
+    failure mode of bind-mounting `.env` into a container on this platform, not something to
+    write into `.env` and trust blindly mid-session again without a stability check
+    (`wc -l .env` a few times in a row with no writes in between) first.
+  - A second, unrelated environment surprise while building the text-only benchmark suite (see
+    below): `.venv/Lib/site-packages/__editable__.command_center-4.0.0.pth` — this repo's OWN
+    venv's editable-install pointer — was found pointing at `C:\tmp\cc-agent-runtime\src`, a
+    different worktree entirely (see the "Agent-session chat integration" work). Every plain
+    `python -m command_center.…` invocation was silently running against the WRONG checkout's
+    code (pytest was unaffected — it manipulates `sys.path` itself and correctly resolved this
+    repo throughout). Symptom: a brand-new module (`local_frontier_benchmark.py`, only present
+    here) raised `ModuleNotFoundError` even though it demonstrably existed on disk. Fixed by
+    correcting the `.pth` file's single line to point back at this repo's own `src/` (the venv
+    has no `pip` module installed inside it, so a normal `pip install -e .` re-run silently hits
+    the system Python instead of the venv — editing the `.pth` file directly is the fix that
+    actually reaches the venv). Root cause not confirmed (most likely an earlier `pip install
+    -e .` run from the other worktree while this same venv happened to be active), but worth
+    a periodic sanity check (`python -c "import command_center; print(command_center.__file__)"`
+    should print a path under **this** repo) if `python -m command_center...` commands ever
+    behave inexplicably again.
+
+**Performance-tuning experiments, 2026-07-12** (`--ram 28` + default engine settings, measured
+against the same `"Reply with exactly one short sentence."` prompt, real `/api/chat` calls
+through the cockpit, each compared against the 0.0549 tok/s acceptance-gate baseline):
+
+- `iobench` (the engine's own I/O diagnostic) measured **0.07 GB/s buffered vs 0.99 GB/s
+  `O_DIRECT`** — a dramatic 14x gap in a synthetic 8-thread burst-read pattern. Tempting to read
+  as "free 14x speedup available," but `glm.c`'s own `g_direct` comment already documents that
+  the maintainer tested exactly this (VHDX-backed NVMe, "latenza serializzata ~60ms/req") and
+  found buffered reads win in real inference despite the synthetic numbers — a warning not to
+  trust a diagnostic tool's access pattern as representative of the real workload.
+- **`MTP=0`** (explicitly disabling the already-confirmed-broken int4 MTP head, avoiding even the
+  wasted 24-proposal self-disable probe): **0.0078 tok/s — ~7x slower**, not faster. Likely
+  because MTP's verification pass batches multiple experts' disk reads together (the engine's
+  own "batch-union MoE" behavior extends to MTP verification), and under this storage stack's
+  high per-request latency, batched reads beat strictly-sequential ones even when the draft
+  itself gets rejected. Reverted.
+- **`DIRECT=1`** (enabling `O_DIRECT` on expert slabs, testing the maintainer's stated finding
+  directly rather than trusting it by analogy): **0.0151 tok/s — ~3.6x slower**. Confirms the
+  `g_direct` comment's claim empirically on this specific machine, not just by reading the
+  source. Reverted.
+- **`--topp 0.7`** (adaptive expert top-p — colibrì's own README cites a real, measured "1.6×
+  end-to-end speedup" and "30-40% less disk" from this exact flag on a comparable low-RAM
+  machine; verified that specific claim against the primary source, not just the reviewer's
+  paraphrase, before testing): **0.0427 tok/s — ~22% slower**, and — more importantly than the
+  speed number — the reply came back genuinely incoherent and truncated ("Understood... please
+  provide the following: [...] You are a helpful, skilled, and knowledgeable assistant. I have
+  no"), hallucinating text that isn't part of the actual system prompt. Unlike `MTP=0`/`DIRECT=1`
+  (pure speed regressions, replies stayed coherent), this is a speed-AND-quality regression on
+  this specific run. Matches the README's own caveat that this flag changes which experts are
+  retained — it is a genuine tradeoff knob, not a free win, and on this one real sample the
+  trade didn't pay off in either dimension. A single run is not conclusive (the README's own
+  1.6× figure came from a different machine and, per the methodology gap noted below, likely
+  multiple repetitions) — treat this as a real data point arguing for caution, not a final
+  verdict on `--topp` in general. Reverted.
+- **Conclusion: three tested "obvious" optimizations, three regressions.** `MTP=0`, `DIRECT=1`,
+  and `--topp 0.7` all made a real, measured request slower (and in `--topp`'s case, less
+  coherent too). The maintainer-chosen defaults (MTP on, `O_DIRECT` off, adaptive top-p off)
+  plus the one change already proven necessary here (`--ram 28`, avoiding swap thrashing)
+  represent the practical performance ceiling found so far without deeper engine-level work.
+  Remaining candidates identified but not yet tested, roughly in descending priority: pulling
+  colibrì's upstream changes (13 commits behind as of 2026-07-12, including two real perf
+  commits — `03d9a29` opt-in NVMe/matmul I/O overlap, `704ed49` hot OpenMP thread pool across
+  tiny expert matmuls — a genuine engine-code change, not a runtime-flag guess, and the most
+  promising remaining lever); `PILOT=1` (router-lookahead prefetch, README-labeled
+  experimental); a proper multi-repetition cold/warm A/B methodology (today's tests were each a
+  single real sample under uncontrolled machine conditions — real evidence, but not
+  statistically tight); a RAM sweep above 28 (real risk of repeating the swap-thrashing
+  regression, only worth it in an isolated run with other workloads stopped).
+- **Compact system prompt, implemented 2026-07-12**: `build_system`'s `local_frontier` variant
+  was reusing the paid frontier lane's ~700-character prompt with only the lane description
+  swapped. Colibrì-class engines are genuinely disk/compute-bound, so system-prompt token count
+  is a real, measured cost here (219 prompt tokens for an 8-word user message before this fix).
+  Gave `local_frontier` its own dedicated ~240-character template carrying the same two safety
+  properties (no tools, never claim an action happened) in far fewer tokens — confirmed live:
+  the next real request measured 67 prompt tokens for the same 8-word message.
 
 What is done (legacy detail):
 
@@ -2555,6 +2843,105 @@ GatewayCore chat, built in a stacked worktree (`C:\tmp\cc-agent-runtime`) and
   review; and evidence-based auto-routing. The `openai/codex-plugin-cc` bridge
   (§4.7) is adopted only as a wrapped, Ledger/worktree-bound companion — never a
   competing control plane.
+
+### 2026-07-12 — Local-frontier (colibrì) acceptance gate: closed the real gap, found 4 more real issues
+
+An independent review of yesterday's colibrì work correctly identified that every prior test had
+exercised the cockpit's config/health surface, never a real turn through its own `POST /api/chat`
+— the actual browser-facing path. Closed that gap today; see §5.4 "Full acceptance-gate proof" for
+the complete detail (flight-recorder-verified: `context_blocks: []`, no `tool_calls`, real
+`tokens_per_second: 0.0549`, coherent reply). Getting there surfaced and fixed/documented four more
+real issues beyond yesterday's two: a missing `max_tokens` cap (real bug, fixed), colibrì not
+cancelling generation on client disconnect (operational fact, not a bug), colibrì's auto-RAM-budget
+causing genuine swap thrashing (fixed by launching with an explicit `--ram 28`), and colibrì not
+isolating KV cache by conversation (`cache_slot` unimplemented on our side — known gap, prefill cost
+observed growing 13→163 tokens across a session as a direct result). Also hit and rode out a scary
+`.env`-file instability (content changed between reads with no writes issued — settled on its own,
+cause undetermined, likely a Docker-Desktop-on-Windows bind-mount sync artifact) — no secret loss
+confirmed, but worth remembering as a real failure mode on this platform.
+
+### 2026-07-11 (later) — Local-frontier chat lane (colibrì): a THIRD lane, Phase 1 landed disabled
+
+Deep-checked an externally-drafted proposal to add **colibrì**
+([github.com/JustVugg/colibri](https://github.com/JustVugg/colibri)) — a project claiming to
+run GLM-5.2 (744B MoE) on consumer hardware by streaming ~370GB of quantized experts from NVMe
+— as a local chat option, benchmarked the same way OpenRouter frontier candidates already are.
+
+**Fact-check against the primary source** (not the proposal's claims at face value): most
+technical detail held up — RAM footprint, rejected API params, Windows "Phase 1" status,
+KV-slot mechanics, custom container format. Two things it got wrong: a WSL2 tok/s range that
+conflated two different benchmark configs, and a `parallel_generation` rejected-field claim that
+appears fabricated (no such field in the source). The material risk it undersold: the colibrì
+repo was **10 days old** (created 2026-07-01) with every published tok/s number self-reported
+and zero independent reproduction found.
+
+**Hardware verified on this machine** (corrected stale memory of 32GB RAM — it's actually 64GB):
+RTX 4090 24GB VRAM, 64GB system RAM, WSL2 capped 48GB/16GB swap with GPU passthrough confirmed.
+**Disk was the binding constraint**: WSL2's `ext4.vhdx` looked like 848GB free via `df`, but it's
+a sparse file on the *same* Windows C: drive (only 500GB genuinely free) — WSL2 does not add
+real headroom on this machine, a correction worth remembering for any future "just use WSL2 for
+more room" assumption.
+
+**Architecture correction to the proposal**: the suggested LiteLLM `openai/`-prefixed routing
+would have tripped `check_forbidden_providers.check_litellm_config`'s existing fragment scan
+(`FORBIDDEN_MODEL_FRAGMENTS` includes `"openai/"`, checked regardless of `base_url`) and
+violated `ModelRegistry`'s ollama-only invariant for local roles. Landed instead as a genuine
+**third lane** mirroring the frontier-router lane's shape (direct-httpx, gated off by default,
+no tools/board/memory context) but with its own contract, since it's loopback (no $ cost, no
+API key) rather than paid cloud egress — see §5.4 "Local frontier lane (colibrì) — full spec".
+
+**Phase 0 — disk cleanup** (user-approved per group, not a blanket prune): removed 7 unused
+Docker images (~181GB reclaimed inside Docker's store) spanning llm_station, bball_homography_
+pipeline, and betts_basketball — a dangling image, an unused `vllm/vllm-openai`, two orphaned
+hash-named airflow builds, two superseded backup/pre-migration tags, and one stale
+hyphen-vs-underscore duplicate repo image. Windows-visible free space unchanged until a
+`wsl --shutdown`/Docker Desktop restart compacts the sparse VHDX — deferred rather than
+interrupting the 17 containers that were live across three repos at the time.
+
+**Phase 1 — code landed, `enabled: false`, no live server needed:**
+
+- `LocalFrontierProvider`/`Model`/`ProvidersConfig` contracts (`schemas/contracts.py`), forcing
+  `tools`/`json_mode` capabilities to `False` at the schema level, registered in
+  `CONFIG_CONTRACTS`; new `configs/local-frontier-providers.yaml` (glm-5.2-colibri, disabled).
+- `channels/local_frontier_client.py` — mirrors `frontier_client.py`'s shape (no LiteLLM, no
+  tools ever sent, fail-closed gate errors) without its $-budget logic (no cost, so no ledger
+  cost field — latency + tokens/sec instead); a cheap `/health` probe for the chat picker.
+- `check_forbidden_providers.check_local_frontier_providers` — a host-allowlist invariant
+  (loopback/`host.docker.internal`/private-LAN/Tailscale only), unconditional (no
+  `--allow-*-egress` flag — this isn't cloud egress, there's no key to gate).
+- `GatewayCore`: `is_local_frontier` alongside `is_frontier`, both feeding a shared
+  `no_tools_lane` flag; `_frontier_tool_call_diagnostic` generalized to
+  `_no_tools_lane_tool_call_diagnostic` (names whichever lane is active); `build_system` gained
+  a `lane` parameter so the "talking through the paid frontier-router lane" system-prompt
+  wording doesn't lie to a free local turn. `frontier_model_id`/`local_frontier_model_id` are
+  contract-enforced mutually exclusive.
+- Chat surface: `local-frontier:<id>` prefix alongside `frontier:`, a third `local_frontier_models`
+  array + note on `/api/chat/runtime`, a new disabled "Local Frontier — experimental" optgroup
+  and diagnostic panel in the cockpit (`App.tsx`/`api.ts`, TS-checked clean).
+- **The tester**: extracted `_score_case` out of `frontier_benchmark.py` into a shared
+  `improvement/benchmark_scoring.py` (both harnesses now apply the identical rubric); new
+  `improvement/local_frontier_benchmark.py` runs the SAME `configs/model-benchmarks.yaml` suite
+  colibrì's headline metric is **tokens/sec + pass_rate**, not cost — `--max-cases` defaults to
+  3 given the expected multi-minute-per-reply cost. `cc colibri-preflight`/`cc colibri-health`
+  registered in the main `cc` app (read-only, no cost — unlike `frontier_router.py`, which stays
+  Makefile-only); `make colibri-benchmark` stays Makefile-only for the same reason
+  `frontier-router-benchmark` does (a real, potentially slow, live operation).
+- 26 new/extended tests (contracts, host-allowlist, mocked-transport client behavior, GatewayCore
+  routing + tool-call-refusal regression, mutual exclusivity) — all green; full existing gateway/
+  frontier/contracts suites re-run clean (no regressions); `ruff check` clean; `cc validate` +
+  `cc forbidden-providers` (egress mode, matching this checkout's existing frontier-router state)
+  both pass.
+
+**Phase 2 completed the same day** (see the 2026-07-11 (later) entry above for full detail):
+engine built in WSL2 and independently verified correct against a PyTorch oracle (32/32
+teacher-forcing, 20/20 greedy — not just "it compiled"); real 353GB weights downloaded
+(1h53m); server smoke-tested end to end including one real chat completion from the actual
+744B model; lane enabled; `make colibri-benchmark LIVE=1` run for real — **median 0.0563
+tok/s**, at the pessimistic end of the self-reported range, meaning a 100-token reply is
+genuinely ~30 minutes on this machine. The `chat` suite's 0% pass rate is a tool-call-shaped
+suite mismatch (this lane never gets a `tools` schema), not a quality signal — flagged as a
+known risk in the original evaluation write-up, not a surprise. A live bug was found and fixed
+in the process: the `/health` probe was hitting a nonexistent `/v1/health` path.
 
 ### 2026-07-09 — Cockpit PWA mobile polish, All Boards nav, and editable job-search controls
 

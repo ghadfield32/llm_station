@@ -530,6 +530,8 @@ export interface ChatRuntime {
   executor_note?: string;
   frontier_models?: FrontierModelOption[];
   frontier_note?: string;
+  local_frontier_models?: LocalFrontierModelOption[];
+  local_frontier_note?: string;
   stream_endpoint: string;
   action_endpoint: string;
   activity_endpoint: string;
@@ -564,6 +566,45 @@ export interface FrontierModelOption {
   key_present: boolean;
   selectable: boolean;
   measured?: FrontierMeasuredResult | null;
+}
+// The free, experimental, loopback-only lane (colibrì / GLM-5.2 744B today) — `selectable`
+// is false until an operator enables configs/local-frontier-providers.yaml AND the server's
+// /health probe returns ready. No cost field: there is no $ cost, only a wall-clock one.
+export interface LocalFrontierThroughputEstimate {
+  low: number;
+  high: number;
+  source: string;
+}
+export interface LocalFrontierCapabilities {
+  text: boolean;
+  streaming: boolean;
+  tools: boolean;
+  json_mode: boolean;
+  vision: boolean;
+  audio: boolean;
+}
+// Real measured results from the last `make colibri-benchmark LIVE=1` run
+// (local_frontier_benchmark.summarize) — absent until that has been run once.
+export interface LocalFrontierMeasuredResult {
+  cases_scored: number;
+  cases_blocked: number;
+  pass_rate: number | null;
+  median_tokens_per_second: number | null;
+  block_reasons: string[];
+}
+export interface LocalFrontierModelOption {
+  model_id: string;
+  provider: string;
+  lane_enabled: boolean;
+  health: string;
+  selectable: boolean;
+  capabilities: LocalFrontierCapabilities;
+  context_tokens: number | null;
+  disk_footprint_gb: number | null;
+  expected_tokens_per_second: LocalFrontierThroughputEstimate | null;
+  kv_slots: number;
+  max_queue: number;
+  measured?: LocalFrontierMeasuredResult | null;
 }
 export const fetchChatRuntime = () => getJSON<ChatRuntime>("/api/chat/runtime");
 
