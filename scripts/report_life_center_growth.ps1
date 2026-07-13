@@ -26,7 +26,7 @@ $rows = Import-Csv -LiteralPath $historyPath | ForEach-Object {
         FileCount = [int64]$_.FileCount
         ErrorCount = [int64]$_.ErrorCount
     }
-}
+} | Where-Object Target -ne "projects_envelope"
 
 $runs = $rows | Group-Object RunId | ForEach-Object {
     [pscustomobject]@{
@@ -98,7 +98,7 @@ $lines.Add(('**Latest:** {0} (`{1}`)  ' -f $latest.Timestamp.ToString('o'), $lat
 $lines.Add("**Elapsed:** $([math]::Round($elapsed.TotalDays, 2)) days  ")
 $lines.Add("**First eligible closeout:** $($eligibleAt.ToString('yyyy-MM-dd HH:mm zzz'))")
 $lines.Add("")
-$lines.Add("Targets are policy categories, not proof that every byte is durable. Envelope and runtime categories overlap retained-review categories and must not be added together.")
+$lines.Add("Targets are policy categories, not proof that every byte is durable. The overlapping project envelope is intentionally excluded because it contains generated dependencies and junctions; do not add runtime or system envelopes to retained-review categories.")
 $lines.Add("")
 $lines.Add("| Target | Class | Baseline GiB | Latest GiB | Delta GiB | Annualized GiB/year | Errors |")
 $lines.Add("| --- | --- | ---: | ---: | ---: | ---: | ---: |")

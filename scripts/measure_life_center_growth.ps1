@@ -26,7 +26,6 @@ $dockerProjects = Join-Path $projects "docker_projects"
 
 $targets = @(
     @{ Name = "personal_synced"; Path = (Join-Path $homePath "OneDrive"); Class = "retained-review" },
-    @{ Name = "projects_envelope"; Path = $projects; Class = "envelope-only" },
     @{ Name = "betts_data"; Path = (Join-Path $dockerProjects "betts_basketball\data"); Class = "retained-review" },
     @{ Name = "betts_models"; Path = (Join-Path $dockerProjects "betts_basketball\models"); Class = "retained-review" },
     @{ Name = "betts_reports"; Path = (Join-Path $dockerProjects "betts_basketball\reports"); Class = "retained-review" },
@@ -38,6 +37,12 @@ $targets = @(
     @{ Name = "huggingface_cache"; Path = (Join-Path $homePath ".cache\huggingface"); Class = "reproducible" },
     @{ Name = "docker_runtime"; Path = (Join-Path $homePath "AppData\Local\Docker\wsl\disk\docker_data.vhdx"); Class = "runtime-envelope" }
 )
+
+# Do not recursively measure the entire project root. It contains overlapping
+# repositories, generated dependencies, and junctions, so it is neither an
+# authoritative capacity category nor a reliable aggregate. The named child
+# targets and system-volume signal cover the planning evidence without this
+# noisy envelope scan.
 
 function Measure-Target {
     param([hashtable]$Target)
