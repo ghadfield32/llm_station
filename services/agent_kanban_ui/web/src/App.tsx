@@ -25,6 +25,9 @@ import {
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
   StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
   reclassifyJobApplications, ReclassifyResult, bulkSelectSuggested,
+  updateJobSearchLocations, updateJobSearchLanguages,
+  fetchPrepStatus, fetchRejectionsReport, RejectionsReport,
+  REJECT_REASONS,
   AgentEvent, AgentHarnessOption, AgentSessionRecord, AgentModelOption,
   closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
   fetchAgentSession, fetchHarnessModels, interruptAgentSession, promoteAgentSession,
@@ -1000,6 +1003,13 @@ function JobApplicationCard({ card }: { card: DomainCard }) {
     ? "Bot-prepared handoff: the packet is ready, but automatic submit is disabled. Geoff can take over, submit, then move this to Completed."
     : manualReason;
   const nextAction = valText(card.next_action);
+  // The background prep worker has not produced a packet yet: the card sits in
+  // a selected lane with no application_id/materials_path. Shown so a queued
+  // move reads as "working" rather than stuck.
+  const status = valText(card.status);
+  const isPreparing =
+    (status === "Selected by Geoff" || status === "In Progress")
+    && !valText(card.application_id) && !valText(card.materials_path);
   return (
     <div className="job-card domain-card-body">
       <div className="domain-card-top">
@@ -1016,6 +1026,7 @@ function JobApplicationCard({ card }: { card: DomainCard }) {
       <div className="domain-badges">
         <Badge value={card.automation_class} />
         <Badge value={card.resume_variant} />
+        {isPreparing && <span className="badge job-prep-badge">preparing packet…</span>}
       </div>
       {handoffReason && <div className="job-card-note">{handoffReason}</div>}
       {nextAction && <div className="job-card-next">{nextAction}</div>}
@@ -2123,6 +2134,185 @@ function CategorySettingRow({ category, editable, onSaved }: {
   );
 }
 
+const US_STATE_NAMES = [
+  "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado",
+  "Connecticut", "Delaware", "Florida", "Georgia", "Hawaii", "Idaho",
+  "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine",
+  "Maryland", "Massachusetts", "Michigan", "Minnesota", "Mississippi",
+  "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
+  "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio",
+  "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island", "South Carolina",
+  "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia",
+  "Washington", "West Virginia", "Wisconsin", "Wyoming",
+  "District of Columbia",
+];
+
+function JobFilterSettings({ controls, editable, onSaved }: {
+  controls: JobProfileControls; editable: boolean; onSaved: () => void;
+}) {
+  const loc = controls.locations;
+  const lang = controls.languages;
+  const [spoken, setSpoken] = useState(lang.spoken.join(", "));
+  const [requireSpoken, setRequireSpoken] = useState(lang.require_spoken_for_apply);
+  const [mode, setMode] = useState(loc.mode);
+  const [remoteOk, setRemoteOk] = useState(loc.remote_ok);
+  const [arrangements, setArrangements] = useState<string[]>(loc.remote_types_allowed);
+  const [fullTime, setFullTime] = useState(loc.employment_types_allowed.includes("full_time"));
+  const [countries, setCountries] = useState(loc.countries.join(", "));
+  const [states, setStates] = useState<string[]>(
+    US_STATE_NAMES.filter((s) => loc.regions.some((r) => r.toLowerCase() === s.toLowerCase())));
+  const [customRegions, setCustomRegions] = useState(
+    loc.regions.filter((r) => !US_STATE_NAMES.some((s) => s.toLowerCase() === r.toLowerCase())).join(", "));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const l = controls.languages, c = controls.locations;
+    setSpoken(l.spoken.join(", "));
+    setRequireSpoken(l.require_spoken_for_apply);
+    setMode(c.mode);
+    setRemoteOk(c.remote_ok);
+    setArrangements(c.remote_types_allowed);
+    setFullTime(c.employment_types_allowed.includes("full_time"));
+    setCountries(c.countries.join(", "));
+    setStates(US_STATE_NAMES.filter((s) => c.regions.some((r) => r.toLowerCase() === s.toLowerCase())));
+    setCustomRegions(c.regions.filter((r) => !US_STATE_NAMES.some((s) => s.toLowerCase() === r.toLowerCase())).join(", "));
+  }, [controls]);
+
+  const disabled = !editable || busy;
+  const toggle = (list: string[], value: string) =>
+    (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  const splitCsv = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+
+  async function saveLanguages() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchLanguages({
+        spoken: splitCsv(spoken), require_spoken_for_apply: requireSpoken });
+      setMsg("languages saved"); onSaved();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+  async function saveLocations() {
+    setBusy(true); setMsg(null);
+    try {
+      await updateJobSearchLocations({
+        mode, remote_ok: remoteOk,
+        remote_types_allowed: arrangements,
+        employment_types_allowed: fullTime ? ["full_time"] : [],
+        countries: splitCsv(countries),
+        regions: [...states, ...splitCsv(customRegions)],
+      });
+      setMsg("locations saved"); onSaved();
+    } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="settings-form job-filter-settings">
+      <h3>Languages I speak</h3>
+      <div className="settings-form-grid">
+        <label>Spoken (comma-separated)
+          <input value={spoken} disabled={disabled}
+            onChange={(e) => setSpoken(e.target.value)} /></label>
+        <label className="chip-check">
+          <input type="checkbox" checked={requireSpoken} disabled={disabled}
+            onChange={(e) => setRequireSpoken(e.target.checked)} />
+          hide jobs that require a language I don't speak</label>
+      </div>
+      <div className="preset-actions">
+        <button className="actbtn" disabled={disabled} onClick={saveLanguages}>save languages</button>
+      </div>
+
+      <h3>Locations & work arrangement</h3>
+      <div className="settings-form-grid">
+        <label>Match mode
+          <select value={mode} disabled={disabled} onChange={(e) => setMode(e.target.value)}>
+            <option value="worldwide">worldwide (anywhere)</option>
+            <option value="countries">countries only</option>
+            <option value="regions">specific states / metros</option>
+          </select></label>
+        <label className="chip-check">
+          <input type="checkbox" checked={remoteOk} disabled={disabled}
+            onChange={(e) => setRemoteOk(e.target.checked)} /> accept remote anywhere</label>
+      </div>
+      <div className="filter-toggle-row">
+        <span className="filter-toggle-label">Work arrangement:</span>
+        {["remote", "hybrid", "onsite"].map((a) => (
+          <label key={a} className={`chip-check ${arrangements.includes(a) ? "chip-on" : ""}`}>
+            <input type="checkbox" checked={arrangements.includes(a)} disabled={disabled}
+              onChange={() => setArrangements((cur) => toggle(cur, a))} />{a}</label>
+        ))}
+        <label className={`chip-check ${fullTime ? "chip-on" : ""}`}>
+          <input type="checkbox" checked={fullTime} disabled={disabled}
+            onChange={(e) => setFullTime(e.target.checked)} /> full-time only</label>
+      </div>
+      <label className="filter-wide">Countries (comma-separated)
+        <input value={countries} disabled={disabled}
+          onChange={(e) => setCountries(e.target.value)} /></label>
+      <div className="filter-states">
+        <span className="filter-toggle-label">States / DC checklist:</span>
+        <div className="state-chip-grid">
+          {US_STATE_NAMES.map((s) => (
+            <label key={s} className={`chip-check ${states.includes(s) ? "chip-on" : ""}`}>
+              <input type="checkbox" checked={states.includes(s)} disabled={disabled}
+                onChange={() => setStates((cur) => toggle(cur, s))} />{s}</label>
+          ))}
+        </div>
+      </div>
+      <label className="filter-wide">Other places (metros / free text, comma-separated)
+        <input value={customRegions} disabled={disabled}
+          onChange={(e) => setCustomRegions(e.target.value)} /></label>
+      <div className="preset-actions">
+        <button className="actbtn" disabled={disabled} onClick={saveLocations}>save locations</button>
+        {msg && <span className={msg.endsWith("saved") ? "actmsg" : "error-inline"}>{msg}</span>}
+      </div>
+      <div className="filter-note">
+        Clear mismatches (onsite/hybrid outside these places, or a job requiring a
+        language you don't speak) are hidden from Suggested Jobs; unclear postings
+        stay visible, ranked lower.
+      </div>
+    </div>
+  );
+}
+
+function RejectionInsights() {
+  const [report, setReport] = useState<RejectionsReport | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    fetchRejectionsReport().then(setReport)
+      .catch((e) => setErr((e as Error).message));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (err) return <div className="error-inline">rejections: {err}</div>;
+  if (!report) return <div className="muted">loading rejection insights…</div>;
+  return (
+    <div className="rejection-insights">
+      <div className="preset-actions">
+        <span>{report.total_rejections} rejection{report.total_rejections === 1 ? "" : "s"} recorded</span>
+        <button className="actbtn" onClick={load}>refresh</button>
+      </div>
+      {Object.keys(report.counts_by_reason).length > 0 && (
+        <div className="domain-badges">
+          {Object.entries(report.counts_by_reason).map(([code, n]) => (
+            <span key={code} className="badge">{report.reason_labels[code] ?? code}: {n}</span>
+          ))}
+        </div>
+      )}
+      {report.suggestions.length === 0
+        ? <div className="muted">No suggestions yet — reject a few jobs with a reason to build signal.</div>
+        : (
+          <ul className="rejection-suggestions">
+            {report.suggestions.map((s, i) => (
+              <li key={i} className={`rej-sugg rej-${s.priority}`}>
+                <span className="rej-area">[{s.priority}] {s.area}</span> {s.suggestion}
+              </li>
+            ))}
+          </ul>
+        )}
+      <div className="diag-row"><span>source</span><code>{report.source}</code></div>
+    </div>
+  );
+}
+
 function JobSearchControlsPanel({ controls, onSaved }: {
   controls: JobProfileControls; onSaved: () => void;
 }) {
@@ -2136,6 +2326,7 @@ function JobSearchControlsPanel({ controls, onSaved }: {
         </span>
       </div>
       <JobRuntimeControls controls={controls} onSaved={onSaved} />
+      <JobFilterSettings controls={controls} editable={editable} onSaved={onSaved} />
       <h3>Role Focus</h3>
       <div className="preset-category-list">
         {controls.job_categories.map((category) => (
@@ -2143,6 +2334,8 @@ function JobSearchControlsPanel({ controls, onSaved }: {
             editable={editable} onSaved={onSaved} />
         ))}
       </div>
+      <h3>Rejections & weaknesses</h3>
+      <RejectionInsights />
       <h3>Own Info</h3>
       <div className="diag-table">
         {Object.entries(controls.source_paths).map(([name, path]) => (
@@ -2913,21 +3106,56 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
     if (allowed) return allowed;
     return boardColumns.filter((name) => name !== "Unstaged" && name !== status);
   };
+  // After a queued prep, the card advances to Needs Geoff on the background
+  // worker. Poll prep-status and refresh the board so it advances on screen
+  // without a manual reload; stop once the queue is idle (or after ~30s).
+  function pollPrepUntilIdle() {
+    let ticks = 0;
+    const timer = window.setInterval(async () => {
+      ticks += 1;
+      try {
+        const st = await fetchPrepStatus();
+        await load();
+        if ((!st.pending && !st.running) || ticks > 20) window.clearInterval(timer);
+      } catch { window.clearInterval(timer); }
+    }, 1500);
+  }
   async function moveDomainCardTo(card: DomainCard, statusName: string) {
     if (!card || !canMove || statusName === "Unstaged") return;
     const id = cardId(card);
+    const isJobs = spec.domain_id === "job_application";
+    let reason: { reason_code?: string; reason_note?: string } | undefined;
+    if (isJobs && statusName === "Rejected / Skip") {
+      const menu = REJECT_REASONS.map((r, i) => `${i + 1}. ${r.label}`).join("\n");
+      const raw = window.prompt(
+        "Why reject this job? Enter a number — this feeds the rejection report "
+        + "so the filters can be tuned:\n" + menu, String(REJECT_REASONS.length));
+      if (raw === null) return;   // cancelled: leave the card where it is
+      const picked = REJECT_REASONS[parseInt(raw.trim(), 10) - 1];
+      const code = picked ? picked.code : "other";
+      let note: string | undefined;
+      if (code === "other" || code === "company") {
+        note = window.prompt("Add a short note (optional):") ?? undefined;
+      }
+      reason = { reason_code: code, reason_note: note || undefined };
+    }
     setToast(null);
     try {
-      const result = await moveDomainCard(spec.domain_id, id, statusName);
+      const result = await moveDomainCard(spec.domain_id, id, statusName, reason);
       const sideEffect = result.side_effect;
       const actualStatus = valText(result.card?.status) || statusName;
-      const processed = sideEffect?.operation === "process_selected"
-        ? Number(sideEffect.selected_count ?? 0)
-        : 0;
-      setToast(processed > 0
-        ? `${result.card_id} -> ${actualStatus}; prepared ${processed} application packet${processed === 1 ? "" : "s"}`
-        : `${result.card_id} -> ${actualStatus}`);
-      await load();
+      const op = sideEffect?.operation;
+      if (op === "process_selected_queued") {
+        setToast(`${result.card_id} -> ${actualStatus}; packet prep queued...`);
+        await load();
+        pollPrepUntilIdle();
+      } else if (op === "rejection_recorded") {
+        setToast(`${result.card_id} rejected (${String(sideEffect?.reason_code ?? "other")}) - noted for the filter report`);
+        await load();
+      } else {
+        setToast(`${result.card_id} -> ${actualStatus}`);
+        await load();
+      }
     } catch (e) { setToast("ERR " + (e as Error).message); }
   }
   async function drop(statusName: string) {
@@ -2943,8 +3171,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
     setToast(null);
     try {
       const r = await bulkSelectSuggested("bot_possible", "Selected by Geoff");
-      setToast(`added ${r.moved_count} bot job${r.moved_count === 1 ? "" : "s"} to Selected by Geoff`);
+      setToast(`added ${r.moved_count} bot job${r.moved_count === 1 ? "" : "s"} to Selected by Geoff; packets preparing...`);
       await load();
+      if (r.moved_count > 0) pollPrepUntilIdle();
     } catch (e) { setToast("ERR " + (e as Error).message); }
   }
 

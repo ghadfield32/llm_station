@@ -29,6 +29,11 @@ from command_center.job_search.digest import write_digest
 from command_center.job_search.followups import generate_followup
 from command_center.job_search.live_sources import discover_live_postings
 from command_center.job_search.profile_ingest import ingest_profile
+from command_center.job_search.rejections import (
+    REASON_CODES,
+    record_rejection,
+    rejection_report,
+)
 from command_center.job_search.resume_selection import select_resume
 from command_center.job_search.retention import apply_retention, plan_retention
 from command_center.job_search.scoring import normalize_job_from_text, score_job
@@ -231,6 +236,35 @@ def cmd_digest(args) -> int:
     return 0
 
 
+def cmd_reject(args) -> int:
+    """Record why a job was rejected. Feeds `rejections-report`, which turns the
+    pattern into concrete filter/scoring suggestions."""
+    cfg = load_config()
+    root = data_root(cfg)
+    ensure_data_dirs(root)
+    try:
+        record = record_rejection(
+            root,
+            job_key=args.job_key,
+            reason_code=args.reason,
+            note=args.note,
+            company=args.company,
+            role_title=args.role_title,
+            location=args.location,
+            remote_type=args.remote_type,
+            fit_score=args.fit_score,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    print(json.dumps(record, indent=2))
+    return 0
+
+
+def cmd_rejections_report(args) -> int:
+    print(json.dumps(rejection_report(), indent=2))
+    return 0
+
+
 def cmd_validate_examples(args) -> int:
     examples = sorted(Path("docs/job_search/examples").glob("*.md"))
     if not examples:
@@ -430,6 +464,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("validate-examples")
     p.set_defaults(func=cmd_validate_examples)
+
+    p = sub.add_parser(
+        "reject",
+        help="Record why a job was rejected (feeds rejections-report).",
+    )
+    p.add_argument("job_key")
+    p.add_argument("--reason", required=True, choices=sorted(REASON_CODES))
+    p.add_argument("--note")
+    p.add_argument("--company")
+    p.add_argument("--role-title")
+    p.add_argument("--location")
+    p.add_argument("--remote-type",
+                   choices=["remote", "hybrid", "onsite", "unknown"])
+    p.add_argument("--fit-score", type=int)
+    p.set_defaults(func=cmd_reject)
+
+    p = sub.add_parser(
+        "rejections-report",
+        help="Aggregate rejections into filter/scoring change suggestions.",
+    )
+    p.set_defaults(func=cmd_rejections_report)
 
     p = sub.add_parser("discover-live")
     p.add_argument("--source", action="append", choices=["jobicy", "remoteok", "remotive"])

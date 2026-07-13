@@ -23,6 +23,39 @@ ranking:
   missing_salary_penalty: 3
   manual_required_penalty: 2
   target_company_bonus: 6
+  # Soft penalties for AMBIGUOUS location/language cases (clear mismatches are
+  # hard-excluded from suggestions in scoring, not merely penalized).
+  location_ambiguous_penalty: 8
+  language_preferred_penalty: 6
+  employment_mismatch_penalty: 6
+
+# Geography + work-arrangement filter. Hybrid enforcement: a clear mismatch
+# (onsite/hybrid in a place not listed, or an excluded work arrangement) is
+# hard-excluded from Suggested Jobs; an ambiguous posting (unknown or
+# national-only location) stays visible with a soft penalty. Remote roles pass
+# regardless of region when remote_ok is true. Edit this from the Jobs settings
+# drawer or data/job_search/profile/search_settings.yml.
+locations:
+  mode: regions            # worldwide | countries | regions
+  remote_ok: true
+  remote_types_allowed: [remote, hybrid, onsite]
+  employment_types_allowed: [full_time]
+  countries: [United States]
+  regions:
+    - Florida
+    - Arizona
+    - Philadelphia
+    - Colorado
+    - Washington
+    - Seattle
+    - Oregon
+
+# Languages Geoff speaks. A posting that REQUIRES a language not listed here is
+# hard-excluded; a merely preferred language is a soft penalty.
+languages:
+  spoken:
+    - English
+  require_spoken_for_apply: true
 
 retention:
   rich_application_cache_days: 30
