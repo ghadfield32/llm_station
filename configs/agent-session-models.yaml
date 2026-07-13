@@ -1,0 +1,21 @@
+# Per-harness model preference for agent sessions — kept separate from
+# agent-session-budgets.yaml (that file is egress/enablement policy; this one
+# is "which model, and what to do if it's not available in this SDK build").
+#
+# REAL FINDING (2026-07-11): a hardcoded model string is not safe — the
+# pinned openai-codex-cli-bin build can lag behind an operator's global
+# ~/.codex/config.toml model preference (a real live turn failed:
+# "'gpt-5.6-sol' requires a newer version of Codex"). The adapter validates
+# preferred_model against the SDK's OWN live model list (client.models())
+# before ever using it — see adapters/codex_agent.py's _resolve_model.
+#
+# allow_sdk_default_fallback: true means "if preferred_model isn't in this
+# build's list, silently use whatever the SDK itself reports as
+# is_default=True". Set to false to make an unavailable preferred_model a
+# hard failure instead (useful once a specific model is a real policy
+# requirement, not just a preference).
+schema_version: command-center.agent-session-models.v1
+codex_agent:
+  preferred_model: gpt-5.5
+  reasoning_effort: medium
+  allow_sdk_default_fallback: true

@@ -123,6 +123,52 @@ def test_run_overall_is_blocked_when_any_probe_is_blocked(monkeypatch):
     assert any(p["check"] == "forbidden_provider_policy" for p in result["probes"])
 
 
+def test_run_codex_only_excludes_the_claude_specific_policy_probe(monkeypatch):
+    """forbidden_provider_policy is a genuinely CLAUDE-specific blocker (the
+    Claude Agent SDK structurally requires ANTHROPIC_API_KEY). Codex never
+    touches OPENAI_API_KEY (verified live via a real account() call — see
+    WORKLOG.md "Agent-session chat integration"), so including this probe in
+    a codex-only run made `--harness codex --live` report BLOCKED overall
+    even when every Codex-relevant check passed. Real regression test: with
+    every codex probe mocked to PASS, overall must be PASS, not BLOCKED by
+    an irrelevant Claude policy note."""
+    monkeypatch.setattr(pf, "probe_host",
+                        lambda: [pf.Probe("execution_context", "PASS", "on host")])
+    monkeypatch.setattr(pf, "probe_codex", lambda: [pf.Probe("x", "PASS", "ok")])
+    result = pf.run("codex")
+    assert result["overall"] == "PASS"
+    assert not any(p["check"] == "forbidden_provider_policy" for p in result["probes"])
+
+
+def test_informational_probe_never_gates_overall(monkeypatch):
+    """codex_api_key_present is informational: NOT_CONFIGURED there is the
+    EXPECTED state for existing-login Codex (verified live — a real turn runs
+    with no OPENAI_API_KEY). It must not drag overall down to NOT_CONFIGURED
+    when every gating probe passes. Real regression test for Fix A's
+    completion (the packet's target: `--harness codex --live` -> PASS)."""
+    monkeypatch.setattr(pf, "probe_host",
+                        lambda: [pf.Probe("execution_context", "PASS", "on host")])
+    monkeypatch.setattr(pf, "probe_codex", lambda: [
+        pf.Probe("codex_sdk_importable", "PASS", "ok"),
+        pf.Probe("codex_api_key_present", "NOT_CONFIGURED",
+                 "OPENAI_API_KEY is not set", informational=True),
+        pf.Probe("codex_cli_session_auth", "PASS", "login session found"),
+    ])
+    result = pf.run("codex")
+    assert result["overall"] == "PASS"
+    # the informational probe is still REPORTED — just not gating
+    assert any(p["check"] == "codex_api_key_present" for p in result["probes"])
+
+
+def test_real_probe_codex_marks_api_key_probe_informational():
+    """Ground-truth: the real probe_codex() output flags codex_api_key_present
+    as informational (not just the synthetic test above)."""
+    probes = {p.check: p for p in pf.probe_codex()}
+    assert probes["codex_api_key_present"].informational is True
+    # the SDK/CLI probes are NOT informational — they genuinely gate
+    assert probes["codex_sdk_importable"].informational is False
+
+
 def test_run_never_writes_anything(monkeypatch, tmp_path):
     """Read-only guarantee: point HOME/CODEX_HOME somewhere pristine and confirm the
     directory is untouched after a full run."""

@@ -18,6 +18,7 @@ COPY services/agent_kanban_ui/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ /app/src/
 COPY services/agent_kanban_ui/app.py /app/app.py
+COPY services/agent_kanban_ui/agent_worker_client.py /app/agent_worker_client.py
 COPY services/agent_kanban_ui/domain_fixtures.json /app/domain_fixtures.json
 COPY --from=web /web/dist /app/static
 ENV PYTHONPATH=/app/src KANBAN_UI_STATIC=/app/static

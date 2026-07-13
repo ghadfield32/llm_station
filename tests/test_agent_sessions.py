@@ -46,7 +46,7 @@ def test_start_session_creates_record_and_session_started_event():
     session_id = asyncio.run(fh.start_session(request))
 
     record = store.get(session_id)
-    assert record.status == "active"
+    assert record.status == "idle"   # ready, not "a task is running" — see fake_harness.py
     assert record.conversation_id == "c1"
     assert record.repo_id == "llm_station"
     assert record.harness == "fake"
@@ -150,7 +150,7 @@ def test_resume_after_interrupt_reactivates_session():
     asyncio.run(fh.interrupt(session_id))
     asyncio.run(fh.resume(session_id))
 
-    assert store.get(session_id).status == "active"
+    assert store.get(session_id).status == "idle"
     events = asyncio.run(_drain(fh.send(session_id, "back online")))
     assert events[0].type == "assistant_message"
 
@@ -162,6 +162,35 @@ def test_close_marks_session_closed():
     asyncio.run(fh.close(session_id))
     assert store.get(session_id).status == "closed"
     assert store.events_since(session_id)[-1].type == "session_closed"
+
+
+def test_update_session_sets_only_supplied_fields():
+    store, fh = _harness()
+    session_id = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="c1", repo_id="r", mode="analysis")))
+
+    updated = store.update_session(
+        session_id, external_session_id="thread-xyz", model="gpt-5.5")
+    assert updated.external_session_id == "thread-xyz"
+    assert updated.model == "gpt-5.5"
+    assert updated.worker_id is None            # untouched field stays untouched
+
+    store.update_session(session_id, cost_usd=0.0042)
+    record = store.get(session_id)
+    assert record.cost_usd == 0.0042
+    assert record.external_session_id == "thread-xyz"   # still there from the first call
+
+
+def test_list_sessions_filters_by_conversation_id_and_repo_id():
+    store, fh = _harness()
+    s1 = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="conv-a", repo_id="llm_station", mode="analysis")))
+    s2 = asyncio.run(fh.start_session(
+        SessionStart(conversation_id="conv-b", repo_id="betts_basketball", mode="analysis")))
+
+    assert [r.session_id for r in store.list_sessions(conversation_id="conv-a")] == [s1]
+    assert [r.session_id for r in store.list_sessions(repo_id="betts_basketball")] == [s2]
+    assert {r.session_id for r in store.list_sessions()} == {s1, s2}
 
 
 def test_agent_event_to_dict_round_trips_fields():

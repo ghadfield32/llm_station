@@ -89,6 +89,507 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   mutation via hash-before/after. Codex may not need the new egress flag at all if it
   authenticates via the existing `codex login` session instead of OPENAI_API_KEY —
   verify that with a real SDK call before relying on the preflight's static finding.
+- STACKED BRANCH 07-11: PR #32 (`feat/research-digest-intake-hygiene-main` -> main)
+  verified real via `gh pr view` — its title/body genuinely only describe research-
+  digest/log-hygiene/skills/card-deps, not any cockpit/frontier/job-search/agent-
+  session work landed on the branch since. Rather than keep growing that PR, new work
+  moves to a stacked worktree/branch (`C:\tmp\cc-agent-runtime`,
+  `feat/agent-session-runtime`, based on `origin/feat/research-digest-intake-hygiene-
+  main`) — this and every entry below is committed there, not on the main branch.
+- DURABLE STORE DONE 07-11 (Milestone 1, part 1): investigated Ledger first, as
+  required, before building anything new — real verdict: Ledger IS in-repo
+  (`services/ledger/app.py`, SQLite, durable) with an established extension pattern
+  already proven for the experiment registry (mirrored DDL + drift test, since the
+  container can't import command_center). Reused that exact pattern instead of a
+  second database: new `agent_sessions`/`agent_session_events` tables
+  (`src/command_center/agent_sessions/ledger_schema.py`, mirrored into
+  `services/ledger/app.py` as `AGENT_SESSION_SCHEMA_SQL`, drift-tested) + 6 new Ledger
+  endpoints (`POST /agent-session`, `GET /agent-sessions`, `GET|POST /agent-session/
+  {sid}[/event|/events|/status]`) — the Ledger, not the caller, assigns event sequence
+  numbers transactionally with the insert (same "never trust a vendor-supplied
+  ordering" discipline as store.py). New `LedgerSessionStore`
+  (`agent_sessions/ledger_store.py`) is a SYNC drop-in for the Phase-1 in-memory
+  `SessionStore` — same 5-method surface, so FakeHarness needs zero changes to run
+  against either backend. Proved this for real: `FakeHarness(LedgerSessionStore(...))`
+  runs the exact same lifecycle assertions (start/send/approval/interrupt/resume,
+  events_since reconnect, unknown-session KeyError) against a REAL Ledger app
+  instance, not a mock. A real bug caught by adding a payload round-trip test before
+  trusting the endpoint: the events-list endpoint was returning the payload column as
+  a double-encoded JSON string instead of a real object — fixed to decode server-side,
+  matching how `get_experiment` already avoids the same trap.
+- TESTS 07-11: test_agent_session_ledger_schema.py (3, drift-detection, mirrors
+  test_ledger_experiment_schema.py), test_agent_session_ledger_rest.py (8, incl. a
+  real restart-recovery test — a second app instance opened against the same db file
+  recovers every session/event and continues sequences correctly, not resetting),
+  test_agent_sessions_ledger_store.py (5, cross-backend FakeHarness parity). mypy +
+  ruff clean on every changed file; full suite (including job_search — this worktree
+  has none of the concurrent session's uncommitted files) green in this clean
+  worktree.
+- DURABLE APPROVALS DONE 07-11 (Milestone 1, part 2, prerequisite before registry/
+  service): `FakeHarness._pending_approvals` was still an in-memory dict a restart
+  would silently drop — moved into the store as a proper `ApprovalRecord`
+  (approval_id/session_id/action/status/requested_at/resolved_at/approved/reason),
+  same durability contract as sessions/events. New `agent_session_approvals` Ledger
+  table (mirrored + drift-tested like the other two) + 3 endpoints (create/get/
+  resolve) — resolve is session-bound and one-use (replay returns 409, wrong-session
+  returns 403) — matches `create_session`, the server (not the caller) generates
+  `approval_id`. `SessionStore`/`LedgerSessionStore` both gained
+  `create_approval`/`get_approval`/`resolve_approval`; `FakeHarness` now holds NO
+  session-scoped state of its own at all (interrupted status reads `store.get(...)
+  .status` instead of a local set too) — a fresh FakeHarness instance pointed at the
+  same store behaves identically to the original, which is exactly the recovery
+  contract a real adapter must satisfy later.
+- REGISTRY + SERVICE DONE 07-11 (rest of Milestone 1, still zero real SDK):
+  `registry.py` — `HarnessRegistry`/`HarnessDescriptor`, `default_registry(store)`
+  wires `fake` (production=False) + `codex_agent`/`claude_agent` as `NotBuiltHarness`
+  placeholders whose `probe()` reports an exact, specific blocker (never a generic
+  "unavailable") without importing any SDK — verified by a test that `openai_codex`/
+  `claude_agent_sdk` never enter `sys.modules` just from listing harnesses.
+  `service.py` — `AgentSessionService` is the sole lifecycle owner (start/send/
+  events/approve/interrupt/resume/close/list_harnesses); `_active_harnesses` is an
+  explicit PROCESS-LOCAL cache only, never trusted as the source of truth — every
+  method reconstructs a harness from the registry when the cache is empty, so a
+  restarted service serves a FakeHarness session identically (proved with a real
+  test: brand-new service, fresh store client, fresh in-process cache, same Ledger
+  db — recovers full history AND the session is still live/usable, sequence
+  continues correctly). New `SessionStoreProtocol` (mirrors `AgentHarness`'s
+  `runtime_checkable` pattern) lets the service accept either backend without
+  hardcoding a type. Also added a structural guardrail test:
+  `issubclass(GatewayCore, AgentHarness)` is False — the two execution systems
+  cannot be confused even by accident.
+- TESTS 07-11: test_agent_session_approvals.py (11, parameterized across both
+  backends incl. pending-approval-survives-restart), test_agent_session_registry.py
+  (8), test_agent_session_service.py (16, parameterized across both backends incl.
+  service-level restart recovery + the GatewayCore guardrail). 71 agent-session
+  tests total now pass together; mypy + ruff clean on all 9 package files; full repo
+  suite green in the clean worktree.
+- HOST WORKER DONE 07-11 (`cc agent-worker`, `agent_sessions/worker_app.py` +
+  `cli/agent_worker.py`): standalone FastAPI+uvicorn process, binds 127.0.0.1 by
+  default (`--host`/`AGENT_WORKER_HOST` to override), port 8791 by default
+  (`AGENT_WORKER_PORT`). `build_app()` requires BOTH `AGENT_WORKER_TOKEN` and
+  `LEDGER_BASE_URL` and refuses to start without them — no silently-generated
+  token, no silent in-memory-store fallback if Ledger isn't configured (a worker
+  that silently degraded to non-durable storage would undo the entire durable-
+  store milestone). Every `/api/*` route requires `Authorization: Bearer
+  <token>` (401 otherwise); `/health` is deliberately unauthed for basic
+  liveness probing. Exposes the exact 8-route surface from the plan
+  (`GET /api/agent-harnesses`, `POST /api/agent-sessions`, `GET/POST` per-
+  session routes for messages/events/approvals/interrupt/resume, `DELETE` to
+  close) as a thin, fully-tested wrapper around `AgentSessionService` — store-
+  layer `KeyError`/`ValueError`/`RuntimeError` map to 404/409/400 respectively,
+  never swallowed into a fabricated 200. Plain JSON GET for `/events` (not SSE)
+  — this is the internal worker-to-cockpit hop, not the browser-facing one; SSE
+  is scoped to the cockpit's own proxy layer, next.
+- TESTS 07-11: test_agent_worker.py (11) — full lifecycle over real HTTP calls
+  (not direct service calls), token auth enforced on every /api/* route and
+  bypassed on /health, unknown-harness 404 / unavailable-harness 400 with the
+  exact blocker text, approval replay 409, unknown-session 404 on every route,
+  and both no-token/no-ledger-url startup refusals. A real mypy catch while
+  wiring this in: `registry.py`/`fake_harness.py` still typed their store
+  parameter as the concrete `SessionStore` instead of the new
+  `SessionStoreProtocol`, which would have silently broken passing a
+  `LedgerSessionStore` through — fixed before it became a runtime bug. 96
+  agent-session tests total; mypy+ruff clean on all 11 package files; full repo
+  suite green (confirmed twice — the first full-suite run hit a one-off flake
+  in an unrelated experiment-registry test caused by editing WORKLOG.md while
+  pytest was mid-run in the same worktree; reran untouched and it passed clean,
+  confirming it wasn't a real regression).
+- ASYNC EXECUTION CORRECTION 07-11 (before the cockpit proxy, as required): the
+  worker's `POST /messages` originally drained the harness's full async
+  generator and returned every event in one JSON response — fine for
+  FakeHarness's instant completion, wrong for a real multi-minute Codex/Claude
+  turn (the HTTP call would block for the whole turn, with no way to
+  interrupt). Now: `POST /messages` validates the session (404/400/409 —
+  closed / interrupted-or-failed requiring `/resume` first / already has an
+  active turn), schedules a background `asyncio.Task`, returns 202
+  immediately. A process-local `active_runs: {session_id: Task}` dict is the
+  ONLY source of truth for "is a turn genuinely running" — this forced a real
+  fix to the status vocabulary: `start_session()`/`resume()` now set `"idle"`
+  (ready, no task running), not `"active"` — `"active"` is set EXCLUSIVELY by
+  the worker's task wrapper while a turn is genuinely in flight, and back to
+  `"idle"`/`"failed"`/`"interrupted"` when it ends. This distinction is what
+  makes restart reconciliation unambiguous: a fresh worker process's
+  `active_runs` is always empty, so ANY session still reading `"active"` at
+  startup is, by definition, orphaned — `_reconcile_orphaned_sessions()` marks
+  it `failed` with an honest reason before serving any request. New
+  `list_sessions(status=...)` on `SessionStoreProtocol`/both backends (the
+  Ledger endpoint already existed from the durable-store milestone; only the
+  client method was missing). `/interrupt` now cancels the real task if one
+  exists; `/close` cancels-and-awaits before setting the final `closed` status
+  so the two writes can't race.
+- REAL BUG FOUND VIA TESTING 07-11: `starlette.testclient.TestClient` bridges
+  sync test code to the async app via a portal running in its own thread — a
+  task spawned with `asyncio.create_task()` during one `.post()` call was
+  empirically found NOT to reliably survive to a LATER `.post()` call on that
+  same portal (it came back cancelled/"interrupted" even with a thread-safe
+  `threading.Event` gate, ruling out a naive cross-thread-signal explanation).
+  This is a `TestClient`-specific artifact of its per-call task-group
+  boundary, not a bug in the worker — a real uvicorn process has no such
+  boundary. Confirmed by rewriting the concurrency test on
+  `httpx.AsyncClient(transport=ASGITransport(...))` with everything on ONE
+  event loop (no thread/portal at all): passes cleanly. Lesson for future
+  agent-session tests: anything that needs a background task to survive
+  across multiple separate HTTP calls must use the single-event-loop
+  AsyncClient pattern, not TestClient.
+- TESTS 07-11: test_agent_worker.py grew to 15 (was 11) — concurrent-turn 409
+  (via a controllable `_SlowHarness` gated on an `asyncio.Event`, the only way
+  to make the race deterministic instead of hoping FakeHarness stays "slow
+  enough"), message-to-interrupted-session 409 until `/resume`,
+  message-to-closed-session 400, and a dedicated worker-restart-reconciliation
+  test (force a session to `"active"` with no backing task, build a second
+  `build_app()` against the same store, confirm it's marked `failed` with the
+  exact reason). `build_app()` gained an optional `registry` parameter
+  specifically so tests can inject a controllable non-FakeHarness harness
+  without touching production wiring. 100 agent-session tests total; mypy+ruff
+  clean; full repo suite green (confirmed undisturbed this time — no file
+  edits while pytest was running).
+- COCKPIT PROXY + SSE DONE 07-11 (Commit 1 of the two-commit cockpit plan): new
+  `services/agent_kanban_ui/agent_worker_client.py` — the cockpit's ONLY path
+  to the host worker (owns base URL/token/timeouts; sync httpx.Client, matching
+  the service's existing convention, since FastAPI runs plain `def` routes in a
+  threadpool). `app.py` gained `AGENT_SESSIONS_ENABLED`/`FAKE_AGENT_ENABLED`/
+  `AGENT_WORKER_URL`/`AGENT_WORKER_TOKEN` (all default off/unset, matching
+  `CHAT_ENABLED`'s gating pattern), the full 8-route proxy surface (harnesses/
+  create/get/messages[202]/events/approvals/interrupt/resume/close) mapping
+  worker `AgentWorkerUnavailable` -> 502 and worker 4xx/error bodies -> the
+  same status+detail (never swallowed into a fabricated 200), Fake Agent
+  filtered out of `/api/agent-harnesses` and 403'd on create unless
+  `FAKE_AGENT_ENABLED`, and `agent_worker` added to `/api/status` +
+  `/api/debug/runtime` probes (token deliberately never included in either).
+  Every agent-session route is a straight proxy — none of them ever construct
+  or call GatewayCore (a dedicated test monkeypatches `_get_core` to raise if
+  called, hits 4 agent routes, asserts clean).
+- TWO REAL INFRA GAPS CAUGHT BEFORE THEY SHIPPED: (1) `Dockerfile` only
+  explicitly `COPY`s `app.py`, not sibling modules — would have silently
+  broken the container build the moment `agent_worker_client.py` existed;
+  fixed with an explicit second `COPY` line. (2) the test harness loads
+  `app.py` via `importlib.util.spec_from_file_location`, which does NOT add
+  the file's own directory to `sys.path` — a plain `import
+  agent_worker_client` would fail under pytest despite working fine under
+  real `uvicorn app:app`; fixed with an explicit `sys.path.insert(0,
+  str(Path(__file__).resolve().parent))` guard at the top of `app.py`, ahead
+  of the import, so both loaders agree.
+- SSE FRAMING DONE 07-11: `GET /api/agent-sessions/{id}/events/stream` mirrors
+  the existing `/api/events/kanban` convention exactly — `id: <sequence>\n
+  event: agent_event\ndata: {...}\n\n`, `Last-Event-ID` header wins over
+  `?after_sequence` (extracted into a standalone `_resolve_sse_checkpoint()`,
+  clamped non-negative), a `: heartbeat\n\n` comment line every
+  `_AGENT_EVENT_HEARTBEAT_SECONDS` (15s) of no new events, and worker
+  transport/4xx failures surfaced as a distinct `event: transport_error` frame
+  — never persisted as a fabricated `AgentEvent`. The actual polling loop is
+  `_agent_event_frames(client, session_id, checkpoint, is_disconnected)`, a
+  standalone generator taking disconnect-checking as an injectable async
+  callable; the route itself is a 2-line wrapper.
+- REAL TEST-INFRA BUG FOUND VIA TESTING 07-11 (second time this arc): driving
+  a genuinely long-lived SSE generator through `TestClient.stream(...)` hung
+  the entire pytest process indefinitely — even with an early `break` after
+  the assertions passed and exiting the `with` block, the surrounding process
+  never returned. Reproduced twice, each requiring a hard kill of the
+  background test run. Root-caused as the same class of `TestClient` portal/
+  lifecycle limitation as the async-execution-correction entry above (a
+  different symptom, same underlying cause: TestClient's sync/async bridging
+  does not behave like a real ASGI server for anything long-lived). Fixed the
+  same way: bypass TestClient entirely for this logic. `_agent_event_frames`
+  and `_resolve_sse_checkpoint` are tested by calling them directly via
+  `asyncio.run()` with a bounded fake `is_disconnected` (`_disconnect_after(n)`
+  — False for n calls, then True), never through HTTP. Lesson reinforced:
+  TestClient is unreliable for anything that spans multiple calls or runs
+  indefinitely; test the underlying async logic directly instead.
+- TESTS 07-11: `tests/test_agent_kanban_ui_agent_sessions.py` (19) — disabled-
+  by-default 503, worker-unreachable 502, worker 404/409/400 preserved
+  verbatim, 202 on message accept, token never appears in any response body
+  (harnesses/debug-runtime/status, checked via `.text` substring), Fake Agent
+  filtered/blocked/visible correctly across 4 tests, GatewayCore-never-
+  constructed across 4 routes, `_resolve_sse_checkpoint` header-wins/query-
+  fallback/non-numeric-fallback/never-negative (4 assertions), ordered SSE
+  events, reconnect-from-checkpoint with no duplicates, worker-unavailable and
+  worker-4xx both becoming `transport_error` (never an `agent_event`), and
+  heartbeat firing with zero real events emitted. Pre-existing
+  `tests/test_agent_kanban_ui.py` (47) still green unchanged. ruff clean on
+  all 3 changed/new files (mypy doesn't apply — `services/` is outside
+  `[tool.mypy] files = ["src"]`). Full repo suite green, run alone with no
+  concurrent file edits.
+- AGENT SESSIONS UI DONE 07-11 (Commit 2, FakeHarness cockpit interface —
+  frontend-only, no backend changes): `api.ts` gained typed
+  `AgentHarnessOption`/`AgentSessionRecord`/`AgentEvent` contracts + client
+  functions for the full lifecycle (create/get/send/events/approve/interrupt/
+  resume/close) plus `streamAgentEvents` — native browser `EventSource`
+  rather than a manual fetch-reader (unlike `streamChat`'s POST-body stream,
+  this is a plain GET, so `EventSource` gets `Last-Event-ID` reconnect for
+  free and silently ignores heartbeat comment lines with no special-casing).
+  `App.tsx`'s chat target changed from a bare `target` string to a real
+  discriminated union (`ChatTarget = {kind:"gateway"} | {kind:"agent",
+  harnessId} | {kind:"external", name}`) via `decodeChatTarget` — every one
+  of the ~15 existing `target === "GatewayCore"`-style comparisons in
+  `ChatView` now switches on `.kind` instead. A new "Agent Sessions" optgroup
+  in the existing agent/target `<select>` lists live harnesses from
+  `fetchAgentHarnesses()`; Fake only appears when the BACKEND included it
+  (`KANBAN_UI_FAKE_AGENT_ENABLED` — no separate frontend dev flag needed,
+  the backend is the single source of truth), Codex/Claude always render as
+  disabled options carrying their real `NotBuiltHarness` blocker text as the
+  tooltip (never a generic "unavailable").
+- NEW `AgentSessionPanel` + `AgentEventCard` components: session creation
+  form (repo/mode — `permission_profile` hardcoded `read_only`, workspace
+  write-mode explicitly out of scope) when no session exists yet; once one
+  does, a dedicated per-event-type renderer (never inferring tool activity
+  from prose — matches the backend's own "an agent session's tool surface is
+  much bigger, don't trust it implicitly" discipline), a derived pending-
+  approvals list (any `approval_required` without a later matching
+  `approval_resolved` in the event log) with approve/deny buttons, and
+  interrupt/resume/close controls gated on real session status.
+- REFRESH RECOVERY DONE 07-11: agent-session metadata (`agentSessionId`,
+  `agentHarnessId`, `agentRepoId`, `agentMode`, `agentPermissionProfile`,
+  `agentLastSeenSequence`) was added to the LOCAL `ChatThread` type only —
+  deliberately never sent through `persistThread`/`saveChatThread`
+  (GatewayCore's flight-recorder thread store), matching the "structurally
+  separate execution path" rule everywhere else in this subsystem. A new
+  small `activeThread` localStorage pointer (conversationId + target)
+  restores the last-open thread/lane across a real browser reload; on mount,
+  `AgentSessionPanel` re-verifies a persisted session against the real
+  worker (`fetchAgentSession`), replays full history
+  (`fetchAgentEvents(id, 0)`), then resumes the live stream from the last
+  real sequence — never trusts the persisted state blindly.
+- VERIFIED 07-11: `npm run build` (`tsc && vite build`) clean with ZERO type
+  errors on the first attempt despite the ~550-line diff across a
+  discriminated-union refactor of ~15 call sites — no backend changes in this
+  commit, so `tests/test_agent_kanban_ui.py` (47) + `test_agent_kanban_ui_
+  agent_sessions.py` (19) re-run unchanged/green, full repo suite green
+  (run alone, no concurrent edits). Docker build caught a REAL verification
+  gap on the first attempt: a `docker build` from the wrong `cwd` (the Bash
+  tool's cwd had silently drifted back to the main checkout — the same
+  recurring gotcha from earlier this session) produced an image that
+  "succeeded" entirely from BuildKit cache and contained NONE of the new
+  frontend code; caught by grepping the built JS bundle for a known new
+  string ("Agent Sessions") and finding nothing, not by trusting a green
+  `docker build` exit code. Rebuilt from the correct worktree path — the web
+  build step genuinely re-ran this time, and the built bundle was confirmed
+  to contain the new UI strings and `agent_worker_client.py` before deleting
+  the test image.
+- 20-ITEM ACCEPTANCE GATE RUN 07-11 (live, not mocked): a real `cc
+  agent-worker`-equivalent process (real FakeHarness, real in-memory
+  SessionStore, real uvicorn on a real socket) driven end-to-end through the
+  cockpit's real `app.py` routes — disabled-mode 503, unreachable-worker 502,
+  token-redaction across 3 endpoints, Fake-Agent gating both directions,
+  Codex/Claude's concrete blocker text, full session lifecycle (create ->
+  get -> send [202, non-blocking] -> ordered events -> "write ..." producing
+  a real `approval_required` -> approve -> `approval_resolved` -> replay
+  rejected 409 -> interrupt -> blocked-until-resume 409 -> resume -> message
+  accepted again -> SSE reconnect via `Last-Event-ID` mid-stream delivering
+  only the gap (the real `_agent_event_frames` generator against the real
+  worker, not a stub) -> close -> further message rejected 400), GatewayCore
+  never constructed anywhere in the run (every response checked for a
+  surfaced 500 from the `_get_core` guard), and a real heartbeat firing on
+  an idle stream against the real worker. 20/20 passed. A first attempt at
+  running the cockpit itself as a second real uvicorn subprocess (rather than
+  `TestClient`) was abandoned after proving flaky to orchestrate from this
+  shell on Windows (silent startup failures with no readable error) — same
+  production code path either way (`AgentWorkerClient` makes genuine HTTP
+  calls to the real worker process regardless), so `TestClient`-over-a-real-
+  worker was used instead, matching the pytest suite's own proven-reliable
+  pattern. Scratch script, not committed.
+- NEXT: Commit 2 is code-complete and verified; real Codex/Claude adapters,
+  worktree write mode, mission executor routing, and OpenRouter agent
+  provider profiles remain explicitly out of scope (Phase 2/3+, not started).
+- NEXT: the cockpit's `/api/agent-sessions/*` proxy+SSE endpoints (talking to
+  this worker over `host.docker.internal:8791`, matching the existing Ollama/
+  AppFlowy pattern in docker-compose.yml) and the Agent Sessions UI — still
+  entirely FakeHarness-backed, still zero paid/authenticated calls. Real Codex/
+  Claude adapters remain explicitly out of scope until that vertical slice
+  works end-to-end and a human decides to proceed.
+- INCIDENT 07-11 (real, contained, fully recovered): a Bash tool cwd silently
+  drifted from this worktree (`C:\tmp\cc-agent-runtime`) back to the main
+  `llm_station` checkout mid-session (the same class of drift documented
+  earlier this arc for `docker build`/`git status`). A throwaway proof `.env`
+  write and a `docker compose up` — both intended for an isolated worktree-
+  only proof — ran from the wrong directory instead, overwriting the REAL
+  `.env` and recreating the REAL `llm_station-ledger-1`/`llm_station-agent-
+  kanban-ui-1` production containers with disposable secrets and shifted
+  ports. Caught immediately (container names were `llm_station-*`, not
+  `cc-agent-runtime-*`), fully recovered: Ledger `PRAGMA integrity_check` =
+  `ok` with every real table intact, zero Docker volume changes across the
+  whole incident (before/after `docker volume ls` diff empty), and — better
+  than expected — the real, complete, current `.env` was recovered from VS
+  Code's own Local History (a snapshot ~22h before the incident, cross-
+  verified byte-for-byte-equivalent `LITELLM_MASTER_KEY`/`POSTGRES_PASSWORD`
+  against the untouched live `litellm`/`litellm-db` containers), so no secret
+  needed rotating. Full evidence trail preserved outside the repo. Root cause
+  was structural, not "be more careful": nothing verified the actual Docker/
+  filesystem target before a destructive-capable command ran.
+- SAFETY TOOLING DONE 07-11 (the structural fix, before any further live
+  proof work): `scripts/run_agent_deployment_proof.ps1` is now the ONLY
+  sanctioned way to bring up an isolated ledger+cockpit pair for a live
+  agent-session proof. Refuses to run (exit 1, `REFUSED: ...`) unless every
+  invariant holds — resolved git root matches the expected worktree, current
+  branch matches, proof-env project name is never `llm_station` and must
+  self-document as disposable (contains "proof"), the proof `.env` path must
+  live INSIDE the worktree and must never be named `.env`, and (checked again
+  AFTER container creation, not just before) no resulting container name may
+  start with `llm_station-`. `-DryRun` runs every check with zero Docker/
+  filesystem side effects — this is what the test suite exercises, so the
+  guarantees are provable without a daemon. No-clobber env generation
+  (`-GenerateEnv`): an existing proof `.env` is never regenerated or
+  overwritten, verified by a real test that plants a sentinel value and
+  confirms it survives. `docker-compose.agent-proof.yml` is a documentation/
+  defense-in-depth override (`restart: "no"` for the two proof services) —
+  the REAL volume-isolation guarantee is Compose's own automatic project-name
+  volume namespacing (verified: `docker-compose.yml`'s `ledger_data` has no
+  `name:`/`external:` override, so a distinct `-p` value alone guarantees a
+  distinct volume, never `llm_station_ledger_data`).
+- TESTS 07-11: `tests/test_agent_deployment_proof_safety.py` (10, 1 skipped
+  when no second fixed-path git repo is available for the synthetic root-
+  mismatch case — the realistic incident scenario, wrong root AND wrong
+  branch together, is covered by the branch-mismatch test instead, which is
+  what actually caught the real incident) — shells out to the real script via
+  `pwsh`/`powershell` (skips cleanly if neither is on PATH), asserts refusal
+  for: `llm_station` project name, a project name without "proof" in it,
+  wrong branch, `.env`-named proof path, proof path outside the worktree,
+  missing proof env without `-GenerateEnv`; asserts success + zero side
+  effects for the happy path and for no-clobber. First test run caught a
+  real test-design bug (not a script bug): three tests used pytest's own
+  `tmp_path`, which lives outside the worktree — the script correctly
+  refused per its own "must be inside worktree" invariant; fixed by adding an
+  `in_worktree_proof_env` fixture instead of weakening the script.
+- DURABLE SESSION METADATA DONE 07-11 (prerequisite for the real Codex
+  adapter, deliberately its own commit — no Codex-specific code in this
+  one): a real harness adapter has real vendor identity to persist
+  (`external_session_id`, `worker_id`, `model`, `provider_profile`,
+  `cost_usd`) that FakeHarness never needed. New `update_session()` on both
+  `SessionStore` and `LedgerSessionStore` — every parameter optional, only
+  supplied fields change, mirrored by a new Ledger `POST /agent-session/
+  {sid}/fields` endpoint (same partial-update discipline, 404 on an unknown
+  session). `list_sessions()` gained `conversation_id`/`repo_id` filters on
+  both backends plus the Ledger's `GET /agent-sessions` query params, so a
+  session can be found without already knowing its id — new worker route
+  `GET /api/agent-sessions` and matching cockpit proxy route expose this to
+  the browser (session discovery without relying exclusively on local
+  browser storage). No schema change (existing columns, new endpoint only),
+  so no drift test needed here.
+- TESTS 07-11: cross-backend parity proven the same way the original
+  durable-store milestone did — identical assertions run against BOTH the
+  in-memory store (`test_agent_sessions.py`) and a real Ledger instance
+  (`test_agent_sessions_ledger_store.py`), plus direct REST coverage
+  (`test_agent_session_ledger_rest.py`: partial-update semantics, 404 on
+  unknown session, filter combinations including a no-match case) and the
+  worker/cockpit HTTP surface (`test_agent_worker.py`,
+  `test_agent_kanban_ui_agent_sessions.py` — the latter needed a
+  `list_sessions` method added to the test suite's `_FakeWorkerClient`
+  stub). ruff clean; mypy clean on the `src/` files touched.
+- HOST WORKER DEPLOYMENT WIRING 07-11: `scripts/start_agent_worker.ps1`
+  (start/stop/restart/status/autostart, mirrors gateway.ps1's conventions —
+  runs `cc agent-worker` hidden on the HOST, loads AGENT_WORKER_TOKEN from
+  .env, refuses to start without it). `docker-compose.yml`'s agent-kanban-ui
+  service gained the `AGENT_WORKER_URL`/`AGENT_WORKER_TOKEN`/
+  `KANBAN_UI_AGENT_SESSIONS_ENABLED`/`KANBAN_UI_FAKE_AGENT_ENABLED` env
+  (worker reached via `host.docker.internal:8791`, same pattern as Ollama/
+  AppFlowy — all default OFF). `.env.example` documents the agent-worker
+  block (empty placeholders only, no secrets). This is FakeHarness-era ops
+  wiring — how to RUN the worker — committed separately from the Codex
+  adapter (what it runs).
+- REAL CODEX READ-ONLY ADAPTER DONE 07-11 (`adapters/codex_agent.py`, the
+  audited/hardened version of the pre-incident prototype). Backed by the
+  pinned `openai-codex==0.1.0b3` (`agent-codex` optional-deps extra;
+  `openai-codex-cli-bin==0.137.0a4` bundled). Every SDK type used was
+  verified by LIVE introspection against the pinned package (see the
+  introspection findings below), never guessed from docs. Real live probe
+  passed end-to-end against Geoff's actual `codex login` session (auth,
+  read-only thread, first turn, same-thread follow-up, resume-by-id via a
+  fresh instance, interrupt, ZERO filesystem mutation via mutation_proof.py's
+  before/after snapshot). Read-only analysis mode ONLY; workspace/full-access
+  refused. `configs/agent-session-budgets.yaml` flips `codex_agent: true`
+  (Geoff-authorized; note Codex auth is ChatGPT-session, sets no forbidden
+  vendor key, so this gate doesn't actually exempt any key for Codex).
+- REAL SDK FINDINGS baked into the adapter (each a live discovery, not a
+  doc claim): (1) auth reuses the existing `codex login` session — no
+  OPENAI_API_KEY, consumes subscription quota. (2) `handle.stream()` yields a
+  generic `Notification(method, payload)` envelope; the concrete typed event
+  is `.payload`. (3) `ThreadItem` (and other nested types) are pydantic
+  RootModel wrappers — real fields live on `.root`, accessed via a `_unwrap`
+  helper. (4) a global `~/.codex/config.toml` model/effort newer than the
+  pinned CLI build breaks `thread_start` ("gpt-5.6-sol requires a newer
+  Codex") — fixed WITHOUT touching the operator's global config, via a
+  per-session `config_overrides=("model_reasoning_effort=medium",)` plus
+  dynamic model validation. (5) the SDK exposes NO programmatic hook to
+  resolve a Guardian approval review — decisions are auto (`auto_review`) or
+  blanket (`deny_all`); this harness uses `deny_all`.
+- AUDIT HARDENING (each a specific fix over the raw prototype): (A) preflight
+  `overall` is truthful for codex-only runs — the ANTHROPIC/OPENAI forbidden-
+  provider policy probe is Claude-specific and no longer BLOCKs a
+  `--harness codex --live` run, AND `codex_api_key_present` is now
+  informational (its NOT_CONFIGURED is the EXPECTED existing-login state, so
+  it no longer drags overall to NOT_CONFIGURED). Result: a real
+  `cc agent-preflight --harness codex --live --repo llm_station` now reports
+  `overall: PASS` (verified live, 14/14 gating checks pass, zero mutation).
+  (B) dynamic model validation
+  (`configs/agent-session-models.yaml`: preferred_model + reasoning_effort +
+  allow_sdk_default_fallback) — never a hardcoded model trusted blind; the
+  configured/requested model is checked against the SDK's OWN live
+  `client.models()` list, falls back to the SDK-designated default, and the
+  selected model + selection reason are recorded on `session_started`.
+  (C+D) per-turn `_TurnState` coalesces assistant deltas by item_id (a
+  completed agentMessage whose text already streamed is NOT re-emitted) and
+  dedupes terminal failures (a non-retryable ErrorNotification followed by
+  TurnCompletedNotification(failed) yields ONE session_failed; a retryable
+  error is a `warning`, not terminal). (E) `interactive_approvals = False`
+  is a real, registry-surfaced capability (probes() reports it), not a
+  UI-only assumption — resolve_approval records an audit-only,
+  `effective: False` event. (F) repo resolution reuses
+  `repo_registry.resolve_repo_local_path` (extracted, canonical — one place
+  for path/env-ref policy), eliminating a duplicated resolver. (G) zero new
+  mypy failures: `types-PyYAML` added to dev deps (fixes the yaml-stub gap
+  repo-wide as a bonus) AND codex_agent.py's own repo resolution no longer
+  imports yaml directly. (H) `shutdown()` on the harness + a worker
+  `lifespan` handler interrupt active turns and close the SDK client on
+  worker stop, so no orphan `codex_bin` app-server process is left behind —
+  walks EVERY per-session cached harness instance (service caches one per
+  session, not one per type).
+- TESTS 07-11: `tests/test_codex_agent_adapter.py` (38, all against a FAKE
+  SDK installed into sys.modules — no real package/network/account): SDK-
+  absent & auth-failure unavailability, analysis-only/read-only rejection,
+  thread-id persistence + follow-up reuse, resume-after-restart via
+  thread_resume, interrupt reaching the active handle, unknown native events
+  → visible warning (never inferred from prose), usage attribution, no-secret
+  probe output, non-causal approval recording, close→archive, canonical
+  repo resolver reuse, the full `_resolve_model` matrix (explicit/preferred/
+  SDK-default/fallback-disallowed/no-models), delta coalescing + terminal
+  dedup + retryable-error distinction, interactive_approvals capability, and
+  shutdown cleanup (incl. close() raising / no client ever built). Plus
+  `test_agent_preflight.py` (codex-only truthful overall), worker shutdown
+  tests, and the pre-existing registry/service/worker suites updated for
+  codex_agent now being a REAL adapter (their "unbuilt placeholder"
+  assertions moved to claude_agent, which genuinely still is one). Full repo
+  suite green; ruff clean; mypy clean across all 14 touched agent-session +
+  preflight files.
+- LIVE COCKPIT ACCEPTANCE 07-12 (Codex enablement gate — the real "is it
+  usable in the interface" proof, done through the ISOLATED deployment-proof
+  project, never production): `scripts/run_agent_deployment_proof.ps1`
+  brought up `cc-agent-runtime-proof-{ledger,agent-kanban-ui}` on ports
+  8092/8788 with a dedicated `cc-agent-runtime-proof_ledger_data` volume
+  (post-create check confirmed no `llm_station-*` container touched; the
+  production stack + `llm_station_ledger_data` stayed up 13h untouched
+  throughout, verified before AND after). Host worker started against the
+  proof ledger; the deployed cockpit CONTAINER reached it via
+  `host.docker.internal:8791` and reported `codex_agent available: true`
+  (authenticated as the real account, `interactive_approvals: false`). A
+  real read-only Codex session driven entirely through the cockpit's HTTP
+  proxy (browser-equivalent: cockpit → worker → SDK → real `codex login`)
+  passed 14/14: create→idle with a real external thread id, a real streamed
+  response (Codex ran 5 real read-only shell commands, all surfaced as
+  structured `command_started`/`command_finished` events), NO duplicate
+  assistant_message for an already-streamed item (Fix C proven LIVE),
+  model+selection-reason recorded, session recovery (GET + list by
+  conversation_id), follow-up reusing the SAME external thread, interrupt,
+  close, and ZERO repo mutation (git HEAD/branch/status byte-identical
+  before+after). Fresh `cc agent-preflight --harness codex --live --repo
+  llm_station` also reports `overall: PASS` now (Fix A complete). Acceptance
+  driver was a throwaway script — durable coverage is the 38 unit tests.
+  A real robustness bug surfaced and was fixed during this proof: Docker's
+  `./.env` bind-mount creates an empty `.env` DIRECTORY in a checkout with no
+  real .env, which crashed the worker script's dotenv loader (fixed with
+  `Test-Path -PathType Leaf`).
+- STILL OUT OF SCOPE (explicit): Claude read-only adapter, writable/worktree
+  mode, mission executor routing, cross-agent review, OpenRouter agent
+  provider profiles — all gated behind the Codex read-only slice merging
+  first.
 
 ## Frontier-router chat lane — untrusted tool_calls dispatch
 - BUG 07-11: real incident, live transcript (job_application:job_5bfc9d483a1d). deepseek-v4-pro

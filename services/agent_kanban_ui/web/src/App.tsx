@@ -21,6 +21,10 @@ import {
   saveChatThread, updateDomainSchema, updateDraftDefault, updateJobSearchCategory, updateJobSearchRuntime,
   StandingAnswer, updateStandingAnswer, removeJobSearchCategory,
   reclassifyJobApplications, ReclassifyResult, bulkSelectSuggested,
+  AgentEvent, AgentHarnessOption, AgentSessionRecord,
+  closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
+  fetchAgentSession, interruptAgentSession, resolveAgentApproval,
+  resumeAgentSession, sendAgentMessage, streamAgentEvents,
 } from "./api";
 
 type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "chat";
@@ -2998,8 +3002,54 @@ type ChatThread = {
   updatedAt: string;
   target?: string;
   lastPrompt?: string;
+  // Agent-session recovery metadata — local-only, deliberately never sent to
+  // saveChatThread/GatewayCore's flight-recorder transcript (see WORKLOG.md
+  // "Agent-session chat integration": agent sessions are a structurally
+  // separate execution path and must not be conflated with GatewayCore's
+  // chat history store). Present only on threads whose target is "agent:*".
+  agentSessionId?: string;
+  agentHarnessId?: string;
+  agentRepoId?: string;
+  agentMode?: string;
+  agentPermissionProfile?: string;
+  agentLastSeenSequence?: number;
 };
 const CHAT_THREADS_KEY = "agent-kanban-cockpit.chatThreads.v1";
+const ACTIVE_THREAD_KEY = "agent-kanban-cockpit.activeThread.v1";
+
+// Which execution lane a message goes to. A discriminated union, not a bare
+// string: GatewayCore's /chat/completions tool-call loop and an agent
+// session (Claude/Codex/Fake, via the host worker) are structurally
+// separate systems — this makes "which one am I talking to" a single,
+// exhaustively-checked switch instead of scattered string comparisons.
+// Encoded as a plain string for the <select>'s value / localStorage, via
+// encodeChatTarget/decodeChatTarget below.
+type ChatTarget =
+  | { kind: "gateway" }
+  | { kind: "agent"; harnessId: string }
+  | { kind: "external"; name: string };
+
+function decodeChatTarget(raw: string): ChatTarget {
+  if (!raw || raw === "GatewayCore") return { kind: "gateway" };
+  if (raw.startsWith("agent:")) return { kind: "agent", harnessId: raw.slice("agent:".length) };
+  return { kind: "external", name: raw };
+}
+
+function loadActiveThreadPointer(): { conversationId: string; target: string } {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_THREAD_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed.conversationId === "string" && typeof parsed.target === "string") {
+      return parsed;
+    }
+  } catch { /* browser storage can be unavailable in private modes */ }
+  return { conversationId: "app", target: "GatewayCore" };
+}
+function saveActiveThreadPointer(conversationId: string, target: string) {
+  try {
+    window.localStorage.setItem(ACTIVE_THREAD_KEY, JSON.stringify({ conversationId, target }));
+  } catch { /* browser storage can be unavailable in private modes */ }
+}
 
 function loadChatThreads(): ChatThread[] {
   try {
@@ -3082,6 +3132,282 @@ function ChatLine({ ev }: { ev: ChatEvent }) {
       return <div className="cl res">← {String(ev.result)}</div>;
     default: return <div className="cl">{JSON.stringify(ev)}</div>;
   }
+}
+
+// ---- agent sessions (Claude Agent / Codex Agent / Fake) --------------------
+// A structurally separate execution path from GatewayCore chat above — see
+// api.ts's streamAgentEvents and WORKLOG.md "Agent-session chat integration".
+// Never routed through streamChat/ChatLine; AgentEventCard is a dedicated
+// renderer over the 16-type AgentEvent vocabulary so tool activity is always
+// rendered from a real typed event, never inferred from assistant prose.
+
+function pendingApprovalsOf(events: AgentEvent[]) {
+  const resolved = new Set(
+    events.filter((e) => e.type === "approval_resolved")
+      .map((e) => String(e.payload.approval_id)));
+  return events.filter((e) =>
+    e.type === "approval_required" && !resolved.has(String(e.payload.approval_id)));
+}
+
+function AgentEventCard({ ev }: { ev: AgentEvent }) {
+  const p = ev.payload ?? {};
+  switch (ev.type) {
+    case "session_started":
+      return <div className="cl round">
+        ▸ session started{p.resumed ? " (resumed)" : ""}
+        {p.mode ? ` — mode: ${String(p.mode)}` : ""}
+      </div>;
+    case "assistant_delta":
+    case "assistant_message":
+      return <div className="cl final">{String(p.text ?? "")}</div>;
+    case "tool_requested":
+      return <div className="cl tool">▸ tool requested: <b>{String(p.name ?? p.action ?? "")}</b></div>;
+    case "approval_required":
+      return <div className="cl tool">⏸ approval requested: {String(p.action ?? "")}</div>;
+    case "approval_resolved":
+      return <div className="cl res">
+        {p.approved ? "✓ approved" : "✗ denied"}{p.reason ? ` — ${String(p.reason)}` : ""}
+      </div>;
+    case "tool_started":
+      return <div className="cl tool">▸ <b>{String(p.name ?? "tool")}</b> started</div>;
+    case "tool_output":
+      return <div className="cl res">← {String(p.output ?? p.text ?? "")}</div>;
+    case "tool_finished":
+      return <div className="cl res">✓ <b>{String(p.name ?? "tool")}</b> finished</div>;
+    case "file_changed":
+      return <div className="cl tool">✎ {String(p.path ?? "file changed")}</div>;
+    case "command_started":
+      return <div className="cl tool">$ {String(p.command ?? "")}</div>;
+    case "command_finished":
+      return <div className="cl res">exit {String(p.exit_code ?? p.code ?? "")}</div>;
+    case "usage":
+      return <div className="cl round muted">usage: {JSON.stringify(p)}</div>;
+    case "warning":
+      return <div className="cl err">⚠ {String(p.message ?? p.detail ?? "")}</div>;
+    case "session_idle":
+      return <div className="cl round">· idle ·</div>;
+    case "session_failed":
+      return <div className="cl err">⚠ session failed — {String(p.reason ?? "")}</div>;
+    case "session_closed":
+      return <div className="cl round">session closed</div>;
+    default:
+      return <div className="cl">{ev.type}: {JSON.stringify(p)}</div>;
+  }
+}
+
+function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange }: {
+  harnessId: string;
+  harnesses: AgentHarnessOption[] | null;
+  repos: { repo_id: string; remote_url: string }[];
+  thread: ChatThread | undefined;
+  onThreadChange: (patch: Partial<ChatThread>) => void;
+}) {
+  const [sessionId, setSessionId] = useState<string | null>(thread?.agentSessionId ?? null);
+  const [record, setRecord] = useState<AgentSessionRecord | null>(null);
+  const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [repoId, setRepoId] = useState(thread?.agentRepoId ?? repos[0]?.repo_id ?? "");
+  const [mode, setMode] = useState(thread?.agentMode ?? "analysis");
+  const sessionIdRef = useRef(sessionId);
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  const closeStreamRef = useRef<(() => void) | null>(null);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { endRef.current?.scrollIntoView(); }, [events]);
+
+  function connect(id: string, afterSequence: number) {
+    closeStreamRef.current?.();
+    closeStreamRef.current = streamAgentEvents(id, afterSequence,
+      (ev) => {
+        if (sessionIdRef.current !== id) return;
+        setEvents((current) => [...current, ev]);
+        if (ev.sequence != null) onThreadChange({ agentLastSeenSequence: ev.sequence });
+        if (["session_idle", "session_failed", "session_closed"].includes(ev.type)) {
+          void fetchAgentSession(id).then(setRecord).catch(() => {});
+        }
+      },
+      (detail) => { if (sessionIdRef.current === id) setError(detail); });
+  }
+
+  // Refresh recovery: a persisted session id (from a previous page load, via
+  // the parent's ChatThread metadata) is re-verified against the real
+  // worker, replayed in full, then the live stream resumes from wherever it
+  // left off — never trusted blindly (see WORKLOG.md "Agent-session chat
+  // integration" on why an agent session's state is never assumed).
+  useEffect(() => {
+    const id = thread?.agentSessionId;
+    if (!id) return;
+    let cancelled = false;
+    setSessionId(id);
+    fetchAgentSession(id)
+      .then((rec) => { if (!cancelled) setRecord(rec); })
+      .catch((e) => { if (!cancelled) setError((e as Error).message); });
+    fetchAgentEvents(id, 0)
+      .then((all) => {
+        if (cancelled) return;
+        setEvents(all);
+        const last = all.length ? all[all.length - 1].sequence ?? 0 : 0;
+        connect(id, last);
+      })
+      .catch((e) => { if (!cancelled) setError((e as Error).message); });
+    return () => {
+      cancelled = true;
+      closeStreamRef.current?.();
+      closeStreamRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thread?.agentSessionId]);
+
+  async function createSession() {
+    setBusy(true);
+    setError(null);
+    try {
+      const rec = await createAgentSession({
+        harness_id: harnessId, conversation_id: thread?.id ?? "agent",
+        repo_id: repoId, mode, permission_profile: "read_only",
+      });
+      setSessionId(rec.session_id);
+      setRecord(rec);
+      setEvents([]);
+      onThreadChange({
+        agentSessionId: rec.session_id, agentHarnessId: harnessId,
+        agentRepoId: repoId, agentMode: mode,
+        agentPermissionProfile: rec.permission_profile, agentLastSeenSequence: 0,
+      });
+      connect(rec.session_id, 0);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function send() {
+    const id = sessionId;
+    const text = input.trim();
+    if (!id || !text || busy) return;
+    setInput("");
+    setBusy(true);
+    setError(null);
+    try {
+      await sendAgentMessage(id, text);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decide(approvalId: string, approved: boolean) {
+    if (!sessionId) return;
+    try { await resolveAgentApproval(sessionId, approvalId, approved); }
+    catch (e) { setError((e as Error).message); }
+  }
+
+  async function doInterrupt() {
+    if (!sessionId) return;
+    try { await interruptAgentSession(sessionId); setRecord(await fetchAgentSession(sessionId)); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function doResume() {
+    if (!sessionId) return;
+    try { await resumeAgentSession(sessionId); setRecord(await fetchAgentSession(sessionId)); }
+    catch (e) { setError((e as Error).message); }
+  }
+  async function doClose() {
+    if (!sessionId) return;
+    try {
+      await closeAgentSession(sessionId);
+      closeStreamRef.current?.();
+      closeStreamRef.current = null;
+      setRecord(await fetchAgentSession(sessionId));
+    } catch (e) { setError((e as Error).message); }
+  }
+
+  const harness = harnesses?.find((h) => h.harness_id === harnessId);
+  const pending = pendingApprovalsOf(events);
+  const status = record?.status;
+
+  if (!sessionId) {
+    return (
+      <div className="chat-log">
+        <div className="agent-session-setup">
+          <div><b>{harness?.label ?? harnessId}</b>{harness ? ` — ${harness.detail}` : ""}</div>
+          {harness && !harness.available ? (
+            <div className="muted">This harness is not available in this deployment.</div>
+          ) : (
+            <>
+              <label className="chat-field">
+                <span className="muted small">repo</span>
+                <select className="select" value={repoId} onChange={(e) => setRepoId(e.target.value)}>
+                  {repos.length === 0 && <option value="">(no registered repos)</option>}
+                  {repos.map((r) => <option key={r.repo_id} value={r.repo_id}>{r.repo_id}</option>)}
+                </select>
+              </label>
+              <label className="chat-field">
+                <span className="muted small">mode</span>
+                <select className="select" value={mode} onChange={(e) => setMode(e.target.value)}>
+                  <option value="analysis">analysis (read-only)</option>
+                  <option value="workspace" disabled>workspace (leased worktree — not yet available)</option>
+                </select>
+              </label>
+              <button className="actbtn" disabled={busy || !repoId} onClick={() => void createSession()}>
+                {busy ? "starting…" : "start agent session"}
+              </button>
+            </>
+          )}
+          {error && <div className="cl err">⚠ {error}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="chat-subbar">
+        <span className="muted small">agent session <code>{sessionId}</code> · {status ?? "…"}</span>
+        <div className="chat-header-right">
+          {(status === "idle" || status === "active") && (
+            <button className="clear" onClick={() => void doInterrupt()}>interrupt</button>
+          )}
+          {(status === "interrupted" || status === "failed") && (
+            <button className="clear" onClick={() => void doResume()}>resume</button>
+          )}
+          {status !== "closed" && (
+            <button className="clear" onClick={() => void doClose()}>close</button>
+          )}
+        </div>
+      </div>
+      <div className="chat-log">
+        {events.length === 0 && <div className="muted">Session started — send a message to begin.</div>}
+        {events.map((ev, i) => <AgentEventCard key={ev.sequence ?? i} ev={ev} />)}
+        {error && <div className="cl err">⚠ {error}</div>}
+        <div ref={endRef} />
+      </div>
+      {pending.map((ev) => (
+        <div className="agent-approval" key={String(ev.payload.approval_id)}>
+          <span>Approval requested: {String(ev.payload.action)}</span>
+          <button className="actbtn" onClick={() => void decide(String(ev.payload.approval_id), true)}>
+            approve
+          </button>
+          <button className="clear" onClick={() => void decide(String(ev.payload.approval_id), false)}>
+            deny
+          </button>
+        </div>
+      ))}
+      {status !== "closed" && (
+        <div className="chat-input">
+          <input value={input} placeholder="message the agent…"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void send(); }} />
+          <button onClick={() => void send()} disabled={busy || status === "active"}>
+            {busy ? "…" : "send"}
+          </button>
+        </div>
+      )}
+    </>
+  );
 }
 
 // which task family a conversation belongs to, from its scoped id
@@ -3528,11 +3854,19 @@ function ChatView({ roles, runtime, draft, onBack }: {
   onBack?: () => void;
 }) {
   const [model, setModel] = useState(roles.includes("chat") ? "chat" : roles[0] ?? "");
-  const [conversationId, setConversationId] = useState("app");
+  const initialActive = useMemo(() => loadActiveThreadPointer(), []);
+  const [conversationId, setConversationId] = useState(initialActive.conversationId);
   const [historyOpen, setHistoryOpen] = useState(false);
-  // which agent we're talking to: GatewayCore (in-app) or a configured
-  // external specialist (ORCA/OmniAgent/OxyGent) opened in its own tab
-  const [target, setTarget] = useState("GatewayCore");
+  // which lane we're talking to: GatewayCore (in-app, /chat/completions),
+  // an agent session (Claude/Codex/Fake, structurally separate — see
+  // WORKLOG.md "Agent-session chat integration"), or a configured external
+  // specialist (ORCA/OmniAgent/OxyGent) opened in its own tab. targetRaw is
+  // the <select>'s string value; chatTarget is the parsed discriminated
+  // union everything else below switches on.
+  const [targetRaw, setTargetRaw] = useState(initialActive.target);
+  const chatTarget = decodeChatTarget(targetRaw);
+  const [agentHarnesses, setAgentHarnesses] = useState<AgentHarnessOption[] | null>(null);
+  const [agentHarnessesError, setAgentHarnessesError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads());
@@ -3549,6 +3883,38 @@ function ChatView({ roles, runtime, draft, onBack }: {
   const conversationIdRef = useRef(conversationId);
   useEffect(() => { conversationIdRef.current = conversationId; }, [conversationId]);
   useEffect(() => { endRef.current?.scrollIntoView(); }, [events]);
+  // Refresh recovery (page reload): remember which thread + lane were open
+  // so a browser refresh lands back on the same agent session (or GatewayCore
+  // thread) instead of always resetting to "app"/GatewayCore.
+  useEffect(() => {
+    saveActiveThreadPointer(conversationId, targetRaw);
+  }, [conversationId, targetRaw]);
+  useEffect(() => {
+    fetchAgentHarnesses()
+      .then((list) => { setAgentHarnesses(list); setAgentHarnessesError(null); })
+      .catch((e) => { setAgentHarnesses(null); setAgentHarnessesError((e as Error).message); });
+  }, []);
+  const currentThread = threads.find((t) => t.id === conversationId);
+  // Agent-session metadata lives on the local ChatThread cache only — never
+  // routed through persistThread/saveChatThread (GatewayCore's flight
+  // recorder), matching the structural separation everywhere else in this
+  // subsystem.
+  function updateAgentThread(patch: Partial<ChatThread>) {
+    setThreads((current) => {
+      const existing = current.find((t) => t.id === conversationIdRef.current);
+      const next: ChatThread = {
+        id: conversationIdRef.current,
+        title: existing?.title ?? "Agent session",
+        target: targetRaw,
+        ...existing,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+      const merged = upsertChatThread(current, next);
+      saveChatThreads(merged);
+      return merged;
+    });
+  }
   function loadConversations() {
     fetchChatConversations()
       .then((body) => setConversations(body.conversations))
@@ -3667,7 +4033,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
       id,
       title: "New cockpit chat",
       updatedAt: new Date().toISOString(),
-      target: "GatewayCore",
+      target: targetRaw,
     };
     setThreads((current) => {
       const next = upsertChatThread(current, thread);
@@ -3681,12 +4047,17 @@ function ChatView({ roles, runtime, draft, onBack }: {
   function openThread(thread: ChatThread, mode: "live" | "story" = chatMode) {
     conversationIdRef.current = thread.id;
     setConversationId(thread.id);
+    if (thread.target) setTargetRaw(thread.target);
     if (thread.lastPrompt) setInput(thread.lastPrompt);
     setEvents([]);
     setStory(null);
     setStoryError(null);
     setFocusTs(null);
     setChatMode(mode);
+    // agent threads recover their own history/live stream from ChatThread's
+    // agentSessionId (see AgentSessionPanel) — GatewayCore's story/live
+    // hydration below only applies to a "GatewayCore" or external thread.
+    if (decodeChatTarget(thread.target ?? "GatewayCore").kind !== "gateway") return;
     if (mode === "story") void loadStory(thread.id);
     else void hydrateThread(thread.id);
   }
@@ -3791,7 +4162,9 @@ function ChatView({ roles, runtime, draft, onBack }: {
   }
 
   const externalChats = runtime?.external_chats ?? [];
-  const activeExternal = externalChats.find((c) => c.name === target);
+  const activeExternal = chatTarget.kind === "external"
+    ? externalChats.find((c) => c.name === chatTarget.name) : undefined;
+  const agentRepos = runtime?.repos ?? [];
   return (
     <div className="chat">
       <div className="chat-layout">
@@ -3806,18 +4179,31 @@ function ChatView({ roles, runtime, draft, onBack }: {
               )}
               <label className="chat-field">
                 <span className="muted small">agent</span>
-                <select className="select" value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                  title="GatewayCore runs in-app; specialists open in their own tab">
+                <select className="select" value={targetRaw}
+                  onChange={(e) => setTargetRaw(e.target.value)}
+                  title="GatewayCore runs in-app; agent sessions run on the host worker; specialists open in their own tab">
                   <option value="GatewayCore">GatewayCore (in-app)</option>
                   {externalChats.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}{c.active ? "" : " (not configured)"}
                     </option>
                   ))}
+                  <optgroup label="Agent Sessions">
+                    {agentHarnessesError && (
+                      <option value="agent:__unavailable" disabled>
+                        Agent sessions unavailable — {agentHarnessesError}
+                      </option>
+                    )}
+                    {agentHarnesses?.map((h) => (
+                      <option key={h.harness_id} value={`agent:${h.harness_id}`}
+                        disabled={!h.available} title={h.detail}>
+                        {h.label}{h.available ? "" : ` — ${h.detail}`}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </label>
-              {target === "GatewayCore" && (
+              {chatTarget.kind === "gateway" && (
                 <label className="chat-field">
                   <span className="muted small">model</span>
                   <select className="select" value={model}
@@ -3897,7 +4283,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
             </div>
           </div>
           {/* External specialist: hand off, don't fake an in-app chat */}
-          {target !== "GatewayCore" && activeExternal && (
+          {chatTarget.kind === "external" && activeExternal && (
             <div className="chat-external">
               <div><b>{activeExternal.name}</b> — {activeExternal.kind || "external specialist"}</div>
               {activeExternal.best_for && <p className="muted">{activeExternal.best_for}</p>}
@@ -3914,7 +4300,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
             </div>
           )}
           {/* Row 2: thread id + live/story toggle (only for GatewayCore) */}
-          {target === "GatewayCore" && (
+          {chatTarget.kind === "gateway" && (
           <div className="chat-subbar">
             <span className="muted small">thread <code>{conversationId}</code></span>
             <div className="chat-mode-toggle" role="tablist" aria-label="Chat view mode">
@@ -3960,7 +4346,10 @@ function ChatView({ roles, runtime, draft, onBack }: {
               </HorizontalScroller>
             </div>
           )}
-          {target !== "GatewayCore" ? null : chatMode === "story" ? (
+          {chatTarget.kind === "agent" ? (
+            <AgentSessionPanel harnessId={chatTarget.harnessId} harnesses={agentHarnesses}
+              repos={agentRepos} thread={currentThread} onThreadChange={updateAgentThread} />
+          ) : chatTarget.kind !== "gateway" ? null : chatMode === "story" ? (
             <div className="chat-log chat-log-story">
               <ThreadTimeline transcript={story} loading={storyLoading}
                 error={storyError} onRefresh={() => void loadStory()}
@@ -3974,7 +4363,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
               <div ref={endRef} />
             </div>
           )}
-          {target === "GatewayCore" && (
+          {chatTarget.kind === "gateway" && (
             <div className="chat-input">
               <input value={input} placeholder="ask the agent…"
                 onChange={(e) => setInput(e.target.value)}
