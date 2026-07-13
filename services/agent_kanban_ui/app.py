@@ -58,6 +58,10 @@ from command_center.kanban_sync.events import emit_event, is_human_owned_status
 # governed verbs (which already refuse Approved).
 CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
 DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "1"
+# Universal Capture — a benign, non-destructive intake list (no repo/Ledger/config
+# side effects), so it defaults ON (opt-out). Captures are in-memory for now; a
+# durable Ledger-backed store is the immediate follow-up.
+CAPTURE_ENABLED = os.environ.get("KANBAN_UI_CAPTURE_ENABLED", "1") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -1222,6 +1226,105 @@ def create_board_module(body: BoardModuleIn) -> dict:
             "provider": "command_center_ui", "execution_scope": scope,
             "card_component": "generic_task",
             "columns": columns, "repo_ids": repo_ids, "chat_enabled": body.chat_enabled}
+
+
+# ── Universal Capture (intake) ────────────────────────────────────────────────
+# A rough thought is preserved as an immutable capture BEFORE deciding whether it
+# becomes a card/project/nothing — capturing never starts work. Classification /
+# routing / packet building are later phases; this is the stable record + Inbox.
+_capture_service = None   # type: ignore[var-annotated]
+
+
+def _get_capture_service():
+    global _capture_service
+    if _capture_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.intake import CaptureService, InMemoryCaptureStore
+        _capture_service = CaptureService(
+            InMemoryCaptureStore(),
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda: "cap-" + secrets.token_hex(5))
+    return _capture_service
+
+
+def _require_capture():
+    if not CAPTURE_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="Universal Capture is disabled (set KANBAN_UI_CAPTURE_ENABLED=1)")
+    return _get_capture_service()
+
+
+class CaptureIn(BaseModel):
+    raw_content: str
+    source_type: str = "text"
+    source_ref: str | None = None
+    current_board_id: str | None = None
+    current_card_id: str | None = None
+    conversation_id: str | None = None
+    requested_mode: str = "save_only"
+
+
+class CaptureBatchIn(BaseModel):
+    text: str
+    source_type: str = "list"
+    current_board_id: str | None = None
+    conversation_id: str | None = None
+    requested_mode: str = "save_only"
+
+
+def _capture_fields(body) -> dict:
+    fields = {"source_type": body.source_type, "requested_mode": body.requested_mode,
+              "current_board_id": body.current_board_id,
+              "conversation_id": body.conversation_id}
+    if getattr(body, "source_ref", None) is not None:
+        fields["source_ref"] = body.source_ref
+    if getattr(body, "current_card_id", None) is not None:
+        fields["current_card_id"] = body.current_card_id
+    return fields
+
+
+@app.post("/api/captures", status_code=201)
+def create_capture(body: CaptureIn) -> dict:
+    svc = _require_capture()
+    try:
+        view = svc.capture(body.raw_content, **_capture_fields(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return view.model_dump()
+
+
+@app.post("/api/captures/batch", status_code=201)
+def create_capture_batch(body: CaptureBatchIn) -> dict:
+    svc = _require_capture()
+    views = svc.capture_batch(body.text, **_capture_fields(body))
+    return {"count": len(views),
+            "batch_id": views[0].record.batch_id if views else None,
+            "captures": [v.model_dump() for v in views]}
+
+
+@app.get("/api/captures")
+def list_captures(status: str | None = None) -> list:
+    svc = _require_capture()
+    return [v.model_dump() for v in svc.list(status=status)]
+
+
+@app.get("/api/captures/{capture_id}")
+def get_capture(capture_id: str) -> dict:
+    svc = _require_capture()
+    try:
+        return svc.get(capture_id).model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/intake/inbox")
+def intake_inbox() -> dict:
+    """The Universal Inbox: captures grouped into lanes. A capture is recoverable
+    here even after it is routed elsewhere — nothing is ever silently dropped."""
+    return _require_capture().inbox()
 
 
 @app.get("/api/domain/{domain_id}/cards")
