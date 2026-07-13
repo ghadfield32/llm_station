@@ -995,12 +995,26 @@ function GenericTaskCard({ card }: { card: DomainCard }) {
 }
 function DomainCardTile({
   spec, card, onOpen, canDrag = false, onDragStart, moveTargets = [], onMove, onOpenPacket,
+  onOpenChat,
 }: {
   spec: DomainSpec; card: DomainCard; onOpen: () => void;
   canDrag?: boolean; onDragStart?: () => void;
   moveTargets?: string[]; onMove?: (status: string) => void;
   onOpenPacket?: () => void;
+  // (prompt, target) — target undefined = GatewayCore, "agent:<harness>" = Claude/Codex
+  onOpenChat?: (prompt: string, target?: string) => void;
 }) {
+  // Seed the chat with this card's full context (the same authoritative
+  // chat_prompt the drawer uses), then open on the chosen assistant lane.
+  async function chatAboutCard(target?: string) {
+    const cid = card.card_id;
+    const fallback = `About ${spec.title}${cid != null ? ` card ${cid}` : ""}:`;
+    if (cid == null) { onOpenChat?.(fallback, target); return; }
+    try {
+      const prog = await fetchDomainCardProgress(spec.domain_id, String(cid));
+      onOpenChat?.(prog.chat_prompt || fallback, target);
+    } catch { onOpenChat?.(fallback, target); }
+  }
   let body: ReactNode;
   switch (spec.card_component) {
     case "job_application": body = <JobApplicationCard card={card} />; break;
@@ -1020,6 +1034,22 @@ function DomainCardTile({
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onOpen(); }}>
       {body}
+      {onOpenChat && (
+        <div className="card-chat-actions" onPointerDown={(e) => e.stopPropagation()}>
+          <button className="actbtn" title="Open this card in chat with its full context"
+            onClick={(e) => { e.stopPropagation(); void chatAboutCard(); }}>
+            Open in chat
+          </button>
+          <button className="actbtn" title="Investigate this card with Claude Code (read-only agent)"
+            onClick={(e) => { e.stopPropagation(); void chatAboutCard("agent:claude_code_local"); }}>
+            Ask Claude
+          </button>
+          <button className="actbtn" title="Investigate this card with Codex (read-only agent)"
+            onClick={(e) => { e.stopPropagation(); void chatAboutCard("agent:codex_agent"); }}>
+            Ask Codex
+          </button>
+        </div>
+      )}
       {onOpenPacket && (
         <button className="actbtn card-packet-btn"
           title="open the application packet: resume, cover letter, story, approve & submit"
@@ -2550,7 +2580,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   refreshKey: string;
   activeDomain: string;
   onActiveDomainChange: (domainId: string) => void;
-  onOpenChat?: (prompt: string, conversationId?: string, storyTs?: string) => void;
+  onOpenChat?: (prompt: string, conversationId?: string, storyTs?: string, target?: string) => void;
 }) {
   const [domains, setDomains] = useState<DomainSpec[]>([]);
   const [cards, setCards] = useState<Record<string, DomainCards>>({});
@@ -2880,6 +2910,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                                 onOpenPacket={isJobDomain && card.application_id
                                   ? () => setPacketFor({ spec, card })
                                   : undefined}
+                                onOpenChat={onOpenChat
+                                  ? (prompt, target) => onOpenChat(prompt, undefined, undefined, target)
+                                  : undefined}
                                 onOpen={() => setSelected({ spec, card })} />
                             ))}
                           </div>
@@ -2901,6 +2934,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                 onMove={(target) => void moveDomainCardTo(card, target)}
                 onOpenPacket={isJobDomain && card.application_id
                   ? () => setPacketFor({ spec, card })
+                  : undefined}
+                onOpenChat={onOpenChat
+                  ? (prompt, target) => onOpenChat(prompt, undefined, undefined, target)
                   : undefined}
                 onOpen={() => setSelected({ spec, card })} />
             ))}
@@ -3390,17 +3426,20 @@ function AgentEventCard({ ev }: { ev: AgentEvent }) {
   }
 }
 
-function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange }: {
+function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange, initialPrompt }: {
   harnessId: string;
   harnesses: AgentHarnessOption[] | null;
   repos: { repo_id: string; remote_url: string }[];
   thread: ChatThread | undefined;
   onThreadChange: (patch: Partial<ChatThread>) => void;
+  initialPrompt?: string;   // e.g. a card's context, seeded from "Ask Claude/Codex"
 }) {
   const [sessionId, setSessionId] = useState<string | null>(thread?.agentSessionId ?? null);
   const [record, setRecord] = useState<AgentSessionRecord | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialPrompt ?? "");
+  // re-seed if a different card's context arrives while the panel is mounted
+  useEffect(() => { if (initialPrompt) setInput(initialPrompt); }, [initialPrompt]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repoId, setRepoId] = useState(thread?.agentRepoId ?? repos[0]?.repo_id ?? "");
@@ -4132,7 +4171,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
   roles: string[];
   runtime: ChatRuntime | null;
   draft?: { text: string; nonce: number; conversationId?: string;
-            storyTs?: string } | null;
+            storyTs?: string; target?: string } | null;
   onBack?: () => void;
 }) {
   const [model, setModel] = useState(roles.includes("chat") ? "chat" : roles[0] ?? "");
@@ -4239,6 +4278,8 @@ function ChatView({ roles, runtime, draft, onBack }: {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
+    // a card's "Ask Claude / Ask Codex" preselects the assistant lane
+    if (draft?.target) setTargetRaw(draft.target);
     if (draft?.text) setInput(draft.text);
     if (!draft?.conversationId) return;
     const changed = draft.conversationId !== conversationIdRef.current;
@@ -4259,7 +4300,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
       void hydrateThread(draft.conversationId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft?.conversationId, draft?.nonce, draft?.text, draft?.storyTs]);
+  }, [draft?.conversationId, draft?.nonce, draft?.text, draft?.storyTs, draft?.target]);
   useEffect(() => {
     // first mount: replay whatever the flight recorder has for the default
     // thread, so a reload (or another device) still shows the conversation
@@ -4646,7 +4687,8 @@ function ChatView({ roles, runtime, draft, onBack }: {
           )}
           {chatTarget.kind === "agent" ? (
             <AgentSessionPanel harnessId={chatTarget.harnessId} harnesses={agentHarnesses}
-              repos={agentRepos} thread={currentThread} onThreadChange={updateAgentThread} />
+              repos={agentRepos} thread={currentThread} onThreadChange={updateAgentThread}
+              initialPrompt={draft?.target === targetRaw ? draft?.text : undefined} />
           ) : chatTarget.kind !== "gateway" ? null : chatMode === "story" ? (
             <div className="chat-log chat-log-story">
               <ThreadTimeline transcript={story} loading={storyLoading}
@@ -4701,7 +4743,7 @@ export function App() {
   const [chatRuntime, setChatRuntime] = useState<ChatRuntime | null>(null);
   const [chatDraft, setChatDraft] =
     useState<{ text: string; nonce: number; conversationId?: string;
-               storyTs?: string } | null>(null);
+               storyTs?: string; target?: string } | null>(null);
   // where the chat was opened from, so the chat's Back button can return there
   const [chatReturnView, setChatReturnView] = useState<View>("domains");
   const [domainNav, setDomainNav] = useState<DomainNavItem[]>([]);
@@ -4791,8 +4833,8 @@ export function App() {
 
   const chatOn = !!cfg?.chat_enabled;
   const openChatWithPrompt = useCallback(
-    (prompt: string, conversationId?: string, storyTs?: string) => {
-      setChatDraft({ text: prompt, conversationId, storyTs, nonce: Date.now() });
+    (prompt: string, conversationId?: string, storyTs?: string, target?: string) => {
+      setChatDraft({ text: prompt, conversationId, storyTs, target, nonce: Date.now() });
       // remember where we came from so Chat's Back button returns there
       setView((prev) => { if (prev !== "chat") setChatReturnView(prev); return "chat"; });
     }, []);
