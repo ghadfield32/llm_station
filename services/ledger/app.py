@@ -326,6 +326,49 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 """
 
+# Durable Universal Capture (intake) schema. MIRROR of the canonical source of
+# truth in src/command_center/intake/ledger_schema.py (SCHEMA_SQL). Duplicated
+# here because this container can't import the package; kept identical by
+# tests/test_capture_ledger_schema.py, which fails on any drift. Additive.
+CAPTURE_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS captures (
+    capture_id        TEXT PRIMARY KEY,
+    raw_content       TEXT NOT NULL,
+    source_type       TEXT NOT NULL DEFAULT 'text',
+    source_ref        TEXT,
+    captured_at       TEXT NOT NULL,
+    ingested_at       TEXT NOT NULL,
+    captured_by       TEXT,
+    current_board_id  TEXT,
+    current_card_id   TEXT,
+    conversation_id   TEXT,
+    batch_id          TEXT,
+    attachments       TEXT,
+    requested_mode    TEXT NOT NULL DEFAULT 'save_only',
+    processing_status TEXT NOT NULL DEFAULT 'captured',
+    classification    TEXT,
+    updated_at        TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capture_events (
+    event_seq  INTEGER PRIMARY KEY AUTOINCREMENT,
+    capture_id TEXT NOT NULL,
+    ts         TEXT NOT NULL,
+    kind       TEXT NOT NULL,
+    payload    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_captures_status ON captures (processing_status);
+CREATE INDEX IF NOT EXISTS ix_captures_batch ON captures (batch_id);
+CREATE INDEX IF NOT EXISTS ix_capture_events_cap
+    ON capture_events (capture_id, event_seq);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    TEXT PRIMARY KEY,
+    applied_at TEXT
+);
+""".strip()
+
 
 # Experiment lifecycle edges + the human-only wall, mirrored from
 # command_center.improvement.lifecycle. The Ledger enforces the structural walls
@@ -359,6 +402,9 @@ def init_db():
         c.executescript(USAGE_SCHEMA_SQL)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("usage.v1", _now()))
+        c.executescript(CAPTURE_SCHEMA_SQL)
+        c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+                  "VALUES (?, ?)", ("capture.v1", _now()))
         c.executescript("""
         CREATE TABLE IF NOT EXISTS missions (
             id TEXT PRIMARY KEY,
@@ -1136,6 +1182,154 @@ def _fetch_one(table: str, where_col: str, value) -> dict:
     with closing(_db()) as c:
         row = c.execute(f"SELECT * FROM {table} WHERE {where_col}=?", (value,)).fetchone()
     return dict(row) if row else {}
+
+
+# ── Universal Capture (intake) — durable backend for the cockpit's LedgerCaptureStore ──
+class CaptureIn(BaseModel):
+    capture_id: str
+    raw_content: str
+    source_type: str = "text"
+    source_ref: Optional[str] = None
+    captured_at: str
+    captured_by: Optional[str] = None
+    current_board_id: Optional[str] = None
+    current_card_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    batch_id: Optional[str] = None
+    attachments: list = []
+    requested_mode: str = "save_only"
+    status: str = "captured"
+
+
+class CaptureEventIn(BaseModel):
+    ts: str
+    kind: str
+    payload: dict = {}
+
+
+class CaptureStatusIn(BaseModel):
+    status: str
+    ts: str
+
+
+class CaptureClassifyIn(BaseModel):
+    classification: dict
+    ts: str
+
+
+def _require_capture(c, capture_id: str) -> None:
+    if not c.execute("SELECT 1 FROM captures WHERE capture_id=?",
+                     (capture_id,)).fetchone():
+        raise HTTPException(404, f"no such capture: {capture_id}")
+
+
+def _capture_view(c, capture_id: str) -> dict:
+    row = c.execute("SELECT * FROM captures WHERE capture_id=?", (capture_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, f"no such capture: {capture_id}")
+    d = dict(row)
+    d["attachments"] = json.loads(d["attachments"]) if d.get("attachments") else []
+    d["classification"] = (json.loads(d["classification"])
+                           if d.get("classification") else None)
+    ev = c.execute("SELECT COUNT(*) n, MAX(ts) mx FROM capture_events "
+                   "WHERE capture_id=?", (capture_id,)).fetchone()
+    d["event_count"] = ev["n"] or 0
+    d["updated_at"] = ev["mx"] or d.get("updated_at")   # = last event ts (matches in-memory)
+    return d
+
+
+@app.post("/capture")
+def create_capture(body: CaptureIn):
+    with closing(_db()) as c:
+        # idempotent on replay by capture_id — a repeat write is a no-op
+        if c.execute("SELECT 1 FROM captures WHERE capture_id=?",
+                     (body.capture_id,)).fetchone() is None:
+            c.execute(
+                "INSERT INTO captures (capture_id, raw_content, source_type, "
+                "source_ref, captured_at, ingested_at, captured_by, current_board_id, "
+                "current_card_id, conversation_id, batch_id, attachments, "
+                "requested_mode, processing_status, classification, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (body.capture_id, body.raw_content, body.source_type, body.source_ref,
+                 body.captured_at, _now(), body.captured_by, body.current_board_id,
+                 body.current_card_id, body.conversation_id, body.batch_id,
+                 json.dumps(body.attachments), body.requested_mode, body.status,
+                 None, body.captured_at))
+            c.execute(
+                "INSERT INTO capture_events (capture_id, ts, kind, payload) VALUES (?,?,?,?)",
+                (body.capture_id, body.captured_at, "status",
+                 json.dumps({"status": body.status, "created": True})))
+            c.commit()
+        return _capture_view(c, body.capture_id)
+
+
+@app.post("/capture/{capture_id}/event")
+def add_capture_event(capture_id: str, body: CaptureEventIn):
+    with closing(_db()) as c:
+        _require_capture(c, capture_id)
+        c.execute("INSERT INTO capture_events (capture_id, ts, kind, payload) "
+                  "VALUES (?,?,?,?)",
+                  (capture_id, body.ts, body.kind, json.dumps(body.payload)))
+        c.commit()
+    return {"ok": True}
+
+
+@app.post("/capture/{capture_id}/status")
+def set_capture_status(capture_id: str, body: CaptureStatusIn):
+    with closing(_db()) as c:
+        _require_capture(c, capture_id)
+        c.execute("UPDATE captures SET processing_status=?, updated_at=? WHERE capture_id=?",
+                  (body.status, body.ts, capture_id))
+        c.execute("INSERT INTO capture_events (capture_id, ts, kind, payload) "
+                  "VALUES (?,?,?,?)",
+                  (capture_id, body.ts, "status", json.dumps({"status": body.status})))
+        c.commit()
+        return _capture_view(c, capture_id)
+
+
+@app.post("/capture/{capture_id}/classify")
+def classify_capture(capture_id: str, body: CaptureClassifyIn):
+    with closing(_db()) as c:
+        _require_capture(c, capture_id)
+        c.execute("UPDATE captures SET classification=?, updated_at=? WHERE capture_id=?",
+                  (json.dumps(body.classification), body.ts, capture_id))
+        c.execute("INSERT INTO capture_events (capture_id, ts, kind, payload) "
+                  "VALUES (?,?,?,?)",
+                  (capture_id, body.ts, "classify", json.dumps(body.classification)))
+        c.commit()
+        return _capture_view(c, capture_id)
+
+
+@app.get("/captures")
+def list_captures(status: Optional[str] = None, batch_id: Optional[str] = None):
+    q, params = "SELECT capture_id FROM captures", []
+    conds = []
+    if status is not None:
+        conds.append("processing_status=?"); params.append(status)
+    if batch_id is not None:
+        conds.append("batch_id=?"); params.append(batch_id)
+    if conds:
+        q += " WHERE " + " AND ".join(conds)
+    q += " ORDER BY rowid"      # stable insertion order (matches in-memory)
+    with closing(_db()) as c:
+        ids = [r["capture_id"] for r in c.execute(q, params).fetchall()]
+        return [_capture_view(c, cid) for cid in ids]
+
+
+@app.get("/capture/{capture_id}")
+def get_capture(capture_id: str):
+    with closing(_db()) as c:
+        return _capture_view(c, capture_id)
+
+
+@app.get("/capture/{capture_id}/events")
+def get_capture_events(capture_id: str):
+    with closing(_db()) as c:
+        _require_capture(c, capture_id)
+        rows = c.execute("SELECT * FROM capture_events WHERE capture_id=? "
+                         "ORDER BY event_seq", (capture_id,)).fetchall()
+    return [{"capture_id": r["capture_id"], "ts": r["ts"], "kind": r["kind"],
+             "payload": json.loads(r["payload"]) if r["payload"] else {}} for r in rows]
 
 
 @app.post("/model-usage/sample")
