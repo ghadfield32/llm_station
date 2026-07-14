@@ -781,3 +781,23 @@ The architecture is complete only when:
   to the security baseline's risk/approval policy;
 - the laptop remains responsive and presentation-ready for interviews and live
   demonstrations.
+
+## Horizon thought — optional large-memory AI node
+
+After the Life Center is built, backed up, and proven useful, consider a
+DGX Spark-class appliance (or a future equivalent) only as a **separate
+large-memory AI node**. It is not part of the Life Center bill of materials and
+does not replace the desktop, laptop, cloud burst capacity, or storage host.
+
+Its potential role would be long-context LLM/VLM inference, multiple
+always-resident agents, and selective parameter-efficient model work that
+regularly exceeds the desktop GPU's practical memory capacity. The desktop
+remains the fast CV/video and smaller-model lane; the Life Center remains the
+data, application, and recovery lane.
+
+Revisit this only when workload telemetry shows repeated memory-capacity or
+CPU-offload constraints—not merely high GPU utilization or slow CV throughput—
+and when the required containers and libraries have proven ARM64 compatibility.
+Compare the total ownership cost with temporary cloud GPUs and contemporary
+high-memory workstation GPUs at that time. This is a future option, not a
+current dependency or purchase gate.
