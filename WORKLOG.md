@@ -5,6 +5,25 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Job-search filters + fast prep, and cc doctor fix (2026-07-13)
+- MERGED #52 (squash 0bfbca1): job-search **location/language hybrid filter**
+  (`src/command_center/job_search/geo_language.py`; seeded English + FL/AZ/
+  Philadelphia/CO/WA-Seattle/OR + US + remote; hard-exclude clear mismatch,
+  soft-penalize ambiguous; 50-state gazetteer handles Washington-DC vs WA),
+  **rejection feedback** (`rejections.py`; reason capture → filter-gap vs
+  working-filter suggestions; CLI `cc job-search reject`/`rejections-report`),
+  **fast selection** (`app.py` `_JobPrepQueue`: move returns instantly, bg worker
+  prepares, "preparing packet…" badge). Cockpit rebuilt+redeployed on :8787.
+- FIXED cc doctor crash (TypeError): `check_forbidden_provider_scan` (doctor.py)
+  called `check_env_files/process_env/compose` with 1 arg after #26 changed them
+  to `(errors, forbidden)`. Fix = doctor builds `forbidden=FORBIDDEN_KEYS` and
+  subtracts a lane's keys when `frontier_egress_ready()`/`agent_session_egress_ready()`
+  is True (egress-aware, mirrors `main()`); `permitted_lanes` recorded in evidence.
+  Now `cc doctor` runs: PASS=18 FAIL=0 (3 BLOCKED are unrelated appflowy/branch-
+  protection/discord config gaps). Tests: `test_doctor.py` +3.
+- NEXT: PR the doctor fix to main (user-controlled). Open item: `"<lang>-speaking"`
+  postings are hard-excluded (tunable, filter drawer).
+
 ## Chat-first cockpit + Universal Capture + Work Graph (2026-07-13)
 - MERGED to main: chat-first Assistant chooser — Claude/Codex selectable, no
   "start from a mission" dead-end (#41); Track-as-mission for agent + gateway
@@ -70,8 +89,22 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   the complete tree, then merged origin/main = #40/#48/#49/#52; work_graph files
   taken as additions-only supersets, #40 usage routes preserved in app.py); ONE PR
   → main carries just permalink + receipts. Digest re-recorded vs merged MASTER.
-- NEXT: merge the consolidated PR; Work Map + Connected-Work drawer UI (Phase F);
-  capture→work conversion; classification/routing (Phase G).
+- MERGED to main 07-13: #54 (permalink + Phase E) + #55 (frontier flake fix).
+- Capture→work conversion DONE (branch `feat/capture-to-work`, off updated main):
+  a Universal Capture becomes connected work via the SAME planner. NEW
+  `CaptureService.mark_converted` (appends a `link` CaptureEvent with
+  work_item_ids + moves capture to `routed` — never destroyed). `WorkPlanIn`
+  gains `capture_id` (threaded to `WorkItem.capture_id` = work→capture provenance)
+  and `conversation_id` is now OPTIONAL (capture/daily-intake origins have no
+  chat; `TaskBatchReceipt.conversation_id`/`capture_id` widened too). Cockpit
+  `POST /api/captures/{id}/work-preview` (side-effect-free) + `/convert` (commits
+  the plan, THEN marks the capture routed — work side atomic; capture untouched on
+  a bad plan). Tests: 2 intake unit + 5 cockpit (provenance stamped, preview
+  side-effect-free, cycle→409 leaves capture `captured`, unknown→404, graph-off→
+  503). MASTER §4.9 capture-conversion + truth-check convert endpoint + digest.
+  274 passed via PYTHONPATH=worktree/src.
+- NEXT: Work Map + Connected-Work drawer UI (Phase F); classification/routing
+  (Phase G — free text → structured plan feeding preview/convert).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

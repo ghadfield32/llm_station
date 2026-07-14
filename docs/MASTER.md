@@ -889,14 +889,29 @@ work items/placements/edges is **planning, not a mission** — it starts no
 execution and touches no wall verb; writes still require the mission + lease +
 approval wall.
 
+**Capture → work conversion (`intake` + `work_graph`).** A Universal Capture
+(§4.8) becomes connected work through the SAME planner:
+`POST /api/captures/{capture_id}/work-preview` (side-effect-free) and
+`POST /api/captures/{capture_id}/convert`. The capture supplies provenance — its
+id is stamped onto every created `WorkItem.capture_id` (work→capture), and its
+batch + conversation carry through — while the caller supplies the plan structure
+(until classification/routing infers it). `convert` commits the plan, then calls
+`CaptureService.mark_converted` to append a `link` event with the created
+`work_item_ids` and move the capture to the `routed` lane: the capture is **never
+destroyed**, only linked to the work it produced and still recoverable in the
+Inbox (capture→work). A daily-intake DAG can reuse the same endpoints (the plan's
+`conversation_id` is optional, so a non-chat origin is first-class).
+
 **Readiness status.** Contracts + graph service + durable Ledger store +
-permalink resolver + chat receipts are **BUILT + HERMETIC_PROVEN**
-(`tests/test_work_graph*.py`, `tests/test_agent_kanban_ui_workgraph.py` — graph
-correctness, cycle policy, durability across restart, permalink resolution,
-preview-is-side-effect-free, commit atomicity, no-mission safety). Next phases:
-the Work Map + Connected-Work drawer UI, capture→work conversion, and
-classification/routing — none of which change the identity/placement/link
-contract above.
+permalink resolver + chat receipts + capture→work conversion are
+**BUILT + HERMETIC_PROVEN** (`tests/test_work_graph*.py`,
+`tests/test_agent_kanban_ui_workgraph.py`,
+`tests/test_agent_kanban_ui_capture_convert.py`, `tests/test_intake_convert.py`
+— graph correctness, cycle policy, durability across restart, permalink
+resolution, preview-is-side-effect-free, commit atomicity, capture-linked
+provenance, no-mission safety). Next phases: the Work Map + Connected-Work drawer
+UI and classification/routing (free text → structured plan) — neither changes the
+identity/placement/link contract above.
 
 ---
 

@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from .schemas import (
     INBOX_STATUSES,
+    CaptureEvent,
     CaptureRecord,
     CaptureView,
     split_bulk_list,
@@ -72,6 +73,22 @@ class CaptureService:
         columns += [{"name": s, "captures": c} for s, c in by_status.items()
                     if s not in INBOX_STATUSES and c]
         return {"columns": columns, "total": len(views)}
+
+    def mark_converted(self, capture_id: str, work_item_ids: list[str], *,
+                       conversation_id: str | None = None) -> CaptureView:
+        """Record that a capture became canonical work: append a 'link' event
+        carrying the created work_item_ids, then move the capture to the 'routed'
+        lane. The capture is NEVER destroyed — it stays recoverable in the Inbox,
+        now linked to the work it produced (capture→work; the reverse work→capture
+        lives on WorkItem.capture_id). KeyError if the capture is unknown."""
+        self._store.view(capture_id)          # KeyError if unknown
+        now = self._clock()
+        self._store.append_event(CaptureEvent(
+            capture_id=capture_id, ts=now, kind="link",
+            payload={"work_item_ids": list(work_item_ids),
+                     "conversation_id": conversation_id}))
+        self._store.set_status(capture_id, "routed", at=now)
+        return self._store.view(capture_id)
 
 
 def _card(v: CaptureView) -> dict:

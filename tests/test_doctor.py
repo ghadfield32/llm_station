@@ -53,3 +53,39 @@ def test_committed_config_secret_scan_allows_env_refs_not_literals():
 
     assert result.status == "PASS"
     assert result.evidence["findings"] == []
+
+
+def test_forbidden_provider_scan_runs_without_typeerror():
+    # Regression for the #26 egress-lane refactor: check_env_files/process_env/
+    # compose require (errors, forbidden). doctor's caller must pass the set —
+    # calling with one arg raised TypeError and crashed the whole `cc doctor`.
+    result = doctor.check_forbidden_provider_scan()
+
+    assert result.status in {"PASS", "FAIL"}
+    assert "permitted_lanes" in result.evidence
+    assert "forbidden_keys" in result.evidence
+
+
+def test_forbidden_provider_scan_strict_when_no_lane_ready(monkeypatch):
+    monkeypatch.setattr(doctor, "frontier_egress_ready", lambda: (False, "off"))
+    monkeypatch.setattr(doctor, "agent_session_egress_ready", lambda: (False, "off"))
+
+    result = doctor.check_forbidden_provider_scan()
+
+    # nothing relaxed: the full forbidden set is enforced
+    assert set(result.evidence["forbidden_keys"]) == set(doctor.FORBIDDEN_KEYS)
+    assert result.evidence["permitted_lanes"] == []
+
+
+def test_forbidden_provider_scan_relaxes_ready_lanes(monkeypatch):
+    monkeypatch.setattr(doctor, "frontier_egress_ready", lambda: (True, "budget on"))
+    monkeypatch.setattr(
+        doctor, "agent_session_egress_ready", lambda: (True, "codex on"))
+
+    result = doctor.check_forbidden_provider_scan()
+
+    forbidden = set(result.evidence["forbidden_keys"])
+    # a ready lane's keys are no longer forbidden, and the relaxation is recorded
+    assert forbidden.isdisjoint(doctor.ROUTER_LANE_KEYS)
+    assert forbidden.isdisjoint(doctor.AGENT_SESSION_KEYS)
+    assert len(result.evidence["permitted_lanes"]) == 2
