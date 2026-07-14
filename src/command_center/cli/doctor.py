@@ -28,12 +28,16 @@ from pydantic import ValidationError
 
 from command_center.cli.branch_protection_verify import verify_branch_protection
 from command_center.cli.check_forbidden_providers import (
+    AGENT_SESSION_KEYS,
     FORBIDDEN_KEYS,
+    ROUTER_LANE_KEYS,
+    agent_session_egress_ready,
     check_compose,
     check_env_files,
     check_litellm_config,
     check_models_yaml,
     check_process_env,
+    frontier_egress_ready,
 )
 from command_center.cli.github_app_verify import verify_github_app
 from command_center.schemas import (
@@ -681,10 +685,28 @@ def check_repo_paths(config_check: Check) -> Check:
 
 
 def check_forbidden_provider_scan() -> Check:
+    # check_env_files/process_env/compose take (errors, forbidden) since the
+    # egress-lane refactor (#26): a provider key is only forbidden if no
+    # deliberately-enabled lane permits it. Mirror that trust model here so the
+    # health check reports the ACTUAL posture instead of flagging a key that the
+    # operator turned on. Readiness is computed from the budget configs (never
+    # fabricated); the strict `cc forbidden-providers` CLI remains the hard gate.
     errors: list[str] = []
-    check_env_files(errors)
-    check_process_env(errors)
-    check_compose(errors)
+    forbidden = set(FORBIDDEN_KEYS)
+    permitted_lanes: list[str] = []
+    router_ready, router_why = frontier_egress_ready()
+    if router_ready:
+        forbidden -= ROUTER_LANE_KEYS
+        permitted_lanes.append(f"frontier-router lane permits {sorted(ROUTER_LANE_KEYS)}: {router_why}")
+    agent_ready, agent_why = agent_session_egress_ready()
+    if agent_ready:
+        forbidden -= AGENT_SESSION_KEYS
+        permitted_lanes.append(f"agent-session lane permits {sorted(AGENT_SESSION_KEYS)}: {agent_why}")
+    check_env_files(errors, forbidden)
+    check_process_env(errors, forbidden)
+    check_compose(errors, forbidden)
+    # The LOCAL LiteLLM/Ollama lane stays cloud-free in every mode — these two
+    # are never relaxed by an egress lane, so they take no forbidden set.
     check_models_yaml(errors)
     check_litellm_config(errors)
     return Check(
@@ -693,7 +715,12 @@ def check_forbidden_provider_scan() -> Check:
         "PASS" if not errors else "FAIL",
         blocker="; ".join(errors[:5]),
         next_command="" if not errors else "remove forbidden provider keys/routes, then run uv run cc forbidden-providers",
-        evidence={"forbidden_keys": sorted(FORBIDDEN_KEYS), "error_count": len(errors), "errors": errors[:10]},
+        evidence={
+            "forbidden_keys": sorted(forbidden),
+            "permitted_lanes": permitted_lanes,
+            "error_count": len(errors),
+            "errors": errors[:10],
+        },
     )
 
 

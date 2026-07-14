@@ -21,6 +21,7 @@ from .schemas import (
     WorkEdgeSummary,
     WorkEvent,
     WorkGraph,
+    WorkGraphPlanSummary,
     WorkItem,
     WorkItemSummary,
     WorkPlacement,
@@ -34,6 +35,13 @@ from .planner import (
     WorkPlanEdgeIn,
     WorkPlanIn,
     WorkPlanItemIn,
+    summarize_plan,
+)
+from .router import (
+    BoardRule,
+    DuplicateCandidate,
+    RoutingProposal,
+    WorkRouter,
 )
 from .service import WorkGraphError, WorkGraphService
 from .store import InMemoryWorkGraphStore
@@ -66,4 +74,10 @@ __all__ = [
     "WorkPlanIn",
     "WorkPlanItemIn",
     "WorkPlanEdgeIn",
+    "WorkRouter",
+    "RoutingProposal",
+    "BoardRule",
+    "DuplicateCandidate",
+    "WorkGraphPlanSummary",
+    "summarize_plan",
 ]

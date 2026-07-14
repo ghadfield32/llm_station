@@ -1638,6 +1638,63 @@ def convert_capture_to_work(capture_id: str, body: CaptureConvertIn) -> dict:
     return receipt.model_dump()
 
 
+# ── Routing (Phase G): free text → a PROPOSED plan for a human to confirm ─────
+# A deterministic first pass: split deliverables, tag evidence-backed board
+# suggestions, flag exact-title duplicates and dependency-worded lines. It
+# NEVER commits and NEVER silently auto-routes — every unresolved point is a
+# needs_confirmation question. The human reviews/edits the proposal, then calls
+# /convert or /commit. (Free-text board calibration is a later phase; with no
+# injected board rules, every board is a question against the real domain list.)
+class RouteTextIn(BaseModel):
+    text: str
+    conversation_id: str | None = None
+    capture_id: str | None = None
+
+
+def _build_work_router():
+    from command_center.intake import split_bulk_list
+    from command_center.work_graph import WorkRouter
+    svc = _get_workgraph_service()
+    existing = [(i.work_item_id, i.title) for i in svc.list_items()]
+    # board-question options are a HINT sourced from boards that actually exist in
+    # the graph (real, always-available) — not the domain config file, so routing
+    # never depends on config plumbing. A fresh graph offers none (human types one).
+    known = sorted({p.board_id for p in svc._store.list_placements()})
+    return WorkRouter(split=split_bulk_list, board_rules=(),
+                      known_boards=known, existing_titles=existing)
+
+
+@app.post("/api/work-items/route")
+def route_work_text(body: RouteTextIn) -> dict:
+    """Propose a structured plan from free text — side-effect-free; commits
+    nothing. Feed the (human-edited) plan to /api/chat/work-items/commit."""
+    _require_workgraph()
+    return _build_work_router().route(
+        body.text, conversation_id=body.conversation_id,
+        capture_id=body.capture_id).model_dump()
+
+
+@app.post("/api/captures/{capture_id}/route")
+def route_capture_text(capture_id: str) -> dict:
+    """Propose a plan from a capture's raw content, carrying its provenance. The
+    capture is untouched (routing is not conversion — /convert commits)."""
+    view = _capture_for_conversion(capture_id)     # 503/404 as appropriate
+    rec = view.record
+    return _build_work_router().route(
+        rec.raw_content, conversation_id=rec.conversation_id,
+        capture_id=rec.capture_id).model_dump()
+
+
+@app.post("/api/work-items/plan-summary")
+def work_plan_summary(plan: WorkPlanIn) -> dict:
+    """The confirmation gate: 'this will create N items / M placements / K edges'
+    for a proposed plan. Deterministic and side-effect-free — commits nothing;
+    the human reads it before choosing Create / Edit / Keep as note."""
+    from command_center.work_graph import summarize_plan
+    _require_workgraph()
+    return summarize_plan(plan).model_dump()
+
+
 @app.get("/api/domain/{domain_id}/cards")
 def domain_cards(domain_id: str) -> dict:
     spec = _domain_spec(domain_id)

@@ -5,6 +5,25 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Job-search filters + fast prep, and cc doctor fix (2026-07-13)
+- MERGED #52 (squash 0bfbca1): job-search **location/language hybrid filter**
+  (`src/command_center/job_search/geo_language.py`; seeded English + FL/AZ/
+  Philadelphia/CO/WA-Seattle/OR + US + remote; hard-exclude clear mismatch,
+  soft-penalize ambiguous; 50-state gazetteer handles Washington-DC vs WA),
+  **rejection feedback** (`rejections.py`; reason capture → filter-gap vs
+  working-filter suggestions; CLI `cc job-search reject`/`rejections-report`),
+  **fast selection** (`app.py` `_JobPrepQueue`: move returns instantly, bg worker
+  prepares, "preparing packet…" badge). Cockpit rebuilt+redeployed on :8787.
+- FIXED cc doctor crash (TypeError): `check_forbidden_provider_scan` (doctor.py)
+  called `check_env_files/process_env/compose` with 1 arg after #26 changed them
+  to `(errors, forbidden)`. Fix = doctor builds `forbidden=FORBIDDEN_KEYS` and
+  subtracts a lane's keys when `frontier_egress_ready()`/`agent_session_egress_ready()`
+  is True (egress-aware, mirrors `main()`); `permitted_lanes` recorded in evidence.
+  Now `cc doctor` runs: PASS=18 FAIL=0 (3 BLOCKED are unrelated appflowy/branch-
+  protection/discord config gaps). Tests: `test_doctor.py` +3.
+- NEXT: PR the doctor fix to main (user-controlled). Open item: `"<lang>-speaking"`
+  postings are hard-excluded (tunable, filter drawer).
+
 ## Chat-first cockpit + Universal Capture + Work Graph (2026-07-13)
 - MERGED to main: chat-first Assistant chooser — Claude/Codex selectable, no
   "start from a mission" dead-end (#41); Track-as-mission for agent + gateway
@@ -84,8 +103,43 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   side-effect-free, cycle→409 leaves capture `captured`, unknown→404, graph-off→
   503). MASTER §4.9 capture-conversion + truth-check convert endpoint + digest.
   274 passed via PYTHONPATH=worktree/src.
-- NEXT: Work Map + Connected-Work drawer UI (Phase F); classification/routing
-  (Phase G — free text → structured plan feeding preview/convert).
+- Phase G routing DONE (branch `feat/work-graph-routing-and-ui`, off main w/#57):
+  `work_graph/router.py` `WorkRouter` — deterministic free text → PROPOSED plan.
+  Splits deliverables (reuses intake split_bulk_list), evidence-tags board
+  suggestions (keyword→injected rule; matched words recorded), and — critically —
+  NEVER commits + NEVER silently auto-routes: unmatched/ambiguous board → a
+  needs_confirmation question (item board unset); a dependency word (before/until/
+  …) → a question, NOT a fabricated edge; an EXACT normalized-title match → a
+  duplicate_candidate + question, never auto-dropped. No LLM, no fuzzy thresholds.
+  Cockpit `POST /api/work-items/route` + `/api/captures/{id}/route` (board-hint
+  options sourced from the graph's own placement board_ids — decoupled from the
+  domain-config file so routing never 503s on missing config). Tests: 9 router
+  unit + 3 cockpit; 317 passed via PYTHONPATH=worktree/src.
+- Phase F work-map UI DONE (same branch; built by a subagent, build-verified by
+  me): SPA `web/src/` — api.ts work-graph client (types match schemas, hrefs
+  rendered VERBATIM), a `work-map` View + NAV, URL routing for `work`/`depth` with
+  pushState/replaceState/popstate (Back/Forward works), `WorkMapView` (mobile
+  indented tree of items + typed edges, error/empty/loading states — never a
+  silent empty graph) and `ConnectedWork` (renders backend ResourceLink hrefs
+  verbatim). Verified: `npm run build` (tsc + vite) green, twice, independently.
+  MASTER §4.9 routing + work-map paragraphs + truth-check router file/endpoint +
+  digest re-record.
+- Confirmation gate DONE (branch `feat/work-graph-plan-summary`, off main w/#60):
+  §12 "this will create …". NEW `WorkGraphPlanSummary` schema + `summarize_plan()`
+  — deterministic count of a proposed plan (items by kind, primary/secondary
+  placements, distinct boards, items-without-board → Inbox, edges by relation +
+  blocking subset). Pure counting, no LLM/thresholds/side-effects. RoutingProposal
+  now carries `summary`; cockpit `POST /api/work-items/plan-summary` (commits
+  nothing) feeds the Create / Edit / Keep-as-note gate. Tests: 4 unit + 2 cockpit;
+  323 passed via PYTHONPATH=worktree/src. MASTER §4.9 + truth-check endpoint +
+  digest.
+- Routing CALIBRATION reframed: deliberately did NOT hand-author a keyword
+  ruleset — the plan requires EVIDENCE-backed calibration, so hand-written
+  heuristics would violate "no silent auto-routing"/"no invented data". Real
+  calibration needs router-correction telemetry first (record human overrides of
+  suggestions) → that's the next slice, then evidence-derived board rules.
+- NEXT: router-correction telemetry → evidence-backed routing calibration; packet
+  + review chain (Phase H); daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1
