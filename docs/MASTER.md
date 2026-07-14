@@ -991,6 +991,34 @@ wall. **Deliberately deferred to a later, separately-reviewed slice (H2):** the
 the review slots (analysis-mode read-only agent sessions) — here slots start
 `pending` or are set by a human. This module runs no agent and invents no verdict.
 
+**Readiness Packet durability + immutable revisions (Phase H slice 2,
+`work_graph/packet_ledger_schema.py` + `packet_ledger_store.py`).** The in-memory
+packet store gains a durable Ledger-backed sibling (`LedgerPacketStore`, selected
+by `KANBAN_UI_PACKET_LEDGER=1`) over five additive tables (`packet.v1`:
+`readiness_packets`, `packet_revisions`, `packet_reviews`, `packet_events`,
+`packet_work_links`) — canonical DDL in-package with a **byte-identical** copy in
+`services/ledger/app.py`, drift-tested. Packets **survive restart**; every
+plan-content edit (`POST /api/packets/{id}/revise`) mints a new **immutable**
+revision with a deterministic `content_digest` **over plan-content only** (reviews
+excluded, so a review never mints a revision); a review **binds to the revision it
+reviewed** — editing content reverts slots to `pending` and a stale
+`expected_revision` is **409** (`PacketRevisionConflict`); a **committed packet is
+frozen** at the DB layer (revision/review writes rejected). `commit` is
+**idempotent across the cockpit→Ledger boundary**: a re-commit after a partial
+failure discovers the already-created graph via `packet_id` and **reuses it — no
+duplicate graph**. Status: **BUILT + HERMETIC_PROVEN**
+(`tests/test_packet_durable.py`, `tests/test_packet_ledger_schema.py`;
+restart-durability, immutable revision, digest determinism, revision-bound review,
+stale-409, frozen-after-commit, idempotent-commit). NOT deployed; the live H2
+review orchestration that fills the slots remains the next, separately-reviewed
+slice. **Deployment coupling:** the idempotent-commit reconcile discovers an
+already-created graph via the work-graph store, so durable packets
+(`KANBAN_UI_PACKET_LEDGER=1`) must run with durable work items
+(`KANBAN_UI_WORKGRAPH_LEDGER=1`) — a ledger-backed packet over an in-memory work
+graph would lose the reconcile source across a restart. Single-writer cockpit
+only; the DB `/commit` guard is not yet a conditional `WHERE committed_at IS NULL`
+update, so concurrent writers are out of scope until a multi-writer deployment.
+
 **Work Map + Connected-Work UI (cockpit SPA).** A `work-map` view renders the
 graph as a mobile-friendly indented tree (items + typed edges), and a
 Connected-Work section renders each item's backend-generated `ResourceLink`s

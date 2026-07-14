@@ -72,6 +72,9 @@ WORKGRAPH_ENABLED = os.environ.get("KANBAN_UI_WORKGRAPH_ENABLED", "1") == "1"
 # Durable work graph: back it with the Ledger (survives restart → the work-item
 # ids are permanent enough for deep links). Off by default for a Ledger-less dev.
 WORKGRAPH_LEDGER = os.environ.get("KANBAN_UI_WORKGRAPH_LEDGER", "") == "1"
+# Durable Readiness Packets: back the packet store with the Ledger (survives
+# restart; immutable revisions; committed packets frozen). Off by default.
+PACKET_LEDGER = os.environ.get("KANBAN_UI_PACKET_LEDGER", "") == "1"
 # Agent sessions (Claude Agent / Codex Agent) are a SEPARATE execution path from
 # GatewayCore chat — proxied to the host worker (cc agent-worker), never
 # constructed here, never sharing GatewayCore dispatch. OFF by default like
@@ -1821,22 +1824,38 @@ def _get_packet_service():
         from datetime import datetime, timezone
 
         from command_center.work_graph import InMemoryPacketStore, PacketService
+        if PACKET_LEDGER:
+            from command_center.work_graph import LedgerPacketStore
+            store = LedgerPacketStore(
+                httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            store = InMemoryPacketStore()
         _packet_service = PacketService(
-            InMemoryPacketStore(),
+            store,
             clock=lambda: datetime.now(timezone.utc).isoformat(),
             id_factory=lambda: "pkt-" + secrets.token_hex(5))
     return _packet_service
+
+
+def _work_items_for_packet(packet_id: str) -> list[str]:
+    """The commit reconcile hook: work-item ids already created for this packet
+    (they carry packet_id). Lets a re-commit after a partial failure REUSE the
+    existing graph instead of creating a duplicate."""
+    svc = _get_workgraph_service()
+    return [it.work_item_id for it in svc.list_items()
+            if getattr(it, "packet_id", None) == packet_id]
 
 
 def _packet_call(fn, *args, **kwargs):
     """PacketNotReady -> 409, PacketError (malformed) -> 400, work-graph cycle ->
     409, unknown ref -> 404."""
     from command_center.work_graph import (
-        ChatPlanError, PacketError, PacketNotReady, WorkGraphError,
+        ChatPlanError, PacketError, PacketNotReady, PacketRevisionConflict,
+        WorkGraphError,
     )
     try:
         return fn(*args, **kwargs)
-    except PacketNotReady as exc:
+    except (PacketNotReady, PacketRevisionConflict) as exc:  # not-ready / stale -> 409
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (PacketError, ChatPlanError) as exc:   # malformed plan/packet -> 400
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1861,6 +1880,19 @@ class ReviewOutcomeIn(BaseModel):
     status: str                        # approved | changes_requested | error | pending
     summary: str = ""
     findings: list[str] = Field(default_factory=list)
+    session_id: str | None = None      # the agent-session/judge run, when present
+    expected_revision: int | None = None   # 409 if the packet changed under you
+
+
+class PacketReviseIn(BaseModel):
+    """Edit a packet's plan-content, minting a new immutable revision. Reviews are
+    not content, so they survive; but readiness is re-evaluated against the new
+    revision (a review bound to the old revision no longer counts)."""
+    expected_revision: int | None = None
+    title: str | None = None
+    research: str | None = None
+    runbook: list[str] | None = None
+    acceptance_criteria: list[str] | None = None
 
 
 @app.post("/api/packets", status_code=201)
@@ -1888,6 +1920,27 @@ def get_packet(packet_id: str) -> dict:
     return _packet_call(_get_packet_service().get, packet_id).model_dump()
 
 
+@app.get("/api/packets/{packet_id}/revisions")
+def list_packet_revisions_api(packet_id: str) -> list:
+    """The immutable revision history: one entry per plan-content edit, each with
+    the content_digest a review binds to."""
+    _require_workgraph()
+    return [r.model_dump()
+            for r in _packet_call(_get_packet_service().revisions, packet_id)]
+
+
+@app.post("/api/packets/{packet_id}/revise")
+def revise_packet(packet_id: str, body: PacketReviseIn) -> dict:
+    """Edit plan-content → new immutable revision. Refused (409) if committed
+    (frozen) or if expected_revision is stale."""
+    _require_workgraph()
+    return _packet_call(
+        _get_packet_service().revise, packet_id,
+        expected_revision=body.expected_revision, title=body.title,
+        research=body.research, runbook=body.runbook,
+        acceptance_criteria=body.acceptance_criteria).model_dump()
+
+
 @app.get("/api/packets/{packet_id}/readiness")
 def packet_readiness(packet_id: str) -> dict:
     """The deterministic readiness gate: the checks + whether the packet may be
@@ -1906,16 +1959,20 @@ def set_packet_review(packet_id: str, role: str, body: ReviewOutcomeIn) -> dict:
     _require_workgraph()
     return _packet_call(
         _get_packet_service().set_review, packet_id, role, status=body.status,
-        summary=body.summary, findings=body.findings).model_dump()
+        summary=body.summary, findings=body.findings, session_id=body.session_id,
+        expected_revision=body.expected_revision).model_dump()
 
 
 @app.post("/api/packets/{packet_id}/commit", status_code=201)
-def commit_packet(packet_id: str) -> dict:
+def commit_packet(packet_id: str, expected_revision: int | None = None) -> dict:
     """Create the work graph the packet describes — refused (409) unless the
-    packet is ready. Every created item links back via WorkItem.packet_id."""
+    packet is ready (or if expected_revision is stale). Every created item links
+    back via WorkItem.packet_id; a re-commit reuses an already-created graph."""
     _require_workgraph()
     return _packet_call(
-        _get_packet_service().commit, packet_id, _get_chat_planner()).model_dump()
+        _get_packet_service().commit, packet_id, _get_chat_planner(),
+        expected_revision=expected_revision,
+        work_items_for_packet=_work_items_for_packet).model_dump()
 
 
 @app.get("/api/domain/{domain_id}/cards")

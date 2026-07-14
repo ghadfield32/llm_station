@@ -224,8 +224,21 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   sessions (codex_agent/claude_code_local) + `judge_gate /skeptic`; H1 runs no
   agent + invents no verdict. Durable Ledger packet store also a follow-up
   (in-memory now, mirror-DDL pattern next, like Capture #44→#47).
-- NEXT: Phase H slice 2 (review orchestration); duplicate scoring; daily intake
-  DAG (Phase I).
+- Packet DURABILITY + revisions DONE (Phase H SLICE 2a; branch
+  `feat/packet-durable-store`, off #65; high-risk → fresh plan-review FIX-FIRST
+  reconciled first). NEW `work_graph/packet_ledger_schema.py` (packet.v1: 5 tables,
+  byte-identical copy in `services/ledger/app.py`, drift-tested) +
+  `packet_ledger_store.py` (`LedgerPacketStore`, `KANBAN_UI_PACKET_LEDGER=1`).
+  Packets survive restart; `POST /api/packets/{id}/revise` mints IMMUTABLE
+  revisions; `content_digest` over plan-content only (reviews excluded → no
+  revision inflation); review binds to its revision (edit reverts slots to pending;
+  stale `expected_revision`→409 `PacketRevisionConflict`); committed packet frozen
+  at the DB layer; `commit` idempotent (reconciles existing graph by packet_id → NO
+  duplicate). Tests: 13 durable + 4 schema + cockpit revise/409; 317 in the
+  affected suite pass, ruff clean. MASTER §4.9 + digest. In-memory still default;
+  NOT deployed.
+- NEXT: Phase H slice 2b (LIVE review orchestration filling the slots); duplicate
+  scoring; daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1
