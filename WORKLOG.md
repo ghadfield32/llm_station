@@ -5,6 +5,25 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Job-search filters + fast prep, and cc doctor fix (2026-07-13)
+- MERGED #52 (squash 0bfbca1): job-search **location/language hybrid filter**
+  (`src/command_center/job_search/geo_language.py`; seeded English + FL/AZ/
+  Philadelphia/CO/WA-Seattle/OR + US + remote; hard-exclude clear mismatch,
+  soft-penalize ambiguous; 50-state gazetteer handles Washington-DC vs WA),
+  **rejection feedback** (`rejections.py`; reason capture → filter-gap vs
+  working-filter suggestions; CLI `cc job-search reject`/`rejections-report`),
+  **fast selection** (`app.py` `_JobPrepQueue`: move returns instantly, bg worker
+  prepares, "preparing packet…" badge). Cockpit rebuilt+redeployed on :8787.
+- FIXED cc doctor crash (TypeError): `check_forbidden_provider_scan` (doctor.py)
+  called `check_env_files/process_env/compose` with 1 arg after #26 changed them
+  to `(errors, forbidden)`. Fix = doctor builds `forbidden=FORBIDDEN_KEYS` and
+  subtracts a lane's keys when `frontier_egress_ready()`/`agent_session_egress_ready()`
+  is True (egress-aware, mirrors `main()`); `permitted_lanes` recorded in evidence.
+  Now `cc doctor` runs: PASS=18 FAIL=0 (3 BLOCKED are unrelated appflowy/branch-
+  protection/discord config gaps). Tests: `test_doctor.py` +3.
+- NEXT: PR the doctor fix to main (user-controlled). Open item: `"<lang>-speaking"`
+  postings are hard-excluded (tunable, filter drawer).
+
 ## Chat-first cockpit + Universal Capture + Work Graph (2026-07-13)
 - MERGED to main: chat-first Assistant chooser — Claude/Codex selectable, no
   "start from a mission" dead-end (#41); Track-as-mission for agent + gateway
