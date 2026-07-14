@@ -912,9 +912,10 @@ matched by exactly one rule leaves the item's board unset and raises a
 question rather than **inventing** an edge whose endpoints text can't fix; an
 **exact** normalized-title match against an existing item becomes a
 `duplicate_candidate` + question, never an auto-drop. No LLM, no fuzzy
-thresholds; board calibration is a later phase, so with no injected rules every
-board is a question against the boards that already exist in the graph. The
-human reviews/edits the proposal, then calls `/convert` or `/commit`.
+thresholds. Its board rules are **learned from the correction log** (see
+calibration below); with no evidence yet, every board is a question against the
+boards that exist in the graph. The human reviews/edits the proposal, then calls
+`/convert` or `/commit`.
 
 **Confirmation gate — "this will create …" (`summarize_plan`).**
 `POST /api/work-items/plan-summary` returns a **deterministic** count of a
@@ -939,6 +940,21 @@ phase that learns from this log (past corrections only). Same mirror-DDL Ledger
 pattern (`routing.telemetry.v1`, drift-guarded), durable under
 `KANBAN_UI_WORKGRAPH_LEDGER`. Recording is planning, not a mission.
 
+**Evidence-backed routing calibration (`work_graph/calibration.py`).**
+`RoutingCalibrator` closes the loop: it learns keyword→board rules **from the
+correction log** so the router suggests boards grounded in what the human
+actually chose, instead of always asking. It is deterministic and time-ordered —
+`derive(as_of=…)` uses **past corrections only** (temporal split, no leakage); a
+keyword's board is its **data-driven majority** (ties are excluded, not guessed);
+every `DerivedRule` carries its **support count + full per-board distribution**
+as evidence; and `min_support` is an explicit dial (default 1 = "≥1 real
+observation") — **no invented thresholds**. `_build_work_router` feeds the
+derived `BoardRule`s in (domain resolved from real placements — an unresolvable
+board is skipped, never fabricated); `GET /api/routing-rules` surfaces the
+learned rules + evidence. Suggestions remain **human-confirmed** (a proposal, not
+auto-routing), and every override feeds back as new telemetry — a closed,
+self-improving, honest loop.
+
 **Work Map + Connected-Work UI (cockpit SPA).** A `work-map` view renders the
 graph as a mobile-friendly indented tree (items + typed edges), and a
 Connected-Work section renders each item's backend-generated `ResourceLink`s
@@ -947,19 +963,22 @@ verbatim; the SPA's URL router carries `work`/`depth` (with `pushState`/
 
 **Readiness status.** Contracts + graph service + durable Ledger store +
 permalink resolver + chat receipts + capture→work conversion + routing +
-confirmation-gate summary + correction telemetry are **BUILT + HERMETIC_PROVEN**
-(`tests/test_work_graph*.py`, `tests/test_agent_kanban_ui_workgraph.py`,
+confirmation-gate summary + correction telemetry + evidence-backed calibration
+are **BUILT + HERMETIC_PROVEN** (`tests/test_work_graph*.py`,
+`tests/test_agent_kanban_ui_workgraph.py`,
 `tests/test_agent_kanban_ui_capture_convert.py`, `tests/test_intake_convert.py`,
 `tests/test_work_graph_router.py`, `tests/test_work_graph_plan_summary.py`,
-`tests/test_routing_telemetry*.py`, `tests/test_agent_kanban_ui_routing_telemetry.py`
-— graph correctness, cycle policy, durability across restart, permalink
-resolution, preview/route/summary-are-side-effect-free, commit atomicity,
-capture-linked provenance, evidence-tagged/never-auto-routed proposals,
-deterministic plan counts, correction-evidence persists across restart,
-no-mission safety); the Work Map SPA is verified by `npm run build`. Next phases:
-evidence-backed routing **calibration** (learn board rules from the correction
-log — not hand-authored heuristics — plus duplicate scoring) and the packet/review
-chain — neither changes the identity/placement/link contract above.
+`tests/test_routing_telemetry*.py`, `tests/test_routing_calibration.py`,
+`tests/test_agent_kanban_ui_routing_telemetry.py`,
+`tests/test_agent_kanban_ui_routing_calibration.py` — graph correctness, cycle
+policy, durability across restart, permalink resolution,
+preview/route/summary-are-side-effect-free, commit atomicity, capture-linked
+provenance, evidence-tagged/never-auto-routed proposals, deterministic plan
+counts, correction-evidence persists across restart, past-only rule derivation
+with majority + support evidence, learn→suggest closed loop, no-mission safety);
+the Work Map SPA is verified by `npm run build`. Next phases: duplicate scoring
+(fuzzy dedup, evidence-calibrated) and the packet/review chain (Phase H) — neither
+changes the identity/placement/link contract above.
 
 ---
 

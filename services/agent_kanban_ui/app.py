@@ -1651,16 +1651,35 @@ class RouteTextIn(BaseModel):
     capture_id: str | None = None
 
 
+def _board_domain_resolver(placements):
+    """board_id -> domain_id, learned from REAL existing placements (the
+    most-common domain seen for that board). Returns None for an unknown board so
+    the calibrator never fabricates a domain."""
+    from collections import Counter, defaultdict
+    doms: dict[str, Counter] = defaultdict(Counter)
+    for p in placements:
+        doms[p.board_id][p.domain_id] += 1
+    resolved = {b: c.most_common(1)[0][0] for b, c in doms.items()}
+    return lambda board_id: resolved.get(board_id)
+
+
 def _build_work_router():
     from command_center.intake import split_bulk_list
-    from command_center.work_graph import WorkRouter
+    from command_center.work_graph import RoutingCalibrator, WorkRouter
     svc = _get_workgraph_service()
     existing = [(i.work_item_id, i.title) for i in svc.list_items()]
+    placements = svc._store.list_placements()
     # board-question options are a HINT sourced from boards that actually exist in
     # the graph (real, always-available) — not the domain config file, so routing
     # never depends on config plumbing. A fresh graph offers none (human types one).
-    known = sorted({p.board_id for p in svc._store.list_placements()})
-    return WorkRouter(split=split_bulk_list, board_rules=(),
+    known = sorted({p.board_id for p in placements})
+    # EVIDENCE-backed calibration: derive keyword->board rules from the human
+    # correction log (past corrections only). The router then makes evidence-tagged
+    # suggestions instead of always asking; every suggestion is still confirmed by
+    # the human (proposal, not auto-routing), and overrides feed back as telemetry.
+    rules = RoutingCalibrator(_get_telemetry_service().list()).board_rules(
+        _board_domain_resolver(placements))
+    return WorkRouter(split=split_bulk_list, board_rules=rules,
                       known_boards=known, existing_titles=existing)
 
 
@@ -1756,6 +1775,24 @@ def list_routing_corrections(since: str | None = None, board: str | None = None,
     return {"corrections": [c.model_dump()
                             for c in svc.list(since=since, board=board, limit=limit)],
             "summary": svc.summary()}
+
+
+@app.get("/api/routing-rules")
+def routing_rules() -> dict:
+    """What the router has LEARNED from the correction log: `derived` = every
+    keyword->board association with its support + full per-board distribution
+    (the evidence), `applied` = the BoardRules currently fed to the router (one
+    per board, domain resolved from real placements). Read-only; past
+    corrections only; derives no rule without evidence and invents no domain."""
+    _require_workgraph()
+    from command_center.work_graph import RoutingCalibrator
+    svc = _get_workgraph_service()
+    placements = svc._store.list_placements()
+    calib = RoutingCalibrator(_get_telemetry_service().list())
+    derived = calib.derive()                       # derive once, reuse below
+    applied = calib.board_rules(_board_domain_resolver(placements), rules=derived)
+    return {"derived": [r.model_dump() for r in derived],
+            "applied": [r.model_dump() for r in applied]}
 
 
 @app.post("/api/work-items/plan-summary")
