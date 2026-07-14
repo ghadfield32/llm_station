@@ -1188,3 +1188,33 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 .rej-sugg.rej-medium { border-left-color: var(--warn); }
 .rej-sugg.rej-low { border-left-color: var(--muted); }
 .rej-area { font-weight: 600; color: var(--muted); text-transform: capitalize; }
+
+/* ---- work map: mobile-friendly indented work-graph tree ---- */
+.workmap { display: flex; flex-direction: column; gap: 10px; }
+.workmap-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.workmap-head .select { padding: 4px 8px; }
+.wm-item { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.wm-item-head { display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  text-align: left; background: none; border: none; color: var(--fg); cursor: pointer;
+  padding: 0; width: 100%; }
+.wm-item-head:hover .wm-title { color: var(--accent); }
+.wm-title { font-weight: 600; }
+.wm-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.wm-edges { display: flex; flex-direction: column; gap: 4px; margin-left: 6px;
+  padding-left: 10px; border-left: 2px solid var(--border); }
+.wm-relation { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--muted); }
+.wm-targets { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px; }
+.wm-targets li { display: flex; align-items: center; gap: 6px; }
+.wm-target-link { background: none; border: none; color: var(--accent); cursor: pointer;
+  padding: 0; text-align: left; font-size: 13px; }
+.wm-target-link:hover { text-decoration: underline; }
+.wm-blocking { color: var(--warn); }
+.connected-work { background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; }
+.connected-links { list-style: none; margin: 6px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 4px; }
+.connected-links a { color: var(--accent); text-decoration: none; }
+.connected-links a:hover { text-decoration: underline; }
