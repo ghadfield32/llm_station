@@ -54,6 +54,7 @@ REQUIRED_FILES = (
     ("src/command_center/work_graph/router.py", "work_graph/router.py"),
     ("src/command_center/work_graph/telemetry_schema.py", "work_graph/telemetry"),
     ("src/command_center/work_graph/calibration.py", "work_graph/calibration.py"),
+    ("src/command_center/work_graph/packet.py", "work_graph/packet.py"),
 )
 
 # claims that were true once and would now be a lie — must never reappear
@@ -86,6 +87,7 @@ REQUIRED_ENDPOINTS = (
     ("/api/work-items/plan-summary", ("services/agent_kanban_ui/app.py",)),
     ("/api/routing-corrections", ("services/agent_kanban_ui/app.py",)),
     ("/api/routing-rules", ("services/agent_kanban_ui/app.py",)),
+    ("/api/packets", ("services/agent_kanban_ui/app.py",)),
 )
 
 

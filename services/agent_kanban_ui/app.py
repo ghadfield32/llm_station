@@ -1805,6 +1805,119 @@ def work_plan_summary(plan: WorkPlanIn) -> dict:
     return summarize_plan(plan).model_dump()
 
 
+# ── Readiness Packet (Phase H, slice 1): review a unit of work before creating it
+# A packet gathers the Work Graph Plan + runbook + research + acceptance criteria
+# + per-role review slots, and a readiness gate that commit must pass. Assembling
+# and committing a packet is PLANNING (creates work items, no wall verb); the
+# independent Claude/Codex review orchestration that FILLS the review slots is a
+# later, separately-reviewed slice — here slots start pending / are set by a human.
+_packet_service = None   # type: ignore[var-annotated]
+
+
+def _get_packet_service():
+    global _packet_service
+    if _packet_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.work_graph import InMemoryPacketStore, PacketService
+        _packet_service = PacketService(
+            InMemoryPacketStore(),
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda: "pkt-" + secrets.token_hex(5))
+    return _packet_service
+
+
+def _packet_call(fn, *args, **kwargs):
+    """PacketNotReady -> 409, PacketError (malformed) -> 400, work-graph cycle ->
+    409, unknown ref -> 404."""
+    from command_center.work_graph import (
+        ChatPlanError, PacketError, PacketNotReady, WorkGraphError,
+    )
+    try:
+        return fn(*args, **kwargs)
+    except PacketNotReady as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (PacketError, ChatPlanError) as exc:   # malformed plan/packet -> 400
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except WorkGraphError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class PacketAssembleIn(BaseModel):
+    plan: WorkPlanIn
+    title: str | None = None
+    research: str = ""
+    runbook: list[str] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    review_roles: list[str] = Field(default_factory=list)
+    capture_id: str | None = None
+    conversation_id: str | None = None
+
+
+class ReviewOutcomeIn(BaseModel):
+    status: str                        # approved | changes_requested | error | pending
+    summary: str = ""
+    findings: list[str] = Field(default_factory=list)
+
+
+@app.post("/api/packets", status_code=201)
+def assemble_packet(body: PacketAssembleIn) -> dict:
+    """Assemble a readiness packet from a plan (side-effect-free beyond storing the
+    packet — creates NO work items). Review slots open as pending."""
+    _require_workgraph()
+    return _packet_call(
+        _get_packet_service().assemble, body.plan, title=body.title,
+        capture_id=body.capture_id, conversation_id=body.conversation_id,
+        research=body.research, runbook=body.runbook,
+        acceptance_criteria=body.acceptance_criteria,
+        review_roles=body.review_roles).model_dump()
+
+
+@app.get("/api/packets")
+def list_packets(status: str | None = None) -> list:
+    _require_workgraph()
+    return [p.model_dump() for p in _get_packet_service().list(status=status)]
+
+
+@app.get("/api/packets/{packet_id}")
+def get_packet(packet_id: str) -> dict:
+    _require_workgraph()
+    return _packet_call(_get_packet_service().get, packet_id).model_dump()
+
+
+@app.get("/api/packets/{packet_id}/readiness")
+def packet_readiness(packet_id: str) -> dict:
+    """The deterministic readiness gate: the checks + whether the packet may be
+    committed (no error-level check failing)."""
+    _require_workgraph()
+    svc = _get_packet_service()
+    packet = _packet_call(svc.get, packet_id)
+    return {"ready": svc.is_ready(packet),          # the canonical gate predicate
+            "checks": [c.model_dump() for c in svc.readiness(packet_id)]}
+
+
+@app.post("/api/packets/{packet_id}/reviews/{role}")
+def set_packet_review(packet_id: str, role: str, body: ReviewOutcomeIn) -> dict:
+    """Set a review slot's outcome (a human override now; the review orchestration
+    will use the same path later)."""
+    _require_workgraph()
+    return _packet_call(
+        _get_packet_service().set_review, packet_id, role, status=body.status,
+        summary=body.summary, findings=body.findings).model_dump()
+
+
+@app.post("/api/packets/{packet_id}/commit", status_code=201)
+def commit_packet(packet_id: str) -> dict:
+    """Create the work graph the packet describes — refused (409) unless the
+    packet is ready. Every created item links back via WorkItem.packet_id."""
+    _require_workgraph()
+    return _packet_call(
+        _get_packet_service().commit, packet_id, _get_chat_planner()).model_dump()
+
+
 @app.get("/api/domain/{domain_id}/cards")
 def domain_cards(domain_id: str) -> dict:
     spec = _domain_spec(domain_id)
