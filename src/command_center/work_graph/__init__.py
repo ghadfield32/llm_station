@@ -35,12 +35,16 @@ from .packet import (
     InMemoryPacketStore,
     PacketError,
     PacketNotReady,
+    PacketRevision,
+    PacketRevisionConflict,
     PacketService,
+    PacketStore,
     ReadinessCheck,
     ReadinessPacket,
     ReviewSlot,
     RunbookStep,
 )
+from .packet_ledger_store import LedgerPacketStore
 from .planner import (
     ChatPlanError,
     ChatWorkPlanner,
@@ -110,7 +114,11 @@ __all__ = [
     "ReviewSlot",
     "ReadinessCheck",
     "PacketService",
+    "PacketStore",
     "InMemoryPacketStore",
+    "LedgerPacketStore",
+    "PacketRevision",
     "PacketError",
     "PacketNotReady",
+    "PacketRevisionConflict",
 ]
