@@ -470,6 +470,77 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 """.strip()
 
+# BYTE-IDENTICAL mirror of command_center.work_graph.packet_ledger_schema
+# .PACKET_SCHEMA_SQL (packet.v1). tests/test_packet_ledger_schema.py guards drift.
+PACKET_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS readiness_packets (
+    packet_id         TEXT PRIMARY KEY,
+    title             TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'draft',
+    capture_id        TEXT,
+    conversation_id   TEXT,
+    research          TEXT,
+    plan_json         TEXT NOT NULL,
+    plan_summary_json TEXT NOT NULL,
+    runbook_json      TEXT,
+    acceptance_json   TEXT,
+    reviews_json      TEXT,
+    current_revision  INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    committed_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS packet_revisions (
+    packet_id      TEXT NOT NULL,
+    revision       INTEGER NOT NULL,
+    content_digest TEXT NOT NULL,
+    snapshot_json  TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    PRIMARY KEY (packet_id, revision)
+);
+
+CREATE TABLE IF NOT EXISTS packet_reviews (
+    packet_id     TEXT NOT NULL,
+    revision      INTEGER NOT NULL,
+    role          TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    summary       TEXT,
+    findings_json TEXT,
+    session_id    TEXT,
+    reviewed_at   TEXT NOT NULL,
+    PRIMARY KEY (packet_id, revision, role)
+);
+
+CREATE TABLE IF NOT EXISTS packet_events (
+    event_seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    packet_id TEXT NOT NULL,
+    ts        TEXT NOT NULL,
+    kind      TEXT NOT NULL,
+    payload   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS packet_work_links (
+    packet_id    TEXT NOT NULL,
+    work_item_id TEXT NOT NULL,
+    PRIMARY KEY (packet_id, work_item_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_packet_revisions_packet
+    ON packet_revisions (packet_id);
+CREATE INDEX IF NOT EXISTS ix_packet_reviews_packet
+    ON packet_reviews (packet_id, revision);
+CREATE INDEX IF NOT EXISTS ix_packet_events_packet
+    ON packet_events (packet_id, event_seq);
+CREATE INDEX IF NOT EXISTS ix_packet_work_links_packet
+    ON packet_work_links (packet_id);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    TEXT PRIMARY KEY,
+    applied_at TEXT
+);
+""".strip()
+
 
 # Experiment lifecycle edges + the human-only wall, mirrored from
 # command_center.improvement.lifecycle. The Ledger enforces the structural walls
@@ -512,6 +583,9 @@ def init_db():
         c.executescript(ROUTING_TELEMETRY_SCHEMA_SQL)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("routing.telemetry.v1", _now()))
+        c.executescript(PACKET_SCHEMA_SQL)
+        c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+                  "VALUES (?, ?)", ("packet.v1", _now()))
         c.executescript("""
         CREATE TABLE IF NOT EXISTS missions (
             id TEXT PRIMARY KEY,
@@ -1590,6 +1664,190 @@ def get_work_events(work_item_id: str):
     return [{"event_seq": r["event_seq"], "work_item_id": r["work_item_id"],
              "ts": r["ts"], "kind": r["kind"],
              "payload": json.loads(r["payload"]) if r["payload"] else {}} for r in rows]
+
+
+# ── Readiness Packet durability (packet.v1) ───────────────────────────────────
+# Durable sibling of the in-memory packet store. `readiness_packets.reviews_json`
+# holds the CURRENT reviews (authoritative for reconstruction); `packet_reviews`
+# is the append-only per-revision audit; `packet_work_links` is authoritative for
+# a committed packet's work items. A committed packet (committed_at set) is frozen:
+# revision and review writes are rejected at the DB layer, not only in the service.
+def _packet_work_links(c, packet_id: str) -> list:
+    return [r["work_item_id"] for r in c.execute(
+        "SELECT work_item_id FROM packet_work_links WHERE packet_id=? ORDER BY rowid",
+        (packet_id,)).fetchall()]
+
+
+def _packet_to_dict(r, work_item_ids: list) -> dict:
+    return {
+        "packet_id": r["packet_id"], "title": r["title"], "status": r["status"],
+        "revision": r["current_revision"],
+        "capture_id": r["capture_id"], "conversation_id": r["conversation_id"],
+        "work_item_ids": work_item_ids,
+        "plan": json.loads(r["plan_json"]),
+        "plan_summary": json.loads(r["plan_summary_json"]),
+        "research": r["research"] or "",
+        "runbook": json.loads(r["runbook_json"]) if r["runbook_json"] else [],
+        "acceptance_criteria":
+            json.loads(r["acceptance_json"]) if r["acceptance_json"] else [],
+        "reviews": json.loads(r["reviews_json"]) if r["reviews_json"] else [],
+        "created_at": r["created_at"], "updated_at": r["updated_at"],
+        "committed_at": r["committed_at"],
+    }
+
+
+@app.post("/readiness-packet")
+def upsert_packet(body: dict):
+    with closing(_db()) as c:
+        frozen = c.execute(
+            "SELECT committed_at FROM readiness_packets WHERE packet_id=?",
+            (body["packet_id"],)).fetchone()
+        if frozen is not None and frozen["committed_at"] is not None:
+            # durable second wall: a committed packet's row is frozen (finalize
+            # goes through /commit, not this upsert)
+            raise HTTPException(409, f"packet {body['packet_id']} is committed; frozen")
+        c.execute(
+            "INSERT OR REPLACE INTO readiness_packets (packet_id, title, status, "
+            "capture_id, conversation_id, research, plan_json, plan_summary_json, "
+            "runbook_json, acceptance_json, reviews_json, current_revision, "
+            "created_at, updated_at, committed_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (body["packet_id"], body["title"], body.get("status", "draft"),
+             body.get("capture_id"), body.get("conversation_id"),
+             body.get("research", ""),
+             json.dumps(body["plan"]), json.dumps(body["plan_summary"]),
+             json.dumps(body.get("runbook") or []),
+             json.dumps(body.get("acceptance_criteria") or []),
+             json.dumps(body.get("reviews") or []),
+             int(body.get("revision", 1)),
+             body["created_at"], body["updated_at"], body.get("committed_at")))
+        c.commit()
+        row = c.execute("SELECT * FROM readiness_packets WHERE packet_id=?",
+                        (body["packet_id"],)).fetchone()
+        links = _packet_work_links(c, body["packet_id"])
+    return _packet_to_dict(row, links)
+
+
+@app.get("/readiness-packets")
+def list_packets_ledger(status: Optional[str] = None):
+    q = "SELECT * FROM readiness_packets"
+    params: list = []
+    if status is not None:
+        q += " WHERE status=?"; params.append(status)
+    q += " ORDER BY rowid"
+    with closing(_db()) as c:
+        rows = c.execute(q, params).fetchall()
+        return [_packet_to_dict(r, _packet_work_links(c, r["packet_id"]))
+                for r in rows]
+
+
+@app.get("/readiness-packet/{packet_id}")
+def get_packet_ledger(packet_id: str):
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM readiness_packets WHERE packet_id=?",
+                        (packet_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, f"no such packet: {packet_id}")
+        links = _packet_work_links(c, packet_id)
+    return _packet_to_dict(row, links)
+
+
+@app.post("/readiness-packet/{packet_id}/revision")
+def append_packet_revision(packet_id: str, body: dict):
+    with closing(_db()) as c:
+        row = c.execute("SELECT committed_at FROM readiness_packets WHERE packet_id=?",
+                        (packet_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, f"no such packet: {packet_id}")
+        if row["committed_at"] is not None:
+            raise HTTPException(409, f"packet {packet_id} is committed; frozen")
+        exists = c.execute(
+            "SELECT 1 FROM packet_revisions WHERE packet_id=? AND revision=?",
+            (packet_id, int(body["revision"]))).fetchone()
+        if exists:
+            raise HTTPException(
+                409, f"packet {packet_id} revision {body['revision']} already exists")
+        c.execute(
+            "INSERT INTO packet_revisions (packet_id, revision, content_digest, "
+            "snapshot_json, created_at) VALUES (?,?,?,?,?)",
+            (packet_id, int(body["revision"]), body["content_digest"],
+             body["snapshot_json"], body["created_at"]))
+        c.commit()
+    return {"ok": True}
+
+
+@app.get("/readiness-packet/{packet_id}/revisions")
+def list_packet_revisions(packet_id: str):
+    with closing(_db()) as c:
+        rows = c.execute(
+            "SELECT packet_id, revision, content_digest, created_at "
+            "FROM packet_revisions WHERE packet_id=? ORDER BY revision",
+            (packet_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.post("/readiness-packet/{packet_id}/review")
+def record_packet_review(packet_id: str, body: dict):
+    with closing(_db()) as c:
+        row = c.execute("SELECT committed_at FROM readiness_packets WHERE packet_id=?",
+                        (packet_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, f"no such packet: {packet_id}")
+        if row["committed_at"] is not None:      # durable frozen-after-commit wall
+            raise HTTPException(409, f"packet {packet_id} is committed; frozen")
+        c.execute(
+            "INSERT OR REPLACE INTO packet_reviews (packet_id, revision, role, "
+            "status, summary, findings_json, session_id, reviewed_at) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (packet_id, int(body["revision"]), body["role"], body["status"],
+             body.get("summary", ""), json.dumps(body.get("findings") or []),
+             body.get("session_id"), body["reviewed_at"]))
+        c.commit()
+    return {"ok": True}
+
+
+@app.post("/readiness-packet/{packet_id}/work-links")
+def add_packet_work_links(packet_id: str, body: dict):
+    with closing(_db()) as c:
+        for wid in body.get("work_item_ids") or []:
+            c.execute("INSERT OR IGNORE INTO packet_work_links (packet_id, "
+                      "work_item_id) VALUES (?,?)", (packet_id, wid))
+        c.commit()
+        links = _packet_work_links(c, packet_id)
+    return {"work_item_ids": links}
+
+
+@app.get("/readiness-packet/{packet_id}/work-links")
+def get_packet_work_links(packet_id: str):
+    with closing(_db()) as c:
+        return {"work_item_ids": _packet_work_links(c, packet_id)}
+
+
+@app.post("/readiness-packet/{packet_id}/commit")
+def commit_packet_ledger(packet_id: str, body: dict):
+    """Atomically finalize a packet: set committed_at + status and write the
+    work-item links in ONE transaction (no committed-but-unlinked window).
+    Rejects a double commit (409) at the DB layer."""
+    with closing(_db()) as c:
+        row = c.execute("SELECT committed_at FROM readiness_packets WHERE packet_id=?",
+                        (packet_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, f"no such packet: {packet_id}")
+        if row["committed_at"] is not None:
+            raise HTTPException(409, f"packet {packet_id} is already committed")
+        c.execute(
+            "UPDATE readiness_packets SET status=?, committed_at=?, updated_at=? "
+            "WHERE packet_id=?",
+            (body.get("status", "committed"), body["committed_at"],
+             body["updated_at"], packet_id))
+        for wid in body.get("work_item_ids") or []:
+            c.execute("INSERT OR IGNORE INTO packet_work_links (packet_id, "
+                      "work_item_id) VALUES (?,?)", (packet_id, wid))
+        c.commit()                                 # single txn = atomic finalize
+        row2 = c.execute("SELECT * FROM readiness_packets WHERE packet_id=?",
+                         (packet_id,)).fetchone()
+        links = _packet_work_links(c, packet_id)
+    return _packet_to_dict(row2, links)
 
 
 # ── router-correction telemetry (routing.telemetry.v1) ────────────────────────

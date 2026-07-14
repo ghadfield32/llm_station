@@ -97,3 +97,22 @@ def test_packets_disabled_is_503(monkeypatch):
     _mod, client = _load(monkeypatch, enabled=False)
     assert client.post("/api/packets", json=_plan_body()).status_code == 503
     assert client.get("/api/packets").status_code == 503
+
+
+def test_revise_mints_revision_and_stale_review_is_409(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    pid = client.post("/api/packets", json=_plan_body(
+        review_roles=["codex_agent"])).json()["packet_id"]
+    # revise plan-content -> revision 2, reviews revert to pending
+    r = client.post(f"/api/packets/{pid}/revise", json={"research": "scope changed"})
+    assert r.status_code == 200, r.text
+    assert r.json()["revision"] == 2
+    assert r.json()["reviews"][0]["status"] == "pending"
+    # revision history exposed
+    revs = client.get(f"/api/packets/{pid}/revisions").json()
+    assert [rv["revision"] for rv in revs] == [1, 2]
+    assert revs[0]["content_digest"] != revs[1]["content_digest"]
+    # a reviewer who read revision 1 approving it now -> 409 (stale)
+    stale = client.post(f"/api/packets/{pid}/reviews/codex_agent",
+                        json={"status": "approved", "expected_revision": 1})
+    assert stale.status_code == 409, stale.text
