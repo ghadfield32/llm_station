@@ -124,8 +124,24 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   verbatim). Verified: `npm run build` (tsc + vite) green, twice, independently.
   MASTER §4.9 routing + work-map paragraphs + truth-check router file/endpoint +
   digest re-record.
-- NEXT: routing calibration (evidence-backed board rules + duplicate scoring);
-  packet + review chain (Phase H); daily intake DAG (Phase I).
+- Router-correction telemetry DONE (branch `feat/routing-telemetry`, off main
+  w/#60): the durable EVIDENCE for later calibration. NEW `RoutingCorrection`
+  contract + `telemetry_schema.py` (`routing.telemetry.v1`: routing_corrections)
+  + byte-mirror in `services/ledger/app.py` (drift-guarded) + REST routes +
+  `telemetry_store.py` (InMemory + Ledger, same surface, 404→KeyError) +
+  `telemetry.py` `RoutingTelemetryService` (record/get/list/summary — accepted =
+  chosen==suggested; summary is read-only, NO derived rules; acceptance_rate=None
+  with no evidence). Cockpit `POST /api/routing-corrections` (record, 201) + `GET`
+  (log + summary), gated on WORKGRAPH_ENABLED, durable under
+  KANBAN_UI_WORKGRAPH_LEDGER. Fresh read-only reviewer pass (durable-state + public
+  endpoint). Tests: 2 drift + 7 service/durability (survives restart) + 5 cockpit;
+  331 passed via PYTHONPATH=worktree/src. MASTER §4.9 + truth-check + digest.
+  Deliberately derives NO board rules — that's the SEPARATE calibration phase.
+- NOTE: this PR + #61 (plan-summary, still open) both touch work_graph/__init__,
+  MASTER §4.9, truth-check, capabilities digest, WORKLOG → whichever merges second
+  needs a trivial union merge + digest re-record.
+- NEXT: evidence-backed routing calibration (learn board rules from the correction
+  log); packet + review chain (Phase H); daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

@@ -52,6 +52,7 @@ REQUIRED_FILES = (
     ("src/command_center/work_graph/ledger_schema.py", "work_graph/ledger_schema.py"),
     ("src/command_center/work_graph/planner.py", "work_graph/planner.py"),
     ("src/command_center/work_graph/router.py", "work_graph/router.py"),
+    ("src/command_center/work_graph/telemetry_schema.py", "work_graph/telemetry"),
 )
 
 # claims that were true once and would now be a lie — must never reappear
@@ -81,6 +82,7 @@ REQUIRED_ENDPOINTS = (
     ("/api/chat/work-items/commit", ("services/agent_kanban_ui/app.py",)),
     ("/api/captures/{capture_id}/convert", ("services/agent_kanban_ui/app.py",)),
     ("/api/work-items/route", ("services/agent_kanban_ui/app.py",)),
+    ("/api/routing-corrections", ("services/agent_kanban_ui/app.py",)),
 )
 
 

@@ -916,6 +916,20 @@ thresholds; board calibration is a later phase, so with no injected rules every
 board is a question against the boards that already exist in the graph. The
 human reviews/edits the proposal, then calls `/convert` or `/commit`.
 
+**Router-correction telemetry — the durable EVIDENCE for calibration
+(`work_graph/telemetry*`).** When a human accepts / changes / declines the board
+the router proposed, that decision is recorded as durable ground truth:
+`POST /api/routing-corrections` writes a `RoutingCorrection`
+(`title` = the routed text, `chosen_board_id` = the label, `accepted` = did the
+suggestion match, `matched_keywords` = the router's evidence, `at` = timestamp
+for temporal splits); `GET /api/routing-corrections` returns the log + a
+**read-only** summary (counts, acceptance rate, chosen-board tallies). It derives
+**no rules** — that keeps the "no auto-routing until *evidence-backed*
+calibration" discipline honest: calibration is a deliberately separate later
+phase that learns from this log (past corrections only). Same mirror-DDL Ledger
+pattern (`routing.telemetry.v1`, drift-guarded), durable under
+`KANBAN_UI_WORKGRAPH_LEDGER`. Recording is planning, not a mission.
+
 **Work Map + Connected-Work UI (cockpit SPA).** A `work-map` view renders the
 graph as a mobile-friendly indented tree (items + typed edges), and a
 Connected-Work section renders each item's backend-generated `ResourceLink`s
@@ -923,16 +937,19 @@ verbatim; the SPA's URL router carries `work`/`depth` (with `pushState`/
 `popstate`) so deep links and Back/Forward work.
 
 **Readiness status.** Contracts + graph service + durable Ledger store +
-permalink resolver + chat receipts + capture→work conversion + routing are
-**BUILT + HERMETIC_PROVEN** (`tests/test_work_graph*.py`,
+permalink resolver + chat receipts + capture→work conversion + routing +
+correction telemetry are **BUILT + HERMETIC_PROVEN** (`tests/test_work_graph*.py`,
 `tests/test_agent_kanban_ui_workgraph.py`,
 `tests/test_agent_kanban_ui_capture_convert.py`, `tests/test_intake_convert.py`,
-`tests/test_work_graph_router.py` — graph correctness, cycle policy, durability
-across restart, permalink resolution, preview/route-are-side-effect-free, commit
-atomicity, capture-linked provenance, evidence-tagged/never-auto-routed proposals,
-no-mission safety); the Work Map SPA is verified by `npm run build`. Next phases:
-routing calibration (evidence-backed board rules + duplicate scoring) and the
-packet/review chain — neither changes the identity/placement/link contract above.
+`tests/test_work_graph_router.py`, `tests/test_routing_telemetry*.py`,
+`tests/test_agent_kanban_ui_routing_telemetry.py` — graph correctness, cycle
+policy, durability across restart, permalink resolution,
+preview/route-are-side-effect-free, commit atomicity, capture-linked provenance,
+evidence-tagged/never-auto-routed proposals, correction-evidence persists across
+restart, no-mission safety); the Work Map SPA is verified by `npm run build`.
+Next phases: evidence-backed routing **calibration** (learn board rules from the
+correction log — not hand-authored heuristics) and the packet/review chain —
+neither changes the identity/placement/link contract above.
 
 ---
 

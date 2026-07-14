@@ -14,6 +14,7 @@ from .schemas import (
     BoardSuggestion,
     PermalinkResolution,
     ResourceLink,
+    RoutingCorrection,
     RoutingQuestion,
     TaskBatchReceipt,
     TaskCreationReceipt,
@@ -43,6 +44,11 @@ from .router import (
 )
 from .service import WorkGraphError, WorkGraphService
 from .store import InMemoryWorkGraphStore
+from .telemetry import RoutingTelemetryService
+from .telemetry_store import (
+    InMemoryRoutingTelemetryStore,
+    LedgerRoutingTelemetryStore,
+)
 
 __all__ = [
     "ACYCLIC_RELATIONS",
@@ -76,4 +82,8 @@ __all__ = [
     "RoutingProposal",
     "BoardRule",
     "DuplicateCandidate",
+    "RoutingCorrection",
+    "RoutingTelemetryService",
+    "InMemoryRoutingTelemetryStore",
+    "LedgerRoutingTelemetryStore",
 ]

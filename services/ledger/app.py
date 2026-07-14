@@ -442,6 +442,34 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 """.strip()
 
+# BYTE-IDENTICAL mirror of command_center.work_graph.telemetry_schema.SCHEMA_SQL
+# (routing.telemetry.v1). tests/test_routing_telemetry_schema.py guards drift.
+ROUTING_TELEMETRY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS routing_corrections (
+    correction_id      TEXT PRIMARY KEY,
+    at                 TEXT NOT NULL,
+    title              TEXT NOT NULL,
+    ref                TEXT,
+    suggested_board_id TEXT,
+    chosen_board_id    TEXT,
+    accepted           INTEGER NOT NULL DEFAULT 0,
+    matched_keywords   TEXT,
+    conversation_id    TEXT,
+    capture_id         TEXT,
+    source             TEXT NOT NULL DEFAULT 'chat'
+);
+
+CREATE INDEX IF NOT EXISTS ix_routing_corrections_at
+    ON routing_corrections (at);
+CREATE INDEX IF NOT EXISTS ix_routing_corrections_chosen
+    ON routing_corrections (chosen_board_id);
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    TEXT PRIMARY KEY,
+    applied_at TEXT
+);
+""".strip()
+
 
 # Experiment lifecycle edges + the human-only wall, mirrored from
 # command_center.improvement.lifecycle. The Ledger enforces the structural walls
@@ -481,6 +509,9 @@ def init_db():
         c.executescript(WORKGRAPH_SCHEMA_SQL)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("workgraph.v1", _now()))
+        c.executescript(ROUTING_TELEMETRY_SCHEMA_SQL)
+        c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
+                  "VALUES (?, ?)", ("routing.telemetry.v1", _now()))
         c.executescript("""
         CREATE TABLE IF NOT EXISTS missions (
             id TEXT PRIMARY KEY,
@@ -1559,6 +1590,69 @@ def get_work_events(work_item_id: str):
     return [{"event_seq": r["event_seq"], "work_item_id": r["work_item_id"],
              "ts": r["ts"], "kind": r["kind"],
              "payload": json.loads(r["payload"]) if r["payload"] else {}} for r in rows]
+
+
+# ── router-correction telemetry (routing.telemetry.v1) ────────────────────────
+_CORRECTION_COLS = (
+    "correction_id", "at", "title", "ref", "suggested_board_id",
+    "chosen_board_id", "accepted", "matched_keywords", "conversation_id",
+    "capture_id", "source")
+
+
+def _correction_to_dict(r) -> dict:
+    d = dict(r)
+    d["accepted"] = bool(d["accepted"])
+    d["matched_keywords"] = (json.loads(d["matched_keywords"])
+                             if d.get("matched_keywords") else [])
+    return d
+
+
+@app.post("/routing-correction")
+def upsert_routing_correction(body: dict):
+    vals = [
+        body["correction_id"], body["at"], body["title"], body.get("ref"),
+        body.get("suggested_board_id"), body.get("chosen_board_id"),
+        int(bool(body.get("accepted"))),
+        json.dumps(body.get("matched_keywords") or []),
+        body.get("conversation_id"), body.get("capture_id"),
+        body.get("source", "chat")]
+    with closing(_db()) as c:
+        c.execute(f"INSERT OR REPLACE INTO routing_corrections "
+                  f"({', '.join(_CORRECTION_COLS)}) "
+                  f"VALUES ({', '.join('?' * len(_CORRECTION_COLS))})", vals)
+        c.commit()
+        row = c.execute("SELECT * FROM routing_corrections WHERE correction_id=?",
+                        (body["correction_id"],)).fetchone()
+    return _correction_to_dict(row)
+
+
+@app.get("/routing-correction/{correction_id}")
+def get_routing_correction(correction_id: str):
+    with closing(_db()) as c:
+        row = c.execute("SELECT * FROM routing_corrections WHERE correction_id=?",
+                        (correction_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, f"no such routing correction: {correction_id}")
+    return _correction_to_dict(row)
+
+
+@app.get("/routing-corrections")
+def list_routing_corrections(since: Optional[str] = None,
+                             board: Optional[str] = None,
+                             limit: Optional[int] = None):
+    q, params, conds = "SELECT * FROM routing_corrections", [], []
+    if since is not None:
+        conds.append("at>=?"); params.append(since)
+    if board is not None:
+        conds.append("chosen_board_id=?"); params.append(board)
+    if conds:
+        q += " WHERE " + " AND ".join(conds)
+    q += " ORDER BY at, rowid"
+    if limit is not None:
+        q += " LIMIT ?"; params.append(limit)
+    with closing(_db()) as c:
+        rows = c.execute(q, params).fetchall()
+    return [_correction_to_dict(r) for r in rows]
 
 
 @app.post("/model-usage/sample")

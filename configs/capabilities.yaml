@@ -161,7 +161,7 @@ entries:
         source_ref: https://deepmind.google/models/gemma/
       - relation: gate
         source_ref: docs/MASTER.md#65-the-model-update-pipeline-no-auto-promotion
-        digest: sha256:be50356820a3c89c5cce855cdc5397b9356b9a2c81d7cc83688119a055956a65
+        digest: sha256:cda6752769f0e52057a793109146aaa5a5fc512c978eafda5ab845c623b7f78f
 
   - identifier: urn:air:command-center.local:skill:agent-idea-evaluation
     display_name: Agent idea evaluation prompt
