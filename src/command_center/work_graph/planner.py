@@ -21,9 +21,11 @@ from collections.abc import Callable
 from pydantic import BaseModel, Field
 
 from .schemas import (
+    ACYCLIC_RELATIONS,
     TaskBatchReceipt,
     TaskCreationReceipt,
     WorkEdgeSummary,
+    WorkGraphPlanSummary,
     WorkItemSummary,
     WorkPlacement,
     WorkPlacementSummary,
@@ -189,3 +191,44 @@ def _edge_summary(e) -> WorkEdgeSummary:
     return WorkEdgeSummary(edge_id=e.edge_id, from_work_item_id=e.from_work_item_id,
                            to_work_item_id=e.to_work_item_id, relation=e.relation,
                            blocking=e.blocking, reason=e.reason)
+
+
+def summarize_plan(plan: WorkPlanIn) -> WorkGraphPlanSummary:
+    """A deterministic "this will create …" count of a proposed plan — the human
+    confirmation gate before anything is created. Pure counting, no side effects:
+    items by kind, primary/secondary placements, distinct boards, items with no
+    board (→ Inbox), and edges by relation (with the blocking subset called out)."""
+    items_by_kind: dict[str, int] = {}
+    boards: list[str] = []
+    primary = secondary = no_board = 0
+    for it in plan.items:
+        items_by_kind[it.kind] = items_by_kind.get(it.kind, 0) + 1
+        if it.primary_board is not None:
+            primary += 1
+            if it.primary_board.board_id not in boards:
+                boards.append(it.primary_board.board_id)
+        for b in it.secondary_boards:
+            secondary += 1
+            if b.board_id not in boards:
+                boards.append(b.board_id)
+        if it.primary_board is None and not it.secondary_boards:
+            no_board += 1
+
+    edges_by_relation: dict[str, int] = {}
+    blocking = 0
+    for e in plan.edges:
+        edges_by_relation[e.relation] = edges_by_relation.get(e.relation, 0) + 1
+        if e.relation in ACYCLIC_RELATIONS:
+            blocking += 1
+
+    warnings: list[str] = []
+    if no_board:
+        warnings.append(f"{no_board} item(s) have no board and will land in the "
+                        "Universal Inbox until given a home")
+    return WorkGraphPlanSummary(
+        item_count=len(plan.items), items_by_kind=items_by_kind,
+        placement_count=primary + secondary, primary_placement_count=primary,
+        secondary_placement_count=secondary, boards=boards,
+        items_without_board=no_board, edge_count=len(plan.edges),
+        edges_by_relation=edges_by_relation, blocking_edge_count=blocking,
+        warnings=warnings)

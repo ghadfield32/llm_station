@@ -28,8 +28,8 @@ from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, Field
 
-from .planner import PlanBoardRef, WorkPlanIn, WorkPlanItemIn
-from .schemas import BoardSuggestion, RoutingQuestion
+from .planner import PlanBoardRef, WorkPlanIn, WorkPlanItemIn, summarize_plan
+from .schemas import BoardSuggestion, RoutingQuestion, WorkGraphPlanSummary
 
 # keyword -> default WorkItem kind. A default LABEL the human can change, tagged
 # with the word that matched — not a claim about the work, just a starting point.
@@ -70,6 +70,7 @@ class RoutingProposal(BaseModel):
     conversation_id: str | None = None
     capture_id: str | None = None
     plan: WorkPlanIn
+    summary: WorkGraphPlanSummary | None = None    # "this will create …"
     board_suggestions: list[BoardSuggestion] = Field(default_factory=list)
     needs_confirmation: list[RoutingQuestion] = Field(default_factory=list)
     duplicate_candidates: list[DuplicateCandidate] = Field(default_factory=list)
@@ -127,6 +128,7 @@ class WorkRouter:
                           items=items, edges=[])
         return RoutingProposal(
             conversation_id=conversation_id, capture_id=capture_id, plan=plan,
+            summary=summarize_plan(plan),
             board_suggestions=suggestions, needs_confirmation=questions,
             duplicate_candidates=dups, notes=notes)
 

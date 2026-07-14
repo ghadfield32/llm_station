@@ -1685,6 +1685,16 @@ def route_capture_text(capture_id: str) -> dict:
         capture_id=rec.capture_id).model_dump()
 
 
+@app.post("/api/work-items/plan-summary")
+def work_plan_summary(plan: WorkPlanIn) -> dict:
+    """The confirmation gate: 'this will create N items / M placements / K edges'
+    for a proposed plan. Deterministic and side-effect-free — commits nothing;
+    the human reads it before choosing Create / Edit / Keep as note."""
+    from command_center.work_graph import summarize_plan
+    _require_workgraph()
+    return summarize_plan(plan).model_dump()
+
+
 @app.get("/api/domain/{domain_id}/cards")
 def domain_cards(domain_id: str) -> dict:
     spec = _domain_spec(domain_id)
