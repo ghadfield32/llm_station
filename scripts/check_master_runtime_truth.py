@@ -82,6 +82,7 @@ REQUIRED_ENDPOINTS = (
     ("/api/chat/work-items/commit", ("services/agent_kanban_ui/app.py",)),
     ("/api/captures/{capture_id}/convert", ("services/agent_kanban_ui/app.py",)),
     ("/api/work-items/route", ("services/agent_kanban_ui/app.py",)),
+    ("/api/work-items/plan-summary", ("services/agent_kanban_ui/app.py",)),
     ("/api/routing-corrections", ("services/agent_kanban_ui/app.py",)),
 )
 

@@ -39,9 +39,6 @@ $runs = $rows | Group-Object RunId | ForEach-Object {
 if ($runs.Count -lt 1) { throw "No valid snapshot runs were found." }
 $baseline = $runs[0]
 $latest = $runs[-1]
-$elapsed = $latest.Timestamp - $baseline.Timestamp
-$eligibleAt = $baseline.Timestamp.AddDays($MinimumDays)
-$mature = $elapsed.TotalDays -ge $MinimumDays
 
 $comparison = foreach ($targetRows in ($rows | Group-Object Target | Sort-Object Name)) {
     $ordered = @($targetRows.Group | Sort-Object Timestamp)
@@ -61,6 +58,8 @@ $comparison = foreach ($targetRows in ($rows | Group-Object Target | Sort-Object
         AnnualizedGiB = $annualized
         LatestErrors = $after.ErrorCount
         TargetElapsedDays = $targetElapsed.TotalDays
+        BaselineTimestamp = $before.Timestamp
+        LatestTimestamp = $after.Timestamp
     }
 }
 
@@ -89,13 +88,34 @@ $authoritative = Get-ClassRollup -ClassName "authoritative-retained"
 $criticalBackup = Get-ClassRollup -ClassName "critical-backup"
 $offsiteProtected = Get-ClassRollup -ClassName "offsite-protected"
 
+# The capacity gate starts when each classified authoritative target is first
+# observed. An older general snapshot or a later-added target cannot shorten
+# that target's required observation window.
+$gateTargets = @($comparison | Where-Object Class -eq "authoritative-retained")
+if ($gateTargets.Count -gt 0) {
+    $gateBaseline = ($gateTargets | Sort-Object BaselineTimestamp | Select-Object -First 1).BaselineTimestamp
+    $gateLatest = ($gateTargets | Sort-Object LatestTimestamp -Descending | Select-Object -First 1).LatestTimestamp
+    $gateElapsed = $gateLatest - $gateBaseline
+    $eligibleAt = ($gateTargets | ForEach-Object { $_.BaselineTimestamp.AddDays($MinimumDays) } |
+        Sort-Object | Select-Object -Last 1)
+    $mature = (@($gateTargets | Where-Object { $_.TargetElapsedDays -lt $MinimumDays }).Count -eq 0)
+    $gateLabel = "authoritative scope"
+} else {
+    $gateBaseline = $baseline.Timestamp
+    $gateLatest = $latest.Timestamp
+    $gateElapsed = $gateLatest - $gateBaseline
+    $eligibleAt = $gateBaseline.AddDays($MinimumDays)
+    $mature = $gateElapsed.TotalDays -ge $MinimumDays
+    $gateLabel = "all tracked targets (no authoritative scope yet)"
+}
+
 $lines = [System.Collections.Generic.List[string]]::new()
 $lines.Add("# Life Center growth report")
 $lines.Add("")
 $lines.Add("**Status:** " + $(if ($mature) { "MATURE ($MinimumDays-day minimum met)" } else { "COLLECTING" }))
-$lines.Add(('**Baseline:** {0} (`{1}`)  ' -f $baseline.Timestamp.ToString('o'), $baseline.RunId))
-$lines.Add(('**Latest:** {0} (`{1}`)  ' -f $latest.Timestamp.ToString('o'), $latest.RunId))
-$lines.Add("**Elapsed:** $([math]::Round($elapsed.TotalDays, 2)) days  ")
+$lines.Add(('**Capacity-gate baseline ({0}):** {1}  ' -f $gateLabel, $gateBaseline.ToString('o')))
+$lines.Add(('**Capacity-gate latest:** {0}  ' -f $gateLatest.ToString('o')))
+$lines.Add("**Elapsed:** $([math]::Round($gateElapsed.TotalDays, 2)) days  ")
 $lines.Add("**First eligible closeout:** $($eligibleAt.ToString('yyyy-MM-dd HH:mm zzz'))")
 $lines.Add("")
 $lines.Add("Targets are policy categories, not proof that every byte is durable. The overlapping project envelope is intentionally excluded because it contains generated dependencies and junctions; do not add runtime or system envelopes to retained-review categories.")
