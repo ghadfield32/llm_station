@@ -124,22 +124,48 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   verbatim). Verified: `npm run build` (tsc + vite) green, twice, independently.
   MASTER §4.9 routing + work-map paragraphs + truth-check router file/endpoint +
   digest re-record.
-- Confirmation gate DONE (branch `feat/work-graph-plan-summary`, off main w/#60):
-  §12 "this will create …". NEW `WorkGraphPlanSummary` schema + `summarize_plan()`
-  — deterministic count of a proposed plan (items by kind, primary/secondary
-  placements, distinct boards, items-without-board → Inbox, edges by relation +
-  blocking subset). Pure counting, no LLM/thresholds/side-effects. RoutingProposal
-  now carries `summary`; cockpit `POST /api/work-items/plan-summary` (commits
-  nothing) feeds the Create / Edit / Keep-as-note gate. Tests: 4 unit + 2 cockpit;
-  323 passed via PYTHONPATH=worktree/src. MASTER §4.9 + truth-check endpoint +
-  digest.
+- Confirmation gate DONE (#61, merged): §12 "this will create …". NEW
+  `WorkGraphPlanSummary` schema + `summarize_plan()` — deterministic count of a
+  proposed plan (items by kind, primary/secondary placements, distinct boards,
+  items-without-board → Inbox, edges by relation + blocking subset). Pure
+  counting, no LLM/thresholds/side-effects. RoutingProposal now carries `summary`;
+  cockpit `POST /api/work-items/plan-summary` (commits nothing) feeds the Create /
+  Edit / Keep-as-note gate.
 - Routing CALIBRATION reframed: deliberately did NOT hand-author a keyword
   ruleset — the plan requires EVIDENCE-backed calibration, so hand-written
   heuristics would violate "no silent auto-routing"/"no invented data". Real
-  calibration needs router-correction telemetry first (record human overrides of
-  suggestions) → that's the next slice, then evidence-derived board rules.
-- NEXT: router-correction telemetry → evidence-backed routing calibration; packet
-  + review chain (Phase H); daily intake DAG (Phase I).
+  calibration needs router-correction telemetry first (below), then
+  evidence-derived board rules.
+- Router-correction telemetry DONE (branch `feat/routing-telemetry`, off #60,
+  merged origin/main w/#61): the durable EVIDENCE for calibration. NEW
+  `RoutingCorrection` contract + `telemetry_schema.py` (`routing.telemetry.v1`:
+  routing_corrections) + byte-mirror in `services/ledger/app.py` (drift-guarded) +
+  REST routes + `telemetry_store.py` (InMemory + Ledger, same surface,
+  404→KeyError) + `telemetry.py` `RoutingTelemetryService` (record/get/list/
+  summary — accepted = chosen is set AND == suggested; summary read-only, NO
+  derived rules; acceptance_rate=None with no evidence). Cockpit
+  `POST /api/routing-corrections` (201) + `GET` (log + global summary), gated on
+  WORKGRAPH_ENABLED, durable under KANBAN_UI_WORKGRAPH_LEDGER. Fresh read-only
+  reviewer pass (durable-state + public endpoint) → verdict SHIP; nits applied
+  (accepted-comment, summary-is-global docstring, since-filter test, full-app-
+  reload durability test). Tests: 2 drift + 9 service/durability + 5 cockpit; 333
+  passed via PYTHONPATH=worktree/src. Derives NO board rules — that's the SEPARATE
+  calibration phase.
+- CI RACE FIXED (in #62, unblocking its lint-test): pre-existing flaky
+  `test_domain_surfaces::..._queues_packet_prep` — `command_center_provider`
+  `list_cards()`/`_read_fields()` read a card JSON file while background packet
+  prep rewrote it via non-atomic `Path.write_text` (truncate→write window → a
+  reader saw `''` → `json.loads('') JSONDecodeError`, Linux CI). Root cause =
+  unsynchronised concurrent access to shared card-store files. Fix: per-file
+  `threading.Lock` (module registry, one lock per abspath, shared across provider
+  instances) serialising all card-file reads/writes + atomic temp+`os.replace`
+  write (crash-safe; on Windows the lock also avoids os.replace-vs-open-handle
+  PermissionError — a 2nd symptom the atomic-only fix exposed there). Regression
+  test `test_upsert_is_atomic_under_concurrent_reads` (proven to FAIL on the
+  non-atomic writer, pass on the fix). Not defensive — the direct concurrency
+  primitive. 415 affected-area tests pass.
+- NEXT: evidence-backed routing calibration (learn board rules from the correction
+  log); packet + review chain (Phase H); daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

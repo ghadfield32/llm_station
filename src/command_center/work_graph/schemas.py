@@ -173,6 +173,26 @@ class BoardSuggestion(BaseModel):
     reason: str
 
 
+class RoutingCorrection(BaseModel):
+    """A human's decision after the router proposed (or declined to propose) a
+    board — the durable GROUND TRUTH that later, evidence-backed calibration
+    learns from. Nothing is derived from it yet; it is only recorded. `title` is
+    the routed text (the signal), `chosen_board_id` is the label (None = left in
+    the Inbox), `accepted` = the router's suggestion matched the human's choice,
+    and `matched_keywords` is the evidence the router used for its suggestion."""
+    correction_id: str
+    at: str                                  # ISO-8601 — for temporal splits
+    title: str                               # the routed text (the signal)
+    ref: str | None = None                   # plan item ref, if any
+    suggested_board_id: str | None = None    # router's proposal (None = it asked)
+    chosen_board_id: str | None = None       # human's pick (None = left in Inbox)
+    accepted: bool = False                   # chosen is set AND == suggested
+    matched_keywords: list[str] = Field(default_factory=list)  # router's evidence
+    conversation_id: str | None = None
+    capture_id: str | None = None
+    source: str = "chat"                     # chat | capture | inbox | …
+
+
 class TaskCreationReceipt(BaseModel):
     """The navigable result of creating ONE canonical work item: its summary, the
     board placements it got, the edges it participates in, and backend-generated

@@ -1685,6 +1685,79 @@ def route_capture_text(capture_id: str) -> dict:
         capture_id=rec.capture_id).model_dump()
 
 
+# ── router-correction telemetry: the durable EVIDENCE for later calibration ──
+# When a human accepts / changes / declines the board the router proposed, that
+# decision is recorded as ground truth. Nothing is derived from it here; it is
+# the log a future evidence-backed calibration phase learns from. Durable under
+# KANBAN_UI_WORKGRAPH_LEDGER (same ledger.db); recording is planning, not a
+# mission — no wall verb.
+_telemetry_service = None   # type: ignore[var-annotated]
+
+
+def _get_telemetry_service():
+    global _telemetry_service
+    if _telemetry_service is None:
+        import secrets
+        from datetime import datetime, timezone
+
+        from command_center.work_graph import (
+            InMemoryRoutingTelemetryStore,
+            LedgerRoutingTelemetryStore,
+            RoutingTelemetryService,
+        )
+        if WORKGRAPH_LEDGER:
+            store = LedgerRoutingTelemetryStore(
+                httpx.Client(base_url=LEDGER_BASE_URL, timeout=30))
+        else:
+            store = InMemoryRoutingTelemetryStore()
+        _telemetry_service = RoutingTelemetryService(
+            store,
+            clock=lambda: datetime.now(timezone.utc).isoformat(),
+            id_factory=lambda: "rc-" + secrets.token_hex(6))
+    return _telemetry_service
+
+
+class RoutingCorrectionIn(BaseModel):
+    title: str
+    ref: str | None = None
+    suggested_board_id: str | None = None
+    chosen_board_id: str | None = None
+    matched_keywords: list[str] = Field(default_factory=list)
+    conversation_id: str | None = None
+    capture_id: str | None = None
+    source: str = "chat"
+
+
+@app.post("/api/routing-corrections", status_code=201)
+def record_routing_correction(body: RoutingCorrectionIn) -> dict:
+    """Record a human's routing decision as durable evidence (accept / change /
+    decline a suggested board). Derives no rules — just logs the ground truth."""
+    _require_workgraph()
+    try:
+        return _get_telemetry_service().record(
+            body.title, ref=body.ref, suggested_board_id=body.suggested_board_id,
+            chosen_board_id=body.chosen_board_id,
+            matched_keywords=body.matched_keywords,
+            conversation_id=body.conversation_id, capture_id=body.capture_id,
+            source=body.source).model_dump()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/routing-corrections")
+def list_routing_corrections(since: str | None = None, board: str | None = None,
+                             limit: int | None = None) -> dict:
+    """The evidence log (honouring since/board/limit) + a read-only summary. The
+    summary is computed over the WHOLE log regardless of the filters (it is the
+    global evidence surface: totals, acceptance rate, chosen-board tallies), NOT a
+    rule set."""
+    _require_workgraph()               # 503 if the work graph is disabled
+    svc = _get_telemetry_service()
+    return {"corrections": [c.model_dump()
+                            for c in svc.list(since=since, board=board, limit=limit)],
+            "summary": svc.summary()}
+
+
 @app.post("/api/work-items/plan-summary")
 def work_plan_summary(plan: WorkPlanIn) -> dict:
     """The confirmation gate: 'this will create N items / M placements / K edges'
