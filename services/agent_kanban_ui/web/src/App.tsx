@@ -34,11 +34,14 @@ import {
   promoteChat, resolveAgentApproval, resumeAgentSession, sendAgentMessage, streamAgentEvents,
   UsageStatus, UsageLimit, CollectorHealth,
   fetchModelUsage, fetchCollectorHealth, refreshModelUsage,
+  WorkGraph, WorkEdge, ResourceLink,
+  getWorkGraph, getWorkGraphNeighbourhood, getWorkItemLinks,
 } from "./api";
 
-type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox";
+type View = "missions" | "boards" | "domains" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox" | "work-map";
 const NAV: { id: View; label: string }[] = [
   { id: "domains", label: "All Boards" },
+  { id: "work-map", label: "Work Map" },
   { id: "inbox", label: "Inbox" },
   { id: "settings", label: "Controls" },
   { id: "router", label: "Router" },
@@ -78,6 +81,31 @@ function initialViewFromUrl(): View {
 
 function initialDomainFromUrl(): string {
   return new URLSearchParams(window.location.search).get("domain") || "job_application";
+}
+
+// The selected work item (a WorkItem.work_item_id) — drives the Work Map's
+// neighbourhood fetch and every backend `?...&work=<id>` deep link.
+function initialWorkFromUrl(): string | null {
+  return new URLSearchParams(window.location.search).get("work") || null;
+}
+
+// Work-graph neighbourhood depth (hops from the selected item); default 1.
+function initialDepthFromUrl(): number {
+  const raw = new URLSearchParams(window.location.search).get("depth");
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : 1;
+}
+
+// The canonical query string for the current navigation state. view + domain are
+// always present (matching the pre-existing readers); work/depth only when set,
+// so a plain board view stays a clean `?view=…&domain=…`.
+function navSearch(view: View, domain: string, work: string | null, depth: number): string {
+  const p = new URLSearchParams();
+  p.set("view", view);
+  p.set("domain", domain);
+  if (work) p.set("work", work);
+  if (depth !== 1) p.set("depth", String(depth));
+  return "?" + p.toString();
 }
 
 // ---- filter bar (shared) --------------------------------------------------
@@ -5158,6 +5186,191 @@ function ChatView({ roles, runtime, draft, onBack }: {
   );
 }
 
+// ---- work map -------------------------------------------------------------
+// The WorkRelation vocabulary → human labels for the indented tree. Kept as a
+// lookup (not hardcoded per branch) so an unrecognized future relation still
+// degrades to the raw value instead of vanishing.
+const RELATION_LABELS: Record<string, string> = {
+  parent_of: "parent of",
+  blocks: "blocks",
+  related_to: "related to",
+  implements: "implements",
+  informs: "informs",
+  derived_from: "derived from",
+  duplicates: "duplicates",
+  supersedes: "supersedes",
+  supports: "supports",
+};
+
+// Connected Work: the backend-generated navigation receipts for one work item.
+// Each ResourceLink.href is rendered VERBATIM as an <a href> — the frontend never
+// assembles a work route. Ordered graph → primary board → other boards → chat →
+// mission so the canonical landing spots come first.
+function ConnectedWork({ workItemId }: { workItemId: string }) {
+  const [links, setLinks] = useState<ResourceLink[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLinks(null);
+    setError(null);
+    getWorkItemLinks(workItemId)
+      .then((ls) => { if (!cancelled) setLinks(ls); })
+      .catch((e) => { if (!cancelled) setError((e as Error).message); });
+    return () => { cancelled = true; };
+  }, [workItemId]);
+
+  const rank = (l: ResourceLink): number => {
+    if (l.kind === "graph") return 0;
+    if (l.kind === "board") return l.relation === "primary" ? 1 : 2;
+    if (l.kind === "chat") return 3;
+    if (l.kind === "mission") return 4;
+    return 5;
+  };
+
+  if (error) return <div className="error">connected work: {error}</div>;
+  if (!links) return <div className="loading">…</div>;
+  const ordered = [...links].sort((a, b) => rank(a) - rank(b));
+  return (
+    <div className="connected-work">
+      <div className="nav-section-label">Connected work</div>
+      <ul className="connected-links">
+        {ordered.map((l, i) => (
+          <li key={`${l.kind}-${l.resource_id}-${i}`}>
+            <a href={l.href}>{l.label}</a>
+            {l.relation && l.relation !== "self" &&
+              <span className="muted small"> · {l.relation}</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Work Map: a mobile-friendly indented tree of the work graph (NOT a canvas node
+// graph). Whole graph when nothing is selected; the neighbourhood of one item
+// otherwise. Each item lists its outgoing edges grouped by relation, resolving
+// target ids to titles. A 503 (work graph disabled) or any error is surfaced as
+// a banner — never a silent empty list.
+function WorkMapView({
+  workItemId, depth, onSelect, onClear, onDepthChange,
+}: {
+  workItemId: string | null;
+  depth: number;
+  onSelect: (id: string) => void;
+  onClear: () => void;
+  onDepthChange: (d: number) => void;
+}) {
+  const [graph, setGraph] = useState<WorkGraph | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    const req = workItemId
+      ? getWorkGraphNeighbourhood(workItemId, depth)
+      : getWorkGraph();
+    req.then((g) => { if (!cancelled) { setGraph(g); setError(null); } })
+      .catch((e) => { if (!cancelled) { setGraph(null); setError((e as Error).message); } })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [workItemId, depth]);
+
+  // Selected item first, then the rest — so a neighbourhood reads root-down.
+  const items = useMemo(() => {
+    const list = graph?.items ?? [];
+    if (!workItemId) return list;
+    return [...list].sort((a, b) =>
+      Number(b.work_item_id === workItemId) - Number(a.work_item_id === workItemId));
+  }, [graph, workItemId]);
+  const titleById = useMemo(
+    () => new Map((graph?.items ?? []).map((i) => [i.work_item_id, i.title])),
+    [graph]);
+  const outgoing = useMemo(() => {
+    const m = new Map<string, WorkEdge[]>();
+    for (const e of graph?.edges ?? []) {
+      const arr = m.get(e.from_work_item_id);
+      if (arr) arr.push(e); else m.set(e.from_work_item_id, [e]);
+    }
+    return m;
+  }, [graph]);
+
+  if (error) {
+    return (
+      <div className="workmap">
+        <div className="surface-errors"><div className="error">work graph: {error}</div></div>
+      </div>
+    );
+  }
+  if (loading && !graph) return <div className="loading">…</div>;
+  if (!graph || graph.items.length === 0) {
+    return <div className="workmap"><div className="empty">No work items yet</div></div>;
+  }
+
+  const groupByRelation = (edges: WorkEdge[]): [string, WorkEdge[]][] => {
+    const g = new Map<string, WorkEdge[]>();
+    for (const e of edges) {
+      const arr = g.get(e.relation);
+      if (arr) arr.push(e); else g.set(e.relation, [e]);
+    }
+    return [...g.entries()];
+  };
+
+  return (
+    <div className="workmap">
+      <div className="workmap-head">
+        {workItemId ? (
+          <>
+            <button className="clear" onClick={onClear}>← whole graph</button>
+            <label className="muted small">
+              depth{" "}
+              <select className="select" value={depth}
+                onChange={(e) => onDepthChange(Number.parseInt(e.target.value, 10))}>
+                {[1, 2, 3].map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </label>
+          </>
+        ) : (
+          <span className="muted small">{graph.items.length} work items</span>
+        )}
+      </div>
+      {workItemId && <ConnectedWork workItemId={workItemId} />}
+      {items.map((item) => {
+        const groups = groupByRelation(outgoing.get(item.work_item_id) ?? []);
+        return (
+          <div className="wm-item" key={item.work_item_id}>
+            <button className="wm-item-head" onClick={() => onSelect(item.work_item_id)}>
+              <span className="wm-title">{item.title}</span>
+              <span className="wm-meta">
+                <span className="chip">{item.kind}</span>
+                <span className="chip">{item.canonical_status}</span>
+                {item.primary_board_id && <span className="chip">{item.primary_board_id}</span>}
+              </span>
+            </button>
+            {groups.map(([relation, edges]) => (
+              <div className="wm-edges" key={relation}>
+                <span className="wm-relation">{RELATION_LABELS[relation] ?? relation}</span>
+                <ul className="wm-targets">
+                  {edges.map((e) => (
+                    <li key={e.edge_id}>
+                      <button className="wm-target-link"
+                        onClick={() => onSelect(e.to_work_item_id)}>
+                        {titleById.get(e.to_work_item_id) ?? e.to_work_item_id}
+                      </button>
+                      {e.blocking && <span className="chip wm-blocking">blocking</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ---- app ------------------------------------------------------------------
 export function App() {
   const [view, setView] = useState<View>(() => initialViewFromUrl());
@@ -5179,6 +5392,10 @@ export function App() {
   const [chatReturnView, setChatReturnView] = useState<View>("domains");
   const [domainNav, setDomainNav] = useState<DomainNavItem[]>([]);
   const [activeDomain, setActiveDomain] = useState(() => initialDomainFromUrl());
+  // Work-graph selection (Work Map): the focused work item + neighbourhood depth,
+  // both reflected in the URL so Back/Forward and pasted links restore them.
+  const [selectedWork, setSelectedWork] = useState<string | null>(() => initialWorkFromUrl());
+  const [graphDepth, setGraphDepth] = useState<number>(() => initialDepthFromUrl());
   const [captureOpen, setCaptureOpen] = useState(false);
   const [captureNonce, setCaptureNonce] = useState(0);
   const [updated, setUpdated] = useState<string>("");
@@ -5262,6 +5479,40 @@ export function App() {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  // Reflect the current view/domain/work/depth into the URL. The first run only
+  // normalizes the address bar (replaceState — no new history entry); afterwards a
+  // genuine change pushes a new entry so Back/Forward restores the prior view +
+  // selection. A no-op (state already matches the URL, e.g. right after popstate)
+  // pushes nothing.
+  const navReady = useRef(false);
+  useEffect(() => {
+    const search = navSearch(view, activeDomain, selectedWork, graphDepth);
+    if (!navReady.current) {
+      navReady.current = true;
+      window.history.replaceState(null, "", search);
+    } else if (search !== window.location.search) {
+      window.history.pushState(null, "", search);
+    }
+  }, [view, activeDomain, selectedWork, graphDepth]);
+
+  // Browser Back/Forward: restore the whole navigation state from the URL. The
+  // browser has already swapped location.search, so the sync effect above sees a
+  // match and does not push again.
+  useEffect(() => {
+    const onPop = () => {
+      const p = new URLSearchParams(window.location.search);
+      const v = p.get("view");
+      setView(v && VIEW_IDS.has(v) ? (v as View) : "domains");
+      setActiveDomain(p.get("domain") || "job_application");
+      setSelectedWork(p.get("work") || null);
+      const raw = p.get("depth");
+      const n = raw ? Number.parseInt(raw, 10) : NaN;
+      setGraphDepth(Number.isFinite(n) && n > 0 ? n : 1);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   const chatOn = !!cfg?.chat_enabled;
@@ -5363,6 +5614,14 @@ export function App() {
         {view === "observability" && (metrics
           ? <ObservabilityView m={metrics} /> : <div className="loading">…</div>)}
         {view === "usage" && <UsageView />}
+        {view === "work-map" && (
+          <WorkMapView
+            workItemId={selectedWork}
+            depth={graphDepth}
+            onSelect={(id) => { setSelectedWork(id); setView("work-map"); }}
+            onClear={() => setSelectedWork(null)}
+            onDepthChange={setGraphDepth} />
+        )}
         {view === "inbox" && (
           <InboxView refreshKey={captureNonce} onOpenChat={openChatWithPrompt} />
         )}
