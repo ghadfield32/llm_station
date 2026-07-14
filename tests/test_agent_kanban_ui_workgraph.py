@@ -199,3 +199,22 @@ def test_chat_endpoints_disabled_is_503(monkeypatch):
     _mod, client = _load(monkeypatch, enabled=False)
     assert client.post("/api/chat/work-items/preview", json=_plan()).status_code == 503
     assert client.post("/api/chat/work-items/commit", json=_plan()).status_code == 503
+
+
+# ── plan summary (the confirmation gate): deterministic, commits nothing ──────
+
+def test_plan_summary_counts_and_is_side_effect_free(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    r = client.post("/api/work-items/plan-summary", json=_plan())
+    assert r.status_code == 200, r.text
+    s = r.json()
+    assert s["item_count"] == 2
+    assert s["edge_count"] == 1 and s["blocking_edge_count"] == 1   # 'blocks'
+    # a summary creates nothing
+    assert client.get("/api/work-items").json() == []
+
+
+def test_plan_summary_disabled_is_503(monkeypatch):
+    _mod, client = _load(monkeypatch, enabled=False)
+    assert client.post("/api/work-items/plan-summary",
+                       json=_plan()).status_code == 503

@@ -124,8 +124,22 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   verbatim). Verified: `npm run build` (tsc + vite) green, twice, independently.
   MASTER §4.9 routing + work-map paragraphs + truth-check router file/endpoint +
   digest re-record.
-- NEXT: routing calibration (evidence-backed board rules + duplicate scoring);
-  packet + review chain (Phase H); daily intake DAG (Phase I).
+- Confirmation gate DONE (branch `feat/work-graph-plan-summary`, off main w/#60):
+  §12 "this will create …". NEW `WorkGraphPlanSummary` schema + `summarize_plan()`
+  — deterministic count of a proposed plan (items by kind, primary/secondary
+  placements, distinct boards, items-without-board → Inbox, edges by relation +
+  blocking subset). Pure counting, no LLM/thresholds/side-effects. RoutingProposal
+  now carries `summary`; cockpit `POST /api/work-items/plan-summary` (commits
+  nothing) feeds the Create / Edit / Keep-as-note gate. Tests: 4 unit + 2 cockpit;
+  323 passed via PYTHONPATH=worktree/src. MASTER §4.9 + truth-check endpoint +
+  digest.
+- Routing CALIBRATION reframed: deliberately did NOT hand-author a keyword
+  ruleset — the plan requires EVIDENCE-backed calibration, so hand-written
+  heuristics would violate "no silent auto-routing"/"no invented data". Real
+  calibration needs router-correction telemetry first (record human overrides of
+  suggestions) → that's the next slice, then evidence-derived board rules.
+- NEXT: router-correction telemetry → evidence-backed routing calibration; packet
+  + review chain (Phase H); daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

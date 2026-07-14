@@ -200,3 +200,22 @@ class TaskBatchReceipt(BaseModel):
     needs_confirmation: list[RoutingQuestion] = Field(default_factory=list)
     board_suggestions: list[BoardSuggestion] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class WorkGraphPlanSummary(BaseModel):
+    """A deterministic "this will create …" summary of a proposed plan — the
+    human confirmation gate BEFORE anything is created ([Create work] / [Edit
+    structure] / [Keep as note]). Pure counting: no LLM, no side effects, no
+    thresholds. Safer than letting a model silently create an arbitrary number
+    of cards."""
+    item_count: int = 0
+    items_by_kind: dict[str, int] = Field(default_factory=dict)
+    placement_count: int = 0               # primary + secondary
+    primary_placement_count: int = 0
+    secondary_placement_count: int = 0
+    boards: list[str] = Field(default_factory=list)   # distinct boards touched
+    items_without_board: int = 0           # would land in the Universal Inbox
+    edge_count: int = 0
+    edges_by_relation: dict[str, int] = Field(default_factory=dict)
+    blocking_edge_count: int = 0           # edges in the acyclic (blocking) set
+    warnings: list[str] = Field(default_factory=list)
