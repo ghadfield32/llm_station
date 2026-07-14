@@ -69,6 +69,7 @@ class WorkPlanIn(BaseModel):
     conversation_id: str | None = None
     capture_id: str | None = None            # the originating capture, if any
     capture_batch_id: str | None = None
+    packet_id: str | None = None             # the readiness packet, if committed via one
     items: list[WorkPlanItemIn] = Field(default_factory=list)
     edges: list[WorkPlanEdgeIn] = Field(default_factory=list)
 
@@ -120,7 +121,7 @@ class ChatWorkPlanner:
                 it.title, kind=it.kind, description=it.description,
                 owner=it.owner, priority=it.priority, due_at=it.due_at,
                 conversation_id=plan.conversation_id,
-                capture_id=plan.capture_id,
+                capture_id=plan.capture_id, packet_id=plan.packet_id,
                 capture_batch_id=plan.capture_batch_id)
             ref_to_id[it.ref] = item.work_item_id
 

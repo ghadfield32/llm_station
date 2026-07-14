@@ -186,8 +186,34 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   (board_rules gained a `rules=` param). "majority"→"plurality" wording fixed.
   Tests: 10 calibrator + 4 cockpit + 1 router word-boundary; 343 passed. MASTER
   §4.9 + truth-check + digest.
-- NEXT: duplicate scoring (fuzzy dedup, evidence-calibrated); packet + review chain
-  (Phase H); daily intake DAG (Phase I).
+- Readiness Packet DONE (Phase H SLICE 1; branch `feat/readiness-packet`, off #64;
+  high-risk → grounded by an integration survey first). NEW `work_graph/packet.py`
+  `ReadinessPacket` + `PacketService` (in-memory): assemble a reviewable packet
+  from a plan (Work Graph Plan via summarize_plan + runbook + research + acceptance
+  criteria + per-role review slots), a DETERMINISTIC readiness gate (`readiness()`
+  presence + review-status checks, list-of-rows idiom, NO invented thresholds),
+  `set_review` (human sets a slot now), and `commit` (REFUSES 409 unless ready →
+  creates the graph → links every item back via `WorkItem.packet_id`, the reserved
+  seam, + a `kind="packet"` ResourceLink). Threaded `packet_id` through
+  WorkPlanIn/create_item; `links_for` emits the packet link. Cockpit `POST
+  /api/packets`, `GET /api/packets[/{id}[/readiness]]`, `POST /api/packets/{id}/
+  reviews/{role}`, `POST /api/packets/{id}/commit`. Assembling/committing is
+  PLANNING (no wall verb); confirmation = the readiness gate, not the mission
+  HMAC wall. Fresh read-only review: high-risk axes CLEAN (no gate bypass, no
+  hidden auto-approval, no wall violation, packet_id seam + atomicity correct);
+  verdict FIX-FIRST for 2 defects — applied both: (1) assemble now rejects
+  structurally-invalid plans (duplicate refs) + `ChatPlanError→400` mapped, so a
+  plan can't be marked "ready" then 500 on commit; (2) `set_review` frozen after
+  commit. +readiness endpoint uses canonical `is_ready`. Tests: 13 packet unit + 5
+  cockpit; 397 passed. MASTER §4.9 + truth-check + digest.
+- Phase H SLICE 2 (DEFERRED, higher-risk, needs own architecture+plan-review):
+  the LIVE independent Claude/Codex/judge_gate review orchestration that FILLS the
+  packet review slots — reuse `AgentSessionService` analysis-mode read-only agent
+  sessions (codex_agent/claude_code_local) + `judge_gate /skeptic`; H1 runs no
+  agent + invents no verdict. Durable Ledger packet store also a follow-up
+  (in-memory now, mirror-DDL pattern next, like Capture #44→#47).
+- NEXT: Phase H slice 2 (review orchestration); duplicate scoring; daily intake
+  DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

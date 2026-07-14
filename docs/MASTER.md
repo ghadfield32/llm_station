@@ -955,6 +955,24 @@ learned rules + evidence. Suggestions remain **human-confirmed** (a proposal, no
 auto-routing), and every override feeds back as new telemetry — a closed,
 self-improving, honest loop.
 
+**Readiness Packet — review a unit of work before it exists
+(`work_graph/packet.py`, Phase H slice 1).** A `ReadinessPacket` gathers, for a
+proposed plan,
+the Work Graph Plan (reusing `summarize_plan`), a **runbook**, **research** notes,
+**acceptance criteria**, and per-role **review slots**, plus a **deterministic
+readiness gate** (`readiness()` — presence + review-status checks in the
+job-search list-of-rows idiom; no invented thresholds). `POST /api/packets`
+assembles one (creating NO work items); `…/readiness` reports the gate;
+`…/reviews/{role}` sets a slot's outcome; `…/commit` **refuses (409) unless
+ready**, then creates the graph and links every item back via
+`WorkItem.packet_id` (activating the reserved seam + a `kind="packet"`
+`ResourceLink`). Assembling/committing is **planning, not a mission** — human
+confirmation is this gate + the preview/commit split, not the mission-approval
+wall. **Deliberately deferred to a later, separately-reviewed slice (H2):** the
+*live* independent Claude/Codex / `judge_gate` review orchestration that FILLS
+the review slots (analysis-mode read-only agent sessions) — here slots start
+`pending` or are set by a human. This module runs no agent and invents no verdict.
+
 **Work Map + Connected-Work UI (cockpit SPA).** A `work-map` view renders the
 graph as a mobile-friendly indented tree (items + typed edges), and a
 Connected-Work section renders each item's backend-generated `ResourceLink`s
@@ -963,22 +981,25 @@ verbatim; the SPA's URL router carries `work`/`depth` (with `pushState`/
 
 **Readiness status.** Contracts + graph service + durable Ledger store +
 permalink resolver + chat receipts + capture→work conversion + routing +
-confirmation-gate summary + correction telemetry + evidence-backed calibration
-are **BUILT + HERMETIC_PROVEN** (`tests/test_work_graph*.py`,
-`tests/test_agent_kanban_ui_workgraph.py`,
+confirmation-gate summary + correction telemetry + evidence-backed calibration +
+readiness packet (assembly + gate) are **BUILT + HERMETIC_PROVEN**
+(`tests/test_work_graph*.py`, `tests/test_agent_kanban_ui_workgraph.py`,
 `tests/test_agent_kanban_ui_capture_convert.py`, `tests/test_intake_convert.py`,
 `tests/test_work_graph_router.py`, `tests/test_work_graph_plan_summary.py`,
 `tests/test_routing_telemetry*.py`, `tests/test_routing_calibration.py`,
-`tests/test_agent_kanban_ui_routing_telemetry.py`,
-`tests/test_agent_kanban_ui_routing_calibration.py` — graph correctness, cycle
-policy, durability across restart, permalink resolution,
+`tests/test_readiness_packet.py`, `tests/test_agent_kanban_ui_routing_telemetry.py`,
+`tests/test_agent_kanban_ui_routing_calibration.py`,
+`tests/test_agent_kanban_ui_packet.py` — graph correctness, cycle policy,
+durability across restart, permalink resolution,
 preview/route/summary-are-side-effect-free, commit atomicity, capture-linked
 provenance, evidence-tagged/never-auto-routed proposals, deterministic plan
 counts, correction-evidence persists across restart, past-only rule derivation
-with majority + support evidence, learn→suggest closed loop, no-mission safety);
-the Work Map SPA is verified by `npm run build`. Next phases: duplicate scoring
-(fuzzy dedup, evidence-calibrated) and the packet/review chain (Phase H) — neither
-changes the identity/placement/link contract above.
+with plurality + support evidence, learn→suggest closed loop, packet readiness
+gate + commit-links-back-via-packet_id, no-mission safety); the Work Map SPA is
+verified by `npm run build`. Next phases: the packet's **independent review
+orchestration (Phase H slice 2** — live Claude/Codex/judge_gate analysis-mode
+reviews filling the review slots), duplicate scoring, and the daily-intake DAG —
+none change the identity/placement/link contract above.
 
 ---
 

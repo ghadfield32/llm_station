@@ -198,6 +198,10 @@ class WorkGraphService:
             links.append(ResourceLink(
                 kind="mission", resource_id=item.mission_id, label="Mission",
                 href=_href({"view": "missions", "mission": item.mission_id})))
+        if item.packet_id:
+            links.append(ResourceLink(
+                kind="packet", resource_id=item.packet_id, label="Readiness packet",
+                href=_href({"view": "packet", "packet": item.packet_id})))
         return links
 
     # ---- permalink ---------------------------------------------------------
