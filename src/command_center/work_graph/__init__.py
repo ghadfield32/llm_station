@@ -35,6 +35,12 @@ from .planner import (
     WorkPlanIn,
     WorkPlanItemIn,
 )
+from .router import (
+    BoardRule,
+    DuplicateCandidate,
+    RoutingProposal,
+    WorkRouter,
+)
 from .service import WorkGraphError, WorkGraphService
 from .store import InMemoryWorkGraphStore
 
@@ -66,4 +72,8 @@ __all__ = [
     "WorkPlanIn",
     "WorkPlanItemIn",
     "WorkPlanEdgeIn",
+    "WorkRouter",
+    "RoutingProposal",
+    "BoardRule",
+    "DuplicateCandidate",
 ]

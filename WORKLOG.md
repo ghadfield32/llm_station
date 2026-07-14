@@ -84,8 +84,29 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   side-effect-free, cycle→409 leaves capture `captured`, unknown→404, graph-off→
   503). MASTER §4.9 capture-conversion + truth-check convert endpoint + digest.
   274 passed via PYTHONPATH=worktree/src.
-- NEXT: Work Map + Connected-Work drawer UI (Phase F); classification/routing
-  (Phase G — free text → structured plan feeding preview/convert).
+- Phase G routing DONE (branch `feat/work-graph-routing-and-ui`, off main w/#57):
+  `work_graph/router.py` `WorkRouter` — deterministic free text → PROPOSED plan.
+  Splits deliverables (reuses intake split_bulk_list), evidence-tags board
+  suggestions (keyword→injected rule; matched words recorded), and — critically —
+  NEVER commits + NEVER silently auto-routes: unmatched/ambiguous board → a
+  needs_confirmation question (item board unset); a dependency word (before/until/
+  …) → a question, NOT a fabricated edge; an EXACT normalized-title match → a
+  duplicate_candidate + question, never auto-dropped. No LLM, no fuzzy thresholds.
+  Cockpit `POST /api/work-items/route` + `/api/captures/{id}/route` (board-hint
+  options sourced from the graph's own placement board_ids — decoupled from the
+  domain-config file so routing never 503s on missing config). Tests: 9 router
+  unit + 3 cockpit; 317 passed via PYTHONPATH=worktree/src.
+- Phase F work-map UI DONE (same branch; built by a subagent, build-verified by
+  me): SPA `web/src/` — api.ts work-graph client (types match schemas, hrefs
+  rendered VERBATIM), a `work-map` View + NAV, URL routing for `work`/`depth` with
+  pushState/replaceState/popstate (Back/Forward works), `WorkMapView` (mobile
+  indented tree of items + typed edges, error/empty/loading states — never a
+  silent empty graph) and `ConnectedWork` (renders backend ResourceLink hrefs
+  verbatim). Verified: `npm run build` (tsc + vite) green, twice, independently.
+  MASTER §4.9 routing + work-map paragraphs + truth-check router file/endpoint +
+  digest re-record.
+- NEXT: routing calibration (evidence-backed board rules + duplicate scoring);
+  packet + review chain (Phase H); daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

@@ -1127,6 +1127,102 @@ export const fetchCollectorHealth = () =>
 export const refreshModelUsage = () =>
   postJSON<UsageRefreshResult>("/api/model-usage/refresh", {});
 
+// ── Canonical work graph — one WorkItem, many board placements, typed edges ────
+// A task on three boards is ONE work item with three placements, never three
+// unrelated cards. Every navigable href is BACKEND-generated (ResourceLink.href)
+// and rendered verbatim — the frontend never assembles a work route itself. Any
+// endpoint returns 503 when the work graph is disabled; getJSON surfaces that as
+// a thrown error, never as an empty graph.
+export type WorkItemKind =
+  | "note" | "todo" | "research" | "post" | "paper" | "project" | "bug"
+  | "feature" | "decision" | "maintenance";
+export type CanonicalStatus =
+  | "backlog" | "ready" | "in_progress" | "blocked" | "awaiting_approval"
+  | "done" | "rejected" | "archived";
+export type WorkRelation =
+  | "parent_of" | "blocks" | "related_to" | "implements" | "informs"
+  | "derived_from" | "duplicates" | "supersedes" | "supports";
+export interface WorkItem {
+  work_item_id: string;
+  title: string;
+  description: string;
+  kind: WorkItemKind;
+  canonical_status: CanonicalStatus;
+  primary_board_id: string | null;
+  owner: string | null;
+  priority: string | null;
+  due_at: string | null;
+  capture_id: string | null;
+  capture_batch_id: string | null;
+  packet_id: string | null;
+  conversation_id: string | null;
+  mission_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+// A projection of one WorkItem onto one board — the card the user sees IS a
+// placement, not a separate task. placement_stage is a board-local visual stage,
+// distinct from the item's canonical_status.
+export interface WorkPlacement {
+  placement_id: string;
+  work_item_id: string;
+  board_id: string;
+  domain_id: string;
+  is_primary: boolean;
+  placement_stage: string | null;
+  card_component: string;
+  local_fields: Record<string, unknown>;
+  created_at: string;
+  removed_at: string | null;
+}
+export interface WorkEdge {
+  edge_id: string;
+  from_work_item_id: string;
+  to_work_item_id: string;
+  relation: WorkRelation;
+  blocking: boolean;
+  reason: string | null;
+  evidence_refs: string[];
+  created_by: string | null;
+  created_at: string;
+  removed_at: string | null;
+}
+// A backend-generated navigation receipt. Render `href` VERBATIM as an <a href>;
+// NEVER assemble a route URL from an assumed format. `kind` orders the Connected
+// Work list; `relation` distinguishes a primary board placement from a secondary.
+export interface ResourceLink {
+  kind:
+    | "work_item" | "board" | "placement" | "chat" | "mission" | "packet"
+    | "graph" | "evidence";
+  resource_id: string;
+  label: string;
+  href: string;
+  relation: string | null;
+}
+// A resolved neighbourhood around a root work item (or the whole graph): the
+// items, their placements, and the edges among them. root_work_item_id is null
+// for the whole graph.
+export interface WorkGraph {
+  root_work_item_id: string | null;
+  items: WorkItem[];
+  placements: WorkPlacement[];
+  edges: WorkEdge[];
+}
+export const getWorkGraph = () => getJSON<WorkGraph>("/api/work-graph");
+export const getWorkGraphNeighbourhood = (id: string, depth = 1) =>
+  getJSON<WorkGraph>(
+    `/api/work-graph/${encodeURIComponent(id)}?depth=${depth}`);
+export const listWorkItems = () => getJSON<WorkItem[]>("/api/work-items");
+export interface WorkItemDetail {
+  item: WorkItem;
+  placements: WorkPlacement[];
+  links: ResourceLink[];
+}
+export const getWorkItem = (id: string) =>
+  getJSON<WorkItemDetail>(`/api/work-items/${encodeURIComponent(id)}`);
+export const getWorkItemLinks = (id: string) =>
+  getJSON<ResourceLink[]>(`/api/work-items/${encodeURIComponent(id)}/links`);
+
 // Stream a chat turn (SSE over fetch): each event (round/tool/tool_result/final)
 // is delivered as it arrives. Errors are surfaced as an event, never swallowed.
 export async function streamChat(

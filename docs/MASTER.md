@@ -902,16 +902,37 @@ destroyed**, only linked to the work it produced and still recoverable in the
 Inbox (capture→work). A daily-intake DAG can reuse the same endpoints (the plan's
 `conversation_id` is optional, so a non-chat origin is first-class).
 
+**Routing — free text → a PROPOSED plan (`work_graph/router.py`).** `WorkRouter`
+is a **deterministic proposer, never an actor**: `POST /api/work-items/route`
+(and `/api/captures/{id}/route`) split deliverables, tag **evidence-backed**
+board suggestions (which keyword matched which injected rule), and emit the plan
+— but it **commits nothing** and **never silently auto-routes**. Anything not
+matched by exactly one rule leaves the item's board unset and raises a
+`needs_confirmation` question; a dependency word (`before`/`until`/…) raises a
+question rather than **inventing** an edge whose endpoints text can't fix; an
+**exact** normalized-title match against an existing item becomes a
+`duplicate_candidate` + question, never an auto-drop. No LLM, no fuzzy
+thresholds; board calibration is a later phase, so with no injected rules every
+board is a question against the boards that already exist in the graph. The
+human reviews/edits the proposal, then calls `/convert` or `/commit`.
+
+**Work Map + Connected-Work UI (cockpit SPA).** A `work-map` view renders the
+graph as a mobile-friendly indented tree (items + typed edges), and a
+Connected-Work section renders each item's backend-generated `ResourceLink`s
+verbatim; the SPA's URL router carries `work`/`depth` (with `pushState`/
+`popstate`) so deep links and Back/Forward work.
+
 **Readiness status.** Contracts + graph service + durable Ledger store +
-permalink resolver + chat receipts + capture→work conversion are
+permalink resolver + chat receipts + capture→work conversion + routing are
 **BUILT + HERMETIC_PROVEN** (`tests/test_work_graph*.py`,
 `tests/test_agent_kanban_ui_workgraph.py`,
-`tests/test_agent_kanban_ui_capture_convert.py`, `tests/test_intake_convert.py`
-— graph correctness, cycle policy, durability across restart, permalink
-resolution, preview-is-side-effect-free, commit atomicity, capture-linked
-provenance, no-mission safety). Next phases: the Work Map + Connected-Work drawer
-UI and classification/routing (free text → structured plan) — neither changes the
-identity/placement/link contract above.
+`tests/test_agent_kanban_ui_capture_convert.py`, `tests/test_intake_convert.py`,
+`tests/test_work_graph_router.py` — graph correctness, cycle policy, durability
+across restart, permalink resolution, preview/route-are-side-effect-free, commit
+atomicity, capture-linked provenance, evidence-tagged/never-auto-routed proposals,
+no-mission safety); the Work Map SPA is verified by `npm run build`. Next phases:
+routing calibration (evidence-backed board rules + duplicate scoring) and the
+packet/review chain — neither changes the identity/placement/link contract above.
 
 ---
 

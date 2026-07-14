@@ -96,3 +96,40 @@ def test_convert_disabled_when_graph_off(monkeypatch):
                        json=_plan()).status_code == 503
     assert client.post("/api/captures/whatever/work-preview",
                        json=_plan()).status_code == 503
+
+
+# ── routing (Phase G): free text / capture → a proposal, committing nothing ───
+
+def test_route_free_text_proposes_without_committing(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    r = client.post("/api/work-items/route",
+                    json={"text": "- research feasibility\n- write a post"})
+    assert r.status_code == 200, r.text
+    prop = r.json()
+    assert len(prop["plan"]["items"]) == 2
+    # a proposal creates nothing — no work items exist
+    assert client.get("/api/work-items").json() == []
+    # no calibrated board rules → each item asks which board (never auto-routed)
+    assert all(it["primary_board"] is None for it in prop["plan"]["items"])
+    assert any(q["question"].startswith("Which board")
+               for q in prop["needs_confirmation"])
+
+
+def test_route_capture_carries_provenance_and_leaves_capture(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    cid = _capture(client, conversation_id="chat-3")
+    r = client.post(f"/api/captures/{cid}/route")
+    assert r.status_code == 200, r.text
+    prop = r.json()
+    assert prop["capture_id"] == cid
+    assert prop["conversation_id"] == "chat-3"
+    # routing is not conversion — the capture stays 'captured'
+    assert client.get(f"/api/captures/{cid}").json()["processing_status"] == "captured"
+
+
+def test_route_unknown_capture_404_and_graph_off_503(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    assert client.post("/api/captures/nope/route").status_code == 404
+    _mod2, off = _load(monkeypatch, workgraph=False)
+    assert off.post("/api/work-items/route",
+                    json={"text": "x"}).status_code == 503
