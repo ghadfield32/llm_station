@@ -5,7 +5,7 @@
     "n_findings": 4,
     "n_sources": 2
   },
-  "git_sha": "41551798945ee713b7073d328290929ba8ac5d2c",
+  "git_sha": "30928ab4c450c3e18e8fcef849d9f52012f57830",
   "input_sha256": "5fd5981a2ca190b025d12bccd9ba82d89205c029078acd5afdef3ff7d504cd93",
   "library_versions": {
     "PyYAML": "6.0.3",
@@ -13,8 +13,8 @@
     "python": "3.12.6"
   },
   "method": "wsjf",
-  "output_sha256": "537e27f8d7efc6dbf2eb3ab5b6488acf6edd797c41c908da01ea131fc1c3bf68",
-  "produced_at": "2026-07-12T12:00:03.756224+00:00",
+  "output_sha256": "aed482593bafa4fc46317456b32dd5bc7e244f45e4621e8825d0bd2a18de6798",
+  "produced_at": "2026-07-14T12:00:02.205509+00:00",
   "schema_version": "1.0",
   "sources": [
     {
