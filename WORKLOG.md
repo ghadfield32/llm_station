@@ -151,6 +151,19 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   reload durability test). Tests: 2 drift + 9 service/durability + 5 cockpit; 333
   passed via PYTHONPATH=worktree/src. Derives NO board rules — that's the SEPARATE
   calibration phase.
+- CI RACE FIXED (in #62, unblocking its lint-test): pre-existing flaky
+  `test_domain_surfaces::..._queues_packet_prep` — `command_center_provider`
+  `list_cards()`/`_read_fields()` read a card JSON file while background packet
+  prep rewrote it via non-atomic `Path.write_text` (truncate→write window → a
+  reader saw `''` → `json.loads('') JSONDecodeError`, Linux CI). Root cause =
+  unsynchronised concurrent access to shared card-store files. Fix: per-file
+  `threading.Lock` (module registry, one lock per abspath, shared across provider
+  instances) serialising all card-file reads/writes + atomic temp+`os.replace`
+  write (crash-safe; on Windows the lock also avoids os.replace-vs-open-handle
+  PermissionError — a 2nd symptom the atomic-only fix exposed there). Regression
+  test `test_upsert_is_atomic_under_concurrent_reads` (proven to FAIL on the
+  non-atomic writer, pass on the fix). Not defensive — the direct concurrency
+  primitive. 415 affected-area tests pass.
 - NEXT: evidence-backed routing calibration (learn board rules from the correction
   log); packet + review chain (Phase H); daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent

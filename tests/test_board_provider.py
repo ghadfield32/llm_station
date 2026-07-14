@@ -43,6 +43,49 @@ def _internal(tmp_path, board_id="b1") -> CommandCenterBoardProvider:
         store_dir=tmp_path / "boards", status_mapping=dict(_STATUS_MAPPING))
 
 
+# ---- concurrency: atomic card-store writes ---------------------------------
+
+def test_upsert_is_atomic_under_concurrent_reads(tmp_path):
+    """Regression: a writer rewriting a card file (background packet prep) must
+    never expose a truncated/empty file to a concurrent list_cards()/_read_fields()
+    reader. Before the fix, Path.write_text truncated first, so a reader in that
+    window got '' -> json.loads('') -> JSONDecodeError (the CI flake). With the
+    atomic temp+os.replace write, readers always see a complete file. This test
+    fails reliably on the old code and passes on the fixed code."""
+    import threading
+    import time
+
+    provider = _internal(tmp_path)
+    provider.upsert_card("card-1", {"title": "seed", "notes": "n" * 300})
+    errors: list[Exception] = []
+    stop = threading.Event()
+
+    def writer():
+        i = 0
+        while not stop.is_set():
+            provider.upsert_card("card-1", {"title": f"t{i}", "notes": "n" * 300})
+            i += 1
+
+    def reader():
+        try:
+            while not stop.is_set():
+                for card in provider.list_cards():          # reads the store glob
+                    assert isinstance(card, dict)
+                provider._read_fields("card-1")
+        except Exception as exc:            # capture a partial-read failure to assert on
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer)]
+    threads += [threading.Thread(target=reader) for _ in range(3)]
+    for t in threads:
+        t.start()
+    time.sleep(0.5)                          # let the writer + readers contend
+    stop.set()
+    for t in threads:
+        t.join()
+    assert not errors, f"concurrent read observed a partial write: {errors[:1]}"
+
+
 # ---- factory ----------------------------------------------------------------
 
 def test_factory_picks_provider_from_registry_spec(tmp_path):
