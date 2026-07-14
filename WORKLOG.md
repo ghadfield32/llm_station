@@ -164,8 +164,30 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   test `test_upsert_is_atomic_under_concurrent_reads` (proven to FAIL on the
   non-atomic writer, pass on the fix). Not defensive — the direct concurrency
   primitive. 415 affected-area tests pass.
-- NEXT: evidence-backed routing calibration (learn board rules from the correction
-  log); packet + review chain (Phase H); daily intake DAG (Phase I).
+- Evidence-backed routing CALIBRATION DONE (branch `feat/routing-calibration`,
+  off #62): the loop closes. NEW `work_graph/calibration.py` `RoutingCalibrator` +
+  `DerivedRule`. Learns keyword→board rules FROM the correction log: PAST
+  corrections only (`derive(as_of=)` temporal cut, no leakage), data-driven
+  MAJORITY board (ties excluded, not guessed), support + full per-board
+  distribution attached as evidence, `min_support` explicit dial (default 1 = ≥1
+  real observation) — NO invented thresholds; standard stopwords dropped. Cockpit
+  `_build_work_router` now feeds derived `BoardRule`s (domain resolved from REAL
+  placements via `_board_domain_resolver`; unresolvable board skipped, never
+  fabricated) so the router makes evidence-tagged suggestions instead of always
+  asking — still HUMAN-CONFIRMED (proposal, not auto-routing); overrides feed back
+  as telemetry. `GET /api/routing-rules` surfaces derived+applied rules with
+  evidence. Fresh read-only review (time-ordered learning): verdict SHIP — past-
+  only strictly correct, serving-time "use all past corrections" NOT leakage, no
+  invented thresholds, no fabricated data, no silent auto-routing. Applied its 3
+  should-fixes: (a) trimmed stopwords to true closed-class function words (dropped
+  make/add/get/new — they carry signal; honesty re the "not invented" claim);
+  (b) router matches board keywords on WORD BOUNDARIES not substrings (a derived
+  'cv' no longer fires inside 'discovery'); (c) `/api/routing-rules` derives once
+  (board_rules gained a `rules=` param). "majority"→"plurality" wording fixed.
+  Tests: 10 calibrator + 4 cockpit + 1 router word-boundary; 343 passed. MASTER
+  §4.9 + truth-check + digest.
+- NEXT: duplicate scoring (fuzzy dedup, evidence-calibrated); packet + review chain
+  (Phase H); daily intake DAG (Phase I).
 - DEPLOY 07-13: cockpit + Capture LIVE on :8787 (/api/intake/inbox=200). Agent
   lane 503 until cockpit .env has KANBAN_UI_AGENT_SESSIONS_ENABLED=1 +
   AGENT_WORKER_URL/TOKEN and the host worker runs (scripts/start_agent_worker.ps1

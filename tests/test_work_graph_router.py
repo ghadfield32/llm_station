@@ -24,6 +24,16 @@ def test_single_line_is_one_item():
     assert len(prop.plan.items) == 1
 
 
+def test_board_keyword_matches_whole_words_not_substrings():
+    r = _router(board_rules=[BoardRule(board_id="art_board", domain_id="art",
+                                       keywords=("art",))])
+    # 'art' is a substring of 'start' but NOT a whole word -> no match, still asks
+    assert r.route("start the project").plan.items[0].primary_board is None
+    # 'art' as a whole word -> suggested
+    assert (r.route("make some art today").plan.items[0].primary_board.board_id
+            == "art_board")
+
+
 def test_matched_board_rule_suggests_with_evidence_and_sets_primary():
     r = _router(board_rules=[BoardRule(board_id="posts", domain_id="posts",
                                        keywords=("post", "linkedin"))])

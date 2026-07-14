@@ -135,7 +135,12 @@ class WorkRouter:
     # ---- board routing: evidence-tagged suggestion, else ask -----------------
     def _route_board(self, ref: str, norm: str, suggestions: list[BoardSuggestion],
                      questions: list[RoutingQuestion]) -> PlanBoardRef | None:
-        matched = [(r, [w for w in r.keywords if w in norm]) for r in self._rules]
+        # whole-word (not substring) match: a short derived keyword like 'cv' must
+        # not fire inside an unrelated word. norm is already punctuation-stripped +
+        # single-spaced by _normalize, so \b word boundaries are exact.
+        matched = [(r, [w for w in r.keywords
+                        if re.search(rf"\b{re.escape(w)}\b", norm)])
+                   for r in self._rules]
         matched = [(r, ws) for r, ws in matched if ws]
         if len(matched) == 1:
             rule, words = matched[0]

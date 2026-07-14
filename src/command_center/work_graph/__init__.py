@@ -28,6 +28,7 @@ from .schemas import (
     WorkPlacement,
     WorkPlacementSummary,
 )
+from .calibration import DerivedRule, RoutingCalibrator
 from .ledger_store import LedgerWorkGraphStore
 from .planner import (
     ChatPlanError,
@@ -90,4 +91,6 @@ __all__ = [
     "RoutingTelemetryService",
     "InMemoryRoutingTelemetryStore",
     "LedgerRoutingTelemetryStore",
+    "RoutingCalibrator",
+    "DerivedRule",
 ]
