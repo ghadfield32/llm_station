@@ -186,6 +186,18 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   (board_rules gained a `rules=` param). "majority"→"plurality" wording fixed.
   Tests: 10 calibrator + 4 cockpit + 1 router word-boundary; 343 passed. MASTER
   §4.9 + truth-check + digest.
+- Assistant Catalog DONE (branch `feat/assistants-catalog`, off origin/main;
+  medium-risk read-only aggregator). Diagnosis first: the backend ALREADY splits
+  three lanes (GatewayCore completion / agent-session harness / board context) —
+  the confusion was purely presentational (one flat selector listed "Growth OS"
+  as a peer of Claude/Codex). NEW `command_center/assistants/` + `GET /api/assistants`
+  joins the existing truths into `AssistantOption[]` (Auto + GatewayCore + Claude
+  Code + Codex); Growth OS/boards/repos stay CONTEXT (context_note). Backend owns
+  every availability/reason; catalog survives a down/disabled worker (agents listed
+  unavailable-with-reason from static registry descriptors, never dropped/faked).
+  Added `HarnessRegistry.descriptors()`. Tests: 12 catalog + 237 affected pass, ruff
+  clean. MASTER + digest. Foundation for Context→Assistant→Settings UI +
+  assistant-doctor/verify (next slices). NOT deployed.
 - Readiness Packet DONE (Phase H SLICE 1; branch `feat/readiness-packet`, off #64;
   high-risk → grounded by an integration survey first). NEW `work_graph/packet.py`
   `ReadinessPacket` + `PacketService` (in-memory): assemble a reviewable packet

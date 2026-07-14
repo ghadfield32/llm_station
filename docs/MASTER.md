@@ -639,6 +639,24 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
   misattribution). Real bug fixed: the Claude collector's hardcoded
   runtime_id. Operator runbook: `docs/runbooks/agent-sessions-activation.md`.
 
+- **Assistant Catalog — one read-only aggregator, three concepts kept distinct**
+  (`src/command_center/assistants/`, `GET /api/assistants`). A VIEW that joins the
+  existing authorities — GatewayCore completion roles (`route="gateway"`), the
+  agent-session harness registry + live probes (Claude Code / Codex,
+  `route="agent_session"`), and an `Auto` dispatcher — into one normalized
+  `AssistantOption[]`. It owns NO model/harness/context data and writes nothing.
+  **Growth OS, boards, tasks, and repos are CONTEXT, never assistants** (a
+  `context_note` says so): Growth OS is the GatewayCore chat lane's action layer,
+  not a completion model and not a distinct runtime. The backend owns every
+  `availability`/`unavailable_reason` string; a harness the worker can't reach is
+  still LISTED (from its static descriptor) as `unavailable` with a grounded
+  reason (catalog survives a down/disabled worker) — never dropped, never faked
+  available. This is the foundation for the guided Context → Assistant → Settings
+  UI (the flat selector that conflated the three is the target). Status: **BUILT +
+  HERMETIC_PROVEN** (`tests/test_assistants_catalog.py`); the UI restructure and
+  `cc assistant-doctor`/`assistant-verify` are the next, separately-reviewed
+  slices. Not deployed.
+
 - **Phase 3.3 — WORKER-owned usage ingestion (headless-safe)** (PR #37,
   `AGENT_WORKER_USAGE`): the worker feeds its own `UsageService` on `rate_limit`
   events as a turn runs (`_run_turn`), so a headless session captures usage even
