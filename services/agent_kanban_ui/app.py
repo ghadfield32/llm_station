@@ -4310,6 +4310,44 @@ def agent_harness_models(harness_id: str) -> dict:
     return _call_worker(client.list_models, harness_id)
 
 
+@app.get("/api/assistants")
+def assistants_catalog() -> dict:
+    """Read-only Assistant Catalog: ONE normalized list joining GatewayCore
+    (completion) + the agent harnesses (Claude Code / Codex) + the Auto
+    dispatcher, so the UI stops conflating a workspace, a runtime, and a model.
+    Growth OS/boards/repos are CONTEXT, not assistants (see context_note). Never
+    503s on a disabled/down lane — it lists it unavailable with a grounded reason
+    (so the catalog survives an unreachable worker)."""
+    from command_center.assistants import (
+        build_assistant_catalog,
+        declared_harness_descriptors,
+    )
+    runtime: dict = {"enabled": CHAT_ENABLED}
+    try:
+        runtime["roles"] = models().get("roles", [])
+    except Exception as exc:          # noqa: BLE001 — degrade gateway, don't 503
+        runtime["roles"] = []
+        runtime["error"] = str(getattr(exc, "detail", exc))
+    probes = None
+    worker_error: str | None = None
+    if AGENT_SESSIONS_ENABLED:
+        try:
+            client = _require_agent_sessions()
+            probes = _call_worker(client.list_harnesses)
+            if not FAKE_AGENT_ENABLED:
+                probes = [p for p in probes if p.get("harness_id") != "fake"]
+        except HTTPException as exc:      # worker unreachable / disabled path
+            worker_error = str(exc.detail)
+        except Exception as exc:          # noqa: BLE001 — surface as grounded reason
+            worker_error = str(exc)
+    return build_assistant_catalog(
+        runtime=runtime,
+        descriptors=declared_harness_descriptors(),
+        probes=probes,
+        agent_sessions_enabled=AGENT_SESSIONS_ENABLED,
+        worker_error=worker_error).model_dump()
+
+
 @app.get("/api/agent-sessions")
 def list_agent_sessions(conversation_id: str | None = None,
                         repo_id: str | None = None) -> list:

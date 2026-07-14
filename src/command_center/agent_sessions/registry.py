@@ -34,6 +34,12 @@ class HarnessRegistry:
     def __contains__(self, harness_id: str) -> bool:
         return harness_id in self._descriptors
 
+    def descriptors(self) -> list[HarnessDescriptor]:
+        """Static harness metadata (id/label/production/modes) — worker- and
+        probe-independent, so a caller can list the harnesses (and later say WHY
+        one is unavailable) without a live SDK. Availability comes from probes()."""
+        return list(self._descriptors.values())
+
     async def probes(self) -> list[dict]:
         """Every registered harness's live availability. A fresh instance per
         probe call, never cached, so this always reflects current reality (an
