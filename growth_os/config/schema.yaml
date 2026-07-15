@@ -1,0 +1,232 @@
+# ============================================================================
+# Growth OS local-board schema.
+# Field names are canonical card attributes used by growthos/actions.py.
+# Types: text | longtext | number | url | date | checkbox | select | multiselect
+#
+# Select values are declared here so the cockpit and action layer share one
+# validated vocabulary; selects here all
+# have fixed `options`. Free-form tag fields (Topics, Tags, Habits) are plain
+# text. The FIRST field of each database maps onto the grid's primary column
+# (scripts/setup_workspace.py records the mapping in config/databases.json).
+# ============================================================================
+databases:
+  library:
+    icon: "books"
+    fields:
+      Title: text
+      Author: text
+      Tier: {type: select, options: [Essential, Optional, Companion, Fun, Reference]}
+      Status: {type: select, options: [To read, Reading, Done]}
+      Section: number
+      Module: text
+      Hours: number
+      Notes: longtext
+  lessons:
+    icon: "lesson"
+    fields:
+      Lesson: text
+      Detail: longtext
+      Domain: {type: select, options: [Stats, ML, Engineering, Leadership, Health, Finance, Life]}
+      Source: text
+      Status: {type: select, options: [Capture, Review, Internalized]}
+      Confidence: number
+      NextReview: date
+      Interval: number
+      Created: date
+  papers:
+    icon: "paper"
+    fields:
+      Title: text
+      Authors: text
+      ArxivID: text
+      Abstract: longtext
+      Suggested: longtext
+      URL: url
+      Topics: text
+      Score: number
+      Status: {type: select, options: [Inbox, Reading, Read, Archived]}
+      Published: date
+  repos:
+    icon: "code"
+    fields:
+      Name: text
+      Owner: text
+      URL: url
+      Stars: number
+      Language: text
+      Why: longtext
+      Suggested: longtext
+      Topics: text
+      Score: number
+      Status: {type: select, options: [Inbox, Trying, Using, Archived]}
+      Updated: date
+  signals:
+    icon: "news"
+    fields:
+      Headline: text
+      Source: text
+      URL: url
+      Suggested: longtext
+      Category: {type: select, options: [LLM, Coding, DataScience, MLOps, Other]}
+      Score: number
+      Status: {type: select, options: [Inbox, Saved, Archived]}
+      Published: date
+  notes:
+    icon: "note"
+    fields:
+      Title: text
+      Tags: text
+      Updated: date
+  sources:
+    icon: "compass"
+    fields:
+      Name: text
+      Kind: {type: select, options: [arxiv, github, rss]}
+      Query: text
+      Enabled: checkbox
+  review:
+    icon: "check"
+    fields:
+      Day: text
+      Date: date
+      Brief: longtext
+      Habits: text
+      Win: text
+      Focus: text
+  mission_intake:
+    icon: "kanban"
+    fields:
+      Title: text
+      Status: {type: select, options: [Backlog, Ready, Approved, In Progress, Blocked, Done, Rejected]}
+      Section: {type: select, options: [DAGs, Learning, Betts Basketball, Command Center]}
+      Priority: {type: select, options: [P0, P1, P2, P3]}
+      Target: text
+      Risk: {type: select, options: [L0, L1, L2, L3, L4]}
+      Due: date
+      Action: longtext
+      Acceptance: longtext
+      Notes: longtext
+      Repo: text
+      Branch: text
+      MissionID: text
+      CardKey: text
+      LastSync: date
+      Created: date
+  job_search_pipeline:
+    icon: "briefcase"
+    fields:
+      role_title: text
+      Status: {type: select, options: [Suggested Jobs, Selected by Geoff, In Progress, Needs Geoff, Completed, Interviewing, Rejected / Skip, Closed / Archived]}
+      job_key: text
+      company: text
+      location: text
+      remote_type: {type: select, options: [remote, hybrid, onsite, unknown]}
+      source: text
+      portal: text
+      apply_url: url
+      salary_text: text
+      salary_min: number
+      salary_max: number
+      category: text
+      fit_score: number
+      automation_class: {type: select, options: [bot_possible, prepare_only, manual_required, skip]}
+      manual_reason: longtext
+      resume_variant: text
+      why_apply: longtext
+      risks: longtext
+      deadline: date
+      last_seen_at: date
+      application_id: text
+      next_action: longtext
+      materials_path: text
+      company_tier: {type: select, options: [none, sports_team, sports_tech, faang, major_other]}
+      score_explanation: longtext
+      claude_review_url: url
+  todos:
+    icon: "todo"
+    fields:
+      Task: text
+      Status: {type: select, options: [Backlog, Todo, In Progress, Blocked, Done]}
+      Area: {type: select, options: [Betts Basketball, DAGs, Growth OS, Learning, Life]}
+      Priority: {type: select, options: [P0, P1, P2, P3]}
+      Due: date
+      Notes: longtext
+      Created: date
+  dags:
+    icon: "pipeline"
+    fields:
+      Name: text
+      Status: {type: select, options: [Active, Paused, Manual, Broken, Retired]}
+      DagID: text
+      Schedule: text
+      Description: longtext
+      Owners: text
+      Tags: text
+      NextRun: date
+      Notes: longtext
+      Path: text
+      LastSeen: date
+  guidelines:
+    icon: "rules"
+    fields:
+      Name: text
+      Status: {type: select, options: [Current, Review, Superseded]}
+      Area: {type: select, options: [Coding, Data, ML, Infra, Project]}
+      Source: text
+      URL: url
+      Notes: longtext
+      UpdatedAt: date
+  packages:
+    icon: "package"
+    fields:
+      Package: text
+      Status: {type: select, options: [Inbox, Planned, Updated, Skipped]}
+      Repo: text
+      Current: text
+      Latest: text
+      Severity: {type: select, options: [major, minor, patch]}
+      Notes: longtext
+      LastSeen: date
+
+# Stamped per-project board shape used by scripts/new_project.py — NOT created
+# by setup_workspace.py (only `databases:` above are). Same working shape as
+# todos plus the bridge writeback columns.
+project_template:
+  icon: "kanban"
+  fields:
+    Task: text
+    Status: {type: select, options: [Backlog, Ready, Approved, In Progress, Blocked, Done, Rejected]}
+    Priority: {type: select, options: [P0, P1, P2, P3]}
+    Risk: {type: select, options: [L0, L1, L2, L3, L4]}
+    Due: date
+    Action: longtext
+    Acceptance: longtext
+    Notes: longtext
+    MissionID: text
+    CardKey: text
+    Created: date
+
+# Content calendar board shape used by scripts/new_content_board.py (one board
+# per LinkedIn account: geoffhadfield32_content, world_model_sports_content).
+# NOT created by setup_workspace.py. The 3 Status options are the only kanban
+# columns the user asked for: In Queue (Claude Code drafted, awaiting review) ->
+# In Progress (human-approved + scheduled; the publisher will ship it) ->
+# Completed (published; PostURN/PublishedAt stamped back). Hook is the primary
+# column. Source records the real artifact each post is derived from (no fake
+# claims). PostURN/PublishedAt are written by command_center.cli.linkedin_publish.
+content_template:
+  icon: "kanban"
+  fields:
+    Hook: text
+    Body: longtext
+    Status: {type: select, options: [In Queue, In Progress, Completed]}
+    ScheduledFor: date
+    Pillar: {type: select, options: [Betts & Sports Analytics, ML & Data Engineering, World Model Sports, Learning in Public]}
+    Format: {type: select, options: [Text, Image, Carousel, Video]}
+    Media: text
+    Source: longtext
+    PostURN: text
+    PublishedAt: date
+    Notes: longtext
+    Key: text
+    Created: date

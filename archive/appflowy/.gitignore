@@ -1,0 +1,10 @@
+CREDENTIALS.md
+# AppFlowy-Cloud/ is a pinned git submodule (see /.gitmodules), not vendored source.
+legacy-growth-os/.env
+legacy-growth-os/mcp.config.json
+legacy-growth-os/.venv/
+legacy-growth-os/_state/
+legacy-growth-os/_export/
+extracted/
+files.zip
+backups/

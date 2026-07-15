@@ -1,0 +1,242 @@
+[
+  {
+    "key": "geoff-001",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I gave my AI agents a permission system instead of trust.",
+    "body": "Most 'autonomous agent' demos quietly assume the agent should be allowed to do whatever it decides. That's how you wake up to a force-pushed main branch.\n\nI built the opposite: every action my control plane takes is classified L0 to L4. L0 is read-only. L2 is local edits. L3 writes to the outside world. L4 is dangerous and a human runs it, never the agent. The risk tier isn't a suggestion in a prompt - it's enforced in code, before anything executes.\n\nThe lesson that keeps proving itself: autonomy is a permission problem, not an intelligence problem. A smarter model with no wall is more dangerous, not less.\n\nHow are you bounding what your agents are allowed to do?",
+    "source": "llm_station Command Center v4 - risk tiers L0-L4 enforced in gates (docs/MASTER.md sec 6.1)"
+  },
+  {
+    "key": "geoff-002",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "The cheapest bug fix is a config that refuses to load.",
+    "body": "Every editable config in my system validates against a Pydantic contract with extra fields forbidden. A typo'd key doesn't silently do nothing at 2am - it fails loudly at `validate` time, before the stack ever starts.\n\nThis sounds boring until you've spent an evening debugging a feature that was never enabled because someone wrote `enable: true` under the wrong indent.\n\nFail-fast at the boundary is the highest-leverage discipline I know. Push validation as early as it will go, then trust the inside.\n\nWhat's the dumbest outage you've had that a schema would have caught?",
+    "source": "llm_station schemas/base.py Strict(extra=forbid) + cli/validate_config.py"
+  },
+  {
+    "key": "geoff-003",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Why I model NBA games with Bayesian inference instead of a black box.",
+    "body": "For my basketball forecasting work I use hierarchical Bayesian models (JAX + NumPyro, NUTS sampler) rather than a single point-estimate regressor.\n\nThe reason is honesty about uncertainty. A gradient-boosted model will hand you 'team A wins, 64%' with a straight face. A Bayesian model hands you a posterior - a distribution that admits how much it actually knows, and that gets wider when the data is thin (early season, a new lineup, an injury).\n\nIn betting and in sports, calibrated uncertainty is the product. Being confidently wrong is the expensive failure mode.\n\nMore signal isn't always more certainty. Sometimes the honest output is a wide interval.",
+    "source": "betts_basketball README - JAX/NumPyro hierarchical Bayesian models, NUTS sampler"
+  },
+  {
+    "key": "geoff-004",
+    "pillar": "Learning in Public",
+    "format": "Text",
+    "hook": "I'm reading 275 books in a deliberate order. Here's the system.",
+    "body": "I built a sequenced curriculum - from how humanity learned to think, through computation, to frontier AI - and I track every title in a database that schedules spaced reviews of what I've learned.\n\nThe unlock wasn't the reading list. It was making it a pipeline: an hourly curator pulls fresh arXiv papers, GitHub repos and news, scores them against my interests with embeddings, and drops a daily brief next to my curriculum. Learning becomes a system that runs whether or not I feel motivated.\n\nMotivation is unreliable. A pipeline that surfaces the next right thing every morning is not.\n\nWhat does your learning system look like when motivation runs out?",
+    "source": "Growth OS - Lineage curriculum (275 books, data/book-checklist.md) + hourly curator + spaced review"
+  },
+  {
+    "key": "geoff-005",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "No fallbacks. No fake defaults. If the data isn't there, fail.",
+    "body": "A rule I hold across every pipeline I build: decisions are data-derived, never hardcoded, and there are no silent fallbacks.\n\nWhen a model service can't find a trained model, it doesn't quietly serve a stale guess - it trains or it errors. When a publish fails, the item stays in its queue and retries; it never gets marked done without proof it shipped.\n\nFallbacks feel safe. They're actually where bugs go to hide, because the system keeps 'working' while lying to you. A loud failure you can see beats a quiet wrong answer you can't.\n\nFail loud, fail visible, fail early. Your future self is debugging at 2am - be kind to them.",
+    "source": "llm_station + betts_basketball engineering standards - no defensive coding / data-derived / no silent fallback"
+  },
+  {
+    "key": "geoff-006",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "Computer vision can now rebuild a basketball play in 3D from broadcast video.",
+    "body": "My perception pipeline stacks the current generation of CV models: YOLO for detection, SAM for segmentation, SAM3D for 3D body and object reconstruction, monocular depth, and a court homography that maps pixels to real-world floor coordinates.\n\nThe homography is the quiet hero. Once you can transform what the camera sees into where things actually are on the court, you stop analyzing a video and start analyzing a game - positions, spacing, velocities, all in meters.\n\nPerception is the on-ramp to everything else in sports AI. You can't forecast a system you can't first measure.\n\nThe model zoo is impressive. The coordinate transform is what makes it useful.",
+    "source": "bball_homography_pipeline README - SAM3D/SAM2/YOLO/Detectron2/OpenCV CUDA + court homography + depth"
+  },
+  {
+    "key": "geoff-007",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I let an AI propose work, but a human still drags the card.",
+    "body": "My system can scan its own codebase, find improvements, and draft them as kanban cards. What it cannot do is approve them. The card sits in Backlog until I physically drag it to Approved.\n\nThat drag is the contract. The agent proposes; the human disposes. Approval is a wall written in code - the agent literally cannot set a card to Approved, and the bridge that turns cards into work only acts on ones I moved.\n\nHuman-in-the-loop isn't a checkbox you bolt on at the end. It's a boundary you design the system around from the start.\n\nWhere's the approval gate in your automation - and is it enforced or just hoped for?",
+    "source": "llm_station kanban bridge - agent drafts Backlog cards, only human-Approved cards dispatch (cli/kanban_bridge.py)"
+  },
+  {
+    "key": "geoff-008",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Temporal leakage is the silent killer of sports models.",
+    "body": "The fastest way to build a forecasting model that looks brilliant in testing and dies in production: let it peek at the future.\n\nUse a season-total stat to predict a mid-season game, train on data that postdates your prediction point, join a table that was updated after the fact - and your backtest lights up. Then you go live and it's noise.\n\nI design pipelines so a prediction can only ever see what was knowable at that moment. Temporal safety isn't a nice-to-have in sports analytics; it's the difference between a real edge and an expensive illusion.\n\nIf your backtest looks too good, suspect leakage before you suspect genius.",
+    "source": "betts_basketball forecasting standards - temporal safety / no data leakage (point-in-time correctness)"
+  },
+  {
+    "key": "geoff-009",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I route every LLM call through one contract-driven control plane.",
+    "body": "Instead of scattering API calls across services, everything goes through a single control plane: model routing, a judge gate that reviews risky output, a ledger that records every mission, and a registry that's the source of truth for which model handles which job.\n\nThe payoff is that the whole thing is legible. I can answer 'what did the system do, why, and on whose authority?' for any action, because it all flows through one contract.\n\nDistributed cleverness is hard to reason about. Centralized policy with simple edges is something you can actually trust with autonomy.\n\nObservability isn't dashboards. It's being able to explain any decision after the fact.",
+    "source": "llm_station Command Center v4 - LiteLLM routing + Judge Gate + Ledger + model registry"
+  },
+  {
+    "key": "geoff-010",
+    "pillar": "Learning in Public",
+    "format": "Text",
+    "hook": "I stopped trusting my memory and built a second brain that reviews me.",
+    "body": "Every lesson I capture goes into a system that schedules when to resurface it - spaced repetition, but for engineering insights and book takeaways, not vocabulary.\n\nThe shift in mindset: knowledge isn't something you acquire once, it's something you maintain. Without scheduled review, everything I 'learned' last quarter is gone. With it, the ideas keep coming back at widening intervals until they're permanent.\n\nReading more is not learning more. Reviewing on a schedule is.\n\nWhat have you 'learned' this year that you couldn't explain right now without notes?",
+    "source": "Growth OS lessons database - spaced repetition / NextReview scheduling (config/schema.yaml lessons)"
+  },
+  {
+    "key": "geoff-011",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "Idempotency is the unglamorous feature that lets me sleep.",
+    "body": "Every write in my pipelines is keyed by a stable id. Send the same item twice and it updates in place instead of duplicating. Re-run the whole job and nothing breaks.\n\nThis one property - idempotent upserts - is what makes a pipeline safe to retry. And anything safe to retry is safe to automate, because the failure mode of 'it ran twice' becomes a non-event.\n\nThe systems I trust most aren't the ones that never fail. They're the ones where failing and re-running is boring.\n\nIf you can't run it twice without fear, you can't really automate it.",
+    "source": "llm_station/Growth OS first-party cockpit upserts keyed by pre_hash (idempotent by design)"
+  },
+  {
+    "key": "geoff-012",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "I orchestrate dozens of basketball data jobs with Airflow. Here's what broke.",
+    "body": "My sports data platform runs on a fleet of scheduled DAGs - ingest, feature build, model refresh. When you have that many moving parts, the question stops being 'will something break' and becomes 'how fast will I know'.\n\nSo I built an observer that watches every DAG and, the moment one breaks, writes the root cause - the exception, the exact file and line, the task and try number, a link to the log - straight onto a board. A newly broken pipeline drafts its own incident card.\n\nThe goal isn't zero failures. It's that failures explain themselves before I even go looking.\n\nMean-time-to-understanding beats mean-time-to-failure as a metric.",
+    "source": "betts_basketball Airflow DAGs + Growth OS airflow_sync (deterministic failure summaries, auto-drafted fix cards)"
+  },
+  {
+    "key": "geoff-013",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I run capable LLMs locally so my data never leaves the building.",
+    "body": "A lot of my stack runs on local models through Ollama - scoring, drafting, triage - instead of shipping every token to a cloud API.\n\nPart of it is cost. The bigger part is data boundaries. The things worth automating often touch information I don't want to hand to a third party. Keeping the model local means the sensitive path never leaves my machine, and I reserve frontier cloud models for the work that genuinely needs them.\n\n'Should this leave my network?' is a question worth asking before every integration, not after a breach.\n\nLocal-first isn't anti-cloud. It's about putting the boundary where the data actually is.",
+    "source": "llm_station local-only boundary - Ollama tier (qwen3, nomic-embed) + forbidden-providers check"
+  },
+  {
+    "key": "geoff-014",
+    "pillar": "Learning in Public",
+    "format": "Text",
+    "hook": "The best engineers I know treat their own workflow as a product.",
+    "body": "At some point I stopped treating my tools as fixed and started treating my own setup as something to ship, measure, and improve - with the same rigor I'd give production code.\n\nMy environment now has a daily scan that looks for improvements to my own systems, ranks them, and proposes the highest-leverage ones. I'm dogfooding the idea that a developer's leverage compounds when their workflow compounds.\n\nYou ship the product. Who's shipping improvements to the way you ship?\n\nThe meta-work - improving how you work - is the most under-invested high-return work there is.",
+    "source": "llm_station self-improvement scan (src/command_center/improvement/discovery) - observer-only daily pipeline"
+  },
+  {
+    "key": "geoff-015",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "A model registry should be the single source of truth, not a comment in code.",
+    "body": "Which model handles routing? Which one judges risky output? Which is the local fallback? In my system there's exactly one answer to each, and it lives in a versioned registry that everything else reads from.\n\nThe anti-pattern I escaped: model choices scattered as string literals across a dozen files, drifting out of sync, impossible to audit. Centralizing them meant I could finally reason about routing, cost, and capability as one coherent policy.\n\nConfig sprawl is technical debt that doesn't show up until you need to change something everywhere at once.\n\nOne source of truth, read by many. Not many copies, synced by hope.",
+    "source": "llm_station configs/models.yaml ModelRegistry - single source of truth for model routing"
+  },
+  {
+    "key": "geoff-016",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Calibration matters more than accuracy in sports prediction.",
+    "body": "A model that's 'right' 60% of the time tells you less than a model whose 70% predictions actually happen 70% of the time. The second one you can size bets against. The first you can't.\n\nThat's why I obsess over calibration in my forecasting work - whether stated probabilities match observed frequencies - not just hit rate. A well-calibrated model that's modest is worth more than a confident one that's miscalibrated, because you can act on honest numbers.\n\nIn any domain where you bet on the output - capital, inventory, staffing - calibration is the metric that pays rent.\n\nAccuracy tells you if it's right. Calibration tells you if you can trust how sure it is.",
+    "source": "betts_basketball Bayesian forecasting - probability calibration as the operative metric"
+  },
+  {
+    "key": "geoff-017",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I made my system explain its own blast radius before I change anything.",
+    "body": "Before I touch a config or a module, I can ask the system: what does this affect? It traces the dependency graph and tells me the blast radius of the diff I'm about to make.\n\nThis turns 'I think this is a small change' into 'here are the exact things downstream of it'. Most production scares come from underestimating reach - the innocent edit that quietly feeds five other services.\n\nKnowing the blast radius before you pull the trigger is the difference between a confident deploy and a hopeful one.\n\nThe scariest changes are the ones that look local but aren't.",
+    "source": "llm_station cli/impact.py - blast-radius analysis of a git diff"
+  },
+  {
+    "key": "geoff-018",
+    "pillar": "Learning in Public",
+    "format": "Text",
+    "hook": "I automated the boring half of staying current so I can think about the rest.",
+    "body": "Keeping up with ML used to mean a tab graveyard and guilt. Now an hourly curator pulls new papers, repos and signals, scores them against what I actually care about, writes a short 'why this matters to your projects' note, and files the keepers.\n\nWhat I freed up wasn't time so much as attention. The triage - the soul-draining part - is handled. What's left is the part only I can do: deciding what to actually go deep on.\n\nAutomate the filtering. Keep the judgment. That's the right division of labor between you and your tools.\n\nThe goal of automation isn't doing less thinking. It's spending your thinking on what's worth it.",
+    "source": "Growth OS curator - arXiv/GitHub/RSS, embedding scoring, qwen3 enrichment notes, daily brief"
+  },
+  {
+    "key": "geoff-019",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "Multi-session AI coding taught me an old database lesson the hard way.",
+    "body": "Running several AI coding sessions against one repo, I rediscovered why databases have write locks. Two agents editing the same files is a merge conflict generator and a great way to clobber good work.\n\nThe fix was boring and correct: single-writer discipline. One owner per area at a time, explicit handoffs, and rules about who touches what. The same concurrency principles that govern data govern agents editing code.\n\nNew tools, same fundamentals. Concurrency is concurrency whether the writer is a thread or a language model.\n\nThe future is going to re-teach us a lot of distributed-systems lessons we thought were settled.",
+    "source": "llm_station docs/MASTER.md sec 13.2 - multi-session git single-writer rules"
+  },
+  {
+    "key": "geoff-020",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Perception plus prediction is a different sport than stats alone.",
+    "body": "Classic sports analytics works on box scores - what already got counted. I'm building toward something earlier in the stack: measuring the game directly from video, in 3D, then forecasting from that.\n\nWhen you can extract positions, spacing and movement from the raw footage, you get features no box score contains - the quality of a closeout, the geometry of a defense, the value of an off-ball cut. Feed those into a probabilistic model and you're forecasting from how the game is actually played, not just its summary.\n\nThe richest signal in sports is upstream of the stat sheet. Most of it is still on the floor, waiting to be measured.",
+    "source": "bball_homography_pipeline (CV/3D perception) + betts_basketball (Bayesian forecasting) - combined pipeline"
+  },
+  {
+    "key": "geoff-021",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "GPU dependency hell is real. Here's how I stopped fighting it.",
+    "body": "PyTorch with the right CUDA, JAX with GPU, OpenCV compiled with CUDA, a stack of CV models that each want a slightly different world - getting them to coexist is a rite of passage.\n\nWhat finally worked: pin everything, containerize the whole environment, and treat 'it builds and every model imports' as a tested, verifiable state - not a vibe. A devcontainer where every component reports green beats a host machine that worked last Tuesday.\n\nReproducibility isn't a virtue you admire. It's infrastructure you build, or pay for in lost evenings.\n\nIf your environment only works on one machine, it doesn't work.",
+    "source": "bball_homography_pipeline - PyTorch cu128 / JAX GPU / OpenCV CUDA devcontainer, verified model imports"
+  },
+  {
+    "key": "geoff-022",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I gave my agents an adversarial reviewer that tries to refute their findings.",
+    "body": "When an AI process surfaces a 'bug' or an 'improvement', the worst outcome is a confident, plausible, wrong claim that wastes my afternoon. So findings don't get trusted on the first pass - they get sent to independent reviewers whose job is to refute them.\n\nA finding survives only if it withstands skeptics actively trying to knock it down. It's adversarial verification, and it kills the plausible-but-false class of output before it reaches me.\n\nGenerating ideas is cheap now. Verifying them is the bottleneck - so build the verifier with as much care as the generator.\n\nDon't ask your AI to be right. Build a process that's hard to fool.",
+    "source": "llm_station Judge Gate + improvement scan ranking - adversarial verification before a finding is accepted"
+  },
+  {
+    "key": "geoff-023",
+    "pillar": "Learning in Public",
+    "format": "Text",
+    "hook": "I control my whole AI stack from a kanban board on my phone.",
+    "body": "The interface to my autonomous systems isn't a terminal - it's a set of boards. Missions, todos, broken pipelines, things to review. I approve work by dragging a card. I see what every part of the system is doing without SSHing into anything.\n\nReducing the operator surface to 'read a board, drag a card' did something I didn't expect: it made me actually run the system, because the friction to check in dropped to near zero. The best architecture is the one you'll still use when you're tired.\n\nThe right interface isn't the most powerful one. It's the one that survives a busy week.",
+    "source": "llm_station/Growth OS first-party cockpit boards as the operator interface (phone-friendly, drag-to-approve)"
+  },
+  {
+    "key": "geoff-024",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "Most 'AI agent' failures are really missing-boundary failures.",
+    "body": "When I see an agent loop forever or do something dumb, it's almost never the model being stupid. It's an interface that returned an empty list on a bad input instead of an error, so the model had nothing to correct against.\n\nThe fix that keeps working: make boundaries loud. Validate inputs, reject bad enums with a message, never return a silent empty success. Given a clear error, even a small local model self-corrects. Given silence, the best model spirals.\n\nGood error messages aren't politeness. They're the training signal your agent uses at runtime.\n\nDesign your tools' failure messages as carefully as their happy path.",
+    "source": "llm_station/Growth OS - loud boundary validation on list/status tools (fixed local-model tool-loop spirals)"
+  },
+  {
+    "key": "geoff-025",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "Hierarchical models let you predict a player you've barely seen.",
+    "body": "The cold-start problem in sports: a rookie or a new lineup has almost no data. A flat model either overfits the handful of games or shrugs.\n\nHierarchical Bayesian models handle this gracefully. A player with little history is pulled toward the distribution of similar players, and as real data accumulates, the model leans on it more. The structure encodes 'borrow strength from the group until the individual earns its own estimate'.\n\nIt mirrors how good scouts actually think - start from the archetype, update on the evidence.\n\nThe right prior is just structured humility about what you don't yet know.",
+    "source": "betts_basketball - hierarchical Bayesian models (partial pooling / varying intercepts)"
+  },
+  {
+    "key": "geoff-026",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I write the failure mode into the design doc before the feature.",
+    "body": "For every pipeline I build, the doc answers up front: what happens when this fails? Where does a half-finished item land? What retries, what stays put, what alerts?\n\nDesigning the unhappy path first changes the architecture. You stop assuming success and start building for the 3am reality where the network blips, the API 500s, and the job dies halfway. The systems that survive contact with production are the ones designed around their failure modes, not their demos.\n\nHope is not a recovery strategy. Write down what breaks and what happens next.\n\nThe happy path is the easy 20%. The other 80% is where the engineering lives.",
+    "source": "llm_station/betts_basketball engineering standards - failure-mode-first design, explicit retry/queue semantics"
+  },
+  {
+    "key": "geoff-027",
+    "pillar": "Learning in Public",
+    "format": "Text",
+    "hook": "Building in public forced me to make my systems explainable.",
+    "body": "The act of writing about what I build keeps exposing the parts I can't yet explain simply - which is usually a sign the design is still muddy.\n\nWhen I have to describe a pipeline in a paragraph, the accidental complexity stands out. Half my refactors have started as 'this is too annoying to explain, so it's probably too complicated to be right'. Teaching is a debugging tool for your own understanding.\n\nIf you can't explain your architecture in a few plain sentences, you may not understand it as well as the code implies.\n\nWriting is thinking. Publishing is thinking with the stakes turned up.",
+    "source": "Personal practice - building-in-public as a forcing function for explainable design"
+  },
+  {
+    "key": "geoff-028",
+    "pillar": "ML & Data Engineering",
+    "format": "Text",
+    "hook": "I never auto-promote a model. A human decides what goes live.",
+    "body": "My pipeline can evaluate a new model candidate, score it against the incumbent, and write up the comparison. What it will not do is swap the production model on its own.\n\nModel promotion is an external-facing decision with real downside, so it stays human-gated by contract. The system does the tedious, rigorous part - the evaluation - and hands me a decision, not a fait accompli.\n\nAutomate the analysis. Keep the consequential call. That line is where I draw the boundary on every system that touches the real world.\n\nThe more capable your automation, the more deliberate you should be about which decisions it's allowed to make.",
+    "source": "llm_station model-update pipeline - no auto-promotion, human-gated (docs/MASTER.md sec 6.5)"
+  },
+  {
+    "key": "geoff-029",
+    "pillar": "Betts & Sports Analytics",
+    "format": "Text",
+    "hook": "The court homography is the most important 30 lines in my sports pipeline.",
+    "body": "A homography is just a matrix that maps one plane to another - here, broadcast pixels to real court coordinates. It's not glamorous. It is the thing that turns 'a video of basketball' into 'measurable spatial data'.\n\nEverything downstream - spacing metrics, movement, shot geometry, eventually forecasting - depends on knowing where things truly are, in feet, not where they happen to land in a frame. Get the transform right and the rest of the analytics stack has solid ground. Get it wrong and you're modeling camera angles.\n\nThe highest-leverage code is often the least flashy. Boring foundations, interesting buildings.",
+    "source": "bball_homography_pipeline - court homography (pixel-to-floor coordinate transform) as the foundation layer"
+  },
+  {
+    "key": "geoff-030",
+    "pillar": "Learning in Public",
+    "format": "Text",
+    "hook": "What a year of building autonomous systems taught me about trust.",
+    "body": "I came in wanting agents that could do more on their own. I'm leaving more interested in agents whose every action I can bound, observe, and explain.\n\nThe pattern across all of it - the LLM control plane, the sports pipelines, the learning system - is the same: capability is easy now, trust is the hard part, and trust comes from structure. Permission tiers, contracts that fail loud, human approval gates, no silent fallbacks, no leaked data. Boring disciplines that compound into systems you can actually hand the keys to.\n\nThe future isn't more autonomous AI. It's more trustworthy AI - and trust is something you engineer, on purpose, one boundary at a time.",
+    "source": "Synthesis across llm_station, betts_basketball, bball_homography, Growth OS - trust-through-structure thesis"
+  }
+]

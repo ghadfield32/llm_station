@@ -1,0 +1,11 @@
+[Unit]
+Description=Growth OS daily brief (LLM overview + review queue -> review DB)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=CHANGEME
+WorkingDirectory=/home/CHANGEME/appflowy/growth-os
+Environment=PYTHONPATH=.
+ExecStart=/home/CHANGEME/appflowy/growth-os/.venv/bin/python -m growthos.brief

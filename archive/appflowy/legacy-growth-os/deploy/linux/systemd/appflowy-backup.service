@@ -1,0 +1,8 @@
+[Unit]
+Description=AppFlowy Postgres + Growth OS state backup
+After=docker.service
+
+[Service]
+Type=oneshot
+User=CHANGEME
+ExecStart=/home/CHANGEME/appflowy/growth-os/deploy/linux/backup.sh

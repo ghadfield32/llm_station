@@ -5,6 +5,12 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Boards 500 incident + todo→kanban recommendation gap (2026-07-14)
+- INCIDENT FIXED: `/api/boards/live` 500 `ModuleNotFoundError: growthos`. Root cause: committed `GROWTHOS_ROOT=appflowy_kanban/growth-os` (core.py:42) is a live compose bind mount (`./appflowy_kanban/growth-os:/app/...`), but the uncommitted 192-file WIP (restored via stash-pop) DELETED that host dir (moved to `growth_os/`), so the live mount emptied under the running container. Restored the committed path (`git checkout origin/main -- appflowy_kanban/growth-os`) → mount repopulated → boards/live 200. Only `boards_live` breaks because it alone calls `_get_core("chat")` to bootstrap growthos.
+- ROOT ISSUE (not yet fixed): the WIP `appflowy_kanban/growth-os → growth_os` migration is INCOMPLETE — committed core.py + docker-compose still reference the old path. Finishing it (update GROWTHOS_ROOT + compose mount + Dockerfile) must be a reviewed PR before that restructure is deployed, else every clean rebuild breaks chat/boards-live.
+- FINDING: todo→kanban recommendation flow works (`POST /api/captures` → `/route`) but recommends NOTHING for a fresh todo — `board_suggestions:[]` + `needs_confirmation.options:[]`. Root cause: `_build_work_router()` sources board options from `svc._store.list_placements()` (the EMPTY work graph), not the configured board/domain registry, so it can't offer existing boards (Jobs/Posts/Papers/…). "Recommend a NEW kanban" = Phase 3 BoardProposal, not built.
+- NEXT: feed configured domain/board surfaces into the router's `known_boards` so a fresh todo can be routed to real boards; then Phase 3 new-board proposal. (own reviewed slice)
+
 ## Agent auto-start + real Posts composer (2026-07-14)
 - FIXED chat-first behavior: selecting authenticated Claude Code or Codex now auto-creates one read-only session with the runtime-advertised default model/effort; failures stay visible with retry, and a session from the other harness is never reattached.
 - BUILT a real `linkedin_content_pipeline_internal` board plus a LinkedIn-style New post composer (account/body/tags/schedule, desktop/mobile preview, 3,000-char validation, lint, governed Draft event); it does not publish or bypass approval.
