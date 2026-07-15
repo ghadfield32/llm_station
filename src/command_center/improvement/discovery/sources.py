@@ -521,7 +521,7 @@ class DependencyScanner(FeedScanner):
 
 
 class KanbanScanner(FeedScanner):
-    """AppFlowy/Kanban records -> AUTOMATION findings (stale or aged cards = process toil).
+    """Kanban records -> AUTOMATION findings (stale or aged cards = process toil).
     Record: {title, column, age_days, blocked(bool)}."""
 
     def __init__(self, fetch: Fetch, *, name: str = "kanban_cycle_time", max_age_days: float = 14):

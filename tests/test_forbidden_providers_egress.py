@@ -37,11 +37,42 @@ def test_egress_ready_requires_enabled_and_redaction(tmp_path, monkeypatch):
     assert ready is True
 
 
-def test_default_mode_still_forbids_router_key_in_process_env(monkeypatch):
-    # No flag -> OPENROUTER_API_KEY in the process env is a hard failure (local-only intact).
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-not-real")
+@pytest.mark.parametrize("key", ["OPENROUTER_API_KEY", "ZAI_API_KEY"])
+def test_default_mode_still_forbids_router_key_in_process_env(monkeypatch, key):
+    # No flag -> every router key in the process env is a hard failure (local-only intact).
+    monkeypatch.setattr(cfp, "dotenv_keys", lambda path: set())
+    monkeypatch.setenv(key, "sk-not-real")
     assert cfp.main(allow_router_egress=False) == 1
 
+
+def test_configured_posture_permits_only_ready_lanes(monkeypatch):
+    monkeypatch.setattr(cfp, "frontier_egress_ready", lambda: (True, "budget on"))
+    monkeypatch.setattr(cfp, "agent_session_egress_ready", lambda: (False, "off"))
+
+    forbidden, permitted = cfp.configured_provider_posture()
+
+    assert forbidden.isdisjoint(cfp.ROUTER_LANE_KEYS)
+    assert cfp.AGENT_SESSION_KEYS <= forbidden
+    assert len(permitted) == 1
+    assert "frontier-router" in permitted[0]
+
+
+@pytest.mark.parametrize("key", ["OPENROUTER_API_KEY", "ZAI_API_KEY"])
+def test_configured_posture_does_not_fail_for_a_disabled_lane(monkeypatch, key):
+    monkeypatch.setattr(cfp, "frontier_egress_ready", lambda: (True, "budget on"))
+    monkeypatch.setattr(cfp, "agent_session_egress_ready", lambda: (False, "off"))
+    monkeypatch.setattr(cfp, "dotenv_keys", lambda path: {key})
+
+    assert cfp.main(configured_posture=True) == 0
+
+
+def test_configured_posture_still_blocks_keys_for_disabled_lanes(monkeypatch):
+    monkeypatch.setattr(cfp, "frontier_egress_ready", lambda: (True, "budget on"))
+    monkeypatch.setattr(cfp, "agent_session_egress_ready", lambda: (False, "off"))
+    monkeypatch.setattr(
+        cfp, "dotenv_keys", lambda path: {"OPENROUTER_API_KEY", "OPENAI_API_KEY"})
+
+    assert cfp.main(configured_posture=True) == 1
 
 def test_egress_flag_requires_the_lane_to_be_ready(tmp_path, monkeypatch):
     # Flag set but budget disabled -> refuse (cannot opt into egress that isn't budgeted).

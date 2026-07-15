@@ -63,11 +63,25 @@ KANBAN_UI_USAGE_CLAUDE=1         # tee live Claude rate_limit events into the us
 KANBAN_UI_USAGE_LEDGER=1         # read the SAME durable Ledger the worker writes (restart-proof, one authoritative store)
 ```
 
+With Ledger mode enabled, the cockpit proxies **Usage refresh** to the host
+worker. This is required: the worker owns the Codex SDK and the user's login,
+while the cockpit container intentionally owns neither. The PowerShell worker
+manager launches a frozen isolated uv environment with the pinned Codex extra,
+so ordinary uv test/sync commands cannot prune the SDK out from under the
+running service. If start reports an existing older worker, use
+scripts/start_agent_worker.ps1 restart once.
+
 Rebuild/restart the cockpit **from this branch** (it must contain
-`claude_code_local`). Then in the UI: **Agent Sessions → pick a runtime** →
-Claude Agent (local subscription) or Codex Agent → the **model** and **reasoning
-effort** pickers populate from the live catalog → pick a registered repo → start
-a read-only session.
+`claude_code_local`). Then in the UI: open **Chat**, choose Claude Agent (local
+subscription) or Codex Agent in **Assistant**, and the cockpit automatically
+starts one read-only session against the selected registered repo using the
+runtime catalog's default model/effort. A surfaced failure offers retry; no
+mission or separate start button is required.
+
+For a fresh install, `uv run cc init-env` generates `AGENT_WORKER_TOKEN` and the
+local `.env.example` enables the real agent/usage flags. Existing `.env` files
+are deliberately never rewritten: add the documented agent/usage values once,
+restart the cockpit, then run `scripts/start_agent_worker.ps1 start`.
 
 ### 3. If a runtime shows unavailable, read the reason
 

@@ -1,7 +1,7 @@
 """Observer-only desktop target evidence verifier.
 
 This validates the declared desktop target against a live/snapshot board
-artifact. It does not click, type, move cards, mutate AppFlowy, or read secrets.
+artifact. It does not click, type, move cards, mutate external board runtime, or read secrets.
 """
 from __future__ import annotations
 

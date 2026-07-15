@@ -62,13 +62,20 @@ domains:
   - domain_id: linkedin_post
     title: Posts
     card_component: linkedin_post
-    source: fixtures
+    source: board_store
+    board_id: linkedin_content_pipeline_internal
     columns:
       - Draft
       - In Queue
       - Scheduled
       - Published
       - Needs Geoff
+    column_actions:
+      Draft: add_mission_card
+      In Queue: stage_card
+      Scheduled: start_todo
+      Published: finish_todo
+      Needs Geoff: block_card
     summary_fields:
       - {name: account, label: Account, kind: badge}
       - {name: hook, label: Hook}
@@ -82,15 +89,15 @@ domains:
     allowed_actions: [stage_card, block_card, reject_card]
     empty_state:
       title: No posts queued
-      hint: Drafts come from the content pipeline; approval stays on the board drag.
-      command: uv run cc linkedin-publish --preflight
+      hint: Create a draft here, review its LinkedIn preview, then move it through the queue.
+      command: Open Posts and choose New post
 
   - domain_id: book
     title: Books
     card_component: book
-    source: appflowy_board
-    board: library
-    columns:      # the library board's real lanes (growthos STATUSES)
+    source: board_store
+    board_id: reading_library
+    columns:      # first-party board lanes (growthos STATUSES)
       - To read
       - Reading
       - Done
@@ -106,16 +113,16 @@ domains:
       - {name: hours, label: Hours}
     allowed_actions: [stage_card, start_todo, finish_todo]
     empty_state:
-      title: No books in the snapshot yet
+      title: No books in the library yet
       hint: The Growth OS library board holds the reading list; add `library`
         to the board worker's UI_BOARDS and regenerate the snapshot.
-      command: make kanban-board-snapshot
+      command: Open Books and add a card
 
   - domain_id: paper
     title: Papers
     card_component: paper
-    source: appflowy_board
-    board: papers
+    source: board_store
+    board_id: research_papers
     columns:
       - Inbox
       - Reading
@@ -139,8 +146,8 @@ domains:
   - domain_id: repo
     title: Repos
     card_component: repo
-    source: appflowy_board
-    board: repos
+    source: board_store
+    board_id: research_repos
     columns:
       - Inbox
       - Trying
@@ -167,8 +174,8 @@ domains:
   - domain_id: dag
     title: DAGs
     card_component: dag
-    source: appflowy_board
-    board: dags
+    source: board_store
+    board_id: dag_operations
     columns:
       - Active
       - Paused

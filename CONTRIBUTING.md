@@ -58,7 +58,7 @@ half does **not** — this is a control plane, not the forecasting pipeline; see
 - **Never** force-push a shared branch, `--amend` a pushed commit, or `--no-verify`.
 - Before pushing: `git log origin/main..HEAD --oneline`. If another session's commit is in
   the tree, **rebase to keep their work**, don't overwrite it.
-- The `appflowy_kanban/AppFlowy-Cloud` submodule is **pinned**. Don't bump it as a side
+- The `archive/appflowy/AppFlowy-Cloud` retirement archive is **pinned**. Don't bump it as a side
   effect of unrelated work; update it deliberately in its own commit.
 - Work on a branch off `main`; open a PR. The agent may push a feature branch and open a
   PR; it never merges, deploys, or publishes — those stay human-gated.

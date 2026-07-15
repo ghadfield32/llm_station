@@ -14,7 +14,7 @@ completed_work:
   - external_runtime_evaluation_policy_recorded
   - repo_devcontainer_manifest_added_for_llm_station
   - github_app_production_auth_review_completed
-  - staging_appflowy_card_selected_from_snapshot
+  - staging_cockpit_card_selected_from_snapshot
   - completion_verifier_integrated_into_ledger_runtime
   - planner_live_smoke_empty_response_repaired
   - github_app_created_selected_env_recorded
@@ -25,10 +25,10 @@ completed_work:
   - github_app_repository_permissions_verified
   - agent_live_tool_memory_multiturn_validation_added
   - desktop_target_snapshot_verifier_added
-  - staging_appflowy_card_presence_verified_from_live_snapshot
+  - staging_cockpit_card_presence_verified_from_live_snapshot
   - branch_protection_owner_admin_verifier_added
   - github_token_storage_rotation_policy_drafted
-  - staging_appflowy_card_state_in_progress_verified
+  - staging_cockpit_card_state_in_progress_verified
   - desktop_adapter_readiness_gate_added
   - branch_protection_observer_token_supplied_and_repo_read_verified
   - branch_protection_ruleset_diagnostics_added
@@ -167,14 +167,14 @@ repo_manifests:
     blockers: []
 
 desktop_targets:
-  - target_id: appflowy_browser_staging
+  - target_id: cockpit_browser_staging
     enabled: false
     os_family: windows
     surface: browser
     board: mission_intake
     card_ref: card-review q3 odds metrics
     snapshot_evidence_ref: generated/board-snapshot.json
-    allowed_windows: [AppFlowy]
+    allowed_windows: [LLM Station Cockpit]
     allowed_actions: [click, type, select, drag, keyboard_shortcut]
     forbidden_actions:
       - clipboard_read
@@ -258,10 +258,10 @@ canaries:
     blocked_until: [canary_schedule_plan_not_approved]
 
 desktop_noop_canaries:
-  - target_id: appflowy_browser_staging
-    target_type: appflowy_browser
+  - target_id: cockpit_browser_staging
+    target_type: browser
     allowed_mode: read_only
-    allowed_apps_windows_domains: [AppFlowy]
+    allowed_apps_windows_domains: [LLM Station Cockpit]
     allowed_actions:
       - read_snapshot
       - verify_target_identity
@@ -290,7 +290,7 @@ desktop_noop_canaries:
     blockers: []
 
 desktop_timing_sample_plans:
-  - target_id: appflowy_browser_staging
+  - target_id: cockpit_browser_staging
     status: declared
     source_work_item: declare_desktop_timing_sample_plan_before_candidates
     sample_plan_basis: explicit_read_only_noop_samples_for_current_staging_snapshot
@@ -298,7 +298,7 @@ desktop_timing_sample_plans:
       - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary.json
       - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-001.json
       - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-002.json
-    required_sample_count_source: configs/autonomy.yaml:desktop_timing_sample_plans[appflowy_browser_staging].required_evidence_refs
+    required_sample_count_source: configs/autonomy.yaml:desktop_timing_sample_plans[cockpit_browser_staging].required_evidence_refs
     required_measurement_fields:
       - snapshot_load_ms
       - target_verify_ms
@@ -309,38 +309,7 @@ desktop_timing_sample_plans:
     production_enabling: false
     blockers: []
 
-# Representative ACTION-latency canary: measures real action round-trip latency
-# through the primary direct_api path against a reversible SANDBOX database, so
-# the action-timeout candidate is derived from real action timing rather than
-# read-only no-op reads. Credentials are env references only; the canary fails
-# closed when they are absent (no AppFlowy sandbox is configured yet).
-desktop_action_latency_canaries:
-  - target_id: appflowy_browser_staging
-    surface: direct_api
-    allowed_mode: reversible_sandbox_roundtrip
-    reversible_action: create_then_delete_row
-    sandbox_base_url_env: APPFLOWY_SANDBOX_BASE_URL
-    sandbox_workspace_id_env: APPFLOWY_SANDBOX_WORKSPACE_ID
-    sandbox_database_id_env: APPFLOWY_SANDBOX_DATABASE_ID
-    sandbox_user_env: APPFLOWY_SANDBOX_USER
-    sandbox_password_env: APPFLOWY_SANDBOX_PASSWORD
-    forbidden_actions:
-      - clipboard_read
-      - password_field_read
-      - system_settings_change
-      - file_delete
-    forbidden_targets:
-      - mission_intake
-      - card-review q3 odds metrics
-    measurement_fields:
-      - action_create_ms
-      - action_delete_ms
-      - action_roundtrip_ms
-    evidence_policy: redacted_json_only
-    redaction_policy: no_raw_content_no_secrets_no_clipboard
-    human_takeover_policy_ref: docs/desktop/desktop-timeout-takeover-policy.md
-    production_enabling: false
-    blockers: []
+desktop_action_latency_canaries: []
 
 telemetry:
   mode: structured_events_only

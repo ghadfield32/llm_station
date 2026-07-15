@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`cc content-note` - update a card's note BY INTENT, through the governed path.
 
-Resolve a card (library / notes / post / any AppFlowy database) by a fuzzy or
+Resolve a card (library / notes / post / any first-party board) by a fuzzy or
 semantic query, then record the note as a governed `progress_comment` kanban
 event. That event is the ONLY legal write path: `emit_event` structurally rejects
 wall actions, and a progress comment never sets status, approves, or merges.
@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--append", help="append this note text")
     g.add_argument("--set", dest="set_", help="set the note to this text")
     ap.add_argument("--pipeline", default="configs/content_pipeline.yaml",
-                    help="content_pipeline.yaml (AppFlowy source)")
+                    help="content_pipeline.yaml (first-party board source)")
     ap.add_argument("--apply", action="store_true",
                     help="record the event (default: dry-run)")
     ap.add_argument("--log", default=EVENT_LOG)

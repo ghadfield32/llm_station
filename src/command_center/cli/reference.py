@@ -38,7 +38,7 @@ def cmd_index(args) -> int:
         live = records_from_rows(fetch_all(pcfg.source))
         seen = {r.id for r in records}
         records += [r for r in live if r.id not in seen]
-        print(f"  live: indexed {len(live)} board rows from AppFlowy")
+        print(f"  live: indexed {len(live)} board rows from first-party boards")
     note = ""
     if cfg.embed_enabled:
         try:
@@ -79,11 +79,11 @@ def main(argv: list[str] | None = None) -> int:
     pi.add_argument("--rebuild", action="store_true",
                     help="rebuild from configs + posts store (the only mode)")
     pi.add_argument("--live", action="store_true",
-                    help="also index every live AppFlowy database (library, notes, "
+                    help="also index every live first-party board (library, notes, "
                          "posts, ...) so cards resolve by intent")
     pi.add_argument("--config", default=REF_CONFIG)
     pi.add_argument("--pipeline", default="configs/content_pipeline.yaml",
-                    help="content_pipeline.yaml (AppFlowy source for --live)")
+                    help="content_pipeline.yaml (first-party board source for --live)")
     pi.add_argument("--store", default=DEFAULT_STORE)
     pi.set_defaults(func=cmd_index)
 

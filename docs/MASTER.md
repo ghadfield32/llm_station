@@ -6,21 +6,33 @@
 > Deep-dive references for each section are listed in [§12](#12-doc-index-where-the-detail-lives).
 >
 > Last full revision: **2026-06-12**. Latest readiness update:
-> **2026-07-11**. Current source of truth is local
-> `feat/research-digest-intake-hygiene-main`, ahead of `main` with the
-> cockpit/chat/job-search work described below (commits `d8e593d` through
-> `7e6b367`, not yet merged).
+> **2026-07-14**. Current source of truth is the checked-out working tree;
+> verify branch/SHA with `git status` before staging.
 
 ---
 
-## Current readiness snapshot (2026-07-12)
+## Current readiness snapshot (2026-07-14)
 
 The **first-party cockpit** (`services/agent_kanban_ui`, optional Docker
-Compose profile `ui`) is the primary operator surface — see
-[reviews/2026-07-08-cockpit-decision.md](reviews/2026-07-08-cockpit-decision.md).
-AppFlowy stays an optional projection; the board-snapshot file it produces is
-now read directly by the typed domain boards (papers/repos/dags/books) so
-those lists show real counts instead of demo fixtures.
+Compose profile `ui`) is the only active operator board surface. AppFlowy was
+retired on 2026-07-14 because the owned cockpit is faster to update, integrates
+typed domains and Codex/Claude sessions directly, and is more usable for this
+system's workflows. The former server/client/setup is preserved under
+`archive/appflowy/` for provenance only; see
+[the retirement decision](decisions/2026-07-14-appflowy-retirement.md).
+
+Board fields now live in `generated/boards/` and status truth is the governed
+`generated/kanban-events.jsonl` fold. The approval wall is unchanged. Main's
+ruleset now requires one approving review plus code-owner review and resolved
+threads. The 2026-07-14 08:00 self-improvement artifacts were reviewed: the
+run remained observer/draft-only with four findings, zero drafted cards, and no
+code changes; its manifest hash matches the report after the generator's canonical
+CRLF-to-LF normalization.
+
+Codex and Claude CLI authentication were rechecked on 2026-07-14. Usage records
+store provider-native quota reset timestamps in `reset_at`. Neither CLI exposes a
+subscription renewal or expiration date, so those dates remain absent/unknown and
+are never inferred from quota resets, token history, plan type, or login state.
 
 **Chat** was evaluated and rebuilt this pass — full detail in §14's
 2026-07-09/10 entry and
@@ -32,21 +44,22 @@ click-through from any kanban card's Story tab to the exact moment); the
 previously-planned ORCA/OmniAgent/OxyGent specialist link-outs were removed
 in favor of the existing LiteLLM model-role dropdown (one gateway, switch by
 role, cloud providers stay behind the forbidden-provider scan on purpose).
-Claude Code and Codex CLI never appear as selectable options in this picker —
-they are agentic coding **executors** (their own subscription/OAuth login,
-driving leased repo worktrees), not conversational chat models. This was a
-real point of operator confusion ("why don't I see Claude Code as a chat
-option"), so as of 2026-07-11 the model `<select>` itself carries an
-always-visible, explicitly-disabled "Executors — from missions, not here"
-optgroup naming both — not just the `/api/chat/runtime` `executor_note` in a
-side panel that's easy to miss on mobile.
+Claude Code and Codex CLI never appear in the **GatewayCore chat-model** picker:
+they are agentic coding runtimes with their own subscription/OAuth login and
+runtime model catalogs, not LiteLLM chat roles. They are directly selectable in
+the separate **Assistant** picker and start read-only without a mission; mission
+tracking is optional. The Growth OS option is labelled
+"Growth OS (GatewayCore local chat)", while the second selector is explicitly
+"chat model" or "agent model" for the selected runtime. This preserves the
+runtime/model safety boundary without turning it into an operator dead end.
 
 **A second, opt-in lane now exists: the frontier-router backup lane**
 (§5.4, §14 2026-07-10 entry) — GLM-5.2 / DeepSeek V4 Pro / Kimi K2.6 via
 OpenRouter, the current top-3 open-weight models on Artificial Analysis's
-July 2026 index, none of which fit local VRAM. Off by default (fails the
-strict `cc validate` provider scan on purpose if a key is ever present
-without the lane being reconciled); Geoff enabled it 2026-07-10
+July 2026 index, none of which fit local VRAM. Off by default; when enabled,
+`cc validate` permits its key names only after the committed budget config
+proves redaction and usage-accounting readiness. The standalone
+`cc forbidden-providers` audit remains deliberately strict. Geoff enabled it 2026-07-10
 (`OPENROUTER_API_KEY` in `.env` + `configs/frontier-router-budgets.yaml`
 `default.enabled: true`) to test cost/latency/correctness directly. A
 frontier turn carries **no tools and no board/memory context** — plain
@@ -197,65 +210,38 @@ Next order:
 
 ## 1. What this is
 
-Two systems joined by one bridge, governed by one permission model:
+One owned system with three joined planes, governed by one permission model:
 
-- **Command Center** (`llm_station/`, this repo) — the execution plane. A
-  contract-validated control plane (LiteLLM gateway, Judge Gate, Ledger,
-  Proactive Runner) that lets coding agents (Claude Code primary, Codex CLI
-  fallback) do real repo work inside leased, isolated worktrees — with
-  deterministic checks, LLM judge arrays, human approval gates, and GitHub
-  branch protection as the final wall.
-- **Growth OS** (`appflowy_kanban/growth-os/`) — the human surface and
-  knowledge base. Self-hosted AppFlowy boards (todos, mission intake, papers /
-  repos / signals, packages, guidelines, DAGs, library), self-updating
-  watchers, a local assistant, an MCP server, and a Discord gateway — all
-  backed by **one action layer** (`growthos/actions.py`).
-- **The bridge** (`scripts/kanban_bridge.py`) — the only join between them.
-  Approved kanban cards become Ledger missions; mission status is stamped back
-  onto the cards.
+- **Execution plane** — LiteLLM, Judge Gate, Ledger, proactive runners, and
+  leased repo worktrees for Codex/Claude missions.
+- **Work plane** — the first-party Agent Kanban Cockpit, typed domain boards,
+  `generated/boards/` card fields, and the append-only governed kanban event log.
+- **Conversation plane** — GatewayCore local chat plus authenticated Codex and
+  Claude agent sessions, with usage/limit evidence kept separate from chat models.
 
-The one-sentence design: **many channels, one brain gateway, one action layer,
-one approval wall** — open-source local models do the routine work for ~$0;
-Claude Code / Codex are engaged through gated missions for the big things; a
-human drag-to-Approve and GitHub branch protection are the two boundaries no
-agent can cross alone.
-
-```
- CHANNELS (talk to it anywhere)              KNOWLEDGE (updates itself)
- ┌─────────────────────────────┐             ┌──────────────────────────────┐
- │ AppFlowy boards (phone/web) │             │ papers/repos/signals  hourly │
- │ chat.bat (terminal, Ollama) │             │ guidelines (standards+feeds) │
- │ Claude Code via MCP         │             │ packages (semver vs PyPI)    │
- │ Discord bot (anywhere)      │             │ dags (airflow_sync, live)    │
- │ [future: SMS/email/voice]   │             │ library/lessons/notes (you)  │
- └──────────────┬──────────────┘             └──────────────┬───────────────┘
-                │  natural language                         │ rows
-                ▼                                           ▼
- ┌─────────────────────────────┐  reads/writes  ┌──────────────────────────┐
- │ BRAIN GATEWAY: LiteLLM:4000 │◄──────────────►│ ACTION LAYER             │
- │  triage / planner / coder / │   tool calls   │ growthos/actions.py      │
- │  local-judge → Ollama       │                │ (~20 tools, one source   │
- │  (qwen3/devstral, $0,local) │                │  of truth for every agent│
- └─────────────────────────────┘                └────────────┬─────────────┘
-                                                             │ add_mission_card
-                                                             ▼  (Backlog only)
- ┌───────────────────────────────────────────────────────────────────────────┐
- │ THE WALL — human approval, enforced three ways:                           │
- │  1. agents cannot set Approved (actions.set_status refuses)               │
- │  2. the bridge applies ONLY Approved cards (configs/kanban.yaml)          │
- │  3. L3/L4 missions additionally hold at the Ledger awaiting approval      │
- │                 YOU drag the card → that is the entire UX                 │
- └─────────────────────────────────────┬─────────────────────────────────────┘
-                                       ▼
- ┌─────────────────────────────────────────────────────────────────────────┐
- │ EXECUTION PLANE: bridge → Ledger:8091 → risk gates → judges (local      │
- │ models, judging against standards.yaml) → executors (Claude Code/Codex  │
- │ in leased worktrees) → PR behind the GitHub wall → morning-brief worklog │
- └─────────────────────────────────────────────────────────────────────────┘
+```text
+human / chat / agent session
+            |
+            v
+   governed intent + typed contract
+            |
+     +------+-------+
+     |              |
+     v              v
+board store/event log   Ledger mission lifecycle
+     |              |
+     +------+-------+
+            v
+   verifier / GitHub wall
 ```
 
-Fourteen Mermaid diagrams covering every concern below live in
-[architecture/visuals.md](architecture/visuals.md).
+The one-sentence design is: **many channels, one model gateway, one governed
+action layer, one approval wall**. Agents can draft and advance permitted work,
+but they cannot approve, merge, deploy, publish, or delete on their own.
+
+AppFlowy is not a fourth plane or fallback. It was retired on 2026-07-14; only
+the provenance archive remains. See
+[the retirement decision](decisions/2026-07-14-appflowy-retirement.md).
 
 ---
 
@@ -675,8 +661,8 @@ remaining-credit source for the paid frontier lane. **LiteLLM** → `/spend/logs
   (`usage/agent_usage.py`) with honest cost (subscription → `cost_usd=None` +
   `api_equivalent_cost_usd` in its own field, never $0.00; API lane → real
   `cost_usd`) and correct uncached-token math. `UsageSample` gained
-  `model`/`effort`/`context_mode`/`api_equivalent_cost_usd` (additive usage.v1
-  columns), the worker feeds `usage` events durably for ALL agent lanes, and
+  `model`/`effort`/`context_mode`/`api_equivalent_cost_usd` (additive usage.v2 columns with an idempotent startup migration for existing
+  Ledgers), the worker feeds `usage` events durably for ALL agent lanes, and
   `attribution.rank_by` supports `model`/`effort`/`context` dimensions — so "top
   model / top effort / top uncached-context session" is answered from recorded
   fact. Under `KANBAN_UI_USAGE_LEDGER` the cockpit SSE tee **stands down as a
@@ -778,8 +764,10 @@ getting started.
 cockpit chat composer has ONE primary chooser, labelled **Assistant**:
 GatewayCore (in-app), external specialists, and the **Coding agents (Claude Code ·
 Codex)** group. Selecting a coding agent renders `AgentSessionPanel` directly and
-starts a read-only (`analysis`) session against a registered repo — no mission
-required. The old duplicate, *disabled* executor list in the GatewayCore model
+automatically starts one read-only (`analysis`) session against a registered repo
+with the runtime catalog's declared default model/effort — no mission or setup
+button required. A keyed start guard prevents React StrictMode duplicates, and a
+failure is surfaced with retry. The old duplicate, *disabled* executor list in the GatewayCore model
 selector ("Executors — from missions, not here" / "start from a mission, not this
 dropdown") is removed: executors are not GatewayCore models and never appear
 there. An unavailable runtime shows the exact reason plus a repair pointer
@@ -807,6 +795,15 @@ chosen assistant lane (`agent:claude_code_local` / `agent:codex_agent`). The
 chat-handoff draft carries an optional `target` so the assistant lane is
 preselected; an agent target also seeds the session's first message. Guard:
 `tests/test_card_chat_context.py`.
+
+**Posts composer (2026-07-14).** The Posts domain now reads the real
+`linkedin_content_pipeline_internal` command-center board instead of committed
+fixtures. **New post** accepts exact operator-authored copy, configured account,
+hashtags, and an optional timezone-aware schedule; renders desktop/mobile
+LinkedIn previews while typing; applies the canonical 3,000-character and lint
+contract; and creates a governed `Draft` event. It never calls LinkedIn, approves,
+or publishes. The existing official-API/AppFlowy publisher remains a separate
+operator-approved path.
 
 **Board modules — create a whole board in-app (PRs #43, #44).** `POST
 /api/board-module` atomically creates BOTH a kanban board (repo/verb/status
@@ -1275,6 +1272,10 @@ repo's own runs (`cc model-scout`, the `model_baselines`/`model_candidate_audit`
 never a vendor leaderboard. (The legacy detail below is retained; the 2026-06-20 update is the
 current source of truth.)
 
+The concise operator workflow, exact commands, selector mental model, evidence
+contract, and current promotion-readiness limitation are in
+[engineering/MODEL_VERIFICATION_WORKFLOW.md](engineering/MODEL_VERIFICATION_WORKFLOW.md).
+
 #### 2026-06-20 update — watchlist, dual-budget fit, frontier-watch, runnable cards, DAG wiring
 
 The discovery layer previously could only see a model **already installed locally** (the
@@ -1456,8 +1457,9 @@ workload, never hardcoded.
   `check_forbidden_providers --allow-frontier-router-egress`. It permits the router-lane keys
   (`OPENROUTER_API_KEY` / `ZAI_API_KEY`) **only** when `frontier-router-budgets.yaml` is
   `enabled` with redaction + usage accounting; the local LiteLLM lane stays cloud-free in both
-  modes, and `OPENAI`/`ANTHROPIC` keys are never permitted. Default `make validate` /
-  `cc validate` is unchanged and stays strict (`forbidden-providers: PASS`).
+  modes, and the independent agent-session keys are permitted only when that lane is ready.
+  Default `make validate` / `cc validate` checks this committed, readiness-gated posture;
+  `make forbidden-providers` / `cc forbidden-providers` remains the strict all-provider-key audit.
 
 The deliberate enablement sequence stays: dry-run → price-audit → `make frontier-router-egress-check`
 (with the key set + budget enabled) → a tiny budgeted smoke test (≤$0.10, ≤2k in / 500 out, no
@@ -3088,6 +3090,14 @@ superseded them; kept for history, not as current behavior.
 | [improvement/daily-self-improvement-dag.md](improvement/daily-self-improvement-dag.md) | observer-only daily self-improvement scan — implemented (`dags/self_improvement_daily.py` + `improvement scan` CLI): report + Proposed cards across 9 pillars |
 | [improvement/SELF_IMPROVEMENT_PIPELINE.md](improvement/SELF_IMPROVEMENT_PIPELINE.md) | the scan's project tracker — module tree, 5-stage registry, standards-conformance matrix (data-derived ranking, validation gate, manifest) with evidence |
 
+**`engineering/` — implementation and verification contracts**
+
+| Doc | What it holds |
+|---|---|
+| [engineering/AI_ASSISTED_DEVELOPMENT_WORKFLOW.md](engineering/AI_ASSISTED_DEVELOPMENT_WORKFLOW.md) | risk-scaled Claude/Codex implementation and independent-review workflow |
+| [engineering/MODEL_VERIFICATION_WORKFLOW.md](engineering/MODEL_VERIFICATION_WORKFLOW.md) | local model fit → quality → independent verification → serving → canary → human promotion/rollback path |
+| [engineering/REUSABLE_ENGINEERING_STANDARDS.md](engineering/REUSABLE_ENGINEERING_STANDARDS.md) | reusable repository operating contract for implementation sessions |
+
 **`evaluation/` — reusable mission prompts for evaluating external tools**
 
 | Doc | What it holds |
@@ -3741,12 +3751,13 @@ That reconciliation is what shipped this pass:
 - **Enabled 2026-07-10 by Geoff's explicit request** (`OPENROUTER_API_KEY`
   set in `.env`, `configs/frontier-router-budgets.yaml`
   `default.enabled: true`) specifically to test cost/latency/correctness.
-  `cc validate`'s default forbidden-provider check now fails on this
-  checkout — **on purpose**: the strict scan never relaxes for a key it
-  finds in `.env`; `make frontier-router-egress-check`
-  (`check_forbidden_providers --allow-frontier-router-egress`) is the
-  correct validation command whenever the lane is active, and confirms the
-  local LiteLLM lane is unaffected either way. `.env.example`'s stray
+  `cc validate` now evaluates the committed provider posture and accepts this key name only
+  because the frontier-router budget proves readiness. The separate strict
+  `cc forbidden-providers` audit still rejects every provider key it finds;
+  `make frontier-router-egress-check`
+  (`check_forbidden_providers --allow-frontier-router-egress`) remains the
+  lane-specific operator check and confirms the local LiteLLM lane is unaffected either way.
+  `.env.example`'s stray
   `OPENROUTER_API_KEY=sk-or-your-real-key` (with unrelated `ANSWER_LLM_
   PROVIDER`/`ANSWER_AGENT_MODEL` vars this repo never reads) was replaced
   with a commented, correctly-documented placeholder so a fresh clone's

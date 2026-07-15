@@ -1,16 +1,11 @@
-"""The BoardProvider interface: one contract, two backends.
+"""The first-party BoardProvider contract.
 
-A provider exposes the same verbs regardless of backend so the action layer and
-the human approval wall behave identically on AppFlowy and the internal UI.
-Status writes on ANY provider go through the governed event path or refuse
-human-owned statuses — the wall lives in the contract, not in one backend.
-
-`provider_for_board` picks the backend from a KanbanBoardSpec's `provider:`
-field, so consumers depend on the registry entry, never on a concrete client.
+All status writes go through the governed event path and refuse human-owned
+approval statuses. Consumers depend on the registry entry and never on an
+external board client.
 """
 from __future__ import annotations
 
-import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -71,12 +66,7 @@ def provider_for_board(
     event_log: EventLog | None = None,
     store_dir: str | Path | None = None,
 ) -> BoardProvider:
-    """Build the right provider for a KanbanBoardSpec registry entry.
-
-    `command_center_ui` boards need the event log (source of truth) and a card
-    store dir; `appflowy` boards need the process env for their env-ref config.
-    """
-    from command_center.boards.appflowy_provider import AppFlowyBoardProvider
+    """Build the first-party provider for a registry entry."""
     from command_center.boards.command_center_provider import CommandCenterBoardProvider
 
     if spec.provider == "command_center_ui":
@@ -85,7 +75,4 @@ def provider_for_board(
         return CommandCenterBoardProvider(
             board_id=spec.board_id, event_log=log, store_dir=store,
             status_mapping=dict(spec.status_mapping))
-    if spec.provider == "appflowy":
-        return AppFlowyBoardProvider(board_id=spec.board_id,
-                                     env=dict(env if env is not None else os.environ))
     raise ValueError(f"unknown board provider {spec.provider!r}")

@@ -2,7 +2,7 @@
 
 A convenience surface, NOT the policy layer (configs/ui.yaml / WebUIConfig). It
 reads two sources that are reachable across the container boundary without coupling
-to growthos/AppFlowy:
+to Growth OS and the first-party board store:
 
   * the Ledger (`LEDGER_BASE_URL`) — missions are the execution kanban, grouped by
     status into Cline-style columns;
@@ -12,7 +12,7 @@ to growthos/AppFlowy:
 
 Full-console deployments can write through governed action verbs and validated
 profile/domain config editors. Approving/killing a mission stays in the signed
-Ledger endpoints; AppFlowy/provider writes still go through the action layer.
+Ledger endpoints; board writes still go through the governed action layer.
 This keeps `external_write_policy: governed_by_ledger` true by construction.
 
 The built SPA (static assets) is mounted at / when present (single-container mode).
@@ -86,12 +86,10 @@ AGENT_SESSIONS_ENABLED = os.environ.get("KANBAN_UI_AGENT_SESSIONS_ENABLED", "") 
 FAKE_AGENT_ENABLED = os.environ.get("KANBAN_UI_FAKE_AGENT_ENABLED", "") == "1"
 # Usage & Limits surface (the shared metering layer across chat models AND
 # coding agents). Read-only. OFF by default like every other compute surface.
-# The store is in-process (command_center.usage is imported directly here, not
-# proxied), so with the flag on but nothing polled yet the page honestly shows
-# "no data / unknown" rather than fabricating quota. USAGE_CODEX registers the
-# real Codex rate-limit collector for the refresh endpoint (it degrades to
-# UNAVAILABLE if the SDK/login isn't present); USAGE_FAKE seeds the deterministic
-# FakeCollector for a dev/demo page — never both on in a real deployment.
+# The view is in-process, over either memory or the shared Ledger. In a real
+# Ledger-backed agent deployment, provider refresh is proxied to the host worker
+# because only that process owns the SDK and user login. USAGE_FAKE seeds the
+# deterministic FakeCollector for a dev/demo page.
 USAGE_ENABLED = os.environ.get("KANBAN_UI_USAGE_ENABLED", "") == "1"
 USAGE_CODEX = os.environ.get("KANBAN_UI_USAGE_CODEX", "") == "1"
 # Claude limits are EVENT-driven (fed from live agent-session rate_limit events,
@@ -127,8 +125,8 @@ def _env_path(name: str, default: str) -> Path:
 
 LEDGER_BASE_URL = os.environ.get("LEDGER_BASE_URL", "http://ledger:8090").rstrip("/")
 STATIC_DIR = _env_path("KANBAN_UI_STATIC", "/app/static")
-# The AppFlowy board snapshot, produced on the worker (`make kanban-board-snapshot`)
-# and mounted read-only here. The UI never holds AppFlowy creds — it reads this file.
+# The first-party board snapshot, produced on the worker (`make kanban-board-snapshot`)
+# and mounted read-only here. The UI reads this file without any external board credentials.
 BOARD_SNAPSHOT = _env_path("KANBAN_BOARD_SNAPSHOT",
                            "/app/snapshot/board-snapshot.json")
 # Read-only config mount — the model lanes + judge stages come from the real
@@ -213,9 +211,7 @@ def status() -> dict:
         litellm = os.environ.get("LITELLM_BASE_URL", "").rstrip("/")
         if litellm:
             probe("litellm", litellm.replace("/v1", "") + "/health/liveliness")
-        appflowy = os.environ.get("APPFLOWY_BASE_URL", "").rstrip("/")
-        if appflowy:
-            probe("appflowy", appflowy)
+
     if AGENT_SESSIONS_ENABLED:
         probe("agent_worker", f"{AGENT_WORKER_URL}/health")
     return {"hops": hops, "targets": targets}
@@ -326,7 +322,7 @@ def metrics() -> dict:
 
 @app.get("/api/boards")
 def boards() -> dict:
-    """The AppFlowy boards, from the worker-produced snapshot (mounted read-only).
+    """The workspace boards, from the worker-produced snapshot (mounted read-only).
     Missing snapshot is a loud 503 with the path — never an empty board set passed
     off as 'no boards'. Per-board read errors travel inside the snapshot."""
     if not BOARD_SNAPSHOT.is_file():
@@ -339,7 +335,7 @@ def boards() -> dict:
 
 @app.get("/api/boards/live")
 def boards_live() -> dict:
-    """Read the AppFlowy boards LIVE — console only (the container has creds here),
+    """Read the workspace boards LIVE from the mounted local store — console only,
     so a write reflects immediately instead of waiting for the next worker snapshot.
     503 when chat/creds aren't enabled. Per-board fail-loud travels in the payload."""
     from datetime import datetime, timezone
@@ -584,62 +580,6 @@ def _audit_config_write(action: str, detail: dict[str, Any]) -> None:
         pass
 
 
-# snapshot board field -> the domain card grammar the typed components render
-_APPFLOWY_FIELD_MAPS: dict[str, dict[str, str]] = {
-    "paper": {"Title": "title", "Authors": "authors", "Abstract": "abstract",
-              "URL": "url", "Published": "year", "Topics": "useful_for",
-              "Score": "score", "ArxivID": "arxiv_id"},
-    "repo": {"Name": "repo_id", "Owner": "owner", "URL": "url",
-             "Stars": "stars", "Language": "language", "Why": "why",
-             "Topics": "topics", "Score": "score", "Updated": "updated"},
-    "dag": {"DagID": "dag_id", "Status": "state", "Schedule": "schedule",
-            "NextRun": "next_run", "LastSeen": "last_run", "Owners": "owner",
-            "Path": "related_repo", "Description": "description",
-            "Notes": "failure_summary"},
-    "book": {"Title": "title", "Author": "author", "Type": "type",
-             "Tier": "tier", "Hours": "hours", "Section": "section",
-             "Module": "module", "Notes": "notes"},
-}
-
-
-def _appflowy_board_cards(spec: dict) -> dict:
-    """Real items from the AppFlowy board snapshot (worker-produced, mounted
-    under ./generated) — a read-only projection with an honest origin and the
-    snapshot timestamp. A missing snapshot/board reads as an explicit empty
-    with the fix named, never a fabricated count."""
-    board_name = spec.get("board")
-    if not BOARD_SNAPSHOT.is_file():
-        return {"origin": "board_snapshot", "cards": [],
-                "note": f"board snapshot not found at {BOARD_SNAPSHOT} — "
-                        f"run `make kanban-board-snapshot` on the worker"}
-    snap = json.loads(BOARD_SNAPSHOT.read_text(encoding="utf-8"))
-    board = next((b for b in snap.get("boards", [])
-                  if b.get("board") == board_name), None)
-    if board is None:
-        return {"origin": "board_snapshot", "cards": [],
-                "generated_at": snap.get("generated_at"),
-                "note": f"board {board_name!r} is not in the snapshot — add it "
-                        f"to board_state.UI_BOARDS and regenerate"}
-    fmap = _APPFLOWY_FIELD_MAPS.get(spec["domain_id"], {})
-    cards: list[dict] = []
-    for col in board.get("columns", []):
-        status = col.get("name")
-        for raw in col.get("cards", []):
-            fields = raw.get("fields") or {}
-            card = {fmap.get(k, k.lower()): v for k, v in fields.items()}
-            card.setdefault("title", raw.get("title"))
-            card["status"] = status or card.get("status")
-            card["card_id"] = str(
-                card.get("dag_id") or card.get("arxiv_id")
-                or card.get("url") or card.get("repo_id")
-                or card.get("title") or "")[:200]
-            cards.append(card)
-    return {"origin": "board_snapshot",
-            "generated_at": snap.get("generated_at"),
-            "columns": board.get("statuses") or spec.get("columns", []),
-            "cards": cards}
-
-
 def _domain_cards(spec: dict) -> dict:
     source = spec.get("source")
     if source == "fixtures":
@@ -648,8 +588,6 @@ def _domain_cards(spec: dict) -> dict:
             fixtures = json.loads(FIXTURES_FILE.read_text(encoding="utf-8"))
         return {"origin": "fixtures",
                 "cards": fixtures.get(spec["domain_id"], [])}
-    if source == "appflowy_board":
-        return _appflowy_board_cards(spec)
     if source == "board_store":
         from command_center.boards.command_center_provider import (
             CommandCenterBoardProvider)
@@ -2135,11 +2073,12 @@ def _get_usage_service():
         if USAGE_FAKE:
             from command_center.usage.collectors.fake import FakeCollector
             _usage_collectors.append((FakeCollector(), "fake"))
-        if USAGE_CODEX:
+        worker_owned_collectors = USAGE_LEDGER and AGENT_SESSIONS_ENABLED
+        if USAGE_CODEX and not worker_owned_collectors:
             from command_center.usage.collectors.codex_app_server import (
                 CODEX_COLLECTOR_ID, CodexAppServerCollector)
             _usage_collectors.append((CodexAppServerCollector(), CODEX_COLLECTOR_ID))
-        if USAGE_CLAUDE:
+        if USAGE_CLAUDE and not worker_owned_collectors:
             # TWO event-fed Claude collectors — one per lane — so a local
             # subscription session's limits never land on the API lane's card.
             # They report honest UNKNOWN until a real rate_limit event is teed
@@ -2309,6 +2248,19 @@ class DomainNoteIn(BaseModel):
     source: str = "cockpit"
 
 
+class PostDraftIn(BaseModel):
+    """Exact operator-authored LinkedIn draft fields.
+
+    The server derives only review metadata (hook, character count, lint);
+    it never asks a model to fill missing copy or publishes externally.
+    """
+    account: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1, max_length=3000)
+    tags: list[str] = Field(default_factory=list)
+    source_ref: str | None = Field(default=None, max_length=500)
+    scheduled_for: datetime | None = None
+
+
 class DraftDefaultIn(BaseModel):
     key: str
     value: str
@@ -2350,6 +2302,128 @@ class StandingAnswerIn(BaseModel):
     answer: str
     question: str | None = None
     covers: list[str] | None = None
+
+
+def _linkedin_composer_accounts() -> list[dict[str, str]]:
+    """Return content accounts from the validated committed contract."""
+    path = CONFIGS_DIR / "content.yaml"
+    if not path.is_file():
+        raise HTTPException(
+            status_code=503, detail=f"content.yaml not at {path}")
+    from command_center.schemas.contracts import ContentConfig
+
+    try:
+        cfg = ContentConfig.model_validate(_read_yaml_file(path))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"invalid content.yaml: {exc}") from exc
+    return [
+        {
+            "id": account.board,
+            "kind": account.author,
+            "label": (
+                f"Personal profile - {account.board}"
+                if account.author == "member"
+                else f"Organization page - {account.board}"
+            ),
+        }
+        for account in cfg.accounts
+    ]
+
+
+@app.get("/api/domain/linkedin_post/composer")
+def linkedin_post_composer() -> dict:
+    """Data-derived accounts and canonical local preview limits."""
+    from command_center.content.post_model import (
+        DESKTOP_SEE_MORE_CHARS,
+        LINKEDIN_MAX_CHARS,
+        MOBILE_SEE_MORE_CHARS,
+    )
+
+    spec = _domain_spec("linkedin_post")
+    blockers = _domain_write_blockers(spec)
+    return {
+        "accounts": _linkedin_composer_accounts(),
+        "max_characters": LINKEDIN_MAX_CHARS,
+        "desktop_fold_characters": DESKTOP_SEE_MORE_CHARS,
+        "mobile_fold_characters": MOBILE_SEE_MORE_CHARS,
+        "write_ready": CHAT_ENABLED and not blockers,
+        "write_blockers": (
+            blockers if CHAT_ENABLED
+            else ["chat/writes not enabled in this deployment"]
+        ),
+    }
+
+
+@app.post("/api/domain/linkedin_post/drafts", status_code=201)
+def create_linkedin_post_draft(body: PostDraftIn) -> dict:
+    """Create one real Draft card; never approve, schedule, or publish it."""
+    _require_chat()
+    spec = _domain_spec("linkedin_post")
+    _require_domain_writable(spec)
+    account = body.account.strip()
+    accounts = {row["id"] for row in _linkedin_composer_accounts()}
+    if account not in accounts:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{account!r} is not a configured content account; "
+                f"choose from {sorted(accounts)}"
+            ),
+        )
+    text = body.body.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="post body is required")
+    if body.scheduled_for is not None and body.scheduled_for.tzinfo is None:
+        raise HTTPException(
+            status_code=400,
+            detail="scheduled_for must include an explicit timezone offset")
+
+    import secrets
+    from command_center.content.post_model import LinkedInPost
+
+    post = LinkedInPost(author_name=account, body=text)
+    warnings = [
+        {"level": warning.level, "code": warning.code, "message": warning.message}
+        for warning in post.lint()
+    ]
+    card_id = "post-" + secrets.token_hex(6)
+    now = datetime.now(UTC).isoformat()
+    fields = {
+        "account": account,
+        "hook": post.hook(),
+        "body": text,
+        "tags": [tag.strip() for tag in body.tags if tag.strip()],
+        "source_ref": (body.source_ref or "cockpit/manual").strip(),
+        "scheduled_for": (
+            body.scheduled_for.isoformat()
+            if body.scheduled_for is not None else None
+        ),
+        "approval_state": "Draft",
+        "post_urn": None,
+        "created_at": now,
+        "char_count": post.char_count(),
+        "lint": warnings,
+    }
+    provider = _board_store_provider(spec)
+    provider.upsert_card(card_id, fields)
+    event = emit_event(
+        provider.log,
+        action="add_mission_card",
+        board_id=provider.board_id,
+        card_id=card_id,
+        source_surface="internal_ui",
+        actor_type="human",
+        status_after="Draft",
+    )
+    return {
+        "status": "created",
+        "domain_id": "linkedin_post",
+        "card_id": card_id,
+        "card": _find_domain_card(provider, card_id),
+        "event": event.model_dump(mode="json"),
+        "warnings": warnings,
+    }
 
 
 def _validation_blockers_detail(validation: dict) -> str:
@@ -2668,6 +2742,10 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
         if rejection is not None:
             side_effect = {"operation": "rejection_recorded",
                            "reason_code": rejection["reason_code"]}
+    elif domain_id == "linkedin_post":
+        fields = _card_store_fields(card)
+        fields["approval_state"] = body.status
+        provider.upsert_card(body.card_id, fields)
     moved = _find_domain_card(provider, body.card_id)
     return {
         "status": "moved",
@@ -3762,9 +3840,10 @@ def chat_runtime() -> dict:
     discipline as the paid frontier lane, but nothing leaves the machine and
     there is no $ cost, only a (potentially very long) wall-clock one.
     `executors` (Claude Code / Codex CLI) are a FOURTH, distinct thing:
-    agentic coding harnesses that drive leased worktrees via their own
-    subscription/OAuth login, not conversational chat models — they never
-    appear in this picker. Chat-gated like every /api/chat* route."""
+    agentic coding harnesses with their own runtime model catalogs and
+    subscription/OAuth login, not GatewayCore chat models. They appear in the
+    cockpit's Assistant selector, never in GatewayCore's model picker.
+    Chat-gated like every /api/chat* route."""
     _require_chat()
     lanes = models()
     chat_role = next((r for r in lanes["roles"] if r["role"] == "chat"), None)
@@ -3779,10 +3858,11 @@ def chat_runtime() -> dict:
         "roles": lanes["roles"],
         "executors": lanes["executors"],
         "executor_note": (
-            "Claude Code and Codex CLI are agentic coding EXECUTORS, not chat "
-            "roles — they drive leased repo worktrees under their own "
-            "subscription/OAuth login (never a LiteLLM API key) and are "
-            "launched from missions, not this chat picker."
+            "Claude Code and Codex CLI are coding runtimes, not GatewayCore "
+            "chat roles. Choose them from the Assistant selector for a direct "
+            "read-only agent session; their model/effort picker comes from the "
+            "selected runtime's own catalog. Mission tracking is optional and "
+            "does not grant writes."
         ),
         "frontier_models": available_frontier_models(),
         "frontier_note": (
@@ -4229,6 +4309,8 @@ def model_usage_collector_health() -> list:
     """Durable checkpoint per registered collector — polling cleanly / failing
     (with the real error) / never ran."""
     service = _require_usage()
+    if USAGE_LEDGER and AGENT_SESSIONS_ENABLED:
+        return _call_worker(_require_agent_sessions().usage_collector_health)
     from command_center.usage import cockpit_views as cv
     return cv.collector_health(service, [cid for _, cid in _usage_collectors])
 
@@ -4252,6 +4334,9 @@ async def model_usage_refresh() -> dict:
     collectors registered this is a no-op that honestly reports 0 — it never
     fabricates data."""
     service = _require_usage()
+    if USAGE_LEDGER and AGENT_SESSIONS_ENABLED:
+        return await asyncio.to_thread(
+            _call_worker, _require_agent_sessions().refresh_usage)
     from command_center.usage import cockpit_views as cv
     return await cv.refresh(service, _usage_collectors)
 
@@ -4539,7 +4624,9 @@ async def _agent_event_frames(client, session_id: str, checkpoint: int, is_disco
         events = r.json()
         for ev in events:
             checkpoint = ev["sequence"]
-            _feed_agent_usage(client, session_id, ev)   # tee live limits into usage
+            # The uncached-session fallback may call the synchronous worker
+            # client; keep that network round-trip off the SSE event loop.
+            await asyncio.to_thread(_feed_agent_usage, client, session_id, ev)
             yield f"id: {ev['sequence']}\nevent: agent_event\ndata: {json.dumps(ev)}\n\n"
         now = time.monotonic()
         if not events and now - last_heartbeat >= _AGENT_EVENT_HEARTBEAT_SECONDS:

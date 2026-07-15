@@ -5,6 +5,12 @@ liners. Newest notes at the top of each topic. Full design lives in
 `docs/growth-os/growth-os-engineering.md` + `docs/MASTER.md` (system architecture);
 this is the fast "has this been done?" index. Dates are when the line was written.
 
+## Agent auto-start + real Posts composer (2026-07-14)
+- FIXED chat-first behavior: selecting authenticated Claude Code or Codex now auto-creates one read-only session with the runtime-advertised default model/effort; failures stay visible with retry, and a session from the other harness is never reattached.
+- BUILT a real `linkedin_content_pipeline_internal` board plus a LinkedIn-style New post composer (account/body/tags/schedule, desktop/mobile preview, 3,000-char validation, lint, governed Draft event); it does not publish or bypass approval.
+- SETUP contract now generates `AGENT_WORKER_TOKEN` for new environments and enables real sessions plus durable Usage & Limits in `.env.example`; this existing `.env` is still operator-owned and currently lacks that token, so the worker was not started.
+- VERIFIED: both production subscription harnesses probe available after `uv sync --extra dev --extra gateways --extra agent-codex`; 198/198 affected tests, Ruff, frontend build, config/cross-ref/digest/provider checks pass. Full suite: 1,778 pass, 1 skip, 1 unrelated Windows WSL-bash path failure in `test_merge_guard.py`.
+
 ## Job-search filters + fast prep, and cc doctor fix (2026-07-13)
 - MERGED #52 (squash 0bfbca1): job-search **location/language hybrid filter**
   (`src/command_center/job_search/geo_language.py`; seeded English + FL/AZ/
@@ -1667,3 +1673,23 @@ this is the fast "has this been done?" index. Dates are when the line was writte
   most-recent-push approval rule; retrieval-equivalence file-write flake).
 - STATE 06-20: Phases 2–5 + 8/9 done. Remaining: Phase 6 (live desktop) — correctly blocked until
   APPFLOWY_SANDBOX_* is wired so action-latency evidence is measured, not fabricated.
+## Provider posture validation — 2026-07-14
+
+- FIX: `cc validate`, `cc render`, Make validation/render, and the PowerShell `check`
+  composite now run the forbidden-provider scanner in `--configured-posture` mode.
+  A provider key name is accepted only when its owning committed lane proves readiness;
+  disabled/incomplete lanes remain forbidden.
+- SAFETY: the standalone `cc forbidden-providers` / `make forbidden-providers` audit
+  remains strict and still rejects every provider key. Local LiteLLM/Ollama routes and
+  local-frontier host checks are never relaxed. Added the previously omitted
+  `ZAI_API_KEY` to the strict forbidden set.
+- CONSISTENCY: `doctor` and umbrella validation now share one posture calculation instead
+  of independently implementing the readiness rules. No provider credential value was
+  surfaced or changed by this work.
+- VERIFIED: `uv run cc validate` PASS; provider/doctor/preflight focused tests 56/56;
+  repository-wide Ruff PASS; doctor provider scan PASS. The first full pytest result was
+  invalid because another process fast-forwarded `main` from `1ce6c04` to `f13c8bb`
+  during the run; the preserved experiment ledger recorded simultaneous commit, corpus
+  hash, and file-count changes, and Git reflog confirmed the merge at the same second.
+  With `HEAD` held at `f13c8bb` for the complete rerun, full pytest PASS. Doctor still
+  reports only the known dirty-generated-evidence result.

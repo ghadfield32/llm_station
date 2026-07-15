@@ -43,7 +43,7 @@ class CardDependencies(Strict):
 
 
 def parse_card_dependencies(row: dict) -> CardDependencies:
-    """Read dependency edges off a raw card row dict (AppFlowy/Ledger). A field may be a
+    """Read dependency edges off a raw card row dict (board store/Ledger). A field may be a
     list, a comma/space-separated string, or absent — all normalise to a clean id list."""
     def _as_list(value) -> list[str]:
         if value is None:

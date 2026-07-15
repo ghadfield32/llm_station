@@ -100,13 +100,67 @@ def test_no_domain_offers_wall_verbs(client):
         assert not wall & set(d.get("allowed_actions", [])), d["domain_id"]
 
 
-def test_fixture_domain_declares_fixture_origin(client):
+def test_post_domain_is_a_real_internal_board(client):
     _, tc, _ = client
     body = tc.get("/api/domain/linkedin_post/cards").json()
-    assert body["origin"] == "fixtures"
-    assert body["cards"], "committed fixtures must render on a fresh install"
-    post = body["cards"][0]
-    assert post["account"] and post["body"] and "hook" in post
+    assert body["origin"] == "board_store"
+    assert body["board_id"] == "linkedin_content_pipeline_internal"
+    assert body["cards"] == []
+    assert body["columns"] == [
+        "Draft", "In Queue", "Scheduled", "Published", "Needs Geoff"]
+
+
+def test_post_composer_creates_a_governed_draft(client, monkeypatch):
+    mod, tc, _ = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+
+    options = tc.get("/api/domain/linkedin_post/composer").json()
+    account_ids = {row["id"] for row in options["accounts"]}
+    assert account_ids == {
+        "geoffhadfield32_content", "world_model_sports_content"}
+    assert options["max_characters"] == 3000
+
+    text = "A strong first line.\n\nHere is the evidence.\n\nWhat would you test?"
+    resp = tc.post(
+        "/api/domain/linkedin_post/drafts",
+        json={
+            "account": "geoffhadfield32_content",
+            "body": text,
+            "tags": ["#AI", "#Evaluation"],
+            "source_ref": "cockpit/manual",
+        },
+    )
+
+    assert resp.status_code == 201, resp.json()
+    created = resp.json()
+    assert created["card"]["status"] == "Draft"
+    assert created["card"]["hook"] == "A strong first line."
+    assert created["card"]["account"] == "geoffhadfield32_content"
+    assert created["card"]["char_count"] == len(text)
+    assert created["event"]["actor_type"] == "human"
+    cards = tc.get("/api/domain/linkedin_post/cards").json()["cards"]
+    assert [row["card_id"] for row in cards] == [created["card_id"]]
+
+
+def test_post_composer_rejects_unknown_account_and_over_limit_body(client, monkeypatch):
+    mod, tc, _ = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+
+    bad_account = tc.post(
+        "/api/domain/linkedin_post/drafts",
+        json={"account": "invented", "body": "Real body"},
+    )
+    assert bad_account.status_code == 400
+    assert "configured content account" in bad_account.json()["detail"]
+
+    too_long = tc.post(
+        "/api/domain/linkedin_post/drafts",
+        json={
+            "account": "geoffhadfield32_content",
+            "body": "x" * 3001,
+        },
+    )
+    assert too_long.status_code == 422
 
 
 def test_board_store_domain_serves_real_cards_not_fixtures(client):
@@ -137,11 +191,20 @@ def test_board_store_domain_empty_is_empty_plus_designed_state(client):
 
 
 def test_card_detail_and_404(client):
-    # linkedin_post is the remaining fixture-backed domain (paper/repo/dag/book
-    # now read the AppFlowy board snapshot)
-    _, tc, _ = client
-    detail = tc.get("/api/domain/linkedin_post/card/post-fixture-1").json()
-    assert detail["card"]["card_id"] == "post-fixture-1"
+    _, tc, tmp_path = client
+    from command_center.boards.command_center_provider import (
+        CommandCenterBoardProvider)
+    from command_center.kanban_sync import EventLog
+    provider = CommandCenterBoardProvider(
+        board_id="linkedin_content_pipeline_internal",
+        event_log=EventLog(tmp_path / "events.jsonl"),
+        store_dir=tmp_path / "boards")
+    provider.upsert_card(
+        "post-real-1",
+        {"account": "geoffhadfield32_content", "body": "Real post"},
+        status="Draft")
+    detail = tc.get("/api/domain/linkedin_post/card/post-real-1").json()
+    assert detail["card"]["card_id"] == "post-real-1"
     assert detail["drawer_fields"]                  # drawer grammar travels along
     assert tc.get("/api/domain/linkedin_post/card/nope").status_code == 404
     assert tc.get("/api/domain/nope/cards").status_code == 404

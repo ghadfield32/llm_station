@@ -24,7 +24,7 @@ from ..channels.board_state import LIVE_COLUMNS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENV_PATH = REPO_ROOT / ".env"
-GROWTHOS_EXPORT = REPO_ROOT / "appflowy_kanban" / "growth-os" / "_export"
+GROWTHOS_EXPORT = REPO_ROOT / "growth_os" / "_export"
 DISCORD_API = "https://discord.com/api/v10"
 _LIVE_MISSION_STATES = set(LIVE_COLUMNS["missions"])   # the single source of truth
 

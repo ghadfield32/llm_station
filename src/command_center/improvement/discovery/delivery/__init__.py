@@ -1,6 +1,6 @@
 """
 Delivery — how the daily scan reaches the human: an email digest (where you learn/triage), the
-AppFlowy Kanban board (where you act — board.py), and a chat ping (the nudge). All thin callers
+first-party Kanban board (where you act — board.py), and a chat ping (the nudge). All thin callers
 over the tested pipeline; none of them can promote, merge, or deploy.
 """
 from __future__ import annotations

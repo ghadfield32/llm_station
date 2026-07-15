@@ -40,8 +40,8 @@ items:
     title: Personal Content Board (geoffhadfield32_content)
     aliases: [personal board, my content kanban, geoff content board,
               personal linkedin board, the personal kanban]
-    tags: [kanban, appflowy, personal, linkedin, content, queue]
-    summary: AppFlowy 3-column board (In Queue / In Progress / Completed) for the
+    tags: [kanban, cockpit, personal, linkedin, content, queue]
+    summary: first-party cockpit 3-column board (In Queue / In Progress / Completed) for the
       personal LinkedIn identity.
 
   - id: board_business
@@ -49,8 +49,8 @@ items:
     title: World Model Sports Content Board (world_model_sports_content)
     aliases: [business board, wms board, sports board, company linkedin board,
               world model sports kanban, the sports kanban]
-    tags: [kanban, appflowy, business, world model sports, basketball, content]
-    summary: AppFlowy board for the World Model Sports company page content.
+    tags: [kanban, cockpit, business, world model sports, basketball, content]
+    summary: first-party cockpit board for the World Model Sports company page content.
 
   - id: reference_posts_library
     kind: library

@@ -39,6 +39,9 @@ checks, the actual diff, and reproducible runtime evidence are authoritative.
 Claude Code and Codex are coding executors authenticated through their own
 subscription/OAuth sessions. They are not LiteLLM chat models and must not be
 added to the chat model picker or routed through the local model gateway.
+Qualification and promotion of the local models behind that gateway follows
+[`MODEL_VERIFICATION_WORKFLOW.md`](MODEL_VERIFICATION_WORKFLOW.md); model
+quality evidence and coding-executor allocation are separate concerns.
 
 ## Capability profiles and replaceable model mapping
 

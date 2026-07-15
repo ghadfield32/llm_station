@@ -118,12 +118,10 @@ def test_real_kanban_boards_yaml_validates_with_mixed_dependency_fields_usage():
     cfg = KanbanBoardsConfig.model_validate(raw)
     by_id = {b.board_id: b for b in cfg.boards}
     assert {"llm_station_command_center", "betts_basketball",
-            "betts_basketball_appflowy", "job_search_pipeline",
             "job_search_pipeline_internal"} <= set(by_id)
     assert set(by_id["llm_station_command_center"].dependency_fields) == {"blocked_by",
                                                                           "unblocks"}
     assert by_id["betts_basketball"].dependency_fields == []
-    assert by_id["betts_basketball_appflowy"].dependency_fields == []
     assert by_id["job_search_pipeline_internal"].dependency_fields == []
 
 

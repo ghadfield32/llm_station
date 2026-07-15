@@ -143,6 +143,24 @@ def _mk_snapshot(*, bucket_id: str, label: str, used: int | None,
 _WINDOWS = (("primary", "5-hour window"), ("secondary", "weekly window"))
 
 
+def _window_label(fallback: str, window_mins: int | None) -> str:
+    """Describe the provider's actual duration, not a positional key.
+
+    Codex historically used primary=5 hours and secondary=7 days, but account
+    tiers can now return a weekly window under primary. The duration is the
+    authoritative field.
+    """
+    if window_mins is None:
+        return fallback
+    if window_mins == 7 * 24 * 60:
+        return "weekly window"
+    if window_mins % (24 * 60) == 0:
+        return f"{window_mins // (24 * 60)}-day window"
+    if window_mins % 60 == 0:
+        return f"{window_mins // 60}-hour window"
+    return f"{window_mins}-minute window"
+
+
 def _named_bucket_limits(by_limit_id: dict[str, Any], default_limit_id: str,
                          observed_at: str, plan_type: str | None,
                          ) -> list[LimitSnapshot]:
@@ -165,7 +183,8 @@ def _named_bucket_limits(by_limit_id: dict[str, Any], default_limit_id: str,
             used, resets, mins = _win_fields(entry.get(win_key))
             if used is None and resets is None and mins is None:
                 continue
-            label = f"{name} · {win_label}" if name else win_label
+            duration_label = _window_label(win_label, mins)
+            label = f"{name} · {duration_label}" if name else duration_label
             out.append(_mk_snapshot(
                 bucket_id=f"{prefix}{win_key}", label=label, used=used,
                 resets_at_epoch=resets, window_mins=mins, observed_at=observed_at,
@@ -185,7 +204,8 @@ def _compat_limits(snap: Any, observed_at: str, plan_type: str | None,
         if used is None and resets is None and mins is None:
             continue
         out.append(_mk_snapshot(
-            bucket_id=win_key, label=win_label, used=used, resets_at_epoch=resets,
+            bucket_id=win_key, label=_window_label(win_label, mins), used=used,
+            resets_at_epoch=resets,
             window_mins=mins, observed_at=observed_at, plan_type=plan_type,
             credits_remaining=credits_remaining))
     return out

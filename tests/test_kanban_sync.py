@@ -8,7 +8,6 @@ import pytest
 from command_center.kanban_sync import (
     ALLOWED_EVENT_TYPES,
     FORBIDDEN_EVENT_TYPES,
-    AppFlowyProjection,
     EventLog,
     GovernanceViolation,
     KanbanEvent,
@@ -101,58 +100,6 @@ def test_reconcile_detects_drift_vs_human_conflict(tmp_path):
     assert conflicted["writes_performed"] is False
 
 
-def test_appflowy_projection_fails_closed_without_env(tmp_path):
-    proj = AppFlowyProjection(env={})
-    assert proj.configured() is False
-    ev = emit_event(EventLog(tmp_path / "e.jsonl"), action="stage_card", board_id="b1",
-                    card_id="c1", source_surface="discord", status_after="Ready", now=NOW)
-    out = proj.write_through(ev)
-    assert out["status"] == "degraded" and out["wrote"] is False
-    assert out["reason"] == "appflowy_projection_not_configured"
-
-
-def test_appflowy_projection_writes_through_with_injected_client(tmp_path):
-    calls = {}
-
-    class _Resp:
-        def __init__(self, payload):
-            self._p = payload
-        def raise_for_status(self):
-            return None
-        def json(self):
-            return self._p
-
-    class _Client:
-        def __init__(self, *a, **k):
-            pass
-        def __enter__(self):
-            return self
-        def __exit__(self, *exc):
-            return False
-        def post(self, url, json=None):
-            return _Resp({"access_token": "tok"})
-        def put(self, url, headers=None, json=None):
-            calls["put"] = json
-            return _Resp({})
-
-    # a unique, low-entropy, obviously-fake marker — the test only needs to find
-    # (or fail to find) it in the outputs; it must NOT look like a real credential
-    # or a secret-entropy scanner will (correctly) flag the literal.
-    secret = "canary-password-must-not-appear-in-outputs"
-    env = {"APPFLOWY_BASE_URL": "http://sandbox", "APPFLOWY_WORKSPACE_ID": "w",
-           "APPFLOWY_DATABASE_ID": "d", "APPFLOWY_EMAIL": "u", "APPFLOWY_PASSWORD": secret}
-    proj = AppFlowyProjection(env=env, client_factory=_Client)
-    log = EventLog(tmp_path / "e.jsonl")
-    ev = emit_event(log, action="stage_card", board_id="b1",
-                    card_id="c1", source_surface="discord", status_after="Ready", now=NOW)
-    out = proj.write_through(ev)
-    assert out["status"] == "written" and out["wrote"] is True
-    assert calls["put"]["cells"]["Status"] == "Ready"
-    # the password is never surfaced in the result nor written into the event log
-    assert secret not in str(out)
-    assert secret not in (tmp_path / "e.jsonl").read_text(encoding="utf-8")
-
-
 def test_status_value_wall_blocks_agent_set_approval(tmp_path):
     """The wall is on the status VALUE: a permitted verb can't carry an approval."""
     log = _log(tmp_path)
@@ -203,16 +150,6 @@ def test_reconcile_branches_missing_and_extra_and_degraded(tmp_path):
     # card on board but not in log -> conflict (human-created)
     extra = reconcile(log.read(), {"c1": {"status": "Ready"}, "ghost": {"status": "Ready"}})
     assert any(c["reason"] == "card_on_board_not_in_event_log" for c in extra["conflicts"])
-
-
-def test_write_through_refuses_human_owned_status_label(tmp_path):
-    proj = AppFlowyProjection(env={"APPFLOWY_BASE_URL": "x", "APPFLOWY_WORKSPACE_ID": "w",
-                                   "APPFLOWY_DATABASE_ID": "d", "APPFLOWY_EMAIL": "u",
-                                   "APPFLOWY_PASSWORD": "p"})
-    ev = emit_event(EventLog(tmp_path / "e.jsonl"), action="stage_card", board_id="b1",
-                    card_id="c1", source_surface="discord", status_after="Ready", now=NOW)
-    out = proj.write_through(ev, status_label="approved")
-    assert out["status"] == "refused" and out["wrote"] is False
 
 
 def test_allowed_and_forbidden_event_types_are_disjoint():

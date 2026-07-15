@@ -1,7 +1,7 @@
 """Durable publication ledger + single-process lock for the LinkedIn publisher.
 
 The publish path has a real failure window: LinkedIn can accept a post (a side
-effect we cannot undo) and the AppFlowy writeback can then fail or the process
+effect we cannot undo) and the board writeback can then fail or the process
 can die before the row is stamped Completed. Without a durable record, the next
 scheduled run would see no PostURN and publish the SAME post again.
 
@@ -9,10 +9,10 @@ This ledger is the source of truth for "did we already post this Key", written
 to a gitignored JSON under generated/ - exactly the role generated/kanban-
 imported.json plays for the kanban bridge's dedupe. The ordering is:
 
-    mark_publishing(key)  -> POST to LinkedIn  -> mark_published(key, urn)  -> stamp AppFlowy
+    mark_publishing(key)  -> POST to LinkedIn  -> mark_published(key, urn)  -> stamp external board runtime
 
 so a crash anywhere leaves a state the next run reads, and never reposts:
-  PUBLISHED          -> already live; only reconcile the AppFlowy stamp.
+  PUBLISHED          -> already live; only reconcile the board stamp.
   PUBLISHING         -> an attempt was in flight and its outcome is unknown.
   RECONCILE_REQUIRED -> an ambiguous send (timeout/transport error).
 The last two are surfaced LOUDLY for a human to resolve; they are NEVER

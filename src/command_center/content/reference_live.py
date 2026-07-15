@@ -1,4 +1,4 @@
-"""Feed the reference index + preview from the LIVE AppFlowy boards.
+"""Feed the reference index and preview from first-party cockpit boards.
 
 This is what actually fixes "can't find the library / book / note / post without
 the exact name": instead of a static config, it indexes every database in
@@ -8,8 +8,8 @@ content boards, ...) so a fuzzy/semantic query resolves to a real card.
 Two halves:
   - pure mappers (records_from_rows, posts_from_rows) - take already-fetched rows
     and produce IndexRecords / LinkedInPosts. Deterministic, unit-tested offline.
-  - thin IO fetchers (fetch_all, fetch_posts) - reuse the content engine's AppFlowy
-    auth (content.sources) to pull rows, preserving each row's id so a note write
+  - thin IO fetchers (fetch_all, fetch_posts) - reuse the content engine's local
+    board readers (content.sources) to pull rows, preserving each row's id so a note write
     can address the exact card.
 
 Read-only. Writing a note goes through the governed event path (cli/content_note),
@@ -21,12 +21,10 @@ import hashlib
 import re
 from pathlib import Path
 
-import httpx
 
-from command_center.cli.kanban_bridge import merged_env
 from .post_model import LinkedInPost
 from .reference_index import IndexRecord
-from .sources import _appflowy, _cell
+from .sources import _cell
 
 # database name -> the kind label shown in search results. Unknown databases use
 # their own name as the kind (so a future "books" db just works).
@@ -41,8 +39,8 @@ DEFAULT_KIND_MAP = {
 # The LinkedIn content boards (post cards live here).
 CONTENT_BOARDS = ("geoffhadfield32_content", "world_model_sports_content")
 
-_TITLE_FIELDS = ("Title", "Name", "Hook", "Headline", "Topic", "Question")
-_BODY_FIELDS = ("Body", "Abstract", "Why", "Notes", "Summary", "Detail",
+_TITLE_FIELDS = ("title", "hook", "Title", "Name", "Hook", "Headline", "Topic", "Question")
+_BODY_FIELDS = ("body", "abstract", "notes", "Body", "Abstract", "Why", "Notes", "Summary", "Detail",
                 "Answer", "Content", "Text")
 _TAG_FIELDS = ("Topics", "Category", "Tags", "Pillar", "Section")
 
@@ -83,52 +81,69 @@ def posts_from_rows(rows: list[dict], author_name: str = "") -> list[LinkedInPos
     out: list[LinkedInPost] = []
     for row in rows:
         cells = row.get("cells", row)
-        hook = _cell(cells, "Hook", "Title", "Headline")
-        body = _cell(cells, "Body", "Content", "Text")
+        hook = _cell(cells, "hook", "Hook", "Title", "Headline")
+        body = _cell(cells, "body", "Body", "Content", "Text")
         if not (hook or body):
             continue
         full = f"{hook}\n\n{body}".strip() if (hook and body) else (hook or body)
         out.append(LinkedInPost(
             author_name=author_name, body=full,
-            id=row.get("id") or _cell(cells, "Key") or hook[:24]))
+            id=row.get("id") or _cell(cells, "card_id", "Key") or hook[:24]))
     return out
 
 
-# ── thin IO fetchers (reuse content.sources AppFlowy auth) ────────────────
-def _rows_with_ids(base: str, ws: str, token: str, db_id: str) -> list[dict]:
-    """GET a database's rows preserving each row id (sources._read_rows drops it,
-    but a note write needs the card id)."""
-    h = {"Authorization": f"Bearer {token}"}
-    ids = [x["id"] for x in httpx.get(
-        f"{base}/api/workspace/{ws}/database/{db_id}/row",
-        headers=h, timeout=30).json()["data"]]
-    out: list[dict] = []
-    for i in range(0, len(ids), 40):
-        d = httpx.get(f"{base}/api/workspace/{ws}/database/{db_id}/row/detail",
-                      headers=h, params={"ids": ",".join(ids[i:i + 40])}, timeout=30)
-        for row in d.json()["data"]:
-            out.append({"id": row.get("id", ""), "cells": row.get("cells", row)})
-    return out
+# ── thin IO fetchers over the governed local board store ─────────────────
+_BOARD_IDS = {
+    "papers": "research_papers",
+    "repos": "research_repos",
+    "signals": "research_signals",
+    "library": "reading_library",
+    "notes": "knowledge_notes",
+    "lessons": "learning_lessons",
+    "todos": "personal_tasks",
+    "dags": "dag_operations",
+    "mission_intake": "llm_station_command_center",
+}
 
 
-def _env_for(source, env: dict | None):
-    return env or merged_env(Path(".env"), Path(source.growthos_root) / ".env")
+def _provider_rows(source, board_id: str) -> list[dict]:
+    from command_center.boards.command_center_provider import CommandCenterBoardProvider
+    from command_center.kanban_sync.events import EventLog
+
+    provider = CommandCenterBoardProvider(
+        board_id=board_id,
+        event_log=EventLog(source.event_log_path),
+        store_dir=Path(source.board_store_dir),
+    )
+    return [{"id": row.get("card_id", ""), "cells": row}
+            for row in provider.list_cards()]
 
 
 def fetch_all(source, env: dict | None = None,
               only: list[str] | None = None) -> dict[str, list[dict]]:
-    """Pull rows from every database in databases.json (or just `only`)."""
-    env = _env_for(source, env)
-    base, ws, token, db_map = _appflowy(source, env)
-    return {db: _rows_with_ids(base, ws, token, entry["database_id"])
-            for db, entry in db_map.items()
-            if not only or db in only}
+    """Read known first-party boards (or just ``only``) without network auth."""
+    names = list(only) if only else list(_BOARD_IDS)
+    out: dict[str, list[dict]] = {}
+    post_rows: list[dict] | None = None
+    for name in names:
+        if name in CONTENT_BOARDS:
+            if post_rows is None:
+                post_rows = _provider_rows(source, source.board_id)
+            out[name] = [
+                row for row in post_rows
+                if str(row.get("cells", {}).get("account", "")) == name
+            ]
+            continue
+        board_id = _BOARD_IDS.get(name)
+        if board_id:
+            out[name] = _provider_rows(source, board_id)
+    return out
 
 
 def fetch_posts(source, env: dict | None = None,
                 boards: tuple[str, ...] = CONTENT_BOARDS) -> list[LinkedInPost]:
-    """Pull the LinkedIn content-board cards as LinkedInPosts (author = board)."""
-    rows_by_db = fetch_all(source, env, only=list(boards))
+    """Read local Posts cards as LinkedInPosts (author = configured account)."""
+    rows_by_db = fetch_all(source, only=list(boards))
     posts: list[LinkedInPost] = []
     for board, rows in rows_by_db.items():
         posts += posts_from_rows(rows, author_name=board)

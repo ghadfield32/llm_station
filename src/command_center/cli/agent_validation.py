@@ -3,7 +3,7 @@
 This is intentionally read-only. It validates that the local chat model path can
 handle the behaviors the gateway relies on: parsed tool calls, durable memory
 blocks, long multi-turn context, and no raw tool-call markup leakage. It does not
-call Growth OS tools, mutate AppFlowy, write repos, or retain prompts beyond the
+call Growth OS tools, mutate external board runtime, write repos, or retain prompts beyond the
 redacted evidence file.
 """
 from __future__ import annotations

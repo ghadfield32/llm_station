@@ -52,8 +52,6 @@ Command Center Windows helper
   .\scripts\cc.ps1 doctor            Preflight: docker, ollama, ports, .env, providers, digest
   .\scripts\cc.ps1 first-boot        One-shot: doctor -> bootstrap -> keys -> up -> health
   .\scripts\cc.ps1 models-light      Switch to the small-GPU/CPU model profile (qwen3:8b)
-  .\scripts\cc.ps1 appflowy-init     Scaffold AppFlowy-Cloud/.env + growth-os/.env
-  .\scripts\cc.ps1 appflowy-up       Start the AppFlowy board server + curator stacks
   .\scripts\cc.ps1 init-env          Create .env with generated local secrets
   .\scripts\cc.ps1 validate          Validate configs/*.yaml
   .\scripts\cc.ps1 render            Validate and render LiteLLM config
@@ -65,11 +63,7 @@ Command Center Windows helper
   .\scripts\cc.ps1 keys              Mint local-only LiteLLM virtual keys
   .\scripts\cc.ps1 standards-validate Validate standing engineering standards
   .\scripts\cc.ps1 forbidden-providers Assert local-only LiteLLM/provider-key boundary
-  .\scripts\cc.ps1 kanban-validate  Validate AppFlowy/GrowthOS intake config
-  .\scripts\cc.ps1 kanban-bridge [-Apply]
-                                  Dry-run or open Ledger missions from Kanban cards
-  .\scripts\cc.ps1 appflowy-audit [-Details]
-                                  Read-only audit of AppFlowy board fields/views/blank rows
+  .\scripts\cc.ps1 kanban-validate  Validate first-party governed intake config
   .\scripts\cc.ps1 model-scout [-Offline] Write generated/model-scout-report.md
   .\scripts\cc.ps1 usage-digest      Write generated/usage-digest.md
   .\scripts\cc.ps1 usage-report      Alias for usage-digest
@@ -140,12 +134,6 @@ switch ($Task.ToLowerInvariant()) {
     & $PSCommandPath render
     Write-Host "switched to LIGHT profile (qwen3:8b). Revert: git checkout configs/models.yaml"
   }
-  "appflowy-init" { Invoke-Python "-m" "command_center.cli.appflowy_init" }
-  "appflowy-up" {
-    Push-Location "appflowy_kanban/AppFlowy-Cloud"; try { & docker compose up -d } finally { Pop-Location }
-    Push-Location "appflowy_kanban/growth-os"; try { & docker compose -f docker-compose.curator.yml up -d --build } finally { Pop-Location }
-    Write-Host "AppFlowy + curator up. Sign up a user, put creds in growth-os/.env, then setup_workspace.py"
-  }
   "compose-config" { Invoke-Compose "config" }
   "env-smoke" {
     Invoke-Python "-c" "import yaml; from command_center.schemas import EnvironmentsConfig; EnvironmentsConfig.model_validate(yaml.safe_load(open('configs/environments.yaml'))); print('env-smoke: PASS')"
@@ -161,29 +149,6 @@ switch ($Task.ToLowerInvariant()) {
   }
   "kanban-validate" {
     Invoke-Python "-c" "import yaml; from command_center.schemas import KanbanConfig; KanbanConfig.model_validate(yaml.safe_load(open('configs/kanban.yaml'))); print('kanban-validate: PASS')"
-  }
-  "kanban-bridge" {
-    $BridgeArgs = @("-m", "command_center.cli.kanban_bridge")
-    if ($Apply) { $BridgeArgs += "--apply" }
-    Invoke-Python @BridgeArgs
-  }
-  "appflowy-audit" {
-    $GrowthRoot = Join-Path (Get-Location) "appflowy_kanban\growth-os"
-    $GrowthPython = Join-Path $GrowthRoot ".venv\Scripts\python.exe"
-    if (-not (Test-Path $GrowthPython)) {
-      Write-Error "missing GrowthOS venv: $GrowthPython"
-      exit 1
-    }
-    Push-Location $GrowthRoot
-    try {
-      $env:PYTHONPATH = (Get-Location).Path
-      $AuditArgs = @("scripts/audit_workspace.py")
-      if ($Details) { $AuditArgs += "--details" }
-      & $GrowthPython @AuditArgs
-      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    } finally {
-      Pop-Location
-    }
   }
   "tools-validate" {
     Invoke-Python "-c" "import yaml; from command_center.schemas import ToolsConfig; ToolsConfig.model_validate(yaml.safe_load(open('configs/tools.yaml'))); print('tools-validate: PASS')"
@@ -255,7 +220,7 @@ switch ($Task.ToLowerInvariant()) {
     Invoke-Python "-m" "command_center.cli.validate_config"
     Invoke-Python "-m" "command_center.cli.check_cross_refs"
     Invoke-Python "-m" "command_center.registry.render"
-    Invoke-Python "-m" "command_center.cli.check_forbidden_providers"
+    Invoke-Python "-m" "command_center.cli.check_forbidden_providers" "--configured-posture"
     Invoke-Python "-m" "command_center.cli.render_json_schema"
     Invoke-Python "-m" "command_center.cli.run_evals"
     foreach ($Tier in @("L0", "L1", "L2", "L3", "L4")) {

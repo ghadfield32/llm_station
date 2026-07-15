@@ -9,9 +9,7 @@ checklist from `*-verify` is printed so the operator sees exactly what blocks.
   cc onboard repo --path C:/docker_projects/my_repo
   cc onboard repo --path C:/docker_projects/my_repo --apply
   cc onboard kanban --provider command_center_ui --repo my_repo
-  cc onboard kanban --provider appflowy --repo my_repo \
-      --workspace-ref env:APPFLOWY_WORKSPACE_ID --board-ref env:MY_REPO_BOARD_ID
-"""
+  cc onboard kanban --provider command_center_ui --repo my_repo\n"""
 from __future__ import annotations
 
 import argparse
@@ -144,13 +142,8 @@ def _onboard_repo(args: argparse.Namespace) -> int:
 
 def _onboard_kanban(args: argparse.Namespace) -> int:
     board_id = args.board_id or f"{args.repo}_command_center"
-    workspace_ref = args.workspace_ref or (
-        "self" if args.provider == "command_center_ui" else None)
-    board_ref = args.board_ref or (board_id if args.provider == "command_center_ui" else None)
-    if workspace_ref is None or board_ref is None:
-        print("onboard kanban: BLOCKED\n  appflowy boards need --workspace-ref env:NAME "
-              "and --board-ref env:NAME (no literal ids committed)")
-        return 1
+    workspace_ref = args.workspace_ref or "self"
+    board_ref = args.board_ref or board_id
     print(f"onboard kanban: board_id={board_id} provider={args.provider} repo={args.repo}")
     reg = run_kanban_register(board_id=board_id, provider=args.provider,
                               workspace_ref=workspace_ref, board_ref=board_ref,
@@ -180,7 +173,7 @@ def main() -> int:
 
     pk = sub.add_parser("kanban")
     pk.add_argument("--provider", required=True,
-                    choices=["appflowy", "command_center_ui"])
+                    choices=["command_center_ui"])
     pk.add_argument("--repo", required=True)
     pk.add_argument("--board-id", default="")
     pk.add_argument("--workspace-ref", default="")

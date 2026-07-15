@@ -36,6 +36,12 @@ def test_ledger_service_ddl_matches_canonical():
     )
 
 
+def test_service_runs_additive_usage_v2_upgrade():
+    text = LEDGER_APP.read_text(encoding="utf-8")
+    assert "_ensure_usage_sample_columns(c)" in text
+    assert '("usage.v2", _now())' in text
+
+
 def test_all_usage_tables_present_in_service():
     service = _extract_service_ddl()
     for table in ("model_usage_samples", "model_limit_snapshots",
@@ -49,6 +55,48 @@ def test_idempotency_and_dedup_uniques_are_present():
     # every idempotency/dedup key is a UNIQUE column so a repeat is a real no-op
     assert service.count("source_hash         TEXT NOT NULL UNIQUE") >= 1  # samples
     assert "dedup_key  TEXT NOT NULL UNIQUE" in service                    # alerts
+
+
+def test_migrate_upgrades_a_usage_v1_sample_table_in_place(tmp_path):
+    import sqlite3
+
+    from command_center.usage.ledger_schema import SCHEMA_SQL, migrate
+
+    legacy_sql = SCHEMA_SQL
+    for column_line in (
+        "    model               TEXT,\n",
+        "    effort              TEXT,\n",
+        "    context_mode        TEXT,\n",
+        "    api_equivalent_cost_usd REAL\n",
+    ):
+        legacy_sql = legacy_sql.replace(column_line, "")
+    # Removing the final column leaves a trailing comma on source_record_id.
+    legacy_sql = legacy_sql.replace(
+        "    source_record_id    TEXT,\n);",
+        "    source_record_id    TEXT\n);",
+    )
+
+    db = tmp_path / "usage-v1.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(legacy_sql)
+    conn.execute(
+        "INSERT INTO model_usage_samples "
+        "(sample_id, runtime_id, source, observed_at, ingested_at, source_hash) "
+        "VALUES ('US-old', 'codex_agent', 'provider_derived', "
+        "'2026-07-01T00:00:00+00:00', '2026-07-01T00:00:00+00:00', 'old-hash')"
+    )
+    conn.commit()
+
+    migrate(conn)
+
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(model_usage_samples)")
+    }
+    assert {"model", "effort", "context_mode", "api_equivalent_cost_usd"} <= columns
+    assert conn.execute(
+        "SELECT sample_id FROM model_usage_samples"
+    ).fetchone()[0] == "US-old"
+    conn.close()
 
 
 def test_migrate_is_additive_and_records_version(tmp_path):

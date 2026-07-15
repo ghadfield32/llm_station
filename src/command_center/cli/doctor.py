@@ -28,16 +28,12 @@ from pydantic import ValidationError
 
 from command_center.cli.branch_protection_verify import verify_branch_protection
 from command_center.cli.check_forbidden_providers import (
-    AGENT_SESSION_KEYS,
-    FORBIDDEN_KEYS,
-    ROUTER_LANE_KEYS,
-    agent_session_egress_ready,
     check_compose,
     check_env_files,
     check_litellm_config,
     check_models_yaml,
     check_process_env,
-    frontier_egress_ready,
+    configured_provider_posture,
 )
 from command_center.cli.github_app_verify import verify_github_app
 from command_center.schemas import (
@@ -396,72 +392,49 @@ def check_ledger() -> Check:
     return _http_check("ledger_reachable", url, "uv run cc bootstrap-local")
 
 
-def check_appflowy_config(config_check: Check) -> Check:
+def check_board_store_config(config_check: Check) -> Check:
     if config_check.status != "PASS":
         return Check(
-            "appflowy_config",
-            "AppFlowy config",
+            "board_store_config",
+            "First-party board store config",
             "NOT_RUN",
             blocker="config contracts did not pass",
             next_command="uv run cc validate",
             evidence={"dependency": config_check.check_id},
         )
 
-    cfg = KanbanConfig.model_validate(yaml.safe_load(KANBAN_YAML.read_text(encoding="utf-8")))
-    enabled = [
-        source
-        for source in cfg.sources
-        if source.enabled and source.kind == "appflowy"
-    ]
-    if not enabled:
-        return Check(
-            "appflowy_config",
-            "AppFlowy config",
-            "PASS",
-            evidence={"enabled_appflowy_sources": []},
-        )
-
-    env = _merged_env()
+    cfg = KanbanConfig.model_validate(
+        yaml.safe_load(KANBAN_YAML.read_text(encoding="utf-8")))
+    enabled = [source for source in cfg.sources if source.enabled]
     missing: list[str] = []
     source_results: list[dict[str, Any]] = []
     for source in enabled:
-        growthos_root = ROOT / source.growthos_root
-        database_map = growthos_root / source.database_map_path
-        env_names = [
-            source.base_url_env,
-            source.workspace_id_env,
-            source.email_env,
-            source.password_env,
-        ]
-        missing_env = [name for name in env_names if name and not env.get(name)]
-        source_result = {
+        store = ROOT / source.board_store_dir
+        event_log = ROOT / source.event_log_path
+        store_parent = store.parent
+        log_parent = event_log.parent
+        source_results.append({
             "name": source.name,
-            "growthos_root": source.growthos_root,
-            "growthos_root_exists": growthos_root.is_dir(),
-            "database_map_path": str(Path(source.growthos_root) / source.database_map_path),
-            "database_map_exists": database_map.is_file(),
-            "env": _env_presence([name for name in env_names if name], env),
-        }
-        source_results.append(source_result)
-        if not growthos_root.is_dir():
-            missing.append(f"{source.name}: missing growthos_root {source.growthos_root}")
-        if not database_map.is_file():
-            missing.append(
-                f"{source.name}: missing database map "
-                f"{Path(source.growthos_root) / source.database_map_path}"
-            )
-        for env_name in missing_env:
-            missing.append(f"{source.name}: missing env {env_name}")
+            "kind": source.kind,
+            "board_id": source.board_id,
+            "board_store_dir": source.board_store_dir,
+            "board_store_parent_exists": store_parent.is_dir(),
+            "event_log_path": source.event_log_path,
+            "event_log_parent_exists": log_parent.is_dir(),
+        })
+        if not store_parent.is_dir():
+            missing.append(f"{source.name}: missing board-store parent {store_parent}")
+        if not log_parent.is_dir():
+            missing.append(f"{source.name}: missing event-log parent {log_parent}")
 
     return Check(
-        "appflowy_config",
-        "AppFlowy config",
+        "board_store_config",
+        "First-party board store config",
         "PASS" if not missing else "BLOCKED",
         blocker="; ".join(missing[:5]) if missing else "",
-        next_command="" if not missing else "set AppFlowy env refs, then run uv run cc kanban-bridge --dry-run",
+        next_command="" if not missing else "create generated/, then run uv run cc doctor",
         evidence={"sources": source_results},
     )
-
 
 def check_internal_ui_config(config_check: Check) -> Check:
     if config_check.status != "PASS":
@@ -692,16 +665,7 @@ def check_forbidden_provider_scan() -> Check:
     # operator turned on. Readiness is computed from the budget configs (never
     # fabricated); the strict `cc forbidden-providers` CLI remains the hard gate.
     errors: list[str] = []
-    forbidden = set(FORBIDDEN_KEYS)
-    permitted_lanes: list[str] = []
-    router_ready, router_why = frontier_egress_ready()
-    if router_ready:
-        forbidden -= ROUTER_LANE_KEYS
-        permitted_lanes.append(f"frontier-router lane permits {sorted(ROUTER_LANE_KEYS)}: {router_why}")
-    agent_ready, agent_why = agent_session_egress_ready()
-    if agent_ready:
-        forbidden -= AGENT_SESSION_KEYS
-        permitted_lanes.append(f"agent-session lane permits {sorted(AGENT_SESSION_KEYS)}: {agent_why}")
+    forbidden, permitted_lanes = configured_provider_posture()
     check_env_files(errors, forbidden)
     check_process_env(errors, forbidden)
     check_compose(errors, forbidden)
@@ -873,7 +837,7 @@ def collect_checks(*, expected_outputs: set[Path] | None = None) -> list[Check]:
         check_ollama(),
         check_litellm(),
         check_ledger(),
-        check_appflowy_config(config_check),
+        check_board_store_config(config_check),
         check_internal_ui_config(config_check),
         check_airflow_dag_folder(),
         github_env_check,

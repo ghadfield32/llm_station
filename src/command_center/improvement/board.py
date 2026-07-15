@@ -9,7 +9,7 @@ the mission hold here:
     decision. HumanDecision/ReviewNotes/ReopenConditions are HUMAN-owned and the sync
     preserves whatever a human put there (never clobbered).
   * it works offline: the default sink is a JSON file, so the board is exportable and
-    testable without AppFlowy reachable. A live AppFlowy sink upserts the same rows
+    testable without external board runtime reachable. A live external board runtime sink upserts the same rows
     through the curator's clobber-safe action layer.
 
 This mirrors the existing curator discipline (mission_intake: agents may draft, never
@@ -23,7 +23,7 @@ from pathlib import Path
 from .registry import ExperimentRegistry
 
 # The board columns (mission section 10). HUMAN_OWNED ones are never overwritten by sync.
-# Pillar lets the AppFlowy board group scan-drafted cards into per-pillar swimlanes.
+# Pillar lets the first-party board group scan-drafted cards into per-pillar swimlanes.
 BOARD_FIELDS = [
     "ExperimentID", "Title", "Pillar", "TargetType", "Target", "Hypothesis", "Status",
     "Decision", "Risk", "Baseline", "Candidate", "PrimaryMetric", "VerifierVerdict",
@@ -104,7 +104,7 @@ class BoardSink:
 
 
 class FileBoardSink(BoardSink):
-    """Offline JSON sink — the exportable board. Used when AppFlowy is not reachable
+    """Offline JSON sink — the exportable board. Used when external board runtime is not reachable
     and by the tests."""
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -122,12 +122,12 @@ class FileBoardSink(BoardSink):
 
 
 class GrowthOsBoardSink(BoardSink):
-    """Upserts board rows into a live Growth OS / AppFlowy 'improvements' database through
+    """Upserts board rows into a live Growth OS / external board runtime 'improvements' database through
     a pluggable client, clobber-safe. The client is any object with
     `list_rows(database) -> list[dict]` and `upsert(database, rows)` — in production a thin
-    wrapper over the curator's AppFlowyClient (whose `upsert` already dedupes server-side by
+    wrapper over the curator's external board runtimeClient (whose `upsert` already dedupes server-side by
     a stable key). Kept behind this interface so the clobber-safe logic is testable offline
-    with a fake client; only the real network call needs a reachable AppFlowy."""
+    with a fake client; only the real network call needs a reachable external board runtime."""
 
     def __init__(self, client, database: str = "improvements", key_field: str = "ExperimentID"):
         self.client = client

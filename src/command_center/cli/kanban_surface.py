@@ -44,7 +44,7 @@ def _digest(output: str) -> int:
 
 
 def _board_snapshot(output: str) -> int:
-    """Write the AppFlowy board snapshot the UI reads. Runs where growthos + creds
+    """Write the first-party board snapshot the UI reads. Runs where growthos + creds
     live (the worker/curator); per-board fail-loud (unreadable boards are recorded
     with their error, never dropped) so a stale/partial snapshot is never silent."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -71,7 +71,7 @@ def main() -> int:
     d = sub.add_parser("digest", help="render the observability digest")
     d.add_argument("--output", default="generated/kanban-digest.md")
     sub.add_parser("validate", help="blocking N/N PASS gate")
-    b = sub.add_parser("board-snapshot", help="write the AppFlowy board snapshot")
+    b = sub.add_parser("board-snapshot", help="write the first-party board snapshot")
     b.add_argument("--output", default="generated/board-snapshot.json")
     args = ap.parse_args()
     if args.cmd == "digest":

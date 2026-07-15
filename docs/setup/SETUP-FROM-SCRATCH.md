@@ -1,11 +1,15 @@
 # Setup from scratch
 
+> **Current board setup (2026-07-14):** AppFlowy is retired. Use the first-party
+> cockpit and local board store. Any older AppFlowy command elsewhere in this
+> long historical walkthrough is superseded by the
+> [retirement decision](../decisions/2026-07-14-appflowy-retirement.md).
 The one setup doc: from "nothing installed" to "control plane up, channels chatting,
 agents working in leased worktrees" — in build order. The deep reference is
 [MASTER.md](../MASTER.md); per-channel detail is [channels.md](../architecture/channels.md).
 
 **Four equivalent interfaces** — use whichever fits (full table in the [README](../../README.md#ways-to-run-it)):
-`make <target>` (Linux/macOS) · `.\scripts\cc.ps1 <target>` (Windows) · **`uv run cc <command>` (any OS, zero-install)** · `docker compose up -d` (pure Docker; it renders its own config). The fastest start on a fresh machine is **`uv run cc start`** (one button: control plane → keys → health → opens the UIs; add `--appflowy --channel telegram`). The steps below use `make`; substitute freely.
+`make <target>` (Linux/macOS) · `.\scripts\cc.ps1 <target>` (Windows) · **`uv run cc <command>` (any OS, zero-install)** · `docker compose up -d` (pure Docker; it renders its own config). The fastest start on a fresh machine is **`uv run cc start`** (one button: control plane → keys → health → opens the UIs; add `--channel telegram`). The steps below use `make`; substitute freely.
 
 > This doc consolidates the former `runbook.md`, `COMPLETE-SETUP.md`, and
 > `SETUP-REMAINING.md`. Live progress tracking lives in [STATUS.md](../operations/STATUS.md).
@@ -28,7 +32,7 @@ agents working in leased worktrees" — in build order. The deep reference is
 | **Docker** (+ Compose) | runs the control-plane stack | `docker --version` |
 | **uv** | Python env + locked installs | `uv --version` |
 | **Ollama** | the local models LiteLLM routes to | `ollama --version` |
-| **git** | clone + the AppFlowy-Cloud submodule | `git --version` |
+| **git** | clone (retirement archive submodule is optional) | `git --version` |
 
 LiteLLM is pinned by **immutable digest** (not pip) on purpose — supply-chain guard.
 You never `pip install litellm`.
@@ -43,7 +47,7 @@ You never `pip install litellm`.
 git clone --recurse-submodules https://github.com/ghadfield32/llm_station.git
 cd llm_station
 # if you already cloned without it:
-git submodule update --init --recursive   # fetches appflowy_kanban/AppFlowy-Cloud @ pinned commit
+git submodule update --init --recursive   # optional: restores archive/appflowy provenance
 ```
 
 ## 2. Install the Python package (optional — only for development)
@@ -123,20 +127,16 @@ Windows: the same targets via `.\scripts\cc.ps1 bootstrap | keys | verify | up |
 
 ### Environment & stacks map
 
-Three `.env` files and three Docker stacks, each with a clear owner — fill only what you use:
-
-| File | Owns | When |
-|---|---|---|
-| `.env` (repo root) | control plane (LiteLLM/Judge Gate/Ledger) + chat-channel tokens | always |
-| `appflowy_kanban/AppFlowy-Cloud/.env` | the AppFlowy board server (Postgres, GoTrue, S3/MinIO, external URL) | if you use AppFlowy (§6) |
-| `appflowy_kanban/growth-os/.env` | the Growth OS curator (AppFlowy creds, GitHub PAT) | if you use the curator (§6) |
+One root `.env` owns the control plane, channel tokens, and explicitly enabled
+provider lanes. Board state needs no credential file.
 
 | Stack | Compose file | Brought up by |
 |---|---|---|
-| Control plane | `docker-compose.yml` | `make up` |
-| AppFlowy server | `appflowy_kanban/AppFlowy-Cloud/docker-compose.yml` | `make appflowy-up` (after `make appflowy-init`) |
-| Growth OS curator | `appflowy_kanban/growth-os/docker-compose.curator.yml` | `make appflowy-up` (brings up both) |
+| Control plane | `docker-compose.yml` | `uv run cc start` / `make up` |
+| Agent Kanban Cockpit | `docker-compose.yml` profile `ui` | `uv run cc start` |
 
+Growth OS writes to `generated/boards/` and `generated/kanban-events.jsonl`.
+The retired server/setup is preserved only under `archive/appflowy/`.
 The live smoke proves: Ollama direct reply · LiteLLM `triage`/`planner`/`local-judge`
 aliases · `gpt-*` and `claude-*` names **denied** through LiteLLM · executor shell has no
 provider keys · forbidden-providers check passes. There is no skip-Ollama path — calls
@@ -209,7 +209,7 @@ the agent misbehaves.
 
 ## 10. Backups
 
-Wire `make backup` to a restic repository (ledger SQLite + `.env` escrow + AppFlowy
+Wire `make backup` to a restic repository (ledger SQLite + `.env` escrow + first-party board store
 volumes are the state that matters), schedule it, and run `make restore-drill` monthly —
 a backup you haven't restored is a hope, not a backup.
 

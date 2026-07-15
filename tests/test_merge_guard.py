@@ -22,9 +22,10 @@ def test_guard_hook_blocks_protected_branches_only():
 def test_guard_hook_actually_rejects_main_and_allows_feature(tmp_path):
     import shutil
     sh = shutil.which("bash") or shutil.which("sh")
-    if not sh:  # POSIX shell required to execute the hook (always present in CI)
+    unusable_wsl_launcher = sh and "system32" in sh.lower() and sh.lower().endswith("bash.exe")
+    if not sh or unusable_wsl_launcher:  # Git Bash/POSIX shell is present in CI
         import pytest
-        pytest.skip("no POSIX shell available to execute the pre-push hook")
+        pytest.skip("no POSIX shell that can execute a Windows temp hook path")
     hook = tmp_path / "pre-push"
     hook.write_text(merge_guard.guard_hook(["main"]), encoding="utf-8")
     # forward-slash path so Git Bash on Windows resolves it (backslashes mangle)

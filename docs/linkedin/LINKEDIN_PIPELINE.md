@@ -4,7 +4,7 @@ The single place to see **what's built, what's blocked, and how to improve** the
 operation. Operational setup steps live in [linkedin-setup.md](linkedin-setup.md); the architecture
 summary is [MASTER.md §6.6](../MASTER.md). This doc is the working memory — update it as the system grows.
 
-Last updated: 2026-06-22.
+Last updated: 2026-07-14.
 
 ---
 
@@ -41,8 +41,14 @@ self-approves. The publisher is mechanical (no LLM in the publish path).
 | **WMS Page posting (organization)** | **BLOCKED** — needs Community Management API on a *separate* app (see §5) |
 | Content engine (gather→draft→judge→stage) | **In progress** — Phase 1 (gather) underway |
 | Content UX: preview + find-by-intent + routing seam | **Done** — `cc content-preview`, `cc content-find`, `cc reference`, `ContentLLMClient` (see §3.5) |
+| Cockpit post entry board | **Done** — LinkedIn-style composer writes governed Draft cards to `linkedin_content_pipeline_internal` |
 
 `cc linkedin-publish --preflight` prints the live readiness at any time.
+
+The first-party cockpit draft board is an intake/review surface, not a second
+publisher. It stores exact human-authored copy and preview lint in the internal
+board store. Moving a card never calls LinkedIn; the official API publisher and
+its human approval contract above remain authoritative.
 
 ---
 

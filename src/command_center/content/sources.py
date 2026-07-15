@@ -2,7 +2,7 @@
 
 Two source kinds, both already-real material (no inventing):
   - curated items the Growth OS curator already scored into the papers/repos/
-    signals AppFlowy databases (relevance pre-ranked vs the interest profile);
+    signals first-party boards (relevance pre-ranked vs the interest profile);
   - the author's OWN developments - recent git commits + the README headline of
     each watched repo (the "build in public / my own work" lane).
 
@@ -18,9 +18,16 @@ import subprocess
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-import httpx
+from command_center.boards.command_center_provider import CommandCenterBoardProvider
+from command_center.kanban_sync.events import EventLog
 
-from command_center.cli.kanban_bridge import merged_env
+_BOARD_IDS = {
+    "papers": "research_papers",
+    "repos": "research_repos",
+    "signals": "research_signals",
+}
+
+
 
 # curator DB -> (title field, summary field)
 _DB_FIELDS = {
@@ -65,29 +72,19 @@ def _score(cells: dict) -> float:
         return 0.0
 
 
-def _appflowy(source, env: dict) -> tuple[str, str, str, dict]:
-    root = Path(source.growthos_root)
-    db_map = json.loads((root / source.database_map_path).read_text(encoding="utf-8"))
-    base = env[source.base_url_env].rstrip("/")
-    ws = env[source.workspace_id_env]
-    r = httpx.post(f"{base}/gotrue/token?grant_type=password",
-                   json={"email": env[source.email_env], "password": env[source.password_env]},
-                   timeout=30)
-    r.raise_for_status()
-    return base, ws, r.json()["access_token"], db_map
-
-
-def _read_rows(base: str, ws: str, token: str, db_id: str) -> list[dict]:
-    h = {"Authorization": f"Bearer {token}"}
-    ids = [x["id"] for x in httpx.get(
-        f"{base}/api/workspace/{ws}/database/{db_id}/row", headers=h, timeout=30).json()["data"]]
-    out: list[dict] = []
-    for i in range(0, len(ids), 40):
-        d = httpx.get(f"{base}/api/workspace/{ws}/database/{db_id}/row/detail",
-                      headers=h, params={"ids": ",".join(ids[i:i + 40])}, timeout=30)
-        out += [row.get("cells", row) for row in d.json()["data"]]
-    return out
-
+def _internal_rows(source, db_name: str) -> list[dict]:
+    provider = CommandCenterBoardProvider(
+        board_id=_BOARD_IDS[db_name],
+        event_log=EventLog(source.event_log_path),
+        store_dir=Path(source.board_store_dir),
+    )
+    rows: list[dict] = []
+    for card in provider.list_cards():
+        cells = dict(card)
+        if card.get("status") is not None:
+            cells["Status"] = card["status"]
+        rows.append(cells)
+    return rows
 
 def _candidate_from_row(stream: str, db: str, cells: dict) -> Candidate | None:
     title_f, summary_f = _DB_FIELDS[db]
@@ -152,16 +149,14 @@ def gather(cfg, env: dict | None = None, write: bool = True) -> dict[str, list[C
     """Per-stream ranked candidate lists. Curator items (filtered by the stream's
     topics, ranked by score) plus the stream's own-repo digest, capped at
     candidates_per_run. Returns {stream_name: [Candidate, ...]}."""
-    env = env or merged_env(Path(".env"), Path(cfg.source.growthos_root) / ".env")
-    base, ws, token, db_map = _appflowy(cfg.source, env)
     repos_root = (Path(__file__).resolve().parents[3] / cfg.own_repos_root).resolve()
 
-    # read each curator DB once, reuse across streams
+    # Read each first-party research board once and reuse it across streams.
     db_rows: dict[str, list[dict]] = {}
     for s in cfg.streams:
         for db in s.curator_dbs:
             if db not in db_rows:
-                db_rows[db] = _read_rows(base, ws, token, db_map[db]["database_id"])
+                db_rows[db] = _internal_rows(cfg.source, db)
 
     result: dict[str, list[Candidate]] = {}
     for s in cfg.streams:

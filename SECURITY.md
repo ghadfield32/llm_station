@@ -10,14 +10,18 @@ few days.
 
 This is a personal control plane built to be hard to misuse:
 
-- **Local-only models.** LiteLLM routes only to local Ollama; the contract
-  (`make forbidden-providers`) rejects any OpenAI/Anthropic/OpenRouter route or API
-  key. Coding executors (Claude Code / Codex) authenticate through their own
-  subscription/OAuth login, never through this repo.
-- **No secrets in git.** Secrets live only in `.env` files, which are gitignored
-  (`make doctor` / CI assert no provider keys are present). `.env.example` files carry
-  names, never values. The AppFlowy stack ships dev-default secrets that must be
-  rotated before any non-local exposure (see [docs/setup/SETUP-FROM-SCRATCH.md](docs/setup/SETUP-FROM-SCRATCH.md)).
+- **Local LiteLLM lane; explicit external lanes.** LiteLLM routes only to local
+  Ollama, and `make forbidden-providers` is the deliberately strict audit that
+  rejects every OpenAI/Anthropic/OpenRouter route or API key. `cc validate` checks
+  the configured posture instead: it permits only the key names owned by a lane
+  whose committed budget and safety controls prove readiness. Local model routes
+  remain cloud-free in every mode. Coding executors (Claude Code / Codex) normally
+  authenticate through their own subscription/OAuth login.
+- **No secrets in git.** Secrets live only in gitignored `.env` files. `make doctor`
+  and CI scan tracked configuration for secret literals; `.env.example` files carry
+  names, never values. The retired board runtime and its
+  former defaults remain under `archive/appflowy/` and must never be started or copied
+  into an active environment.
 - **LiteLLM pinned by immutable digest**, not a tag and never `pip install`ed — a
   guard against registry/supply-chain tampering. `make verify` checks the pin.
 - **Human-gated external writes.** Agents can push a feature branch and open a PR;
@@ -29,5 +33,5 @@ This is a personal control plane built to be hard to misuse:
 ## Scope
 
 Reports about the control-plane code, contracts, and configs in this repo are in
-scope. The vendored `appflowy_kanban/AppFlowy-Cloud` submodule is upstream
-(AppFlowy-IO) — report issues there to that project.
+scope. The pinned `archive/appflowy/AppFlowy-Cloud` submodule is retirement provenance
+only; its upstream issues belong to that project.

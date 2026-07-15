@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail if cloud provider routes or provider API keys re-enter the local-only setup."""
+"""Enforce provider-key boundaries for strict audits and the configured posture."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
-FORBIDDEN_KEYS = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY"}
+FORBIDDEN_KEYS = {"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ZAI_API_KEY"}
 FORBIDDEN_MODEL_FRAGMENTS = ("openai/", "anthropic/", "openrouter/", "gpt-", "claude-")
 
 # Hosts a local-frontier base URL (configs/local-frontier-providers.yaml) may resolve to.
@@ -98,6 +98,32 @@ def agent_session_egress_ready() -> tuple[bool, str]:
     if not active:
         return False, "no harness under default.harnesses is enabled"
     return True, f"agent-session egress enabled for: {', '.join(active)}"
+
+
+def configured_provider_posture() -> tuple[set[str], list[str]]:
+    """Return key names still forbidden under the committed, readiness-gated posture.
+
+    This is intentionally different from the default strict audit. A lane removes only its
+    own key names and only after its budget/safety config proves readiness. Disabled or
+    incomplete lanes remain forbidden without making an otherwise local-only checkout fail
+    merely because a lane is disabled.
+    """
+    forbidden = set(FORBIDDEN_KEYS)
+    permitted_lanes: list[str] = []
+
+    router_ready, router_why = frontier_egress_ready()
+    if router_ready:
+        forbidden -= ROUTER_LANE_KEYS
+        permitted_lanes.append(
+            f"frontier-router lane permits {sorted(ROUTER_LANE_KEYS)}: {router_why}")
+
+    agent_ready, agent_why = agent_session_egress_ready()
+    if agent_ready:
+        forbidden -= AGENT_SESSION_KEYS
+        permitted_lanes.append(
+            f"agent-session lane permits {sorted(AGENT_SESSION_KEYS)}: {agent_why}")
+
+    return forbidden, permitted_lanes
 
 
 def dotenv_keys(path: Path) -> set[str]:
@@ -204,10 +230,21 @@ def check_local_frontier_providers(errors: list[str]) -> None:
             errors.append(str(exc))
 
 
-def main(allow_router_egress: bool = False, allow_agent_session_egress: bool = False) -> int:
+def main(
+    allow_router_egress: bool = False,
+    allow_agent_session_egress: bool = False,
+    configured_posture: bool = False,
+) -> int:
     errors: list[str] = []
-    forbidden = set(FORBIDDEN_KEYS)
-    if allow_router_egress:
+    if configured_posture:
+        forbidden, permitted_lanes = configured_provider_posture()
+        for lane in permitted_lanes:
+            print(f"configured provider posture: {lane}")
+    else:
+        forbidden = set(FORBIDDEN_KEYS)
+        permitted_lanes = []
+
+    if allow_router_egress and not configured_posture:
         ready, why = frontier_egress_ready()
         if ready:
             # Permit ONLY the router-lane keys, and ONLY for the env/process/compose checks.
@@ -216,7 +253,7 @@ def main(allow_router_egress: bool = False, allow_agent_session_egress: bool = F
         else:
             errors.append(
                 f"--allow-frontier-router-egress requested but the lane is not ready: {why}")
-    if allow_agent_session_egress:
+    if allow_agent_session_egress and not configured_posture:
         ready, why = agent_session_egress_ready()
         if ready:
             # Permit ONLY the agent-session keys — independent of ROUTER_LANE_KEYS above.
@@ -243,9 +280,11 @@ def main(allow_router_egress: bool = False, allow_agent_session_egress: bool = F
         return 1
 
     labels = []
-    if allow_router_egress:
+    if configured_posture:
+        labels.append("configured posture")
+    elif allow_router_egress:
         labels.append("frontier-router egress")
-    if allow_agent_session_egress:
+    if allow_agent_session_egress and not configured_posture:
         labels.append("agent-session egress")
     label = f" ({', '.join(labels)})" if labels else ""
     print(f"forbidden-providers: PASS{label}")
@@ -267,7 +306,12 @@ if __name__ == "__main__":
         help=("permit the agent-session keys (ANTHROPIC_API_KEY/OPENAI_API_KEY) IFF "
               "configs/agent-session-budgets.yaml enables at least one harness; the local "
               "LiteLLM lane and the frontier-router lane stay unaffected regardless"))
+    parser.add_argument(
+        "--configured-posture", action="store_true",
+        help=("validate the committed provider posture: permit key names only for lanes whose "
+              "budget/safety configuration proves readiness; disabled lanes remain strict"))
     args = parser.parse_args()
     raise SystemExit(main(
         allow_router_egress=args.allow_frontier_router_egress,
-        allow_agent_session_egress=args.allow_agent_session_egress))
+        allow_agent_session_egress=args.allow_agent_session_egress,
+        configured_posture=args.configured_posture))

@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
-
-import httpx
 
 from command_center.job_search.application_memory import (
     create_prepared_application,
@@ -28,7 +25,7 @@ from command_center.job_search.schemas import (
     repo_root,
 )
 
-BoardBackend = Literal["appflowy", "local", "internal"]
+BoardBackend = Literal["local", "internal"]
 
 BOARD_COLUMNS = [
     "Suggested Jobs",
@@ -117,63 +114,7 @@ BOT_OWNED_FIELDS = {
 MIXED_UPDATE_WHEN_EMPTY_FIELDS = {"salary_text", "deadline", "next_action"}
 USER_OWNED_FIELDS = {"notes", "custom_priority", "geoff_comments", "manual_decision"}
 
-APPFLOWY_REQUIRED_ENV = (
-    "APPFLOWY_BASE_URL",
-    "APPFLOWY_WORKSPACE_ID",
-    "APPFLOWY_EMAIL",
-    "APPFLOWY_PASSWORD",
-)
-GROWTHOS_ROOT = repo_root() / "appflowy_kanban" / "growth-os"
-DB_MAP_PATH = GROWTHOS_ROOT / "config" / "databases.json"
-SCHEMA_PATH = GROWTHOS_ROOT / "config" / "schema.yaml"
 STATE_SCHEMA = "command-center.job-search-board-state.v1"
-
-APPFLOWY_FIELD_TYPE_IDS = {
-    "text": 0,
-    "longtext": 0,
-    "number": 1,
-    "date": 2,
-    "select": 3,
-    "url": 6,
-}
-SELECT_COLORS = ["Purple", "Orange", "Yellow", "Green", "Blue", "Pink", "Aqua"]
-
-# AppFlowy's self-hosted REST API cannot set a board view's group-by field, edit
-# select options, delete/reorder fields, or delete rows. A fresh grid always ships
-# a groupable "Type" field that hijacks board grouping, so a REST-created board
-# opens grouped by the empty "Type" column ("No Type") with no draggable stages.
-# The database itself is correct (Status has all 8 stage options); only the board
-# VIEW's grouping must be set once, in the AppFlowy client. These steps are the
-# single manual action required to turn the board into a working Kanban.
-GROUP_FIELD = "Status"
-MANUAL_GROUPING_STEPS = [
-    "Open the job_search_pipeline board and click the 'Board' tab (not 'Grid').",
-    "Open the board view settings: the '...' (Settings) menu at the top-right of "
-    "the board on desktop, or the settings icon on mobile.",
-    "Choose 'Group by' and select 'Status'.",
-    "The eight pipeline columns (Suggested Jobs ... Closed / Archived) appear "
-    "immediately, with the current cards under 'Suggested Jobs'. You can now drag "
-    "cards between stages.",
-    "Optional cleanup (one time): delete the 3 blank starter rows AppFlowy created "
-    "(right-click a card -> Delete), and hide the default 'Type' and 'Done' fields "
-    "on cards via the card/field settings. These are AppFlowy defaults the REST API "
-    "cannot remove; they do not affect the pipeline.",
-]
-
-
-def manual_grouping_guidance() -> dict[str, Any]:
-    return {
-        "why": (
-            "AppFlowy's self-hosted REST API cannot set a board view's group field. "
-            "The board opens grouped by AppFlowy's default empty 'Type' field, so it "
-            "shows one 'No Type' column and nothing to drag between. This is a one-time "
-            "client-side setup, not a data problem: the Status field already has all "
-            "8 pipeline stages and every card is tagged."
-        ),
-        "group_by_field": GROUP_FIELD,
-        "steps": list(MANUAL_GROUPING_STEPS),
-    }
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -199,7 +140,6 @@ def _read_dotenv(path: Path) -> dict[str, str]:
 def _merged_env(env: dict[str, str] | None = None) -> dict[str, str]:
     values: dict[str, str] = {}
     values.update(_read_dotenv(repo_root() / ".env"))
-    values.update(_read_dotenv(GROWTHOS_ROOT / ".env"))
     values.update(os.environ)
     if env is not None:
         values.update(env)
@@ -548,307 +488,9 @@ def _application_exists(root: Path, application_id: str | None) -> bool:
     return (root / "applications_active" / application_id / "application.yml").exists()
 
 
-def appflowy_readiness(
-    *,
-    cfg: JobSearchConfig | None = None,
-    env: dict[str, str] | None = None,
-    require_database_mapping: bool = False,
-) -> dict[str, Any]:
-    config = cfg or load_config()
-    values = _merged_env(env)
-    missing_env = [name for name in APPFLOWY_REQUIRED_ENV if not values.get(name)]
-    blockers = [f"missing_env:{name}" for name in missing_env]
-    if not GROWTHOS_ROOT.exists():
-        blockers.append(f"missing_growthos_root:{GROWTHOS_ROOT}")
-    if not SCHEMA_PATH.exists():
-        blockers.append(f"missing_growthos_schema:{SCHEMA_PATH}")
-    if require_database_mapping:
-        if not DB_MAP_PATH.exists():
-            blockers.append(f"missing_database_map:{DB_MAP_PATH}")
-        else:
-            db_map = json.loads(DB_MAP_PATH.read_text(encoding="utf-8"))
-            if config.job_search.board_name not in db_map:
-                blockers.append(f"missing_database_mapping:{config.job_search.board_name}")
-    return {
-        "ready": not blockers,
-        "backend": "appflowy",
-        "board_name": config.job_search.board_name,
-        "required_env": list(APPFLOWY_REQUIRED_ENV),
-        "blockers": blockers,
-        "setup_hint": (
-            "Run `uv run cc appflowy-init`, set APPFLOWY_* values in .env or "
-            "appflowy_kanban/growth-os/.env, start AppFlowy, then run "
-            "`uv run cc job-search board-setup --apply`."
-        ),
-    }
-
-
-def _appflowy_field_specs() -> list[tuple[str, Any]]:
-    return [
-        ("role_title", "text"),
-        ("Status", {"type": "select", "options": BOARD_COLUMNS}),
-        ("job_key", "text"),
-        ("company", "text"),
-        ("location", "text"),
-        ("remote_type", {"type": "select", "options": ["remote", "hybrid", "onsite", "unknown"]}),
-        ("source", "text"),
-        ("portal", "text"),
-        ("apply_url", "url"),
-        ("salary_text", "text"),
-        ("salary_min", "number"),
-        ("salary_max", "number"),
-        ("category", "text"),
-        ("fit_score", "number"),
-        (
-            "automation_class",
-            {"type": "select", "options": [member.value for member in AutomationClass]},
-        ),
-        ("manual_reason", "longtext"),
-        ("resume_variant", "text"),
-        ("why_apply", "longtext"),
-        ("risks", "longtext"),
-        ("deadline", "date"),
-        ("last_seen_at", "date"),
-        ("application_id", "text"),
-        ("next_action", "longtext"),
-        ("materials_path", "text"),
-        (
-            "company_tier",
-            {"type": "select", "options": ["none", "sports_team", "sports_tech", "faang", "major_other"]},
-        ),
-        ("score_explanation", "longtext"),
-        ("claude_review_url", "url"),
-    ]
-
-
-def _field_payload(name: str, spec: Any) -> dict[str, Any]:
-    if isinstance(spec, str):
-        ftype, options = spec, None
-    else:
-        ftype, options = spec["type"], spec.get("options")
-    payload = {"name": name, "field_type": APPFLOWY_FIELD_TYPE_IDS[ftype], "type_option_data": None}
-    if options:
-        content = {
-            "disable_color": False,
-            "options": [
-                {"id": secrets.token_hex(3), "name": str(option), "color": SELECT_COLORS[i % len(SELECT_COLORS)]}
-                for i, option in enumerate(options)
-            ],
-        }
-        payload["type_option_data"] = {"content": json.dumps(content)}
-    return payload
-
-
-def _appflowy_login(client: httpx.Client, env: dict[str, str]) -> dict[str, str]:
-    base = env["APPFLOWY_BASE_URL"].rstrip("/")
-    r = client.post(
-        f"{base}/gotrue/token?grant_type=password",
-        json={"email": env["APPFLOWY_EMAIL"], "password": env["APPFLOWY_PASSWORD"]},
-    )
-    r.raise_for_status()
-    token = r.json().get("access_token")
-    if not token:
-        raise RuntimeError("AppFlowy login returned no access_token")
-    return {"Authorization": f"Bearer {token}"}
-
-
-def _find_parent_space(client: httpx.Client, env: dict[str, str], headers: dict[str, str]) -> str:
-    base = env["APPFLOWY_BASE_URL"].rstrip("/")
-    ws = env["APPFLOWY_WORKSPACE_ID"]
-    r = client.get(f"{base}/api/workspace/{ws}/folder", params={"depth": 1}, headers=headers)
-    r.raise_for_status()
-    root = r.json()["data"]
-    for child in root.get("children", []):
-        if child.get("is_space"):
-            return child["view_id"]
-    return root["view_id"]
-
-
-def _fetch_field_mapping(
-    client: httpx.Client,
-    env: dict[str, str],
-    db_id: str,
-    headers: dict[str, str],
-    title_col: str,
-) -> tuple[str, dict[str, str]]:
-    base = env["APPFLOWY_BASE_URL"].rstrip("/")
-    ws = env["APPFLOWY_WORKSPACE_ID"]
-    r = client.get(f"{base}/api/workspace/{ws}/database/{db_id}/fields", headers=headers)
-    r.raise_for_status()
-    live_fields = r.json()["data"]
-    primary_id = next(field["id"] for field in live_fields if field.get("is_primary"))
-    fields = {field["name"]: field["id"] for field in live_fields}
-    fields[title_col] = primary_id
-    return primary_id, fields
-
-
-def _wire_value(value: Any) -> Any:
-    if isinstance(value, list):
-        return ", ".join(str(item) for item in value)
-    if isinstance(value, str) and "T" in value and value.endswith("+00:00"):
-        return value.split("T", 1)[0]
-    return value
-
-
-class AppFlowyJobSearchClient:
-    def __init__(self, cfg: JobSearchConfig, env: dict[str, str]):
-        self.cfg = cfg
-        self.env = env
-        self.base = env["APPFLOWY_BASE_URL"].rstrip("/")
-        self.ws = env["APPFLOWY_WORKSPACE_ID"]
-        self.client = httpx.Client(timeout=30)
-        self.headers = _appflowy_login(self.client, env)
-        self.db_map = json.loads(DB_MAP_PATH.read_text(encoding="utf-8"))
-        self.entry = self.db_map[cfg.job_search.board_name]
-
-    def close(self) -> None:
-        self.client.close()
-
-    def _field_ids(self) -> dict[str, str]:
-        return self.entry["fields"]
-
-    def list_fields(self) -> list[dict[str, Any]]:
-        db_id = self.entry["database_id"]
-        r = self.client.get(
-            f"{self.base}/api/workspace/{self.ws}/database/{db_id}/fields",
-            headers=self.headers,
-        )
-        r.raise_for_status()
-        return r.json()["data"]
-
-    def list_cards(self) -> list[dict[str, Any]]:
-        db_id = self.entry["database_id"]
-        rows = self.client.get(
-            f"{self.base}/api/workspace/{self.ws}/database/{db_id}/row",
-            headers=self.headers,
-        )
-        rows.raise_for_status()
-        row_ids = [row["id"] for row in rows.json()["data"]]
-        cards: list[dict[str, Any]] = []
-        for i in range(0, len(row_ids), 40):
-            detail = self.client.get(
-                f"{self.base}/api/workspace/{self.ws}/database/{db_id}/row/detail",
-                headers=self.headers,
-                params={"ids": ",".join(row_ids[i:i + 40])},
-            )
-            detail.raise_for_status()
-            for row in detail.json()["data"]:
-                cells = row.get("cells", row)
-                fields = {name: cells.get(name) for name in REQUIRED_CARD_FIELDS}
-                fields["role_title"] = cells.get("role_title") or cells.get("Name")
-                cards.append(
-                    {
-                        "card_id": row.get("id") or _card_id(str(fields.get("job_key") or "")),
-                        "column": cells.get("Status") or "Suggested Jobs",
-                        "fields": fields,
-                    }
-                )
-        return cards
-
-    def upsert_card(self, card: dict[str, Any]) -> None:
-        fields = self._field_ids()
-        cells = {"Status": card["column"], **card["fields"]}
-        wire = {
-            fields[name]: _wire_value(value)
-            for name, value in cells.items()
-            if name in fields and value is not None and value != ""
-        }
-        r = self.client.put(
-            f"{self.base}/api/workspace/{self.ws}/database/{self.entry['database_id']}/row",
-            headers=self.headers,
-            json={"pre_hash": card["fields"]["job_key"], "cells": wire, "document": None},
-        )
-        r.raise_for_status()
-        if r.json().get("code") != 0:
-            raise RuntimeError(f"AppFlowy row upsert failed: {r.text[:200]}")
-
-
-def _reconcile_appflowy_board(cfg: JobSearchConfig, env: dict[str, str]) -> dict[str, Any]:
-    db_map = json.loads(DB_MAP_PATH.read_text(encoding="utf-8")) if DB_MAP_PATH.exists() else {}
-    name = cfg.job_search.board_name
-    schema_fields = _appflowy_field_specs()
-    title_col = schema_fields[0][0]
-    base = env["APPFLOWY_BASE_URL"].rstrip("/")
-    ws = env["APPFLOWY_WORKSPACE_ID"]
-    added_fields: list[str] = []
-    with httpx.Client(timeout=30) as client:
-        headers = _appflowy_login(client, env)
-        parent = _find_parent_space(client, env, headers)
-        if name in db_map:
-            db_id = db_map[name]["database_id"]
-            primary_id, live_fields = _fetch_field_mapping(client, env, db_id, headers, title_col)
-            for field_name, spec in schema_fields[1:]:
-                if field_name in live_fields:
-                    continue
-                fr = client.post(
-                    f"{base}/api/workspace/{ws}/database/{db_id}/fields",
-                    headers=headers,
-                    json=_field_payload(field_name, spec),
-                )
-                fr.raise_for_status()
-                if fr.json().get("code") != 0:
-                    raise RuntimeError(f"{name}.{field_name}: {fr.text[:200]}")
-                added_fields.append(field_name)
-            primary_id, live_fields = _fetch_field_mapping(client, env, db_id, headers, title_col)
-            db_map[name] = {
-                "view_id": db_map[name]["view_id"],
-                "database_id": db_id,
-                "primary_field_id": primary_id,
-                "title_column": title_col,
-                "fields": live_fields,
-            }
-            DB_MAP_PATH.write_text(json.dumps(db_map, indent=2), encoding="utf-8")
-            return {
-                "status": "applied",
-                "created": False,
-                "added_fields": added_fields,
-                "database_map_path": str(DB_MAP_PATH),
-            }
-
-        r = client.post(
-            f"{base}/api/workspace/{ws}/page-view",
-            headers=headers,
-            json={"parent_view_id": parent, "layout": 1, "name": name},
-        )
-        r.raise_for_status()
-        data = r.json()["data"]
-        view_id, db_id = data["view_id"], data["database_id"]
-        for field_name, spec in schema_fields[1:]:
-            fr = client.post(
-                f"{base}/api/workspace/{ws}/database/{db_id}/fields",
-                headers=headers,
-                json=_field_payload(field_name, spec),
-            )
-            fr.raise_for_status()
-            if fr.json().get("code") != 0:
-                raise RuntimeError(f"{name}.{field_name}: {fr.text[:200]}")
-            added_fields.append(field_name)
-        primary_id, live_fields = _fetch_field_mapping(client, env, db_id, headers, title_col)
-        vr = client.post(
-            f"{base}/api/workspace/{ws}/page-view/{view_id}/database-view",
-            headers=headers,
-            json={"parent_view_id": view_id, "layout": 2, "name": "Board", "database_id": db_id, "embedded": False},
-        )
-        vr.raise_for_status()
-        db_map[name] = {
-            "view_id": view_id,
-            "database_id": db_id,
-            "primary_field_id": primary_id,
-            "title_column": title_col,
-            "fields": live_fields,
-        }
-        DB_MAP_PATH.write_text(json.dumps(db_map, indent=2), encoding="utf-8")
-    return {
-        "status": "applied",
-        "created": True,
-        "added_fields": added_fields,
-        "database_map_path": str(DB_MAP_PATH),
-    }
-
-
 def board_setup(
     *,
-    backend: BoardBackend = "appflowy",
+    backend: BoardBackend = "internal",
     apply: bool = False,
     root: Path | None = None,
     cfg: JobSearchConfig | None = None,
@@ -858,39 +500,6 @@ def board_setup(
     base = root or data_root(config)
     ensure_data_dirs(base)
     schema = board_schema()
-    if backend == "appflowy":
-        readiness = appflowy_readiness(cfg=config, env=env, require_database_mapping=False)
-        result = {
-            "operation": "board_setup",
-            "backend": backend,
-            "board_name": config.job_search.board_name,
-            "schema": schema,
-            "writes_performed": False,
-        }
-        if not readiness["ready"]:
-            result.update({"status": "blocked", "readiness": readiness})
-            return result
-        if not apply:
-            result.update(
-                {
-                    "status": "dry_run",
-                    "would_create_or_reconcile": config.job_search.board_name,
-                    "next": "rerun with --apply to create/reconcile the AppFlowy board",
-                    "manual_grouping": manual_grouping_guidance(),
-                }
-            )
-            return result
-        applied = _reconcile_appflowy_board(config, _merged_env(env))
-        result.update(applied)
-        result["writes_performed"] = True
-        result["manual_grouping"] = manual_grouping_guidance()
-        result["important"] = (
-            "REQUIRED ONE-TIME STEP: set the board's 'Group by' to 'Status' in the "
-            "AppFlowy client, or the board shows a single 'No Type' column with nothing "
-            "to drag. See manual_grouping.steps."
-        )
-        return result
-
     if backend == "internal":
         provider = _internal_provider(env)
         exists = provider.store_dir.is_dir()
@@ -1010,7 +619,7 @@ def analyze_cards(cards: list[dict[str, Any]], *, root: Path) -> dict[str, Any]:
 
 def board_snapshot(
     *,
-    backend: BoardBackend = "appflowy",
+    backend: BoardBackend = "internal",
     root: Path | None = None,
     cfg: JobSearchConfig | None = None,
     env: dict[str, str] | None = None,
@@ -1018,22 +627,7 @@ def board_snapshot(
     config = cfg or load_config()
     base = root or data_root(config)
     ensure_data_dirs(base)
-    if backend == "appflowy":
-        readiness = appflowy_readiness(cfg=config, env=env, require_database_mapping=True)
-        if not readiness["ready"]:
-            return {
-                "operation": "board_snapshot",
-                "backend": backend,
-                "status": "blocked",
-                "readiness": readiness,
-                "writes_performed": False,
-            }
-        client = AppFlowyJobSearchClient(config, _merged_env(env))
-        try:
-            cards = client.list_cards()
-        finally:
-            client.close()
-    elif backend == "internal":
+    if backend == "internal":
         cards = _internal_cards(_internal_provider(env))
     else:
         cards = load_local_state(base, config)["cards"]
@@ -1049,72 +643,29 @@ def board_snapshot(
 
 def board_doctor(
     *,
+    root: Path | None = None,
     cfg: JobSearchConfig | None = None,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Health-check the live AppFlowy board and always surface the one-time
-    group-by-Status step, which the REST API cannot perform for us."""
-    config = cfg or load_config()
-    readiness = appflowy_readiness(cfg=config, env=env, require_database_mapping=True)
-    result: dict[str, Any] = {
+    """Health-check the authoritative first-party Jobs board."""
+    snapshot = board_snapshot(backend="internal", root=root, cfg=cfg, env=env)
+    return {
         "operation": "board_doctor",
-        "backend": "appflowy",
-        "board_name": config.job_search.board_name,
-        "manual_grouping": manual_grouping_guidance(),
+        "backend": "internal",
+        "status": snapshot["status"],
+        "board_name": snapshot["board_name"],
+        "checks": {
+            "board_store_readable": True,
+            "canonical_columns": list(BOARD_COLUMNS),
+            "cards": snapshot["total_cards"],
+        },
         "writes_performed": False,
     }
-    if not readiness["ready"]:
-        result.update({"status": "blocked", "readiness": readiness})
-        return result
-
-    client = AppFlowyJobSearchClient(config, _merged_env(env))
-    try:
-        fields = client.list_fields()
-        cards = client.list_cards()
-    finally:
-        client.close()
-
-    status_field = next((f for f in fields if f.get("name") == GROUP_FIELD), None)
-    status_options: list[str] = []
-    if status_field:
-        content = (status_field.get("type_option") or {}).get("content") or {}
-        status_options = [o.get("name") for o in content.get("options", [])]
-    expected = set(BOARD_COLUMNS)
-    missing_options = sorted(expected - set(status_options))
-
-    blank_rows = [
-        card
-        for card in cards
-        if not (card.get("fields", {}).get("job_key") or "").strip()
-    ]
-    default_field_names = {f.get("name") for f in fields}
-    junk_fields = sorted(default_field_names & {"Type", "Done"})
-
-    checks = {
-        "status_field_present": status_field is not None,
-        "status_has_all_stage_options": not missing_options,
-        "missing_status_options": missing_options,
-        "real_cards": len(cards) - len(blank_rows),
-        "blank_starter_rows": len(blank_rows),
-        "leftover_default_fields": junk_fields,
-    }
-    healthy = checks["status_field_present"] and checks["status_has_all_stage_options"]
-    result.update(
-        {
-            "status": "ok" if healthy else "needs_attention",
-            "checks": checks,
-            "next_step": (
-                "The database is correctly set up. Set the board view's 'Group by' to "
-                "'Status' in AppFlowy (see manual_grouping.steps) to get draggable columns."
-            ),
-        }
-    )
-    return result
 
 
 def publish_suggestions(
     *,
-    backend: BoardBackend = "appflowy",
+    backend: BoardBackend = "internal",
     apply: bool = False,
     root: Path | None = None,
     cfg: JobSearchConfig | None = None,
@@ -1146,44 +697,6 @@ def publish_suggestions(
         for item in all_suggestions
         if int(item["fit"]["score"]) < config.ranking.min_score_to_show
     }
-    if backend == "appflowy":
-        readiness = appflowy_readiness(cfg=config, env=env, require_database_mapping=True)
-        if not readiness["ready"]:
-            return {
-                "operation": "publish_suggestions",
-                "backend": backend,
-                "status": "blocked",
-                "readiness": readiness,
-                "writes_performed": False,
-            }
-        client = AppFlowyJobSearchClient(config, _merged_env(env))
-        try:
-            cards = client.list_cards()
-            result = _publish_into_cards(
-                cards,
-                suggestions,
-                apply=apply,
-                below_threshold=below_threshold,
-                min_score_to_show=config.ranking.min_score_to_show,
-                eligible_suggestions_seen=len(eligible_suggestions),
-                daily_suggestion_limit=config.job_search.max_suggested_jobs_per_day,
-                eligible_suggestion_counts=_suggestion_class_counts(eligible_suggestions),
-                selected_suggestion_counts=_suggestion_class_counts(suggestions),
-                daily_suggestion_targets=daily_suggestion_targets,
-            )
-            if apply:
-                for card in result["cards_to_write"]:
-                    client.upsert_card(card)
-        finally:
-            client.close()
-        result.pop("cards_to_write", None)
-        return {
-            "operation": "publish_suggestions",
-            "backend": backend,
-            **result,
-            "writes_performed": apply,
-        }
-
     if backend == "internal":
         provider = _internal_provider(env)
         existing = _internal_cards(provider)
@@ -1424,7 +937,7 @@ def _publish_into_cards(
 
 def process_selected(
     *,
-    backend: BoardBackend = "appflowy",
+    backend: BoardBackend = "internal",
     apply: bool = False,
     root: Path | None = None,
     cfg: JobSearchConfig | None = None,
@@ -1434,39 +947,6 @@ def process_selected(
     config = cfg or load_config()
     base = root or data_root(config)
     ensure_data_dirs(base)
-    if backend == "appflowy":
-        readiness = appflowy_readiness(cfg=config, env=env, require_database_mapping=True)
-        if not readiness["ready"]:
-            return {
-                "operation": "process_selected",
-                "backend": backend,
-                "status": "blocked",
-                "readiness": readiness,
-                "writes_performed": False,
-            }
-        client = AppFlowyJobSearchClient(config, _merged_env(env))
-        try:
-            cards = client.list_cards()
-            result = _process_selected_cards(
-                cards,
-                base,
-                apply=apply,
-                executor=executor,
-                max_selected=config.job_search.max_selected_jobs_per_day,
-            )
-            if apply:
-                for card in result["cards_to_write"]:
-                    client.upsert_card(card)
-        finally:
-            client.close()
-        result.pop("cards_to_write", None)
-        return {
-            "operation": "process_selected",
-            "backend": backend,
-            **result,
-            "writes_performed": apply,
-        }
-
     if backend == "internal":
         provider = _internal_provider(env)
         existing = _internal_cards(provider)

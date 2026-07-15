@@ -3,7 +3,7 @@
   src/command_center/agent_sessions/worker_app.py). Runs on the HOST, not in
   the cockpit container — it owns real Claude/Codex SDK/CLI authentication,
   same reasoning as the existing host.docker.internal pattern for Ollama/
-  AppFlowy. Binds 127.0.0.1 only; the cockpit container reaches it via
+  external board runtime. Binds 127.0.0.1 only; the cockpit container reaches it via
   host.docker.internal:8791 (see docker-compose.yml's agent-kanban-ui env).
 
   Usage (normal, non-admin PowerShell):
@@ -28,7 +28,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 $RepoRoot = Split-Path $ScriptDir -Parent
 $Log = Join-Path $RepoRoot "agent-worker.log"
-$Python = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+$Uv = (Get-Command uv -ErrorAction Stop).Source
 
 function Load-DotEnv {
   # Minimal .env loader (KEY=VALUE lines, # comments) — only fills vars not
@@ -87,13 +87,33 @@ function Start-Worker {
           "Generate one with: uv run python -c `"import secrets; print(secrets.token_urlsafe(48))`""
   }
   if (-not $env:LEDGER_BASE_URL) { $env:LEDGER_BASE_URL = "http://localhost:8091" }
-  Start-Process -FilePath $Python `
-    -ArgumentList "-m", "command_center.cli.main", "agent-worker" `
-    -WorkingDirectory $RepoRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $Log `
-    -RedirectStandardError "$Log.err"
-  Start-Sleep -Seconds 3
+  if (-not $env:AGENT_WORKER_USAGE) { $env:AGENT_WORKER_USAGE = "1" }
+  # Keep the long-running worker independent of the repo's shared .venv.
+  # Ordinary uv run/test commands may legitimately sync that environment
+  # without optional extras; an isolated frozen environment guarantees the
+  # pinned Codex SDK remains available for the lifetime of this worker.
+  $uvArgs = @(
+    "run", "--isolated", "--frozen",
+    "--extra", "gateways", "--extra", "agent-codex",
+    "python", "-m", "command_center.cli.agent_worker"
+  )
+  Start-Process -FilePath $Uv -ArgumentList $uvArgs -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $Log -RedirectStandardError "$Log.err"
+
+  $port = if ($env:AGENT_WORKER_PORT) { $env:AGENT_WORKER_PORT } else { "8791" }
+  $ready = $false
+  for ($i = 0; $i -lt 60; $i++) {
+    Start-Sleep -Seconds 1
+    try {
+      $health = Invoke-RestMethod "http://127.0.0.1:$port/health" -TimeoutSec 2
+      if ($health.status -eq "ok") { $ready = $true; break }
+    } catch {
+      # Startup may be installing the isolated environment on the first run.
+    }
+  }
+  if (-not $ready) {
+    $detail = if (Test-Path "$Log.err") { Get-Content "$Log.err" -Tail 20 } else { "" }
+    throw "agent-worker did not become healthy within 60 seconds. $detail"
+  }
   Show-Status
 }
 

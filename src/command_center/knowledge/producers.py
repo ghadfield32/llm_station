@@ -185,7 +185,7 @@ def produce_models(root: Path, now_iso: str) -> list[ConceptDraft]:
 # --------------------------------------------------------------------- repositories
 
 def produce_repositories(root: Path, now_iso: str) -> list[ConceptDraft]:
-    p = root / "appflowy_kanban" / "growth-os" / "config" / "projects.yaml"
+    p = root / "growth_os" / "config" / "projects.yaml"
     data = _load_yaml(p)
     if not data:
         return []
@@ -210,7 +210,7 @@ def produce_repositories(root: Path, now_iso: str) -> list[ConceptDraft]:
                       description=f"Observe-registry entry for {name}.",
                       resource=f"repo://{repo}", tags=["repository", "observe"],
                       now_iso=now_iso, source_system=SourceSystem.GROWTH_OS,
-                      source_path="appflowy_kanban/growth-os/config/projects.yaml",
+                      source_path="growth_os/config/projects.yaml",
                       source_hash=_sha256_file(p), authority=Authority.OBSERVED)
         out.append(ConceptDraft("repositories", _slug(str(name)), fm, "\n".join(lines)))
     return out
@@ -352,7 +352,7 @@ def produce_kanban(root: Path, now_iso: str) -> list[ConceptDraft]:
     fm = _concept(type_="Data Pipeline", title="Kanban bridge (cards → missions)",
                   description="The dispatch contract: sections, risk ceilings, ready statuses.",
                   resource="config://configs/kanban.yaml",
-                  tags=["kanban", "agents", "dispatch", "appflowy"], now_iso=now_iso,
+                  tags=["kanban", "agents", "dispatch", "board-store"], now_iso=now_iso,
                   source_system=SourceSystem.CONFIG, source_path="configs/kanban.yaml",
                   source_hash=_sha256_file(p), confidence=Confidence.VERIFIED)
     return [ConceptDraft("pipelines", "kanban-bridge", fm, "\n".join(lines))]

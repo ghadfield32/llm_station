@@ -30,10 +30,9 @@ Local URL: http://127.0.0.1:8787 (loopback-bound; `KANBAN_UI_PORT` overrides).
 
 ## Two modes
 
-- **Read-only board** (no creds in the container): remove
-  `KANBAN_UI_CHAT_ENABLED=1` and the growth-os/.env mounts in
-  `docker-compose.yml`. The UI reads the Ledger, the agent-call log, the board
-  snapshot, and the kanban event log. No write path exists.
+- **Read-only board**: remove `KANBAN_UI_CHAT_ENABLED=1` in
+  `docker-compose.yml`. The UI reads the Ledger, the agent-call log, the local
+  board snapshot, and the kanban event log. No write path exists.
 - **Full console** (default compose config): chat + the governed action verbs.
   Every write goes through the action layer (Approved is structurally refused;
   L3/L4 approve/kill stay in the signed Ledger UI). Domain-board drag/drop and
@@ -59,8 +58,7 @@ tailscale serve --bg --https=8787 http://127.0.0.1:8787
 Then on the phone (on the tailnet): `https://<your-machine>.<your-tailnet>.ts.net:8787`
 (find the hostname with `tailscale status`; on this deployment it is
 `vengeance.taile6a055.ts.net`).
-AppFlowy's native mobile app remains the fallback for board approvals on the
-go (`docs/job_search/READINESS_FAQ.md` has its one-time board setup).
+The cockpit PWA is the supported mobile board surface.
 
 ## Install on phone
 
@@ -111,9 +109,9 @@ behind GatewayCore, the action layer, and the Ledger wall.
   `uvicorn` directly on the Windows host, set
   `LEDGER_BASE_URL=http://127.0.0.1:8091`; `http://ledger:8090` only resolves
   inside Docker Compose.
-- `/api/boards` → 503 with a path: the AppFlowy board snapshot is missing —
-  run `make kanban-board-snapshot` on the worker, or ignore if you don't use
-  the AppFlowy projection.
+- `/api/boards` → 503 with a path: the local board store or snapshot is missing —
+  confirm `generated/boards/` is mounted at `/snapshot/boards` and writable in
+  full-console mode.
 - `/api/boards/live` or chat → 503: this deployment is read-only
   (`KANBAN_UI_CHAT_ENABLED` unset) — that is a mode, not a bug.
 - Controls -> All Boards edits fail: confirm the full-console compose service
@@ -141,8 +139,8 @@ behind GatewayCore, the action layer, and the Ledger wall.
   ORCA, OmniAgent/Omnigent, and OxyGent should show as `not linked` unless the
   matching `*_CHAT_URL` env var is set. They are launch links, not active
   runtime dependencies.
-- Board looks wrong in AppFlowy itself: `uv run cc job-search board-doctor`
-  prints the one-time Group-by-Status fix.
+- A board looks stale: inspect `/api/debug/runtime`, then verify the board store
+  and governed kanban-event log paths shown there.
 - `/api/debug/runtime`: non-secret runtime diagnostics for the exact Ledger
   URL, DNS/HTTP probe result, static dir, config dir, event log, board store,
   and board snapshot paths. Use this before changing code.

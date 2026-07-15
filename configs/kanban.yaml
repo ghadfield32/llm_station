@@ -3,19 +3,15 @@ dry_run_default: true
 ledger_base_url_env: LEDGER_BASE_URL
 imported_state_path: generated/kanban-imported.json
 sources:
-- name: growth-os-appflowy
-  kind: appflowy
+- name: command-center-board-store
+  kind: command_center_ui
   enabled: true
-  growthos_root: appflowy_kanban/growth-os
-  database: mission_intake
-  database_map_path: config/databases.json
-  base_url_env: APPFLOWY_BASE_URL
-  workspace_id_env: APPFLOWY_WORKSPACE_ID
-  email_env: APPFLOWY_EMAIL
-  password_env: APPFLOWY_PASSWORD
+  board_id: llm_station_command_center
+  board_store_dir: generated/boards
+  event_log_path: generated/kanban-events.jsonl
 sections:
 - name: dags
-  appflowy_section: DAGs
+  board_section: DAGs
   target_kind: dag
   target: odds_ingest_daily
   default_repo: betts_basketball
@@ -28,7 +24,7 @@ sections:
   - Rejected
   branch_prefix: kanban/dag
 - name: learning
-  appflowy_section: Learning
+  board_section: Learning
   target_kind: learning
   target: growth-os
   default_repo: learning
@@ -41,7 +37,7 @@ sections:
   - Rejected
   branch_prefix: kanban/learning
 - name: betts-basketball
-  appflowy_section: Betts Basketball
+  board_section: Betts Basketball
   target_kind: repo
   target: betts_basketball
   default_repo: betts_basketball
@@ -54,7 +50,7 @@ sections:
   - Rejected
   branch_prefix: kanban/betts
 - name: command-center
-  appflowy_section: Command Center
+  board_section: Command Center
   target_kind: repo
   target: command-center
   default_repo: command-center

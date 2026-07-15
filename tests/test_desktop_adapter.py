@@ -1,6 +1,6 @@
 """Desktop adapter readiness tests.
 
-Hermetic: no browser, no screenshots, no GUI actions, no AppFlowy network.
+Hermetic: no browser, no screenshots, no GUI actions, no cockpit network.
 """
 from __future__ import annotations
 
@@ -54,10 +54,10 @@ def test_desktop_adapter_blocks_current_disabled_manifest(tmp_path):
     result = desktop_adapter.verify_readiness(root=tmp_path)
 
     assert result["status"] == "blocked"
-    assert "desktop_target_appflowy_browser_staging_not_enabled" in result["blockers"]
-    assert "desktop_target_appflowy_browser_staging_timeout_takeover_policy_missing" not in result["blockers"]
-    assert "desktop_target_appflowy_browser_staging_ttl_measurement_missing" in result["blockers"]
-    assert "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing" in result["blockers"]
+    assert "desktop_target_cockpit_browser_staging_not_enabled" in result["blockers"]
+    assert "desktop_target_cockpit_browser_staging_timeout_takeover_policy_missing" not in result["blockers"]
+    assert "desktop_target_cockpit_browser_staging_ttl_measurement_missing" in result["blockers"]
+    assert "desktop_target_cockpit_browser_staging_action_timeout_measurement_missing" in result["blockers"]
     assert result["targets"][0]["timeout_takeover_policy_declared"] is True
     assert result["targets"][0]["ttl_control_measured"] is False
     assert result["targets"][0]["action_timeout_control_measured"] is False

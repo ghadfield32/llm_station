@@ -115,7 +115,7 @@
   "generic_task": [
     {
       "card_id": "task-fixture-1",
-      "title": "Set AppFlowy board Group-by to Status (one-time, manual)",
+      "title": "Set first-party cockpit board Group-by to Status (one-time, manual)",
       "due": "2026-07-11T00:00:00Z",
       "priority": "high",
       "notes": "REST cannot do this. Steps: docs/job_search/READINESS_FAQ.md — board settings -> Group by -> Status, then delete the 3 blank starter rows.",

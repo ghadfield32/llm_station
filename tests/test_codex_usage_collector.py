@@ -132,9 +132,24 @@ def test_maps_primary_and_secondary_windows_to_provider_native_buckets(monkeypat
     assert p.scope == LimitScope.PROVIDER
     assert p.used_percent == 40.0
     assert p.window_seconds == 300 * 60
+    assert p.label == "5-hour window"
     assert p.reset_at == "2026-07-12T13:01:17+00:00"    # epoch -> ISO UTC
     assert p.plan_type == "prolite"
+    serialized = p.to_dict()
+    assert serialized["reset_at"] == "2026-07-12T13:01:17+00:00"
+    assert {"subscription_renewal_at", "subscription_expires_at"}.isdisjoint(serialized)
     assert buckets["secondary"].window_seconds == 10080 * 60
+    assert buckets["secondary"].label == "weekly window"
+
+
+def test_label_follows_duration_when_primary_is_a_week(monkeypatch):
+    codex = _FakeAsyncCodex()
+    codex.snapshot = _Snapshot(primary=_Window(29, 1784400188, 10080))
+    _install_fake_sdk(monkeypatch, codex)
+
+    result = asyncio.run(CodexAppServerCollector().collect())
+    assert result.limits[0].bucket_id == "primary"
+    assert result.limits[0].label == "weekly window"
 
 
 def test_availability_available_when_healthy(monkeypatch):

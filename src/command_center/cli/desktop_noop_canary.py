@@ -2,7 +2,7 @@
 
 This canary records timing evidence for the declared desktop target without
 clicking, typing, capturing screenshots, reading the clipboard, or mutating
-AppFlowy. It is instrumentation only; it cannot enable desktop live actions or
+external board runtime. It is instrumentation only; it cannot enable desktop live actions or
 write production TTL/action-timeout controls.
 """
 from __future__ import annotations

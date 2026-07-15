@@ -1006,20 +1006,15 @@ class TargetsConfig(Strict):
 # cannot execute code, bypass approvals, push branches, or call provider APIs.
 class KanbanSource(Strict):
     name: str
-    kind: Literal["appflowy"] = "appflowy"
+    kind: Literal["command_center_ui"] = "command_center_ui"
     enabled: bool = True
-    growthos_root: str = "appflowy_kanban/growth-os"
-    database: str = "mission_intake"
-    database_map_path: str = "config/databases.json"
-    base_url_env: str = "APPFLOWY_BASE_URL"
-    workspace_id_env: str = "APPFLOWY_WORKSPACE_ID"
-    email_env: str = "APPFLOWY_EMAIL"
-    password_env: str = "APPFLOWY_PASSWORD"
-
+    board_id: str = "llm_station_command_center"
+    board_store_dir: str = "generated/boards"
+    event_log_path: str = "generated/kanban-events.jsonl"
 
 class KanbanSection(Strict):
     name: str
-    appflowy_section: str
+    board_section: str
     target_kind: Literal["repo", "dag", "data_asset", "service", "learning"]
     target: str
     default_repo: str = "unknown"
@@ -1046,9 +1041,9 @@ class KanbanConfig(Strict):
         section_names = [s.name for s in self.sections]
         if len(section_names) != len(set(section_names)):
             raise ValueError("duplicate kanban section names")
-        appflowy_sections = [s.appflowy_section for s in self.sections]
-        if len(appflowy_sections) != len(set(appflowy_sections)):
-            raise ValueError("duplicate appflowy_section values")
+        board_sections = [s.board_section for s in self.sections]
+        if len(board_sections) != len(set(board_sections)):
+            raise ValueError("duplicate board_section values")
         for s in self.sections:
             if not s.ready_statuses:
                 raise ValueError(f"kanban section '{s.name}' needs at least one ready_status")
@@ -1064,7 +1059,7 @@ class KanbanConfig(Strict):
 
 # ---- kanban_boards.yaml ----------------------------------------------------
 # A provider-agnostic registry of kanban boards. One board_id maps a surface
-# (AppFlowy OR the internal Command Center UI) to the repos it drives, the
+# (the internal Command Center UI) to the repos it drives, the
 # canonical status workflow, the fields a mission card must carry, and the agent
 # verb contract. Both providers MUST expose the same canonical verbs/statuses so
 # the action layer + approval wall behave identically regardless of surface.
@@ -1089,7 +1084,7 @@ _KANBAN_CARD_DEPENDENCY_FIELDS = frozenset({"blocked_by", "unblocks"})
 
 class KanbanBoardSpec(Strict):
     board_id: str
-    provider: Literal["appflowy", "command_center_ui"]
+    provider: Literal["command_center_ui"]
     workspace_ref: str
     board_ref: str
     # execution_scope decides whether the board drives a repository. `life` boards
@@ -1115,12 +1110,6 @@ class KanbanBoardSpec(Strict):
             raise ValueError(f"kanban board board_id {self.board_id!r} must be a stable id")
         if not self.workspace_ref:
             raise ValueError(f"kanban board {self.board_id!r} needs a workspace_ref")
-        # AppFlowy workspace must be an env reference, never an inline secret/value.
-        if self.provider == "appflowy" and not self.workspace_ref.startswith("env:"):
-            raise ValueError(
-                f"kanban board {self.board_id!r} appflowy workspace_ref must be an env "
-                "reference like 'env:APPFLOWY_WORKSPACE', not an inline value"
-            )
         if not self.board_ref:
             raise ValueError(f"kanban board {self.board_id!r} needs a board_ref")
         if self.execution_scope != "life" and not self.repo_ids:
@@ -1216,8 +1205,7 @@ class KanbanBoardsConfig(Strict):
 # Ledger's missions, or committed demo fixtures — and lists the governed verbs
 # its cards may offer. The wall is the same wall as kanban boards: no domain may
 # offer approve/merge/deploy/delete, and the validator enforces it structurally.
-_DOMAIN_SOURCES = ("board_store", "ledger_missions", "fixtures",
-                   "appflowy_board")
+_DOMAIN_SOURCES = ("board_store", "ledger_missions", "fixtures")
 _DOMAIN_CARD_COMPONENTS = frozenset({
     "job_application", "linkedin_post", "book", "paper", "repo", "dag",
     "machine_upkeep", "mission", "generic_task",
@@ -1243,12 +1231,8 @@ class DomainSurfaceSpec(Strict):
     domain_id: str
     title: str
     card_component: str
-    source: Literal["board_store", "ledger_missions", "fixtures",
-                    "appflowy_board"]
+    source: Literal["board_store", "ledger_missions", "fixtures"]
     board_id: str | None = None          # required iff source == board_store
-    # required iff source == appflowy_board: the snapshot board name — a
-    # READ-ONLY projection of the worker's board-snapshot.json (no writes)
-    board: str | None = None
     columns: list[str] = Field(default_factory=list)
     column_actions: dict[str, str] = Field(default_factory=dict)
     summary_fields: list[DomainFieldSpec] = Field(default_factory=list)
@@ -1270,13 +1254,6 @@ class DomainSurfaceSpec(Strict):
         if self.source != "board_store" and self.board_id:
             raise ValueError(
                 f"domain {self.domain_id!r} board_id only applies to board_store")
-        if self.source == "appflowy_board" and not self.board:
-            raise ValueError(
-                f"domain {self.domain_id!r} with source appflowy_board needs "
-                f"board (the snapshot board name)")
-        if self.source != "appflowy_board" and self.board:
-            raise ValueError(
-                f"domain {self.domain_id!r} board only applies to appflowy_board")
         if len(self.columns) != len(set(self.columns)):
             raise ValueError(f"domain {self.domain_id!r} has duplicate columns")
         unknown_columns = set(self.column_actions) - set(self.columns)
@@ -1409,29 +1386,22 @@ class MemoryConfig(Strict):
 
 
 # ---- content.yaml ----------------------------------------------------------
-# The LinkedIn content pipeline. Claude Code drafts posts onto per-account
-# AppFlowy boards (config/databases.json); a human approves by dragging In Queue
-# -> In Progress; command_center.cli.linkedin_publish ships approved + due rows
-# to LinkedIn's official Posts API. Same env-key-by-name discipline as
-# KanbanSource / AirflowCfg: secrets live in .env, this only NAMES the keys.
+# LinkedIn publishing reads the first-party Posts board. Human movement into
+# Scheduled is the approval gate; only due Scheduled cards may leave the machine.
 class ContentSource(Strict):
-    """AppFlowy connection for the content boards (auth + databases.json map)."""
-    kind: Literal["appflowy"] = "appflowy"
-    growthos_root: str = "appflowy_kanban/growth-os"
-    database_map_path: str = "config/databases.json"
-    base_url_env: str = "APPFLOWY_BASE_URL"
-    workspace_id_env: str = "APPFLOWY_WORKSPACE_ID"
-    email_env: str = "APPFLOWY_EMAIL"
-    password_env: str = "APPFLOWY_PASSWORD"
-
+    """First-party board-store location for LinkedIn post cards."""
+    kind: Literal["command_center_ui"] = "command_center_ui"
+    board_id: str = "linkedin_content_pipeline_internal"
+    board_store_dir: str = "generated/boards"
+    event_log_path: str = "generated/kanban-events.jsonl"
 
 class ContentStatuses(Strict):
     """The three board columns, named here so the publisher holds no string
     literals. `approved` is the only status the publisher will ship (the human
     drag into it IS the approval); `done` is stamped back after publish."""
     queue: str = "In Queue"
-    approved: str = "In Progress"
-    done: str = "Completed"
+    approved: str = "Scheduled"
+    done: str = "Published"
 
 
 class LinkedInOrgApp(Strict):
@@ -1492,7 +1462,7 @@ class LinkedInApi(Strict):
 
 
 class LinkedInAccount(Strict):
-    board: str                                   # AppFlowy board name in databases.json
+    board: str                                   # account id stored on each Posts card
     author: Literal["member", "organization"]
     org_urn_env: str = ""                        # required iff author == organization
     cadence: Literal["daily"] = "daily"
@@ -1605,7 +1575,7 @@ class ContentLLMRouting(Strict):
 
 class ContentPipelineConfig(Strict):
     schema_version: str
-    source: ContentSource = ContentSource()      # AppFlowy connection (reused)
+    source: ContentSource = ContentSource()      # first-party board source
     litellm_base_url: str = "http://localhost:4000"   # infra (host port), not a secret
     litellm_key_env: str = "LITELLM_MASTER_KEY"       # the secret, named not stored
     draft_role: str = "chat"                     # LiteLLM role for drafting (qwen3:30b)
@@ -1923,7 +1893,7 @@ class EvalsConfig(Strict):
 
 # ---- ui.yaml ---------------------------------------------------------------
 # Human UI surfaces. The Phase-4 WebUI slot now hosts the FIRST-PARTY agent kanban +
-# observability surface over AppFlowy/Ledger (repurposed from the deferred Hermes
+# observability surface over board store/Ledger (repurposed from the deferred Hermes
 # WebUI — see MASTER.md change log). Still a CONVENIENCE layer, never the policy
 # layer: external writes flow through the Ledger/gates (external_write_policy must
 # stay governed_by_ledger), and public exposure without a password is forbidden.
@@ -2417,7 +2387,7 @@ class AutonomyCanarySpec(Strict):
 
 class DesktopNoopCanarySpec(Strict):
     target_id: str
-    target_type: Literal["desktop", "browser", "appflowy_browser"]
+    target_type: Literal["desktop", "browser"]
     allowed_mode: Literal["read_only", "no_op_roundtrip"]
     allowed_apps_windows_domains: list[str]
     allowed_actions: list[str]

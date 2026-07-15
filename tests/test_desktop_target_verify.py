@@ -1,6 +1,6 @@
 """Desktop target verifier tests.
 
-Hermetic: the tests use synthetic board snapshots and perform no UI/AppFlowy
+Hermetic: the tests use synthetic board snapshots and perform no UI/cockpit
 actions.
 """
 from __future__ import annotations
@@ -59,6 +59,6 @@ def test_desktop_target_verify_blocks_mismatched_snapshot(tmp_path):
     assert result["status"] == "blocked"
     assert result["targets"][0]["status_field"] == "Rejected"
     assert (
-        "desktop_target_appflowy_browser_staging_missing_verifier_value_In Progress"
+        "desktop_target_cockpit_browser_staging_missing_verifier_value_In Progress"
         in result["blockers"]
     )

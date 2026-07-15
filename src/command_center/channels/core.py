@@ -7,7 +7,7 @@ to approve mission cards (actions.set_status refuses; approval stays a human dra
 
 Module tree / flow (linear, shared by every channel adapter):
   stage 1  load_tool_layer()   growthos.actions -> OpenAI tool schemas (memoized;
-                               same dispatch table the AppFlowy assistant uses)
+                               same dispatch table every first-party surface uses)
   stage 2  GatewayConfig       repo .env + channel overrides (LiteLLM base/key/model)
   stage 3  run_turn()          LiteLLM /chat/completions tool-call loop (<= max_rounds),
                                errors surfaced to the caller, never swallowed
@@ -39,7 +39,7 @@ from .transcript import TurnRecorder
 from .transcript import current_conversation as transcript_conversation
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # src/command_center/channels/ -> repo root
-GROWTHOS_ROOT = REPO_ROOT / "appflowy_kanban" / "growth-os"
+GROWTHOS_ROOT = REPO_ROOT / "growth_os"
 ENV_PATH = REPO_ROOT / ".env"
 
 
@@ -177,7 +177,7 @@ def build_system(surface: str, *, tools_available: bool = True, lane: str = "fro
         return f"""You are the Growth OS gateway on {surface}, talking through \
 the paid frontier-router lane. Today is {date.today().isoformat()}.
 This is PLAIN CONVERSATION ONLY. You have NO tools, NO board access, and NO \
-ability to see or change anything in AppFlowy, the kanban boards, or either \
+ability to see or change anything in the kanban boards or either \
 repo (betts_basketball / command-center) — none of that reaches this lane, by \
 design. If asked to look something up, check a status, or take an action, say \
 plainly that this chat cannot do that and suggest switching to a local chat \
@@ -186,7 +186,7 @@ tool-call-shaped output (e.g. "**Calling:** `name`") — you were not given a \
 tools schema, nothing will execute it, and doing so anyway misleads whoever \
 reads your answer. Be concise."""
     return f"""You are the Growth OS gateway on {surface}. Today is {date.today().isoformat()}.
-You operate the user's AppFlowy workspace and drive work on the betts_basketball
+You operate the user's first-party cockpit and drive work on the betts_basketball
 and command-center repos through a verified tool layer. The live board is injected
 each turn — don't call list_* just to see what's already shown. What you can do:
 
@@ -199,8 +199,8 @@ each turn — don't call list_* just to see what's already shown. What you can d
    remove_item_field_value to remove one exact value from grouped text fields;
    add_book/book_note, add_lesson, add_note. search + list_inbox/list_todos/
    list_cards/list_dags find rows. Use Status verbs/move_item for columns. You
-   cannot change AppFlowy view layout/group-by/visual formatting through this REST
-   tool path; say so plainly or draft a verified API mission.
+   cannot change cockpit layout/grouping through the board-action
+   path; draft a verified UI mission for presentation changes.
 2. RESEARCH — understand, don't just list: read_item(database, title) returns a
    paper's/repo's/book's FULL detail (abstract, summary, score, "suggested for",
    url). Use it to actually explain or triage an item; search first if you lack the
@@ -324,8 +324,8 @@ class GatewayCore:
             lane="local_frontier" if self.is_local_frontier else "frontier")
         self.tools, self.dispatch = load_tool_layer(cfg.surface)
         # Live kanban sync: funnel every governed card/todo verb (this surface
-        # included) through the kanban event log so the internal UI + AppFlowy
-        # project from one source. Opt-in: only when a deployment configures the
+        # included) through the kanban event log so every first-party surface
+        # projects from one source. Opt-in: only when a deployment configures the
         # event-log path and a resolvable board (no fabricated board/surface).
         self.dispatch = _wire_kanban_events(self.dispatch, cfg.surface)
         # The harness owns board state: load the (validated) re-injection knobs once

@@ -5,11 +5,12 @@
 #   as In Queue drafts for human approval. No claim ships without evidence.
 schema_version: "1"
 
-# AppFlowy connection (reads the curator DBs + writes In Queue cards) - reuses
-# the same env keys as the publisher / kanban bridge.
+# First-party research board source; generated cards stage into the local Posts board.
 source:
-  growthos_root: appflowy_kanban/growth-os
-  database_map_path: config/databases.json
+  kind: command_center_ui
+  board_id: linkedin_content_pipeline_internal
+  board_store_dir: generated/boards
+  event_log_path: generated/kanban-events.jsonl
 
 # Local model routing (LiteLLM). Drafting on a template-parsed instruct model;
 # judging on the local-judge role. Secrets/URLs named, not stored.

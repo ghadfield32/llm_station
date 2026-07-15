@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--live", action="store_true",
                     help="resolve --post against the live LinkedIn content boards")
     ap.add_argument("--pipeline", default="configs/content_pipeline.yaml",
-                    help="content_pipeline.yaml (AppFlowy source for --live)")
+                    help="content_pipeline.yaml (first-party board source for --live)")
     ap.add_argument("--platform", default="linkedin", choices=["linkedin"])
     ap.add_argument("--device", default="desktop", choices=["desktop", "mobile"],
                     help="which see-more fold the markdown preview shows")

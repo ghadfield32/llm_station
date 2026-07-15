@@ -45,12 +45,6 @@ def test_onboard_kanban_dry_run_validates_then_verify_blocks(capsys):
     assert "board_not_registered" in out and rc == 1
 
 
-def test_onboard_kanban_appflowy_requires_env_refs(capsys):
-    rc = onboard._onboard_kanban(_ns(provider="appflowy", repo="demo_repo",
-                                     board_id="", workspace_ref="", board_ref="",
-                                     apply=False))
-    out = capsys.readouterr().out
-    assert rc == 1 and "env:NAME" in out  # no literal ids; demands env refs
 
 
 def test_setup_summary_reports_registry_and_activation(capsys, monkeypatch):

@@ -6,14 +6,14 @@ schema_version: command-center.ui.v1
 # exposure without a password. Edit this file, then `make ui-validate`.
 #
 # 2026-06-13: this slot hosts the FIRST-PARTY agent kanban + observability surface
-# over AppFlowy/Ledger (services/agent_kanban_ui), repurposed from the deferred
+# over board store/Ledger (services/agent_kanban_ui), repurposed from the deferred
 # Hermes WebUI (see MASTER.md change log — Cline/Hermes DEFER). Tracker:
 # docs/kanban/AGENT_KANBAN_SURFACE.md. The WebUIConfig contract
 # (loopback/password/governed-by-ledger guarantees) is unchanged — the board is
 # read-mostly and every write still flows through the action layer / Ledger gates.
 
 # 2026-07-08: the cockpit is the PRIMARY operator surface (decision record:
-# docs/reviews/2026-07-08-cockpit-decision.md). AppFlowy stays an optional
+# docs/reviews/2026-07-08-cockpit-decision.md). external board runtime stays an optional
 # mobile/knowledge projection. Start: docker compose --profile ui up -d
 # agent-kanban-ui (or `uv run cc start`); quickstart:
 # docs/setup/COCKPIT_QUICKSTART.md.

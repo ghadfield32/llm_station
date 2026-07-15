@@ -1,13 +1,13 @@
 """Kanban board registry operations: verify / register / sync (dry-run).
 
 The registry (`configs/kanban_boards.yaml`, contract `KanbanBoardsConfig`) maps a
-board_id to a surface (AppFlowy OR the internal Command Center UI), the repos it
+board_id to the internal Command Center UI surface, the repos it
 drives, the canonical status workflow, the required mission-card fields, and the
 agent verb contract. These commands operate on that registry only; they never
 approve, merge, deploy, or delete, and they perform no board writes.
 
   cc kanban-verify [--board-id <id>] [--snapshot <path>]
-  cc kanban-register --board-id <id> --provider <appflowy|command_center_ui> \
+  cc kanban-register --board-id <id> --provider command_center_ui \
       --workspace-ref <ref> --board-ref <ref> --repo-id <id> [--apply]
   cc kanban-sync [--board-id <id>] --dry-run
 """
@@ -132,15 +132,9 @@ def run_kanban_verify(
         })
         blockers.extend(f"{b.board_id}:{x}" for x in bb)
 
-    # AppFlowy and internal UI share one action contract: the canonical verb and
-    # status sets are identical across providers by construction (the schema
-    # forbids per-board divergence). Confirm both providers, if present, agree.
+    # Every board uses the one first-party action contract.
     providers = {b.provider for b in cfg.boards}
     same_contract = True
-    if {"appflowy", "command_center_ui"} <= providers:
-        verb_sets = {frozenset(b.allowed_agent_verbs) | frozenset(b.forbidden_agent_verbs)
-                     for b in cfg.boards}
-        same_contract = len(verb_sets) >= 1  # canonical sets; divergence is schema-blocked
 
     result = {
         "schema_version": "command-center.kanban-verify.v1",
@@ -224,9 +218,9 @@ def run_kanban_sync(
     dry_run: bool = True,
 ) -> dict[str, Any]:
     if not dry_run:
-        # Actual board mutation is the kanban bridge's job (cc kanban-bridge
+        # Actual board mutation is the governed event writer's job (cc kanban-emit
         # --apply). This command is a read-only planner; refuse to imply writes.
-        return {"status": "blocked", "blockers": ["kanban_sync_apply_not_supported_use_kanban_bridge"]}
+        return {"status": "blocked", "blockers": ["kanban_sync_apply_not_supported_use_kanban_emit"]}
     cfg = _load(config_path)
     boards = cfg.boards if board_id is None else [b for b in cfg.boards if b.board_id == board_id]
     plan = [{
@@ -257,7 +251,7 @@ def main() -> int:
 
     pr = sub.add_parser("register")
     pr.add_argument("--board-id", required=True)
-    pr.add_argument("--provider", required=True, choices=["appflowy", "command_center_ui"])
+    pr.add_argument("--provider", required=True, choices=["command_center_ui"])
     pr.add_argument("--workspace-ref", required=True)
     pr.add_argument("--board-ref", required=True)
     pr.add_argument("--repo-id", action="append", default=[], dest="repo_ids")

@@ -173,8 +173,11 @@ def test_chat_runtime_is_one_gateway_no_specialist_links(client, monkeypatch):
     assert "llm_station" in repo_ids       # registered repos are chat targets
     assert "FRONTIER lane" in body["provider_note"]
     assert "cloud-free by design" in body["provider_note"]
-    # executors (Claude Code / Codex CLI) are explicitly NOT chat models
-    assert "not chat roles" in body["executor_note"]
+    # executors are separate runtimes, directly selectable without a mission,
+    # and their own model catalog must not be conflated with GatewayCore roles.
+    assert "not GatewayCore chat roles" in body["executor_note"]
+    assert "Assistant selector" in body["executor_note"]
+    assert "Mission tracking is optional" in body["executor_note"]
     executor_names = {e["name"] for e in body["executors"]}
     assert {"claude-code", "codex-cli"} <= executor_names
     # the top-3 frontier candidates are reported (real config, real pricing,
@@ -339,48 +342,6 @@ def test_delete_conversation_clears_chat_history_only(
     assert all(c["conversation_id"] != "bye" for c in index["conversations"])
 
 
-def test_appflowy_board_domain_serves_snapshot_cards(client, monkeypatch, tmp_path):
-    """The real papers/repos/dags data: cards come from the worker's board
-    snapshot with an honest origin, the board's REAL lanes, and stable ids."""
-    mod, tc = client
-    snap = {
-        "generated_at": "2026-07-01T00:00:00+00:00",
-        "boards": [{
-            "board": "papers",
-            "statuses": ["Inbox", "Reading", "Read", "Archived"],
-            "columns": [{
-                "name": "Inbox",
-                "cards": [{
-                    "title": "Attention Is All You Need",
-                    "meta": "9.9",
-                    "fields": {"URL": "http://arxiv.org/abs/1706.03762",
-                               "Authors": "Vaswani et al.",
-                               "Abstract": "Transformers.",
-                               "Topics": "cs.LG", "Score": "9.9",
-                               "Status": "Inbox"},
-                }],
-            }],
-        }],
-    }
-    snap_path = tmp_path / "board-snapshot.json"
-    snap_path.write_text(json.dumps(snap), encoding="utf-8")
-    monkeypatch.setattr(mod, "BOARD_SNAPSHOT", snap_path)
-
-    out = mod._appflowy_board_cards(
-        {"domain_id": "paper", "board": "papers", "columns": []})
-    assert out["origin"] == "board_snapshot"
-    assert out["generated_at"] == "2026-07-01T00:00:00+00:00"
-    assert out["columns"] == ["Inbox", "Reading", "Read", "Archived"]
-    card = out["cards"][0]
-    assert card["title"] == "Attention Is All You Need"
-    assert card["abstract"] == "Transformers."
-    assert card["useful_for"] == "cs.LG"
-    assert card["status"] == "Inbox"
-    assert card["card_id"]                       # stable id for drawers/chat
-
-    missing = mod._appflowy_board_cards(
-        {"domain_id": "book", "board": "library", "columns": []})
-    assert missing["cards"] == [] and "not in the snapshot" in missing["note"]
 
 
 def test_transcript_card_story_is_fail_soft(client, monkeypatch, tmp_path):

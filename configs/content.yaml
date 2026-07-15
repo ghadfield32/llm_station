@@ -1,26 +1,20 @@
 # LinkedIn content pipeline (validated by command_center.schemas.ContentConfig).
 #
-# Flow: Claude Code drafts -> AppFlowy board "In Queue" -> you approve by dragging
-# to "In Progress" (+ set ScheduledFor) -> command_center.cli.linkedin_publish ships
-# the due, approved rows to LinkedIn's official Posts API and stamps "Completed".
-#
-# Secrets are NOT here. This file only NAMES the .env keys that hold them
-# (same discipline as configs/kanban.yaml and the Airflow observer).
+# Flow: create a Draft in the first-party Posts board -> human reviews it and
+# moves it through In Queue to Scheduled -> the publisher sends due Scheduled
+# cards through LinkedIn's official API and stamps Published locally.
+# Secrets are named below and remain in .env; no external board credentials.
 schema_version: "1"
 
 source:
-  # AppFlowy connection - reuses the same env keys as the kanban bridge.
-  growthos_root: appflowy_kanban/growth-os
-  database_map_path: config/databases.json
-  base_url_env: APPFLOWY_BASE_URL
-  workspace_id_env: APPFLOWY_WORKSPACE_ID
-  email_env: APPFLOWY_EMAIL
-  password_env: APPFLOWY_PASSWORD
-
+  kind: command_center_ui
+  board_id: linkedin_content_pipeline_internal
+  board_store_dir: generated/boards
+  event_log_path: generated/kanban-events.jsonl
 statuses:
   queue: In Queue          # Claude Code drafted, awaiting your review
-  approved: In Progress    # you dragged it here = approved + scheduled to ship
-  done: Completed          # published; PostURN + PublishedAt stamped back
+  approved: Scheduled      # human-reviewed and explicitly scheduled
+  done: Published          # real PostURN + published_at stamped locally
 
 linkedin:
   # Official LinkedIn API. `version` is the required LinkedIn-Version header in

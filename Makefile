@@ -11,9 +11,9 @@ LITELLM_DIGEST ?= ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0
 
 .PHONY: help setup verify verify-base validate schema render up bootstrap down keys health \
         models models-canary models-promote models-rollback \
-        model-scout model-fit proactive-validate proactive-smoke targets-validate kanban-validate kanban-bridge appflowy-audit tools-validate capabilities-digests capabilities-verify evals cross-refs ui-validate \
+        model-scout model-fit proactive-validate proactive-smoke targets-validate kanban-validate tools-validate capabilities-digests capabilities-verify evals cross-refs ui-validate \
         standards-validate forbidden-providers usage-digest usage-report live-smoke impact mission-dryrun env-smoke repo-install backup restore-drill logs \
-        gateway channels-validate lint test doctor first-boot models-light appflowy-init appflowy-up \
+        gateway channels-validate lint test doctor first-boot models-light \
         improvement-validate improvement-list improvement-register improvement-baseline \
         improvement-run improvement-verify improvement-report improvement-request-promotion \
         improvement-canary improvement-promote improvement-rollback improvement-post-watch \
@@ -25,11 +25,11 @@ help:  ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n",$$1,$$2}'
 
-validate:  ## Validate all configs/*.yaml against Pydantic contracts + cross-file refs
+validate:  ## Validate configs, cross-file refs, render, and the configured provider posture
 	@$(PY) -m command_center.cli.validate_config
 	@$(PY) -m command_center.cli.check_cross_refs
 	@$(PY) -m command_center.registry.render
-	@$(PY) -m command_center.cli.check_forbidden_providers
+	@$(PY) -m command_center.cli.check_forbidden_providers --configured-posture
 
 schema:  ## Generate JSON Schema from contracts -> generated/json-schema
 	@$(PY) -m command_center.cli.render_json_schema
@@ -37,7 +37,7 @@ schema:  ## Generate JSON Schema from contracts -> generated/json-schema
 render:  ## Validate + render generated/litellm-config.yaml from configs
 	@$(PY) -m command_center.cli.validate_config
 	@$(PY) -m command_center.registry.render
-	@$(PY) -m command_center.cli.check_forbidden_providers
+	@$(PY) -m command_center.cli.check_forbidden_providers --configured-posture
 
 impact:  ## Blast radius of your git diff (or: make impact FILES="a b")
 	@$(PY) -m command_center.cli.impact $(FILES)
@@ -57,14 +57,8 @@ proactive-smoke:  ## Dry-run proactive lanes: list schedules, actions, write/ris
 targets-validate:  ## Validate configs/targets.yaml (the watch inventory)
 	@$(PY) -c "import yaml; from command_center.schemas import TargetsConfig; TargetsConfig.model_validate(yaml.safe_load(open('configs/targets.yaml'))); print('targets-validate: PASS')"
 
-kanban-validate:  ## Validate configs/kanban.yaml (AppFlowy/GrowthOS intake)
+kanban-validate:  ## Validate configs/kanban.yaml (first-party governed intake)
 	@$(PY) -c "import yaml; from command_center.schemas import KanbanConfig; KanbanConfig.model_validate(yaml.safe_load(open('configs/kanban.yaml'))); print('kanban-validate: PASS')"
-
-kanban-bridge:  ## Dry-run AppFlowy mission_intake -> Ledger mission drafts. APPLY=1 opens missions.
-	@$(PY) -m command_center.cli.kanban_bridge $(if $(APPLY),--apply,)
-
-appflowy-audit:  ## Read-only audit of AppFlowy board fields/views/blank starter rows. DETAILS=1 samples rows.
-	@cd appflowy_kanban/growth-os && PYTHONPATH=. .venv/Scripts/python.exe scripts/audit_workspace.py $(if $(DETAILS),--details,)
 
 tools-validate:  ## Validate configs/tools.yaml (tool permission registry)
 	@$(PY) -c "import yaml; from command_center.schemas import ToolsConfig; ToolsConfig.model_validate(yaml.safe_load(open('configs/tools.yaml'))); print('tools-validate: PASS')"
@@ -174,14 +168,6 @@ models-light:  ## Switch to the small-GPU/CPU profile (qwen3:8b), pull it, re-re
 	@$(MAKE) render
 	@echo "switched to LIGHT profile (qwen3:8b). Revert: git checkout configs/models.yaml"
 
-appflowy-init:  ## Scaffold AppFlowy-Cloud/.env + growth-os/.env from templates (no clobber)
-	@$(PY) -m command_center.cli.appflowy_init
-
-appflowy-up:  ## Start the AppFlowy board server + Growth OS curator stacks
-	@cd appflowy_kanban/AppFlowy-Cloud && $(COMPOSE) up -d
-	@cd appflowy_kanban/growth-os && $(COMPOSE) -f docker-compose.curator.yml up -d --build
-	@echo "AppFlowy + curator up. Sign up a user, put creds in growth-os/.env, then setup_workspace.py"
-
 models-canary:  ## Route ~10% of a role to a local challenger. ROLE= MODEL=ollama_chat/tag
 	@test -n "$(ROLE)" -a -n "$(MODEL)" || { echo "usage: make models-canary ROLE=coder MODEL=ollama_chat/qwen3-coder:30b"; exit 1; }
 	@$(PY) -m command_center.registry.render --canary $(ROLE)=$(MODEL):0.1
@@ -238,7 +224,7 @@ kanban-digest:  ## Write generated/kanban-digest.md — agent-surface metrics + 
 kanban-surface-validate:  ## Blocking N/N gate for the agent kanban surface (config/leakage/verbs/tuning)
 	@$(PY) -m command_center.cli.kanban_surface validate
 
-kanban-board-snapshot:  ## Write generated/board-snapshot.json for the UI (run on the worker; needs growthos + AppFlowy creds)
+kanban-board-snapshot:  ## Write generated/board-snapshot.json for compatibility/history (local boards need no snapshot)
 	@$(PY) -m command_center.cli.kanban_surface board-snapshot --output generated/board-snapshot.json
 
 live-smoke:  ## Print real local model replies through Ollama/LiteLLM. TRIAGE=triage PLANNER=planner JUDGE=local-judge

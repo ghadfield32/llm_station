@@ -1,7 +1,7 @@
 """The host-side agent worker: owns harness instances, the durable Ledger-backed
 session store, and (once real adapters exist) local SDK/CLI authentication —
 none of which the cockpit container should see directly, same reasoning as the
-existing host.docker.internal pattern for Ollama/AppFlowy in docker-compose.yml.
+existing host.docker.internal pattern for Ollama/external board runtime in docker-compose.yml.
 Exposes /api/agent-sessions/* over plain HTTP, gated by a bearer token the
 cockpit is separately configured with; binds to localhost only by default (see
 cli/agent_worker.py, the `cc agent-worker` entry point).
@@ -15,7 +15,9 @@ so the cockpit's harness selector reflects real, per-host auth state.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import secrets
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -27,6 +29,9 @@ from .protocol import ApprovalDecision, SessionStart
 from .registry import default_registry
 from .service import AgentSessionService
 from .store import SessionStoreProtocol
+
+
+logger = logging.getLogger(__name__)
 
 
 def _default_store() -> SessionStoreProtocol:
@@ -120,7 +125,9 @@ def _worker_feed_usage(usage: object, record: object, effort: str | None,
                 observed_at=ev.ts)
             usage.store.ingest_sample(sample)   # type: ignore[attr-defined]
     except Exception:
-        pass
+        logger.exception(
+            "agent usage ingestion failed for session=%s harness=%s event=%s",
+            getattr(record, "session_id", None), harness, ev.type)
 
 
 def _reconcile_orphaned_sessions(store: SessionStoreProtocol) -> None:
@@ -142,7 +149,8 @@ def _reconcile_orphaned_sessions(store: SessionStoreProtocol) -> None:
 
 def build_app(*, store: SessionStoreProtocol | None = None,
              token: str | None = None, registry=None,
-             usage_service: object | None = None) -> FastAPI:
+             usage_service: object | None = None,
+             usage_collectors: list[tuple[object, str]] | None = None) -> FastAPI:
     store = store if store is not None else _default_store()
     token = token if token is not None else _default_token()
     service = AgentSessionService(
@@ -172,6 +180,19 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         else:
             from command_center.usage.store import UsageStore as _UsageStore
             usage = _UsageService(_UsageStore())
+
+    # Provider collectors must run beside the host-owned SDK/CLI login. The
+    # cockpit container deliberately has neither the Codex SDK nor the user's
+    # ~/.codex credentials, so asking it to refresh provider limits produces a
+    # false "SDK not installed" result even while real Codex turns work. Tests
+    # may inject a deterministic collector list; production enables the Codex
+    # collector whenever worker-owned usage is enabled.
+    collectors = usage_collectors if usage_collectors is not None else []
+    if (usage is not None and usage_collectors is None
+            and os.environ.get("AGENT_WORKER_USAGE", "") == "1"):
+        from command_center.usage.collectors.codex_app_server import (
+            CODEX_COLLECTOR_ID, CodexAppServerCollector)
+        collectors.append((CodexAppServerCollector(), CODEX_COLLECTOR_ID))
 
     # PROCESS-LOCAL only, same discipline as AgentSessionService's own
     # _active_harnesses cache: the single source of truth for "is a turn
@@ -211,6 +232,12 @@ def build_app(*, store: SessionStoreProtocol | None = None,
     @asynccontextmanager
     async def _lifespan(_app: FastAPI):
         yield
+        for collector, _collector_id in collectors:
+            close_fn = getattr(collector, "close", None)
+            if close_fn is not None:
+                result = close_fn()
+                if hasattr(result, "__await__"):
+                    await result
         # A real harness adapter (Codex) owns a live SDK client with its own
         # subprocess connection — see adapters/codex_agent.py's shutdown().
         # AgentSessionService caches one harness instance PER SESSION (not
@@ -227,7 +254,7 @@ def build_app(*, store: SessionStoreProtocol | None = None,
                  lifespan=_lifespan)
 
     async def _authed(authorization: str | None = Header(default=None)) -> None:
-        if authorization != f"Bearer {token}":
+        if not secrets.compare_digest(authorization or "", f"Bearer {token}"):
             raise HTTPException(401, "missing or invalid worker token")
 
     @app.get("/health")
@@ -263,6 +290,18 @@ def build_app(*, store: SessionStoreProtocol | None = None,
             cockpit-side SSE tee cannot. The cockpit can proxy this to become
             the single authoritative read path (documented next step)."""
             return _cv.usage_overview(usage)
+
+        # Literal routes must precede /{runtime_id}; FastAPI matches in
+        # declaration order.
+        @app.get("/api/model-usage/collector-health",
+                 dependencies=[Depends(_authed)])
+        def model_usage_collector_health() -> list:
+            return _cv.collector_health(
+                usage, [collector_id for _, collector_id in collectors])
+
+        @app.post("/api/model-usage/refresh", dependencies=[Depends(_authed)])
+        async def model_usage_refresh() -> dict:
+            return await _cv.refresh(usage, collectors)
 
         @app.get("/api/model-usage/{runtime_id}", dependencies=[Depends(_authed)])
         def model_usage_runtime(runtime_id: str) -> dict:

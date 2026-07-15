@@ -12,14 +12,14 @@ import time
 
 from command_center.cli.linkedin_publish import (
     date_start, due_rows, preflight, token_warning, post_text)
-from command_center.cli.kanban_bridge import read_yaml
+from command_center.cli.env_utils import read_yaml
 from command_center.schemas import ContentConfig
 from command_center.linkedin.ledger import (
     ProcessLock, PublishLedger, AlreadyRunning,
 )
 
 NOW = datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc)
-ST = ContentStatuses()  # In Queue / In Progress / Completed
+ST = ContentStatuses()  # In Queue / Scheduled / Published
 
 
 def _row(**cells):
@@ -40,22 +40,22 @@ def test_date_start_handles_dict_and_scalar():
 def test_due_rows_only_approved_due_unpublished_with_key():
     rows = [
         # eligible: approved, due, no PostURN, has Key
-        _row(Status="In Progress", Key="a", Hook="A",
+        _row(Status="Scheduled", Key="a", Hook="A",
              ScheduledFor=_date("2026-06-13T00:00:00+00:00")),
         # not approved (still In Queue) -> the human gate
         _row(Status="In Queue", Key="b", Hook="B",
              ScheduledFor=_date("2026-06-13T00:00:00+00:00")),
         # approved but scheduled in the FUTURE -> temporal safety
-        _row(Status="In Progress", Key="c", Hook="C",
+        _row(Status="Scheduled", Key="c", Hook="C",
              ScheduledFor=_date("2026-06-20T00:00:00+00:00")),
         # approved + due but already has a PostURN -> already published
-        _row(Status="In Progress", Key="d", Hook="D", PostURN="urn:li:share:1",
+        _row(Status="Scheduled", Key="d", Hook="D", PostURN="urn:li:share:1",
              ScheduledFor=_date("2026-06-13T00:00:00+00:00")),
         # approved + due but no Key -> cannot stamp back, skipped
-        _row(Status="In Progress", Hook="E",
+        _row(Status="Scheduled", Hook="E",
              ScheduledFor=_date("2026-06-13T00:00:00+00:00")),
         # approved but no schedule at all -> skipped
-        _row(Status="In Progress", Key="f", Hook="F"),
+        _row(Status="Scheduled", Key="f", Hook="F"),
     ]
     keys = [k for k, _ in due_rows(rows, ST, NOW)]
     assert keys == ["a"]

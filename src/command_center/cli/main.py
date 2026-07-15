@@ -16,7 +16,7 @@ Module tree / flow:
   - docker lifecycle    -> shell out to `docker compose ...` (identical to the Makefile)
   - composite flows     -> a sequence of the above (e.g. first-boot)
 Trailing args after the command are forwarded (e.g. `cc impact a.py b.py`,
-`cc gateway --dry-run`, `cc kanban-bridge --apply`). This mirrors the Makefile so the
+`cc gateway --dry-run`, `cc kanban-emit ...`). This mirrors the Makefile so the
 three interfaces stay behaviorally identical; the Makefile remains the reference.
 """
 from __future__ import annotations
@@ -53,12 +53,13 @@ def _whitelist(models_yaml: str) -> list[str]:
 # ── python-only operations ────────────────────────────────────────────────
 def c_validate(a):
     return (pym("command_center.cli.validate_config") or pym("command_center.cli.check_cross_refs")
-            or pym("command_center.registry.render") or pym("command_center.cli.check_forbidden_providers"))
+            or pym("command_center.registry.render")
+            or pym("command_center.cli.check_forbidden_providers", "--configured-posture"))
 
 
 def c_render(a):
     return (pym("command_center.cli.validate_config") or pym("command_center.registry.render")
-            or pym("command_center.cli.check_forbidden_providers"))
+            or pym("command_center.cli.check_forbidden_providers", "--configured-posture"))
 
 
 def c_mission_dryrun(a):
@@ -137,17 +138,6 @@ def c_models_light(a):
     shutil.copyfile(light, ROOT / "configs" / "models.yaml")
     rc = c_render(a)
     print("switched to LIGHT profile. Revert: git checkout configs/models.yaml")
-    return rc
-
-
-# ── appflowy ──────────────────────────────────────────────────────────────
-def c_appflowy_up(a):
-    af = ROOT / "appflowy_kanban" / "AppFlowy-Cloud"
-    gos = ROOT / "appflowy_kanban" / "growth-os"
-    rc = subprocess.run(["docker", "compose", "up", "-d"], cwd=af).returncode
-    rc = rc or subprocess.run(
-        ["docker", "compose", "-f", "docker-compose.curator.yml", "up", "-d", "--build"], cwd=gos).returncode
-    print("AppFlowy + curator up. Sign up a user, put creds in growth-os/.env, then setup_workspace.py")
     return rc
 
 
@@ -268,9 +258,8 @@ def c_channel(a):
 
 
 def c_start(a):
-    """One button: control plane up, optionally AppFlowy + a favorite channel, then open the UIs.
-       cc start [--appflowy] [--channel NAME] [--hermes]"""
-    want_appflowy = "--appflowy" in a
+    """One button: control plane up, optional channel/Hermes, then open the UIs.
+       cc start [--channel NAME] [--hermes]"""
     want_hermes = "--hermes" in a
     channel = None
     if "--channel" in a:
@@ -291,9 +280,6 @@ def c_start(a):
     if want_hermes:
         print("starting Hermes (profile) — note: set a real hermes image in docker-compose.yml first")
         compose("--profile", "hermes", "up", "-d")
-    if want_appflowy:
-        pym("command_center.cli.appflowy_init")
-        c_appflowy_up([])
     if channel:
         rc = c_channel([channel])  # guided: sets up + launches, or prints the token steps
     c_open(["cockpit", "litellm", "ledger", "kuma"] + (["hermes"] if want_hermes else []))
@@ -337,6 +323,11 @@ COMMANDS: dict[str, tuple] = {
                                   "generated/model-scout-report.md", *a), "propose model candidates"),
     "model-fit": (lambda a: pym("command_center.cli.model_fit", *a),
                   "which installed Ollama models fit the GPU budget (CTX/MODEL/VRAM)"),
+    "model-verify": (lambda a: pym("command_center.improvement.model_candidate_audit", *a),
+                     "isolated local-model quality A/B + independent verifier; never promotes"),
+    "model-serving-verify": (
+        lambda a: pym("command_center.improvement.model_serving_audit", *a),
+        "bounded local serving SLO/load audit with synthetic prompts; never promotes"),
     "model-status": (lambda a: pym("command_center.cli.model_ops", "status", *a),
                      "show the model roster: roles, candidates, active/scout, canary"),
     "model-canary": (lambda a: pym("command_center.cli.model_ops", "canary", *a),
@@ -355,11 +346,10 @@ COMMANDS: dict[str, tuple] = {
     # channels
     "gateway": (lambda a: pym("command_center.channels", *a), "run enabled chat channels (configs/channels.yaml)"),
     "notify": (lambda a: pym("command_center.cli.notify", *a), "push a proactive digest (brief + active missions) to Discord (--dry-run)"),
-    "kanban-bridge": (lambda a: pym("command_center.cli.kanban_bridge", *a), "AppFlowy cards -> Ledger missions"),
     "kanban-verify": (lambda a: pym("command_center.cli.kanban_registry", "verify", *a),
                       "verify a registered kanban board's status/field/verb contract (no writes)"),
     "kanban-register": (lambda a: pym("command_center.cli.kanban_registry", "register", *a),
-                        "register a kanban board (AppFlowy or internal UI) into the registry (--apply to write)"),
+                        "register a first-party kanban board into the registry (--apply to write)"),
     "kanban-sync": (lambda a: pym("command_center.cli.kanban_registry", "sync", *a),
                     "dry-run plan of registry boards -> repos/status mapping (no writes)"),
     "kanban-emit": (lambda a: pym("command_center.cli.kanban_sync_ops", "emit", *a),
@@ -412,7 +402,7 @@ COMMANDS: dict[str, tuple] = {
                 "friendly alias for self-improvement-daily (observer/draft-only)"),
     "demo": (lambda a: pym("command_center.cli.demo", *a),
              "full-loop demo: verify board+repo and document the 14-step loop (no writes, no merge)"),
-    "linkedin-publish": (lambda a: pym("command_center.cli.linkedin_publish", *a), "publish approved+due LinkedIn content rows (--login | --apply)"),
+    "linkedin-publish": (lambda a: pym("command_center.cli.linkedin_publish", *a), "publish approved+due LinkedIn post cards (--login | --apply)"),
     "job-search": (lambda a: pym("command_center.job_search.cli", *a),
                    "prepare/manual-first job search workflow: ingest, suggest, materials, followups, retention"),
     "content-preview": (lambda a: pym("command_center.cli.content_preview", *a),
@@ -422,7 +412,7 @@ COMMANDS: dict[str, tuple] = {
     "content-note": (lambda a: pym("command_center.cli.content_note", *a),
                      "update a card's note by intent via a governed progress_comment event (dry-run; --apply)"),
     "reference": (lambda a: pym("command_center.cli.reference", *a),
-                  "reference index (+ --live AppFlowy) + intent lookup: reference index --rebuild --live | reference find \"...\""),
+                  "reference index (+ --live local boards) + intent lookup: reference index --rebuild --live | reference find \"...\""),
     "system-validation": (lambda a: pym("command_center.cli.system_validation", *a),
                           "write whole-system validation evidence from real config state"),
     "github-app-verify": (lambda a: pym("command_center.cli.github_app_verify", *a),
@@ -441,15 +431,10 @@ COMMANDS: dict[str, tuple] = {
                         "desktop adapter manifest readiness gate"),
     "desktop-noop-canary": (lambda a: pym("command_center.cli.desktop_noop_canary", *a),
                             "read-only desktop/browser canary timing evidence; no live actions"),
-    "desktop-action-canary": (lambda a: pym("command_center.cli.desktop_action_canary", *a),
-                              "representative action-latency: reversible sandbox direct_api round-trip; fail-closed; no production board"),
     "desktop-timing-derive": (lambda a: pym("command_center.cli.desktop_timing_derive", *a),
                               "derive desktop timing candidates from measured action-latency evidence (read-only is observation only)"),
-    # appflowy
-    "appflowy-init": (lambda a: pym("command_center.cli.appflowy_init"), "scaffold AppFlowy + growth-os .env"),
-    "appflowy-up": (c_appflowy_up, "start the AppFlowy board server + curator"),
     # one-button + UIs + channels
-    "start": (c_start, "ONE BUTTON: first-boot [+--appflowy] [+--channel NAME] [+--hermes], then open UIs"),
+    "start": (c_start, "ONE BUTTON: first-boot [+--channel NAME] [+--hermes], then open UIs"),
     "open": (c_open, "open the UIs in your browser (cockpit/litellm/ledger/kuma[/hermes])"),
     "channel": (c_channel, "guided favorite-channel setup: cc channel <discord|slack|telegram|whatsapp>"),
     # dev

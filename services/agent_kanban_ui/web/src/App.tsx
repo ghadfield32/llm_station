@@ -1,7 +1,7 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addDomainCardNote,
-  Activity, AppFlowyBoard, BoardCard, BoardData, BoardSnapshot, ChatEvent,
+  Activity, WorkspaceBoard, BoardCard, BoardData, BoardSnapshot, ChatEvent,
   BoardRegistry, BoardRegistryBoard,
   ChatRuntime, DomainActions, DomainCard, DomainCardDetail, DomainCardProgress,
   DomainCards, DomainSchema, DomainSpec,
@@ -17,6 +17,7 @@ import {
   fetchChatThreads, fetchChatTranscript, ChatTranscriptResponse, TranscriptTurn,
   ChatConversation, fetchChatConversations, deleteChatConversation,
   fetchDomainCard, fetchDomainCardProgress, fetchDomainCards, fetchDomains,
+  createLinkedInPostDraft, fetchLinkedInComposer, LinkedInComposerOptions,
   fetchJobPacket, JobPacket, JobStoryEntry, PacketValidation, AgentTraceEntry,
   requestPacketChanges, submitJobApplication, updateJobPacketFile,
   fetchDomainSchema, fetchJobProfileControls, fetchMetrics, fetchMission, fetchMissions, fetchModels,
@@ -256,7 +257,7 @@ function MissionsView({ data, onOpen }: { data: BoardData; onOpen: (id: string) 
   );
 }
 
-// ---- AppFlowy boards view -------------------------------------------------
+// ---- Workspace boards view -------------------------------------------------
 function BoardsView({ snap, canAct, onOpenCard, onMoved }: {
   snap: BoardSnapshot; canAct: boolean;
   onOpenCard: (board: string, c: BoardCard, statuses: string[]) => void;
@@ -267,7 +268,7 @@ function BoardsView({ snap, canAct, onOpenCard, onMoved }: {
   const [dragged, setDragged] = useState<string | null>(null);
   const [overCol, setOverCol] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const board: AppFlowyBoard | undefined =
+  const board: WorkspaceBoard | undefined =
     snap.boards.find((b) => b.board === active) ?? snap.boards[0];
   // ALL legal columns (so you can drop into an empty target too), each filtered.
   const columns = (board?.statuses ?? []).map((name) => ({
@@ -296,7 +297,7 @@ function BoardsView({ snap, canAct, onOpenCard, onMoved }: {
 
   return (
     <>
-      <HorizontalScroller className="tabs tabs-strip" ariaLabel="AppFlowy boards">
+      <HorizontalScroller className="tabs tabs-strip" ariaLabel="Workspace boards">
         {snap.boards.map((b) => (
           <button key={b.board} className={`tab ${b.board === active ? "tab-on" : ""}`}
             onClick={() => setActive(b.board)}>{b.board}{b.error ? " ⚠" : ""}</button>
@@ -1020,6 +1021,129 @@ function LinkedInPreview({ card, mobile = false }: { card: DomainCard; mobile?: 
       <LinkedInBody text={valText(card.body || card.hook)} />
       <div className="li-tags">{valList(card.tags).map((t) => <span key={t}>{t}</span>)}</div>
       <div className="li-foot"><span>Like</span><span>Comment</span><span>Repost</span><span>Send</span></div>
+    </div>
+  );
+}
+
+function LinkedInPostComposer({ onClose, onCreated }: {
+  onClose: () => void;
+  onCreated: (card: DomainCard, warningCount: number) => void;
+}) {
+  const [options, setOptions] = useState<LinkedInComposerOptions | null>(null);
+  const [account, setAccount] = useState("");
+  const [body, setBody] = useState("");
+  const [tags, setTags] = useState("");
+  const [scheduledFor, setScheduledFor] = useState("");
+  const [mobile, setMobile] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    fetchLinkedInComposer()
+      .then((result) => {
+        if (!live) return;
+        setOptions(result);
+        setAccount((current) => current || result.accounts[0]?.id || "");
+      })
+      .catch((e) => { if (live) setError((e as Error).message); });
+    return () => { live = false; };
+  }, []);
+
+  const maxCharacters = options?.max_characters ?? 3000;
+  const tagList = tags.split(/[\s,]+/).map((tag) => tag.trim()).filter(Boolean);
+  const accountLabel = options?.accounts.find((row) => row.id === account)?.label ?? account;
+  const preview: DomainCard = {
+    account: accountLabel,
+    author_name: accountLabel,
+    body: body || "Your post preview appears here as you type.",
+    hook: body.split(/\n/, 1)[0],
+    tags: tagList,
+  };
+  const blockers = options?.write_blockers ?? [];
+  const canSave = !!options?.write_ready && !!account && !!body.trim()
+    && body.length <= maxCharacters && !busy;
+
+  async function save() {
+    if (!canSave) return;
+    setBusy(true); setError(null);
+    try {
+      const result = await createLinkedInPostDraft({
+        account,
+        body,
+        tags: tagList,
+        source_ref: "cockpit/manual",
+        scheduled_for: scheduledFor
+          ? new Date(scheduledFor).toISOString()
+          : null,
+      });
+      onCreated(result.card, result.warnings.length);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="drawer-bg packet-bg" role="dialog" aria-modal="true"
+      aria-label="Create LinkedIn post draft">
+      <div className="packet-modal post-composer">
+        <div className="drawer-head">
+          <div>
+            <h2>New post</h2>
+            <div className="muted small">Write the exact copy, inspect the live LinkedIn preview, then save a Draft card.</div>
+          </div>
+          <button className="x" onClick={onClose} aria-label="Close">x</button>
+        </div>
+        {error && <div className="error">ERR {error}</div>}
+        {blockers.length > 0 && (
+          <div className="error">Draft creation is blocked: {blockers.join("; ")}</div>
+        )}
+        <div className="post-composer-grid">
+          <div className="post-compose-fields">
+            <label>
+              <span>Account</span>
+              <select className="select" value={account}
+                onChange={(e) => setAccount(e.target.value)}>
+                {(options?.accounts ?? []).map((row) => (
+                  <option key={row.id} value={row.id}>{row.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Post</span>
+              <textarea value={body} rows={16}
+                placeholder={"Lead with the point.\n\nAdd the evidence and useful context.\n\nEnd with a genuine question."}
+                onChange={(e) => setBody(e.target.value)} />
+              <span className={body.length > maxCharacters ? "error small" : "muted small"}>
+                {body.length}/{maxCharacters} characters
+              </span>
+            </label>
+            <label>
+              <span>Hashtags</span>
+              <input value={tags} placeholder="#AI, #SportsAnalytics"
+                onChange={(e) => setTags(e.target.value)} />
+            </label>
+            <label>
+              <span>Schedule (optional)</span>
+              <input type="datetime-local" value={scheduledFor}
+                onChange={(e) => setScheduledFor(e.target.value)} />
+            </label>
+            <button className="actbtn" disabled={!canSave} onClick={() => void save()}>
+              {busy ? "saving..." : "Save draft"}
+            </button>
+          </div>
+          <div className="post-compose-preview">
+            <div className="drawer-toggle">
+              <button className={`tab ${!mobile ? "tab-on" : ""}`}
+                onClick={() => setMobile(false)}>desktop</button>
+              <button className={`tab ${mobile ? "tab-on" : ""}`}
+                onClick={() => setMobile(true)}>mobile</button>
+            </div>
+            <LinkedInPreview card={preview} mobile={mobile} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3018,6 +3142,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   const [overCol, setOverCol] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showJobPresets, setShowJobPresets] = useState(false);
+  const [showPostComposer, setShowPostComposer] = useState(false);
   const [jobBoardMode, setJobBoardMode] = useState<JobBoardMode>("manual");
   const [packetFor, setPacketFor] = useState<{ spec: DomainSpec; card: DomainCard } | null>(null);
   const [drawerTick, setDrawerTick] = useState(0);
@@ -3226,6 +3351,11 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
             Search &amp; answers settings
           </button>
         )}
+        {spec.domain_id === "linkedin_post" && (
+          <button className="actbtn" onClick={() => setShowPostComposer(true)}>
+            + New post
+          </button>
+        )}
         {pack?.origin === "fixtures" && <span className="demo-badge">demo data</span>}
         {pack?.origin === "board_store" && <span className="live-badge">board store</span>}
         {pack?.origin === "ledger" && <span className="live-badge">ledger</span>}
@@ -3426,6 +3556,17 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
           onClose={() => setPacketFor(null)} />
       )}
       {showJobPresets && <JobPresetDrawer onClose={() => setShowJobPresets(false)} />}
+      {showPostComposer && (
+        <LinkedInPostComposer
+          onClose={() => setShowPostComposer(false)}
+          onCreated={(card, warningCount) => {
+            setShowPostComposer(false);
+            setToast(
+              `${cardId(card)} saved as Draft`
+              + (warningCount ? ` - ${warningCount} preview note${warningCount === 1 ? "" : "s"}` : ""));
+            void load();
+          }} />
+      )}
     </>
   );
 }
@@ -3885,7 +4026,8 @@ function AgentEventCard({ ev }: { ev: AgentEvent }) {
   }
 }
 
-function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange, initialPrompt }: {
+function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread, onThreadChange, initialPrompt }: {
+  conversationId: string;
   harnessId: string;
   harnesses: AgentHarnessOption[] | null;
   repos: { repo_id: string; remote_url: string }[];
@@ -3907,12 +4049,15 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
   const [models, setModels] = useState<AgentModelOption[]>([]);
   const [model, setModel] = useState<string>("");
   const [effort, setEffort] = useState<string>("");
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   // "Track as mission" — the OPTIONAL governance wrapper. Set once promoted.
   const [missionId, setMissionId] = useState<string | null>(thread?.missionId ?? null);
   const [promoting, setPromoting] = useState(false);
   const sessionIdRef = useRef(sessionId);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
   const closeStreamRef = useRef<(() => void) | null>(null);
+  const autoStartAttemptedRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => { endRef.current?.scrollIntoView(); }, [events]);
 
@@ -3926,8 +4071,15 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
         setModels(cat.models);
         const def = cat.models.find((m) => m.is_default) ?? cat.models[0];
         setModel(def?.id ?? "");
+        setCatalogError(null);
+        setCatalogLoaded(true);
       })
-      .catch(() => { if (!cancelled) setModels([]); });
+      .catch((e) => {
+        if (cancelled) return;
+        setModels([]);
+        setCatalogError((e as Error).message);
+        setCatalogLoaded(true);
+      });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [harnessId, sessionId]);
@@ -3984,7 +4136,7 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
     setError(null);
     try {
       const rec = await createAgentSession({
-        harness_id: harnessId, conversation_id: thread?.id ?? "agent",
+        harness_id: harnessId, conversation_id: conversationId,
         repo_id: repoId, mode, permission_profile: "read_only",
         model: model || null, effort: effort || null,
       });
@@ -4061,6 +4213,19 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
   const harness = harnesses?.find((h) => h.harness_id === harnessId);
   const pending = pendingApprovalsOf(events);
   const status = record?.status;
+  const autoStartKey = `${harnessId}:${conversationId}:${repoId}`;
+
+  useEffect(() => {
+    if (sessionId || busy || !catalogLoaded || catalogError
+        || !harness?.available || !repoId) return;
+    if (autoStartAttemptedRef.current === autoStartKey) return;
+    autoStartAttemptedRef.current = autoStartKey;
+    void createSession();
+    // createSession uses the runtime catalog's selected default. The key
+    // prevents React StrictMode from creating the same session twice.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartKey, busy, catalogError, catalogLoaded, harness?.available,
+      repoId, sessionId]);
 
   if (!sessionId) {
     return (
@@ -4097,7 +4262,7 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
               </label>
               {models.length > 0 && (
                 <label className="chat-field">
-                  <span className="muted small">model</span>
+                  <span className="muted small">agent model</span>
                   <select className="select" value={model}
                     onChange={(e) => { setModel(e.target.value); setEffort(""); }}>
                     {models.map((m) => (
@@ -4118,9 +4283,24 @@ function AgentSessionPanel({ harnessId, harnesses, repos, thread, onThreadChange
                   </select>
                 </label>
               )}
-              <button className="actbtn" disabled={busy || !repoId} onClick={() => void createSession()}>
-                {busy ? "starting…" : "start agent session"}
-              </button>
+              {!repoId && (
+                <div className="agent-unavailable muted">
+                  Register a repository before starting a coding-agent conversation.
+                </div>
+              )}
+              {catalogError && (
+                <div className="cl err">model catalog failed: {catalogError}</div>
+              )}
+              {busy && <div className="muted">Starting a read-only session...</div>}
+              {error && !busy && (
+                <button className="actbtn" disabled={!repoId || !!catalogError}
+                  onClick={() => {
+                    autoStartAttemptedRef.current = "";
+                    void createSession();
+                  }}>
+                  retry
+                </button>
+              )}
             </>
           )}
           {error && <div className="cl err">⚠ {error}</div>}
@@ -4977,8 +5157,8 @@ function ChatView({ roles, runtime, draft, onBack }: {
                 <span className="muted small">assistant</span>
                 <select className="select" value={targetRaw}
                   onChange={(e) => setTargetRaw(e.target.value)}
-                  title="Pick who handles this chat. GatewayCore runs in-app (fast conversation, local + routed models). Claude Code and Codex run coding agent sessions on the host worker — no mission needed to start a read-only one. Specialists open in their own tab.">
-                  <option value="GatewayCore">GatewayCore (in-app)</option>
+                  title="Pick the runtime that handles this conversation. Growth OS/GatewayCore is the local action-aware chat lane. Claude Code and Codex are coding-agent runtimes on the host worker — no mission is needed to start a read-only session.">
+                  <option value="GatewayCore">Growth OS (GatewayCore local chat)</option>
                   {externalChats.map((c) => (
                     <option key={c.name} value={c.name}>
                       {c.name}{c.active ? "" : " (not configured)"}
@@ -5001,7 +5181,7 @@ function ChatView({ roles, runtime, draft, onBack }: {
               </label>
               {chatTarget.kind === "gateway" && (
                 <label className="chat-field">
-                  <span className="muted small">model</span>
+                  <span className="muted small">chat model</span>
                   <select className="select" value={model}
                     onChange={(e) => setModel(e.target.value)}
                     title="Local roles route free through LiteLLM/Ollama. Frontier models are a paid, opt-in escalation lane. Local Frontier models are a free but experimental, very slow, loopback-only lane. To run Claude Code or Codex, pick them from the Assistant selector — they are coding agents, not GatewayCore chat models.">
@@ -5145,8 +5325,14 @@ function ChatView({ roles, runtime, draft, onBack }: {
             </div>
           )}
           {chatTarget.kind === "agent" ? (
-            <AgentSessionPanel harnessId={chatTarget.harnessId} harnesses={agentHarnesses}
-              repos={agentRepos} thread={currentThread} onThreadChange={updateAgentThread}
+            <AgentSessionPanel
+              key={`${conversationId}:${chatTarget.harnessId}`}
+              conversationId={conversationId}
+              harnessId={chatTarget.harnessId} harnesses={agentHarnesses}
+              repos={agentRepos}
+              thread={currentThread?.agentHarnessId === chatTarget.harnessId
+                ? currentThread : undefined}
+              onThreadChange={updateAgentThread}
               initialPrompt={draft?.target === targetRaw ? draft?.text : undefined} />
           ) : chatTarget.kind !== "gateway" ? null : chatMode === "story" ? (
             <div className="chat-log chat-log-story">
@@ -5405,7 +5591,7 @@ export function App() {
   const [surfaceErrors, setSurfaceErrors] = useState<Record<string, string>>({});
   const chatRef = useRef(false);   // so reloadBoards can pick live vs snapshot
 
-  // Console: read boards LIVE from AppFlowy (a write reflects at once); read-only:
+  // Console: read boards from the LIVE local store (a write reflects at once); read-only:
   // the worker snapshot. Explicit capability switch, not a silent fallback.
   const reloadBoards = useCallback(async () => {
     try {

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 
+from command_center.cli import check_forbidden_providers as cfp
 from command_center.cli import doctor
+from command_center.cli import main as cli_main
 from command_center.cli.main import COMMANDS
 
 
@@ -11,6 +13,19 @@ def test_phase_one_commands_are_registered():
     assert "bootstrap-local" in COMMANDS
     assert "verify-stack" in COMMANDS
 
+
+def test_validate_and_render_use_configured_provider_posture(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(cli_main, "pym", lambda *args: calls.append(args) or 0)
+
+    assert cli_main.c_validate(None) == 0
+    assert calls[-1] == (
+        "command_center.cli.check_forbidden_providers", "--configured-posture")
+
+    calls.clear()
+    assert cli_main.c_render(None) == 0
+    assert calls[-1] == (
+        "command_center.cli.check_forbidden_providers", "--configured-posture")
 
 def test_github_env_ref_check_reports_presence_without_values(monkeypatch):
     secret_path = r"C:\Users\example\outside-repo\llm-station.pem"
@@ -67,25 +82,27 @@ def test_forbidden_provider_scan_runs_without_typeerror():
 
 
 def test_forbidden_provider_scan_strict_when_no_lane_ready(monkeypatch):
-    monkeypatch.setattr(doctor, "frontier_egress_ready", lambda: (False, "off"))
-    monkeypatch.setattr(doctor, "agent_session_egress_ready", lambda: (False, "off"))
+    monkeypatch.setattr(
+        doctor, "configured_provider_posture", lambda: (set(cfp.FORBIDDEN_KEYS), []))
 
     result = doctor.check_forbidden_provider_scan()
 
     # nothing relaxed: the full forbidden set is enforced
-    assert set(result.evidence["forbidden_keys"]) == set(doctor.FORBIDDEN_KEYS)
+    assert set(result.evidence["forbidden_keys"]) == set(cfp.FORBIDDEN_KEYS)
     assert result.evidence["permitted_lanes"] == []
 
 
 def test_forbidden_provider_scan_relaxes_ready_lanes(monkeypatch):
-    monkeypatch.setattr(doctor, "frontier_egress_ready", lambda: (True, "budget on"))
     monkeypatch.setattr(
-        doctor, "agent_session_egress_ready", lambda: (True, "codex on"))
+        doctor,
+        "configured_provider_posture",
+        lambda: (set(), ["frontier-router: budget on", "agent-session: codex on"]),
+    )
 
     result = doctor.check_forbidden_provider_scan()
 
     forbidden = set(result.evidence["forbidden_keys"])
     # a ready lane's keys are no longer forbidden, and the relaxation is recorded
-    assert forbidden.isdisjoint(doctor.ROUTER_LANE_KEYS)
-    assert forbidden.isdisjoint(doctor.AGENT_SESSION_KEYS)
+    assert forbidden.isdisjoint(cfp.ROUTER_LANE_KEYS)
+    assert forbidden.isdisjoint(cfp.AGENT_SESSION_KEYS)
     assert len(result.evidence["permitted_lanes"]) == 2

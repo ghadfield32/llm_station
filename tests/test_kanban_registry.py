@@ -21,7 +21,7 @@ WALL = ["approve_card", "merge", "deploy", "delete_card", "delete_board"]
 
 def _board(**over):
     base = dict(
-        board_id="b1", provider="appflowy", workspace_ref="env:APPFLOWY_WORKSPACE_ID",
+        board_id="b1", provider="command_center_ui", workspace_ref="self",
         board_ref="mission_intake", repo_ids=["llm_station"], status_mapping=dict(CANONICAL),
         required_fields=["MissionID", "RepoID", "Risk"], allowed_agent_verbs=list(GRANT),
         forbidden_agent_verbs=list(WALL),
@@ -64,9 +64,6 @@ def test_repository_scope_still_requires_a_repo():
         KanbanBoardSpec(**_board(execution_scope="repository", repo_ids=[]))
 
 
-def test_appflowy_workspace_ref_must_be_env_reference():
-    with pytest.raises(ValueError, match="env reference"):
-        KanbanBoardSpec(**_board(workspace_ref="my-workspace-uuid"))
 
 
 def test_status_mapping_must_be_canonical():
@@ -153,7 +150,7 @@ def test_register_apply_writes_and_blocks_duplicate(tmp_path):
     reloaded = KanbanBoardsConfig.model_validate(yaml.safe_load(cfg.read_text(encoding="utf-8")))
     assert {b.board_id for b in reloaded.boards} == {"b1", "b2"}
     dup = kanban_registry.run_kanban_register(
-        board_id="b1", provider="appflowy", workspace_ref="env:X", board_ref="x",
+        board_id="b1", provider="command_center_ui", workspace_ref="self", board_ref="x",
         repo_ids=["llm_station"], config_path=cfg, apply=True)
     assert dup["status"] == "blocked"
 
@@ -186,4 +183,4 @@ def test_sync_apply_refuses_and_defers_to_bridge(tmp_path):
     cfg = _write_cfg(tmp_path, [_board()])
     result = kanban_registry.run_kanban_sync(config_path=cfg, dry_run=False)
     assert result["status"] == "blocked"
-    assert "use_kanban_bridge" in result["blockers"][0]
+    assert "use_kanban_emit" in result["blockers"][0]

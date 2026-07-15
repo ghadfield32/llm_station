@@ -25,8 +25,8 @@ def _scaffold(tmp_path: Path, *, autonomy: dict, board_repo_ids=("llm_station",)
     (tmp_path / "configs/kanban_boards.yaml").write_text(yaml.safe_dump({
         "schema_version": "command-center.kanban-boards.v1",
         "boards": [{
-            "board_id": "llm_station_command_center", "provider": "appflowy",
-            "workspace_ref": "env:APPFLOWY_WORKSPACE_ID", "board_ref": "mission_intake",
+            "board_id": "llm_station_command_center", "provider": "command_center_ui",
+            "workspace_ref": "self", "board_ref": "mission_intake",
             "repo_ids": list(board_repo_ids),
             "status_mapping": {k: k.title() for k in
                                ["backlog", "ready", "in_progress", "done", "blocked",

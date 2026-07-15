@@ -1,7 +1,7 @@
 schema_version: command-center.kanban-boards.v1
 
 # Provider-agnostic registry of kanban boards. A board_id maps one surface
-# (AppFlowy OR the internal Command Center UI) to the repos it drives, the
+# (the internal Command Center UI) to the repos it drives, the
 # canonical status workflow, the required mission-card fields, and the agent verb
 # contract. Both providers expose the SAME canonical verbs/statuses so the action
 # layer and the human approval wall behave identically regardless of surface.
@@ -10,9 +10,9 @@ schema_version: command-center.kanban-boards.v1
 # be forbidden; the agent drafts and moves cards but never approves or merges.
 boards:
   - board_id: llm_station_command_center
-    provider: appflowy
-    workspace_ref: env:APPFLOWY_WORKSPACE_ID
-    board_ref: mission_intake
+    provider: command_center_ui
+    workspace_ref: self
+    board_ref: llm_station_command_center
     repo_ids: [llm_station]
     status_mapping:
       backlog: Backlog
@@ -83,44 +83,9 @@ boards:
     - deploy
     - merge
     blockers: []
-  - board_id: betts_basketball_appflowy
-    provider: appflowy
-    workspace_ref: env:APPFLOWY_WORKSPACE_ID
-    board_ref: env:BETTS_APPFLOWY_BOARD_REF
-    repo_ids:
-    - betts_basketball
-    status_mapping:
-      awaiting_approval: Awaiting Approval
-      backlog: Backlog
-      blocked: Blocked
-      done: Done
-      in_progress: In Progress
-      ready: Ready
-      rejected: Rejected
-    required_fields:
-    - MissionID
-    - RepoID
-    - Risk
-    - LastSync
-    - Section
-    allowed_agent_verbs:
-    - add_mission_card
-    - block_card
-    - finish_todo
-    - reject_card
-    - stage_card
-    - start_todo
-    forbidden_agent_verbs:
-    - approve_card
-    - delete_board
-    - delete_card
-    - deploy
-    - merge
-    blockers: []
   # Cockpit-native job board (cc job-search --backend internal): fields in the
   # BoardProvider card store, status in the governed event log; the cockpit's
-  # "Jobs" domain (configs/domain_surfaces.yaml) reads it directly. The AppFlowy
-  # entry below stays as the optional mobile projection of the same pipeline.
+  # "Jobs" domain (configs/domain_surfaces.yaml) reads it directly.
   - board_id: job_search_pipeline_internal
     provider: command_center_ui
     workspace_ref: self
@@ -177,47 +142,104 @@ boards:
     - merge
     blockers:
     - "Job-search board has an extra domain column, Closed / Archived, enforced by command_center.job_search.board."
-  - board_id: job_search_pipeline
-    provider: appflowy
-    workspace_ref: env:APPFLOWY_WORKSPACE_ID
-    board_ref: job_search_pipeline
-    repo_ids:
-    - llm_station
+  # First-party Growth OS knowledge and operations boards. These share the
+  # cockpit event log/card store; no external projection or board credentials.
+  - board_id: reading_library
+    provider: command_center_ui
+    workspace_ref: self
+    board_ref: reading_library
+    execution_scope: life
+    repo_ids: []
     status_mapping:
-      awaiting_approval: Interviewing
-      backlog: Suggested Jobs
+      backlog: To read
+      ready: Reading
+      in_progress: Reading
+      done: Done
+      blocked: Blocked
+      rejected: Archived
+      awaiting_approval: To read
+    required_fields: [title]
+    allowed_agent_verbs: [add_mission_card, stage_card, start_todo, finish_todo, block_card, reject_card]
+    forbidden_agent_verbs: [approve_card, merge, deploy, delete_card, delete_board]
+    blockers: []
+  - board_id: research_papers
+    provider: command_center_ui
+    workspace_ref: self
+    board_ref: research_papers
+    execution_scope: life
+    repo_ids: []
+    status_mapping:
+      backlog: Inbox
+      ready: Reading
+      in_progress: Reading
+      done: Read
+      blocked: Blocked
+      rejected: Archived
+      awaiting_approval: Inbox
+    required_fields: [title]
+    allowed_agent_verbs: [add_mission_card, stage_card, start_todo, finish_todo, block_card, reject_card]
+    forbidden_agent_verbs: [approve_card, merge, deploy, delete_card, delete_board]
+    blockers: []
+  - board_id: research_repos
+    provider: command_center_ui
+    workspace_ref: self
+    board_ref: research_repos
+    execution_scope: life
+    repo_ids: []
+    status_mapping:
+      backlog: Inbox
+      ready: Trying
+      in_progress: Using
+      done: Archived
+      blocked: Blocked
+      rejected: Archived
+      awaiting_approval: Inbox
+    required_fields: [title]
+    allowed_agent_verbs: [add_mission_card, stage_card, start_todo, finish_todo, block_card, reject_card]
+    forbidden_agent_verbs: [approve_card, merge, deploy, delete_card, delete_board]
+    blockers: []
+  - board_id: dag_operations
+    provider: command_center_ui
+    workspace_ref: self
+    board_ref: dag_operations
+    repo_ids: [llm_station]
+    status_mapping:
+      backlog: Manual
+      ready: Active
+      in_progress: Active
+      done: Retired
+      blocked: Broken
+      rejected: Retired
+      awaiting_approval: Paused
+    required_fields: [dag_id]
+    allowed_agent_verbs: [add_mission_card, stage_card, start_todo, finish_todo, block_card, reject_card]
+    forbidden_agent_verbs: [approve_card, merge, deploy, delete_card, delete_board]
+    blockers: []
+  # Cockpit-native LinkedIn drafting board. The composer creates Draft cards;
+  # status changes remain governed events and publishing stays in the existing
+  # LinkedIn approval/publisher path (this board never calls LinkedIn directly).
+  - board_id: linkedin_content_pipeline_internal
+    provider: command_center_ui
+    workspace_ref: self
+    board_ref: linkedin_content_pipeline_internal
+    execution_scope: life
+    repo_ids: []
+    status_mapping:
+      backlog: Draft
+      ready: In Queue
+      in_progress: Scheduled
+      done: Published
       blocked: Needs Geoff
-      done: Completed
-      in_progress: In Progress
-      ready: Selected by Geoff
-      rejected: Rejected / Skip
+      rejected: Rejected
+      awaiting_approval: Needs Geoff
     required_fields:
-    - job_key
-    - company
-    - role_title
-    - location
-    - remote_type
-    - source
-    - portal
-    - apply_url
-    - salary_text
-    - salary_min
-    - salary_max
-    - category
-    - fit_score
-    - automation_class
-    - manual_reason
-    - resume_variant
-    - why_apply
-    - risks
-    - deadline
-    - last_seen_at
-    - application_id
-    - next_action
-    - materials_path
-    - company_tier
-    - score_explanation
-    - claude_review_url
+    - account
+    - hook
+    - body
+    - tags
+    - source_ref
+    - scheduled_for
+    - approval_state
     allowed_agent_verbs:
     - add_mission_card
     - block_card
@@ -232,4 +254,4 @@ boards:
     - deploy
     - merge
     blockers:
-    - "Job-search board has an extra domain column, Closed / Archived, enforced by command_center.job_search.board."
+    - "Publishing remains operator-approved through the existing LinkedIn publisher; this internal board only owns draft/review state."

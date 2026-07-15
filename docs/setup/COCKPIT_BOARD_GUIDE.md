@@ -8,16 +8,15 @@ The cockpit now treats **All Boards** as the primary operator surface.
 - **Missions** lives inside All Boards as a Ledger-backed board. The old
   top-level Missions view remains URL-addressable for debugging, but it is not
   the primary mobile nav.
-- **Raw AppFlowy boards** remain optional projection/fallback state. The old
-  top-level Boards view remains URL-addressable for debugging and comparison,
-  but AppFlowy is not the cockpit.
+- **Workspace boards** are first-party local state. The top-level Boards view is
+  a debugging view over the same governed store, not a second source of truth.
 
 ## Sections
 
 | Section | Use it for | Source today | How to add/update |
 | --- | --- | --- | --- |
 | Jobs | Job search pipeline, resumes, application memory, manual checklist | `job_search_pipeline_internal` board store | `uv run cc job-search suggest --from-file <posting.md> --write`, then `uv run cc job-search publish-suggestions --apply --backend internal` |
-| Posts | LinkedIn/content queue preview | demo fixtures until content pipeline is wired | Add cards to `services/agent_kanban_ui/domain_fixtures.json` or wire a real content board later |
+| Posts | LinkedIn/content composition, review, and scheduling | `linkedin_content_personal` board store | Compose in the cockpit; scheduling moves the card to `Scheduled` for explicit publishing |
 | Books | Reading list and notes | demo fixtures | Add cards to `services/agent_kanban_ui/domain_fixtures.json` until the library board is wired |
 | Papers | Research queue and useful paper notes | demo fixtures | Add cards to `services/agent_kanban_ui/domain_fixtures.json` until the paper intake is wired |
 | Repos | Repo operations and blockers | demo fixtures | Add cards to `services/agent_kanban_ui/domain_fixtures.json` until repo telemetry is wired |
@@ -101,7 +100,7 @@ Use **Controls** for operator settings:
 
 | Panel | What it shows/edits |
 | --- | --- |
-| Runtime APIs | Ledger, LiteLLM, AppFlowy, GatewayCore, and the action/chat endpoints |
+| Runtime APIs | Ledger, LiteLLM, board store, GatewayCore, and the action/chat endpoints |
 | All Boards | Add/remove/update `configs/domain_surfaces.yaml` domain boards; view `configs/kanban_boards.yaml` provider registry |
 | Job Search | Daily search limits, role-focus keywords, profile file paths, and draft application defaults |
 

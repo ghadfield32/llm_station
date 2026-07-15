@@ -1,6 +1,6 @@
 """Desktop no-op canary telemetry tests.
 
-Hermetic: no browser, no screenshots, no GUI actions, no AppFlowy network.
+Hermetic: no browser, no screenshots, no GUI actions, no cockpit network.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def test_desktop_noop_canary_writes_redacted_evidence_only(tmp_path):
     saved = output.read_text(encoding="utf-8")
 
     assert result["status"] == "pass"
-    assert result["target_id"] == "appflowy_browser_staging"
+    assert result["target_id"] == "cockpit_browser_staging"
     assert result["allowed_mode"] == "read_only"
     assert result["visible_target_assertions"]["target_identity_verified"] is True
     assert result["human_takeover_value_retained"] is False
@@ -112,7 +112,7 @@ def test_desktop_noop_canary_fails_on_out_of_scope_window(tmp_path):
     )
 
     assert result["status"] == "blocked"
-    assert "desktop_noop_canary_appflowy_browser_staging_target_out_of_scope" in result["blockers"]
+    assert "desktop_noop_canary_cockpit_browser_staging_target_out_of_scope" in result["blockers"]
     assert result["desktop_actions_performed"] is False
 
 
@@ -138,12 +138,12 @@ def test_desktop_noop_canary_blocks_if_live_actions_already_enabled(tmp_path):
     )
 
     assert result["status"] == "blocked"
-    assert "desktop_target_appflowy_browser_staging_live_actions_already_enabled" in result["blockers"]
+    assert "desktop_target_cockpit_browser_staging_live_actions_already_enabled" in result["blockers"]
     assert result["desktop_live_actions_enabled"] is False
     assert result["desktop_actions_performed"] is False
 
 
-def _write_canary_sample(path: Path, *, status: str = "pass", target_id: str = "appflowy_browser_staging", total: float = 120.0, load: float = 40.0, verify: float = 80.0):
+def _write_canary_sample(path: Path, *, status: str = "pass", target_id: str = "cockpit_browser_staging", total: float = 120.0, load: float = 40.0, verify: float = 80.0):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
         "status": status,
@@ -163,7 +163,7 @@ def test_timing_derivation_blocks_on_insufficient_samples(tmp_path):
 
     result = desktop_timing_derive.derive_timing_candidates(
         evidence_paths=[sample],
-        target_id="appflowy_browser_staging",
+        target_id="cockpit_browser_staging",
         required_samples=2,
         required_samples_source="unit_test_sample_plan",
     )
@@ -176,7 +176,7 @@ def test_timing_derivation_blocks_on_insufficient_samples(tmp_path):
 
 
 def _write_action_sample(path: Path, *, status: str = "pass",
-                         target_id: str = "appflowy_browser_staging",
+                         target_id: str = "cockpit_browser_staging",
                          create: float = 600.0, delete: float = 900.0):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
@@ -201,7 +201,7 @@ def test_timing_derivation_read_only_is_observation_only_not_production(tmp_path
 
     result = desktop_timing_derive.derive_timing_candidates(
         evidence_paths=[sample_a, sample_b],
-        target_id="appflowy_browser_staging",
+        target_id="cockpit_browser_staging",
         required_samples=2,
         required_samples_source="unit_test_sample_plan",
     )
@@ -228,7 +228,7 @@ def test_timing_derivation_derives_action_timeout_from_action_latency(tmp_path):
     result = desktop_timing_derive.derive_timing_candidates(
         evidence_paths=[sample_a, sample_b],
         action_latency_paths=[act_a, act_b],
-        target_id="appflowy_browser_staging",
+        target_id="cockpit_browser_staging",
         required_samples=2,
         required_samples_source="unit_test_sample_plan",
     )
@@ -249,7 +249,7 @@ def test_timing_derivation_requires_sample_plan(tmp_path):
 
     result = desktop_timing_derive.derive_timing_candidates(
         evidence_paths=[sample],
-        target_id="appflowy_browser_staging",
+        target_id="cockpit_browser_staging",
     )
 
     assert result["status"] == "blocked"
@@ -282,7 +282,7 @@ def test_timing_derivation_uses_config_sample_plan_refs(tmp_path):
     result = desktop_timing_derive.derive_timing_candidates_from_config(
         config_path=config_path,
         root=tmp_path,
-        target_id="appflowy_browser_staging",
+        target_id="cockpit_browser_staging",
     )
 
     # read-only sample plan satisfied, but production candidates require
@@ -309,7 +309,7 @@ def test_timing_derivation_from_config_blocks_missing_plan_evidence(tmp_path):
     result = desktop_timing_derive.derive_timing_candidates_from_config(
         config_path=config_path,
         root=tmp_path,
-        target_id="appflowy_browser_staging",
+        target_id="cockpit_browser_staging",
     )
 
     assert result["status"] == "blocked"

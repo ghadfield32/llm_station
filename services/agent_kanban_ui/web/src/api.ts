@@ -46,14 +46,14 @@ async function getJSON<T>(path: string): Promise<T> {
   return r.json() as Promise<T>;
 }
 
-// AppFlowy board snapshot (produced on the worker, read-only here).
+// First-party board snapshot (produced on the worker, read-only here).
 export interface BoardCard {
   title: string;
   meta: string;
   fields?: Record<string, string | number>;
 }
 export interface BoardColumn { name: string; cards: BoardCard[]; }
-export interface AppFlowyBoard {
+export interface WorkspaceBoard {
   board: string;
   statuses?: string[];          // full legal columns — the "Move to…" targets
   columns?: BoardColumn[];
@@ -61,8 +61,8 @@ export interface AppFlowyBoard {
 }
 export interface BoardSnapshot {
   generated_at: string;
-  live?: boolean;               // true when read live from AppFlowy (console)
-  boards: AppFlowyBoard[];
+  live?: boolean;               // true when read from the live local board store (console)
+  boards: WorkspaceBoard[];
 }
 
 export interface ActivityCall {
@@ -340,6 +340,39 @@ export const addDomainCardNote = (
     `/api/domain/${encodeURIComponent(id)}/card/${encodeURIComponent(cardId)}/note`,
     { type, text, source },
   );
+
+export interface LinkedInComposerAccount {
+  id: string;
+  kind: string;
+  label: string;
+}
+export interface LinkedInComposerOptions {
+  accounts: LinkedInComposerAccount[];
+  max_characters: number;
+  desktop_fold_characters: number;
+  mobile_fold_characters: number;
+  write_ready: boolean;
+  write_blockers: string[];
+}
+export interface LinkedInDraftIn {
+  account: string;
+  body: string;
+  tags?: string[];
+  source_ref?: string;
+  scheduled_for?: string | null;
+}
+export interface LinkedInDraftResult {
+  status: string;
+  domain_id: string;
+  card_id: string;
+  card: DomainCard;
+  event: Record<string, unknown>;
+  warnings: { level: string; code: string; message: string }[];
+}
+export const fetchLinkedInComposer = () =>
+  getJSON<LinkedInComposerOptions>("/api/domain/linkedin_post/composer");
+export const createLinkedInPostDraft = (body: LinkedInDraftIn) =>
+  postJSON<LinkedInDraftResult>("/api/domain/linkedin_post/drafts", body);
 
 // Application packet review loop (job_application cards): view the generated
 // materials + agent trace, request changes (regenerates via the agent writer),

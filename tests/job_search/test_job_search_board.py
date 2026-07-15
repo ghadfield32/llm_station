@@ -10,15 +10,12 @@ from command_center.job_search.application_memory import mark_submitted
 from command_center.job_search.achievement_bank import ensure_bank
 from command_center.job_search.automation_policy import classify_automation
 from command_center.job_search.board import (
-    APPFLOWY_REQUIRED_ENV,
     BOARD_COLUMNS,
-    GROUP_FIELD,
     REQUIRED_CARD_FIELDS,
     board_schema,
     board_setup,
     board_snapshot,
     load_local_state,
-    manual_grouping_guidance,
     mark_submitted_on_board,
     process_selected,
     publish_suggestions,
@@ -165,23 +162,8 @@ def test_board_schema_contains_all_required_fields():
     assert {"job_key", "fit_score", "automation_class", "materials_path"} <= fields
 
 
-def test_manual_grouping_guidance_targets_status_field():
-    guidance = manual_grouping_guidance()
-    assert guidance["group_by_field"] == GROUP_FIELD == "Status"
-    assert guidance["steps"], "grouping steps must be present"
-    joined = " ".join(guidance["steps"]).lower()
-    assert "group by" in joined
-    assert "status" in joined
 
 
-def test_board_setup_applied_result_surfaces_manual_grouping(tmp_path):
-    # Local backend still returns a valid applied result; the appflowy backend adds
-    # the manual_grouping guidance. Assert the guidance helper is wired and correct.
-    guidance = manual_grouping_guidance()
-    assert guidance["group_by_field"] == "Status"
-    # every canonical column should be reachable once grouped by Status
-    assert BOARD_COLUMNS[0] == "Suggested Jobs"
-    assert BOARD_COLUMNS[-1] == "Closed / Archived"
 
 
 def test_board_setup_dry_run_mutates_nothing(tmp_path):
@@ -442,12 +424,6 @@ def test_publish_updates_generated_reason_fields_on_suggested_cards(tmp_path):
     assert fields["automation_class"] == "manual_required"
 
 
-def test_missing_appflowy_config_fails_closed(tmp_path):
-    env = {name: "" for name in APPFLOWY_REQUIRED_ENV}
-    result = board_setup(backend="appflowy", apply=False, root=tmp_path, env=env)
-    assert result["status"] == "blocked"
-    assert result["writes_performed"] is False
-    assert any(blocker.startswith("missing_env:") for blocker in result["readiness"]["blockers"])
 
 
 def test_board_snapshot_detects_duplicate_job_keys(tmp_path):

@@ -21,6 +21,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_TSX = ROOT / "services" / "agent_kanban_ui" / "web" / "src" / "App.tsx"
+WORKER_SCRIPT = ROOT / "scripts" / "start_agent_worker.ps1"
 
 
 @pytest.fixture(scope="module")
@@ -71,6 +72,32 @@ def test_assistant_chooser_exposes_coding_agents_directly(app_tsx: str) -> None:
     # selecting an agent still renders the direct session panel (no mission gate)
     assert 'chatTarget.kind === "agent"' in app_tsx
     assert "<AgentSessionPanel" in app_tsx
+
+
+def test_runtime_and_model_choosers_explain_their_distinct_jobs(app_tsx: str) -> None:
+    assert "Growth OS (GatewayCore local chat)" in app_tsx
+    assert ">chat model<" in app_tsx
+    assert ">agent model<" in app_tsx
+
+
+def test_selecting_an_available_agent_auto_starts_read_only_session(app_tsx: str) -> None:
+    assert "autoStartAttemptedRef" in app_tsx
+    assert "void createSession()" in app_tsx
+    assert 'permission_profile: "read_only"' in app_tsx
+    assert "conversation_id: conversationId" in app_tsx
+    assert 'conversation_id: thread?.id ?? "agent"' not in app_tsx
+    assert "start agent session" not in app_tsx, (
+        "normal agent selection should auto-start; a button may be shown only "
+        "as an explicit retry after a surfaced failure"
+    )
+
+
+def test_worker_launcher_uses_isolated_frozen_codex_environment() -> None:
+    source = WORKER_SCRIPT.read_text(encoding="utf-8")
+    assert '"run", "--isolated", "--frozen"' in source
+    assert '"--extra", "gateways", "--extra", "agent-codex"' in source
+    assert "Start-Process -FilePath $Uv" in source
+    assert "command_center.cli.agent_worker" in source
 
 
 def test_unavailable_agent_shows_reason_and_repair_not_bare_message(app_tsx: str) -> None:

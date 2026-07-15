@@ -119,6 +119,51 @@ def test_tee_stands_down_as_a_writer_under_usage_ledger(monkeypatch):
     assert mod._usage_service is None    # tee wrote nothing (never even built it)
 
 
+def test_ledger_refresh_and_health_are_delegated_to_host_worker(monkeypatch):
+    mod, client = _load(monkeypatch, enabled=True, fake=False)
+    monkeypatch.setattr(mod, "USAGE_LEDGER", True)
+    monkeypatch.setattr(mod, "AGENT_SESSIONS_ENABLED", True)
+    # Avoid constructing a real Ledger client: these routes only need the
+    # feature gate before delegating to the injected worker.
+    mod._usage_service = object()
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class Worker:
+        def __init__(self):
+            self.calls = []
+
+        def refresh_usage(self):
+            self.calls.append("refresh")
+            return Response({"collectors_run": 1, "results": [
+                {"collector_id": "codex_app_server",
+                 "runtimes": ["codex_agent"], "alerts_fired": 0}]})
+
+        def usage_collector_health(self):
+            self.calls.append("health")
+            return Response([{"collector_id": "codex_app_server",
+                              "never_ran": False}])
+
+    worker = Worker()
+    mod._agent_worker_client = worker
+
+    refreshed = client.post("/api/model-usage/refresh")
+    assert refreshed.status_code == 200
+    assert refreshed.json()["results"][0]["collector_id"] == "codex_app_server"
+    health = client.get("/api/model-usage/collector-health")
+    assert health.status_code == 200
+    assert health.json()[0]["collector_id"] == "codex_app_server"
+    assert worker.calls == ["refresh", "health"]
+
+
 def test_top_drivers_bad_dimension_is_400(monkeypatch):
     _mod, client = _load(monkeypatch, enabled=True, fake=True)
     client.post("/api/model-usage/refresh")

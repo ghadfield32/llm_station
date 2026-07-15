@@ -501,11 +501,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("board-setup")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
+    p.add_argument("--backend", choices=["internal", "local"], default="internal")
     p.set_defaults(func=cmd_board_setup)
 
     p = sub.add_parser("board-snapshot")
-    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
+    p.add_argument("--backend", choices=["internal", "local"], default="internal")
     p.set_defaults(func=cmd_board_snapshot)
 
     p = sub.add_parser(
@@ -517,7 +517,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("publish-suggestions")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
+    p.add_argument("--backend", choices=["internal", "local"], default="internal")
     p.add_argument("--include-fixtures", action="store_true",
                    help="also publish fixture-sourced example postings (test/demo only)")
     p.set_defaults(func=cmd_publish_suggestions)
@@ -525,7 +525,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("process-selected")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="appflowy")
+    p.add_argument("--backend", choices=["internal", "local"], default="internal")
     p.add_argument("--executor", choices=["auto", "claude", "codex"], default="auto")
     p.set_defaults(func=cmd_process_selected)
 
@@ -534,7 +534,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Full daily pipeline (discover -> publish -> process) for a host "
              "scheduler; no Airflow needed. Use --apply to write.")
     p.add_argument("--apply", action="store_true")
-    p.add_argument("--backend", choices=["appflowy", "local", "internal"], default="internal")
+    p.add_argument("--backend", choices=["internal", "local"], default="internal")
     p.add_argument("--executor", choices=["auto", "claude", "codex"], default="codex")
     p.add_argument("--count", type=int, default=100)
     p.add_argument("--no-process", action="store_true",

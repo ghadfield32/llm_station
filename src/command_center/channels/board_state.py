@@ -171,7 +171,7 @@ def render_board_state(sections: list[BoardSection], knobs: BoardStateKnobs) -> 
     return "\n".join(lines)
 
 
-# The AppFlowy boards surfaced by the UI/snapshot, in display order. mission_intake
+# The first-party boards surfaced by the UI/snapshot, in display order. mission_intake
 # (cards) + todos + dags are kanban-shaped; the research inboxes are triage lanes;
 # library backs the cockpit Books domain (reading list).
 UI_BOARDS = ["mission_intake", "todos", "dags", "papers", "repos", "signals",
@@ -179,8 +179,8 @@ UI_BOARDS = ["mission_intake", "todos", "dags", "papers", "repos", "signals",
 
 
 def all_boards_json(boards: list[str] | None = None) -> list[dict]:
-    """Structured read of each AppFlowy board for the UI snapshot — runs where
-    growthos + AppFlowy creds live (the worker/curator), never in the UI container.
+    """Structured read of each local board for the UI snapshot — runs where
+    Growth OS and the board store live (the worker/curator), not in the UI container.
     Lazily imports growthos; per-board fail-loud: a board that can't be read returns
     {board, error}, never a silently-omitted board."""
     names = boards or UI_BOARDS

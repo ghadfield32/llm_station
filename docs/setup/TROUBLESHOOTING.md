@@ -33,7 +33,6 @@ exact next command for each check.
 | `cc validate` FileNotFoundError on a `configs/*.yaml` | a config registered in CONFIG_CONTRACTS but the file isn't staged/committed | stage the yaml; CI checks out only committed files |
 | `validate: PASS` but CI red on `lint-test` | missing gateway dep at runtime | run/CI with `--extra dev --extra gateways` |
 | `pr-check` checks never report | the PR's changed files don't match the CI `paths`/branch trigger | touch a CI-triggering path (configs/src/tests/pyproject/workflow) |
-| `desktop-action-canary: BLOCKED representative_action_source_not_configured` | no AppFlowy sandbox wired | set `APPFLOWY_SANDBOX_*` in `.env` to a sandbox board, then re-run |
 | `desktop-timing-derive: BLOCKED action_latency_evidence_required…` | only read-only no-op evidence exists | produce real action-latency evidence first (it's not a code bug) |
 | `repo-enable-autonomy: BLOCKED` | a gate fails (devcontainer/CODEOWNERS/branch-protection/board/evidence) | run `cc repo-verify --repo-id <id>` and clear each blocker |
 | `memory-add: BLOCKED` | secret-bearing value or missing `--source-ref` | remove the secret / supply provenance |

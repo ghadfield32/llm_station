@@ -281,9 +281,14 @@ repos/DAGs show health, and upkeep/tasks stay compact.
   is a `command_center_ui` board in `configs/kanban_boards.yaml`; the Jobs
   domain reads the same provider/event-fold that the job-search internal
   backend writes.
+- [x] **7.3a** Posts on an internal board —
+  `linkedin_content_pipeline_internal` is a `command_center_ui` draft/review
+  board. The Posts view has a LinkedIn-style entry composer with configured
+  accounts, live desktop/mobile preview, canonical length/lint checks, and a
+  governed Draft event; publishing remains outside this surface.
 - [x] **7.4** typed SPA view — the React app has a top-level `Domains` view
   with domain switching, per-domain filters, status filtering, typed cards,
-  detail drawer, LinkedIn desktop/mobile preview toggle, honest demo badges,
+  detail drawer, LinkedIn desktop/mobile preview toggle and post entry, honest demo badges,
   designed empty states, and read-only disabled governed verbs unless
   `KANBAN_UI_CHAT_ENABLED=1`.
 - [x] **7.5** validation — `tests/test_domain_surfaces.py`,

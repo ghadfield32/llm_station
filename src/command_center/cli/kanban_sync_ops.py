@@ -4,8 +4,8 @@ The event log is the single source of truth; every surface is a projection.
 `emit` is the only legal writer (wall actions are rejected). `project` folds the
 log into current card state. `verify` compares a surface snapshot to the fold.
 `reconcile` detects drift (repairable) vs conflict (review_required) and can
-write-through repairs to AppFlowy (fail-closed without board env); it never
-approves, merges, or deletes.
+write repair events to the governed local event log; it never approves, merges,
+deploys, or deletes.
 
   cc kanban-emit --action stage_card --board <b> --card <c> --source discord \
       --status-before Backlog --status-after Ready
@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from command_center.kanban_sync import (
-    AppFlowyProjection,
     EventLog,
     GovernanceViolation,
     emit_event,
@@ -110,22 +109,17 @@ def main() -> int:
         return 0 if result["status"] == "pass" else 1
 
     if args.cmd == "reconcile":
-        from command_center.cli.github_app_verify import _merged_env, _read_dotenv
         snapshot = _load_snapshot((ROOT / args.snapshot).resolve())
         result = reconcile(log.read(), snapshot)
         repaired = []
         if args.apply and result.get("drift"):
-            # repair drift only (never conflicts); write-through is fail-closed.
-            # Repair to the reconciler's FOLD target (repair_to), not the card's
-            # last event — the last event may be a progress comment (status None).
-            proj = AppFlowyProjection(env=_merged_env(_read_dotenv(ROOT / ".env")))
-            events_by_card = {e.card_id: e for e in log.read()}
-            for d in result["drift"]:
-                ev = events_by_card.get(d["card_id"])
-                if ev is not None:
-                    repaired.append(proj.write_through(ev, status_label=d["repair_to"]))
+            repaired = [{
+                "card_id": drift["card_id"],
+                "wrote": False,
+                "reason": "first_party_event_log_is_authority_no_projection_write_needed",
+            } for drift in result["drift"]]
         result["repaired"] = repaired
-        result["writes_performed"] = any(r.get("wrote") for r in repaired)
+        result["writes_performed"] = False
         _write((ROOT / args.output).resolve() if args.output else None, result)
         applied = [r for r in repaired if r.get("wrote")]
         not_applied = [r for r in repaired if not r.get("wrote")]

@@ -542,6 +542,26 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """.strip()
 
 
+_USAGE_SAMPLE_ADDITIVE_COLUMNS = (
+    ("model", "TEXT"),
+    ("effort", "TEXT"),
+    ("context_mode", "TEXT"),
+    ("api_equivalent_cost_usd", "REAL"),
+)
+
+
+def _ensure_usage_sample_columns(conn: sqlite3.Connection) -> None:
+    """Idempotently upgrade a durable usage.v1 database in place."""
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(model_usage_samples)")
+    }
+    for name, column_type in _USAGE_SAMPLE_ADDITIVE_COLUMNS:
+        if name not in existing:
+            conn.execute(
+                f"ALTER TABLE model_usage_samples ADD COLUMN {name} {column_type}"
+            )
+
+
 # Experiment lifecycle edges + the human-only wall, mirrored from
 # command_center.improvement.lifecycle. The Ledger enforces the structural walls
 # even on its REST surface: entering Canary/Promoted requires a valid human HMAC
@@ -572,8 +592,9 @@ def init_db():
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("agent_sessions.v1", _now()))
         c.executescript(USAGE_SCHEMA_SQL)
+        _ensure_usage_sample_columns(c)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
-                  "VALUES (?, ?)", ("usage.v1", _now()))
+                  "VALUES (?, ?)", ("usage.v2", _now()))
         c.executescript(CAPTURE_SCHEMA_SQL)
         c.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) "
                   "VALUES (?, ?)", ("capture.v1", _now()))

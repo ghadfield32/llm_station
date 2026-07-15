@@ -36,15 +36,12 @@ uv run cc repo-enable-autonomy --repo-id my_repo --apply           # only after 
 ## Onboarding a board per repo
 
 ```powershell
-# internal-UI board (self-hosted, no AppFlowy creds):
+# first-party board (self-hosted, no external board credentials):
 uv run cc onboard kanban --provider command_center_ui --repo my_repo
-# AppFlowy board (env refs only — no literal ids committed):
-uv run cc onboard kanban --provider appflowy --repo my_repo `
-    --workspace-ref env:APPFLOWY_WORKSPACE_ID --board-ref env:MY_REPO_BOARD_ID
 ```
 
-Both go through the **same board registry and action layer** — model code never
-writes AppFlowy directly. Canonical statuses + the wall verb set are applied
+The board goes through the shared registry and governed action layer — model code
+never writes board storage directly. Canonical statuses + the wall verb set are applied
 automatically; wall verbs (approve/merge/deploy/delete) are forbidden on every
 board by construction.
 

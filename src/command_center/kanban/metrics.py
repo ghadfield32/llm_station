@@ -19,7 +19,7 @@ from pathlib import Path
 from statistics import median
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-_DEFAULT_LOG = REPO_ROOT / "appflowy_kanban" / "growth-os" / "_export" / "agent_calls.jsonl"
+_DEFAULT_LOG = REPO_ROOT / "growth_os" / "_export" / "agent_calls.jsonl"
 
 # The agent-facing board-transition verbs (Phase 2) and the canonical column each
 # targets — the single declared contract. The validate gate asserts every target is

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-GROWTHOS = Path(__file__).resolve().parents[1] / "appflowy_kanban" / "growth-os"
+GROWTHOS = Path(__file__).resolve().parents[1] / "growth_os"
 sys.path.insert(0, str(GROWTHOS))
 
 from growthos import actions  # noqa: E402

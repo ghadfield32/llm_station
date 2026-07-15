@@ -40,7 +40,7 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "require_ruleset_bypass_actors_absent=True" in baseline
     assert "ruleset_bypass_policy_source=GitHub wall requires no unverified" in baseline
     assert "repo `llm_station` autonomous edits blocked" not in gaps
-    assert "desktop target `appflowy_browser_staging` blocked" in gaps
+    assert "desktop target `cockpit_browser_staging` blocked" in gaps
     assert "GitHub App auth is `blocked` pending auth requirements" not in gaps
     assert "GitHub App production auth review pending" not in gaps
     assert ".env` was not read" in privacy
@@ -67,7 +67,7 @@ def test_system_validation_writes_evidence_package(tmp_path):
     assert "github_app_repository_permissions_verified" in next_steps
     assert "branch_protection_owner_admin_verifier_added" in next_steps
     assert "github_token_storage_rotation_policy_drafted" in next_steps
-    assert "staging_appflowy_card_state_in_progress_verified" in next_steps
+    assert "staging_cockpit_card_state_in_progress_verified" in next_steps
     assert "desktop_adapter_readiness_gate_added" in next_steps
     assert "branch_protection_observer_token_supplied_and_repo_read_verified" in next_steps
     assert "branch_protection_ruleset_diagnostics_added" in next_steps
@@ -98,8 +98,8 @@ def test_system_validation_surfaces_desktop_adapter_blockers(tmp_path):
         json.dumps({
             "status": "blocked",
             "blockers": [
-                "desktop_target_appflowy_browser_staging_ttl_measurement_missing",
-                "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing",
+                "desktop_target_cockpit_browser_staging_ttl_measurement_missing",
+                "desktop_target_cockpit_browser_staging_action_timeout_measurement_missing",
             ],
         }),
         encoding="utf-8",
@@ -110,11 +110,11 @@ def test_system_validation_surfaces_desktop_adapter_blockers(tmp_path):
     gaps = (run_dir / "GAPS.md").read_text(encoding="utf-8")
     assert (
         "desktop adapter: "
-        "desktop_target_appflowy_browser_staging_ttl_measurement_missing"
+        "desktop_target_cockpit_browser_staging_ttl_measurement_missing"
     ) in gaps
     assert (
         "desktop adapter: "
-        "desktop_target_appflowy_browser_staging_action_timeout_measurement_missing"
+        "desktop_target_cockpit_browser_staging_action_timeout_measurement_missing"
     ) in gaps
 
 
@@ -124,7 +124,7 @@ def test_system_validation_surfaces_desktop_noop_and_timing_blockers(tmp_path):
     (run_dir / "desktop-noop-canary.json").write_text(
         json.dumps({
             "status": "blocked",
-            "blockers": ["desktop_noop_canary_appflowy_browser_staging_snapshot_missing"],
+            "blockers": ["desktop_noop_canary_cockpit_browser_staging_snapshot_missing"],
         }),
         encoding="utf-8",
     )
@@ -141,7 +141,7 @@ def test_system_validation_surfaces_desktop_noop_and_timing_blockers(tmp_path):
     gaps = (run_dir / "GAPS.md").read_text(encoding="utf-8")
     assert (
         "desktop noop canary: "
-        "desktop_noop_canary_appflowy_browser_staging_snapshot_missing"
+        "desktop_noop_canary_cockpit_browser_staging_snapshot_missing"
     ) in gaps
     assert "desktop timing: insufficient_noop_canary_telemetry" in gaps
 

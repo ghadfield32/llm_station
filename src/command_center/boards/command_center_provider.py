@@ -161,7 +161,7 @@ class CommandCenterBoardProvider(BoardProvider):
                      status_label: str | None = None) -> dict[str, Any]:
         # the event log IS this provider's surface: an already-emitted event is
         # already projected; nothing further to write. Refuse human-owned labels
-        # for parity with the AppFlowy projection contract.
+        # for parity with the external projection contract.
         label = status_label or event.status_after
         if is_human_owned_status(label):
             return {"status": "refused", "card_id": event.card_id,

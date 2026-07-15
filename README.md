@@ -33,8 +33,7 @@ git clone --recurse-submodules https://github.com/ghadfield32/llm_station.git
 cd llm_station
 ```
 
-`--recurse-submodules` pulls **AppFlowy-Cloud** (the self-hosted board server) into
-`appflowy_kanban/AppFlowy-Cloud`. Already cloned without it? `git submodule update --init --recursive`.
+`--recurse-submodules` also restores the read-only AppFlowy retirement archive. It is not part of current startup; see [`archive/appflowy/README.md`](archive/appflowy/README.md).
 
 ### 2 — One button: bring up the control plane
 
@@ -69,25 +68,16 @@ Now message your bot: *"what's on my todo board?"* or *"draft a mission card: ad
 the odds DAG, L2, repo betts_basketball."* It routes through your local model to the action layer —
 and **cannot** approve its own mission cards (you drag the card to Approved; that's the wall).
 
-### 4 — (Optional) Stand up AppFlowy boards
+### 4 — Use the first-party cockpit
 
-AppFlowy Cloud is the **human surface** — todos, mission cards, a 275-book library. One command
-brings up the board server + the Growth OS curator:
-
-```bash
-uv run cc start --appflowy   # scaffolds both .env files + brings up the board server + curator
-```
-
-Then point the **AppFlowy desktop/mobile app** ([download](https://appflowy.io)) at the printed URL,
-sign up a user, put the creds in `appflowy_kanban/growth-os/.env`, and run `setup_workspace.py`
-(it prints the exact steps). Full detail: [`appflowy_kanban/growth-os/README.md`](appflowy_kanban/growth-os/README.md).
-`appflowy-init` uses AppFlowy's shipped localhost defaults — fine for local/tailnet; **rotate the
-secrets before any public exposure**.
+AppFlowy was retired on 2026-07-14. The owned cockpit now provides boards,
+typed domain cards, agent sessions, post composition, and governed local state.
+The former deployment remains under [`archive/appflowy/`](archive/appflowy/) only
+for provenance; it has no startup command and requires no credentials.
 
 ### 5 — Cockpit on desktop and phone
 
-The first-party cockpit is the main product surface now; AppFlowy is optional
-projection/fallback. Start it with:
+The first-party cockpit is the product surface now. Start it with:
 
 ```bash
 docker compose --profile ui up -d --build agent-kanban-ui
@@ -147,7 +137,7 @@ Docker is the engine, not the entrypoint. One `docker compose up -d`:
 
 So: use **`cc start` for the first boot**, then **`docker compose up -d` / `cc up` for every boot after**.
 The portable `cc` command also adds conveniences the raw compose file can't: `cc open` (open the
-dashboards), `cc channel <name>` (guided channel setup), `cc start --appflowy`/`--hermes`. Run
+dashboards), `cc channel <name>` (guided channel setup), `cc start --hermes`. Run
 `uv run cc help` for the full list. The **Hermes** UI is opt-in (`cc start --hermes`) and currently a
 placeholder — set a real `hermes` image in `docker-compose.yml` first (see [STATUS.md](docs/operations/STATUS.md)).
 
@@ -210,7 +200,8 @@ command-center/
 ├── services/                # judge_gate (+ judgectl), ledger, proactive_runner
 ├── tests/                   # contract regression tests (pytest; run by CI)
 ├── repo-template/           # per-repo: pre-commit, CI, CODEOWNERS, pre-push gate, devcontainer
-├── appflowy_kanban/         # Growth OS curator + AppFlowy-Cloud (pinned submodule)
+├── growth_os/               # first-party action/memory/curation harness
+├── archive/appflowy/         # retired AppFlowy source/setup, provenance only
 └── docs/                    # SETUP-FROM-SCRATCH, MASTER, channels, runbook, github-safety, …
 ```
 
@@ -226,7 +217,7 @@ Run `uv run cc help` (or `make help`) for the full list. The maintenance loop is
 # lifecycle
 cc doctor          # green/red preflight
 cc init-env        # create .env with local secrets
-cc start           # ONE BUTTON first boot (+ --appflowy / --channel NAME / --hermes)
+cc start           # ONE BUTTON first boot (+ --channel NAME / --hermes)
 cc up / down       # control plane (steady state)
 cc keys            # mint budgeted LiteLLM virtual keys into .env
 cc health          # all services OK?
@@ -286,14 +277,14 @@ The full system — every pipeline stage, the module tree, model lanes, and the 
 
 More surfaces: [`docs/architecture/ui-options.md`](docs/architecture/ui-options.md) (phone, CLI, VS Code Remote Tunnel,
 dashboards) · [`docs/architecture/channels.md`](docs/architecture/channels.md) (per-platform token steps) ·
-[`docs/kanban/kanban-integration.md`](docs/kanban/kanban-integration.md) (AppFlowy cards → Ledger missions).
+[`docs/kanban/kanban-integration.md`](docs/kanban/kanban-integration.md) (first-party cards → governed events → Ledger missions).
 
 ---
 
 ## Cost
 
 **Running it locally costs $0 in cloud charges** — the default, and how it runs today. Everything
-(LiteLLM, Judge Gate, Ledger, AppFlowy, Ollama) is Docker on your own machine:
+(LiteLLM, Judge Gate, Ledger, the cockpit, and Ollama) runs on your own machine:
 
 - **Model calls** route through LiteLLM to **local Ollama** — no provider API charges, ever.
 - **Claude Code / Codex** executor work uses your existing **subscription/login**, not metered billing.

@@ -1,52 +1,41 @@
 # Adding a kanban board
 
-Boards live in `configs/kanban_boards.yaml` (contract `KanbanBoardsConfig`). One
-`board_id` maps a surface (**AppFlowy** or the **internal Command Center UI**) to
-the repos it drives, the canonical status workflow, required mission-card fields,
-and the agent verb contract. Both providers share **one** action contract.
+Boards live in `configs/kanban_boards.yaml` under `KanbanBoardsConfig`. Every
+active board uses the first-party `command_center_ui` provider and shares the
+same governed event log, card store, status contract, and approval wall.
 
 ## Register
 
 ```bash
 uv run cc kanban-register \
   --board-id betts_board \
-  --provider appflowy \                # or: command_center_ui
-  --workspace-ref env:APPFLOWY_WORKSPACE_ID \   # appflowy MUST be an env: ref
-  --board-ref betts_intake \
+  --provider command_center_ui \
+  --workspace-ref self \
+  --board-ref betts_board \
   --repo-id betts_basketball
 ```
 
-Dry-run by default (prints the validated block). `--apply` writes it. AppFlowy
-`workspace_ref` must be an `env:` reference — an inline value is rejected so no
-workspace secret lands in config.
+Dry-run is the default; `--apply` writes the validated block. No board credential
+or external workspace reference is accepted.
 
-## The canonical contract (enforced by the schema)
+## Contract
 
-- **Statuses** (all seven required): `backlog, ready, in_progress, done, blocked,
-  rejected, awaiting_approval`, each mapped to a provider label.
-- **Granted verbs** (the agent may do): `add_mission_card, stage_card,
-  start_todo, finish_todo, block_card, reject_card`.
-- **Wall verbs** (forbidden on every board, always): `approve_card, merge,
-  deploy, delete_card, delete_board`. A board cannot grant these.
+- All canonical statuses are mapped: `backlog`, `ready`, `in_progress`, `done`,
+  `blocked`, `rejected`, and `awaiting_approval`.
+- Grantable agent verbs are `add_mission_card`, `stage_card`, `start_todo`,
+  `finish_todo`, `block_card`, and `reject_card`.
+- `approve_card`, `merge`, `deploy`, `delete_card`, and `delete_board` remain
+  forbidden on every board.
 
-This is why switching surfaces (AppFlowy ⇄ internal UI) is safe: the approval/merge
-wall can't be bypassed by adding a board.
-
-## Verify
+Bind a specialized card view in `configs/domain_surfaces.yaml` with
+`source: board_store` and the same `board_id`, then run:
 
 ```bash
+uv run cc validate
 uv run cc kanban-verify --board-id betts_board
-# with a board snapshot, it also flags duplicate MissionIDs + unredacted secrets:
-uv run cc kanban-verify --board-id betts_board --snapshot generated/board-snapshot.json
+uv run cc kanban-sync --dry-run
 ```
 
-The snapshot check reports **NOT_RUN** when no snapshot is supplied (never faked).
-
-## Plan a sync (read-only)
-
-```bash
-uv run cc kanban-sync --dry-run        # plan: boards -> repos / status mapping; no writes
-```
-
-Actual card mutation stays with `cc kanban-bridge --apply` (AppFlowy cards ->
-Ledger missions). `kanban-sync` is a planner only.
+Normal mutation happens through the cockpit or `cc kanban-emit`; both use the
+same event writer. AppFlowy was retired in
+[the 2026-07-14 decision](../decisions/2026-07-14-appflowy-retirement.md).

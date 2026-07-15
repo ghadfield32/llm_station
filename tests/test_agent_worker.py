@@ -59,6 +59,28 @@ def test_worker_owned_usage_captures_a_rate_limit_headlessly():
     assert detail["availability"] == "near_limit"
 
 
+def test_worker_owns_provider_collector_refresh_and_health_routes():
+    from command_center.usage.collectors.fake import FakeCollector
+    from command_center.usage.service import UsageService
+    from command_center.usage.store import UsageStore
+
+    usage = UsageService(UsageStore())
+    app = build_app(
+        store=SessionStore(), token=TOKEN, usage_service=usage,
+        usage_collectors=[(FakeCollector(), "fake")])
+    client = TestClient(app)
+
+    refreshed = client.post(
+        "/api/model-usage/refresh", headers=_auth()).json()
+    assert refreshed["collectors_run"] == 1
+    assert refreshed["results"][0]["collector_id"] == "fake"
+
+    health = client.get(
+        "/api/model-usage/collector-health", headers=_auth()).json()
+    assert [row["collector_id"] for row in health] == ["fake"]
+    assert health[0]["never_ran"] is False
+
+
 def _wait_for_events(client, session_id, *, min_count, after_sequence=0, timeout=2.0):
     """POST /messages is fire-and-forget (202 Accepted, a background task —
     see worker_app.py's async execution-model correction), so a caller that

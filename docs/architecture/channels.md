@@ -50,7 +50,7 @@ platform event ──► adapter (discord.py / slack.py / telegram.py / whatsapp
                       │  LiteLLM /chat/completions tool-call loop (<= max_rounds),
                       │  repeat-call breaker + forced final answer, errors surfaced
                       ▼
-              growthos action layer  ──►  AppFlowy / Ledger (gated)
+              growthos action layer  ──►  board store / Ledger (gated)
 ```
 
 - **`core.py`** holds the only logic: the LiteLLM tool loop, the shared system prompt,

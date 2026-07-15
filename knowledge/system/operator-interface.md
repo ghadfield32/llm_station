@@ -41,9 +41,9 @@ Operator commands (`make <target>`; Windows: `.\scripts\cc.ps1 <target>`).
 - `make proactive-validate` — Validate configs/proactive.yaml against its contract
 - `make proactive-smoke` — Dry-run proactive lanes: list schedules, actions, write/risk caps (no calls)
 - `make targets-validate` — Validate configs/targets.yaml (the watch inventory)
-- `make kanban-validate` — Validate configs/kanban.yaml (AppFlowy/GrowthOS intake)
-- `make kanban-bridge` — Dry-run AppFlowy mission_intake -> Ledger mission drafts. APPLY=1 opens missions.
-- `make appflowy-audit` — Read-only audit of AppFlowy board fields/views/blank starter rows. DETAILS=1 samples rows.
+- `make kanban-validate` — Validate the first-party kanban intake contract
+- `uv run cc kanban-verify --all` — Verify every registered first-party board.
+- `uv run cc kanban-project` — Project governed events into local board state.
 - `make tools-validate` — Validate configs/tools.yaml (tool permission registry)
 - `make evals` — Run the routing/judge regression suite against gates (no model calls)
 - `make cross-refs` — Check proactive targets exist in targets.yaml (cross-file lint)
@@ -62,8 +62,6 @@ Operator commands (`make <target>`; Windows: `.\scripts\cc.ps1 <target>`).
 - `make health` — Check every service health endpoint
 - `make models` — Validate+render, pull local tags, restart litellm
 - `make models-light` — Switch to the small-GPU/CPU profile (qwen3:8b), pull it, re-render
-- `make appflowy-init` — Scaffold AppFlowy-Cloud/.env + growth-os/.env from templates (no clobber)
-- `make appflowy-up` — Start the AppFlowy board server + Growth OS curator stacks
 - `make models-canary` — Route ~10% of a role to a local challenger. ROLE= MODEL=ollama_chat/tag
 - `make models-promote` — Promote canary to primary for ROLE=
 - `make models-rollback` — Revert canary for ROLE=
@@ -73,7 +71,7 @@ Operator commands (`make <target>`; Windows: `.\scripts\cc.ps1 <target>`).
 - `make usage-report` — Alias for usage-digest
 - `make kanban-digest` — Write generated/kanban-digest.md — agent-surface metrics + tuning verdict (real data)
 - `make kanban-surface-validate` — Blocking N/N gate for the agent kanban surface (config/leakage/verbs/tuning)
-- `make kanban-board-snapshot` — Write generated/board-snapshot.json for the UI (run on the worker; needs growthos + AppFlowy creds)
+- `make kanban-board-snapshot` — Write generated/board-snapshot.json for the UI (run on the worker; uses the local Growth OS board store)
 - `make live-smoke` — Print real local model replies through Ollama/LiteLLM. TRIAGE=triage PLANNER=planner JUDGE=local-judge
 - `make repo-install` — Install hooks + devcontainer + standards into a repo. REPO=/path [PROFILE=python_ml_pipeline]
 - `make backup` — restic snapshot (see docs/setup/SETUP-FROM-SCRATCH.md, Backups)

@@ -21,6 +21,7 @@ GENERATED_KEYS = {
     "LITELLM_MASTER_KEY": lambda: "sk-master-" + secrets.token_urlsafe(32),
     "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(32),
     "LEDGER_APPROVAL_SECRET": lambda: secrets.token_urlsafe(32),
+    "AGENT_WORKER_TOKEN": lambda: secrets.token_urlsafe(48),
 }
 
 
@@ -46,7 +47,7 @@ def main() -> int:
             rendered.append(line)
 
     DEST.write_text("\n".join(rendered) + "\n", encoding="utf-8")
-    print("created .env with generated LiteLLM/Postgres/Ledger secrets")
+    print("created .env with generated local service and agent-worker secrets")
     print("do not add OpenAI/Anthropic/OpenRouter API keys to this file")
     print("fill HERMES_LITELLM_KEY and JUDGE_GATE_LITELLM_KEY after make keys")
     return 0

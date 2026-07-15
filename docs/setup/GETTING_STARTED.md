@@ -31,14 +31,15 @@ uv run cc start           # one button: doctor -> build -> up -> health -> open 
 uv run cc live-smoke      # prove real local replies through Ollama -> LiteLLM
 ```
 
-Pick your board surface:
+The first-party Command Center cockpit is the board surface; `cc start` brings it
+up. For just the UI container use:
 
-- **AppFlowy** (drag-to-approve boards): `uv run cc start --appflowy`.
-- **Internal Command Center UI** (the recommended cockpit; `uv run cc start`
-  already brings it up): `docker compose --profile ui up -d --build agent-kanban-ui`.
+```bash
+docker compose --profile ui up -d --build agent-kanban-ui
+```
 
-Both drive the **same action contract** — see [ADDING_A_KANBAN.md](ADDING_A_KANBAN.md).
-
+AppFlowy is archived and is not a startup option. See
+[the retirement decision](../decisions/2026-07-14-appflowy-retirement.md).
 ## 3. Verify the autonomy loop is wired
 
 ```bash

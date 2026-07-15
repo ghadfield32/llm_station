@@ -2,7 +2,7 @@
 Self-improvement scan → human-gated Kanban cards.
 
 Closes the "report on how to self-improve every day and apply those if approved" loop: the daily
-scan's top-ranked findings become DRAFT cards on the AppFlowy `mission_intake` board (Status =
+scan's top-ranked findings become DRAFT cards on the external board runtime `mission_intake` board (Status =
 Backlog). They become real work ONLY after the human drags one to Approved, which the existing
 Kanban bridge turns into a gated Ledger mission. Observer-only — this drafts to Backlog and can
 never approve (there is no approve verb; staging to Approved is a human drag).
@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .pipeline import ScanReport
 
-_GROWTHOS_ROOT = Path(__file__).resolve().parents[4] / "appflowy_kanban" / "growth-os"
+_GROWTHOS_ROOT = Path(__file__).resolve().parents[4] / "growth_os"
 # add_mission_card validates risk as bare L0–L4; our findings carry "L2_local_edits" etc.
 _VALID_RISK = {"L0", "L1", "L2", "L3", "L4"}
 

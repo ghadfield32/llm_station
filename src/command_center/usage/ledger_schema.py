@@ -28,7 +28,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = "usage.v1"
+SCHEMA_VERSION = "usage.v2"
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS model_usage_samples (
@@ -171,11 +171,32 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_USAGE_SAMPLE_ADDITIVE_COLUMNS = (
+    ("model", "TEXT"),
+    ("effort", "TEXT"),
+    ("context_mode", "TEXT"),
+    ("api_equivalent_cost_usd", "REAL"),
+)
+
+
+def _ensure_usage_sample_columns(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after usage.v1 to an existing durable Ledger."""
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(model_usage_samples)")
+    }
+    for name, column_type in _USAGE_SAMPLE_ADDITIVE_COLUMNS:
+        if name not in existing:
+            conn.execute(
+                f"ALTER TABLE model_usage_samples ADD COLUMN {name} {column_type}"
+            )
+
+
 def migrate(conn: sqlite3.Connection) -> str:
     """Apply the usage DDL to ``conn`` (idempotent) and record the schema
     version. Additive — safe against a ledger.db already holding the mission/
     experiment/agent-session tables."""
     conn.executescript(SCHEMA_SQL)
+    _ensure_usage_sample_columns(conn)
     conn.execute(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
         (SCHEMA_VERSION, _now()),

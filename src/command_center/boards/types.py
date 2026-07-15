@@ -30,7 +30,7 @@ class UnsupportedOperation(RuntimeError):
 @dataclass(frozen=True)
 class BoardCapabilities:
     """What a board backend can do. Flags describe the BACKEND's API surface;
-    a False here is a hard limit (AppFlowy REST gaps) or a deliberate wall
+    a False here is a deliberate governance wall
     (agents never delete cards on any provider)."""
 
     provider: str
@@ -41,19 +41,6 @@ class BoardCapabilities:
     supports_custom_card_rendering: bool
     supports_live_sync: bool
 
-
-# AppFlowy self-hosted REST API (verified 2026-07-08): row upsert/read only.
-# No row delete, no view group-by, no select-option creation (upstream #8665:
-# select writes can silently no-op on some versions — why writes verify after).
-APPFLOWY_CAPABILITIES = BoardCapabilities(
-    provider="appflowy",
-    supports_delete_row=False,
-    supports_group_by_api=False,
-    supports_select_option_create=False,
-    supports_mobile_native=True,
-    supports_custom_card_rendering=False,
-    supports_live_sync=False,
-)
 
 # Internal provider: full control over the event log + card store; deletion is
 # still False because delete_card is a wall verb on every provider — that is

@@ -51,11 +51,11 @@ generated/improvements-board.json
 updated files
 
 # ── AppFlowy / GrowthOS local state & backups (kept on disk, never pushed) ──
-appflowy_kanban/backups/
-appflowy_kanban/files.zip
-appflowy_kanban/extracted/
-appflowy_kanban/growth-os/_state/
-appflowy_kanban/growth-os/_export/
+archive/appflowy/backups/
+archive/appflowy/files.zip
+archive/appflowy/extracted/
+growth_os/_state/
+growth_os/_export/
 
 # ── Disposable generated output (regenerate: `make render` / `make schema`) ─
 generated/litellm-config.yaml

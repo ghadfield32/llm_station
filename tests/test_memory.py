@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-_GROWTHOS = Path(__file__).resolve().parents[1] / "appflowy_kanban" / "growth-os"
+_GROWTHOS = Path(__file__).resolve().parents[1] / "growth_os"
 sys.path.insert(0, str(_GROWTHOS))
 
 from growthos.memory import (  # noqa: E402
