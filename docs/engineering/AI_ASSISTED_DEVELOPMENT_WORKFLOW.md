@@ -49,20 +49,29 @@ Route work by **capability profile**, not by a permanently hardcoded model
 name. Model names, aliases, CLI support, context limits, and provider quotas
 change. The workflow should remain stable when the preferred model changes.
 
+**Codex-side executors consolidate to the Sol family only** (2026-07-16
+policy). `deep_code` and `throughput` are filled by the same model — Sol —
+differentiated by **reasoning effort**, not by which model answers. This
+removes a failure class where a session silently used a stale or wrong model
+name for one profile but not the other.
+
 The current preferred mapping is:
 
 | Capability profile | Current preferred model family | Primary work |
 | --- | --- | --- |
 | `strategic_steward` | Fable 5 (`fable` or the current Fable model ID) | High-level architecture, planning, methodology, documentation, threat modeling, security review, validation design, and final semantic integration |
-| `deep_code` | Sol-capable GPT/Codex (`gpt-*-sol` or its current successor) | Difficult implementation, cross-module coding, concurrency/state work, hard debugging, migrations, performance-sensitive code, and adversarial code review |
+| `deep_code` | Sol-capable GPT/Codex (`gpt-*-sol` or its current successor), reasoning effort **`xhigh`** as the standing default, escalating to the strongest tier the live catalog exposes for the hardest segments | Difficult implementation, cross-module coding, concurrency/state work, hard debugging, migrations, performance-sensitive code, and adversarial code review |
 | `generalist` | Opus (`opus` or the current Opus model ID) | Most day-to-day engineering: repository exploration, normal implementation, tests, documentation, review, and coordination across a bounded task |
-| `throughput` | Terra (`terra` or the current Terra model ID when exposed by the installed catalog) | A large share of well-specified implementation, targeted tests, mechanical refactors, inventories, evidence collection, and low/medium-risk documentation updates |
-| `independent_verifier` | A fresh model/session chosen for independence and the artifact being reviewed | Read-only plan or diff review; use Fable-class judgment for architecture/security/validation and Sol/GPT-class judgment for deep code paths when available |
+| `throughput` | Sol-capable GPT/Codex (`gpt-*-sol` or its current successor), reasoning effort **`high`** as the standing default | A large share of well-specified implementation, targeted tests, mechanical refactors, inventories, evidence collection, and low/medium-risk documentation updates |
+| `independent_verifier` | A fresh model/session chosen for independence and the artifact being reviewed | Read-only plan or diff review; use Fable-class judgment for architecture/security/validation and Sol-class judgment (effort matched to risk) for deep code paths when available |
 
 These mappings express **intended use**, not an unsupported claim that one
 family is universally stronger. A model may serve more than one profile after
 role-specific evaluation, but the task packet must still name the profile it
-is filling.
+is filling. Parallelization comes from running multiple concurrent Sol
+sessions in separate worktrees (not from switching to a cheaper model
+family) — a `deep_code` session at `xhigh` for the hard segment, one or more
+`throughput` sessions at `high` for the broad segment.
 
 ### Selection procedure
 
@@ -86,12 +95,20 @@ Resolve those fields in this order:
 2. Query the installed harness's live model catalog when it has one. For
    aliases without a live catalog, verify the installed CLI accepts the alias.
 3. Resolve the preferred family to the exact available model and supported
-   reasoning effort; record both in the session/mission evidence.
+   reasoning effort; record both in the session/mission evidence. Within the
+   Sol family, default `throughput` to `high` and `deep_code` to `xhigh` (or
+   the strongest tier the live catalog exposes); do not drop below `high` as
+   a default for either — `low`/`medium` are for trivial, unambiguously
+   low-risk confirmatory checks only, and that choice must be recorded.
 4. Confirm context/tool requirements and the executor's read/write mode before
    starting the task.
 5. If the preferred model is unavailable, use another model already qualified
    for the **same capability profile**. Otherwise stop and escalate; do not
    silently substitute a lower-assurance profile for high-risk work.
+6. When a task proceeded on a documented unavailable-profile exception, its
+   deferred independent review is a standing debt. Before merge, re-verify
+   availability; if the profile is now reachable, run the originally-required
+   review rather than treating the exception as permanently closed.
 
 `configs/agent-session-models.yaml` may hold a preferred runtime model, but it
 does not override the required capability profile. Its SDK-default fallback is
@@ -111,11 +128,13 @@ profile. Record the actual model; never infer it from an alias alone.
   Escalate novel architecture, ambiguous security behavior, or a failing
   acceptance gate rather than improvising.
 - For security-sensitive changes, pair a Fable-class semantic/threat review
-  with a Sol/GPT-class code-path review when both are available.
-- For implementation performed by Sol/GPT, prefer a fresh Fable- or Opus-class
-  semantic reviewer. For implementation performed by Opus or Terra, prefer a
-  fresh Sol/GPT code reviewer for complex code and Fable for architecture or
-  security. A reviewer must not approve its own prior output.
+  with a Sol-class code-path review when both are available.
+- For implementation performed by Sol (either `deep_code` or `throughput`
+  tier), prefer a fresh Fable- or Opus-class semantic reviewer, or a fresh Sol
+  session — never the implementing session — for a second code-focused pass
+  on high-risk work. For implementation performed by Opus, prefer a fresh Sol
+  code reviewer for complex code and Fable for architecture or security. A
+  reviewer must not approve its own prior output.
 - Prefer a different model family/provider for independent review. If that is
   unavailable, require a fresh read-only context, disclose the reduced
   independence, and rely on deterministic gates rather than presenting the
@@ -130,9 +149,38 @@ repetitive extraction or formatting with deterministic checks. Effort labels
 are harness-specific; record the resolved value rather than assuming every
 model supports the same vocabulary.
 
+For the Sol family specifically: `high` is the standing default for all
+Sol-routed work (both `deep_code` and `throughput`); escalate to `xhigh` (or
+the strongest tier the live catalog exposes) for migrations,
+concurrency/durable-state, security/leakage-sensitive code, and final
+high-risk diff reviews. Use `low`/`medium` only for trivial confirmatory
+checks, never as the default.
+
 Do not route solely on context-window size. Split an oversized task into
 contracted slices when possible; use a long-context model only when the
 cross-file relationships themselves must be reasoned about together.
+
+### Destructive-action double-agreement gate
+
+Any action that deletes, drops, truncates, force-overwrites, or otherwise
+cannot be trivially undone requires, before it is even proposed to the user:
+
+1. The proposing agent states the exact target and the concrete evidence
+   that it is safe (confirmed orphaned, confirmed unreferenced, etc.).
+2. A second, independent model — not the one proposing it — confirms or
+   refutes the claim (Sol confirming a Claude-proposed deletion, or Claude
+   confirming a Sol-proposed one). Two sessions of the same model do not
+   satisfy this unless no other model is reachable, and that reduced
+   independence must be disclosed.
+3. Only after both agree is the action presented to the user, with the exact
+   command, both confirmations, and what would be lost if wrong.
+4. The user gives explicit, current-turn approval; a prior approval for a
+   similarly-shaped action does not carry forward.
+5. If either model is unavailable or the two disagree, do not proceed —
+   surface the disagreement to the user.
+
+This is an additional pre-check and does not replace the operator-control
+requirements in A10 or the safety boundaries below.
 
 ### Model qualification, promotion, and retirement
 
@@ -217,6 +265,39 @@ worktree. It must:
 LLM Station model work must distinguish quality evaluation from serving
 evaluation. Any time-ordered learning work needs past-only inputs and temporal
 splits; do not claim evidence that has not been produced from real data.
+
+### Goal-driven KPI leaderboard loop
+
+Run every non-trivial improvement or evaluation task as a champion-challenger
+loop against a persistent KPI leaderboard, not a one-shot.
+
+1. **Frame.** Define the KPI(s) and the goal (target plus stop condition) from
+   data, never an invented threshold. Record the current champion (the best
+   existing result) as the baseline; with no champion, the first validated
+   attempt becomes it. Keep quality-evaluation KPIs distinct from
+   serving-evaluation KPIs.
+2. **Attempt (loop body).** Produce one challenger through the full workflow:
+   bounded packet, Sol implementation at the effort tier matching the risk,
+   deterministic verification (`make validate` / `make test` / `uv run cc
+   doctor` as applicable), and a fresh independent review. No fake or default
+   values; for time-ordered work use past-only inputs and temporal splits.
+3. **Evidence gate.** A challenger reaches the leaderboard only with
+   reproducible runtime evidence from real data — historical where the task is
+   time-ordered, plus a current run — and passing validations and tests. An
+   unproven attempt does not score.
+4. **Leaderboard.** Append each validated challenger's KPIs with provenance
+   (commit, config/contract version, exact command, exit status) to the ranked
+   leaderboard artifact. Promote to champion only when it beats the incumbent
+   on the agreed metric and clears the same gates. Do not bypass the Ledger or
+   the kanban/mission approval flow to record or promote a result.
+5. **Goal check, then keep improving.** When the goal is met and validated,
+   report it with the leaderboard, then keep looping challenger attempts to
+   push past it until diminishing returns, budget exhaustion, or the user's
+   stop.
+6. **Stop honestly.** A metric gain alone never promotes: require baselines,
+   coverage, calibration/uncertainty where applicable, and out-of-time
+   behavior. Report regressions and dropped coverage; never silently truncate
+   the search or the leaderboard.
 
 ## A6 — Deterministic verification
 
