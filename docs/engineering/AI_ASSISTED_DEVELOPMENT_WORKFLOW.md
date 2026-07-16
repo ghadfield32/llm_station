@@ -266,6 +266,36 @@ LLM Station model work must distinguish quality evaluation from serving
 evaluation. Any time-ordered learning work needs past-only inputs and temporal
 splits; do not claim evidence that has not been produced from real data.
 
+### Sol write-mode implementation and reviewer independence
+
+`deep_code` and `throughput` work is implemented by **Sol writing code
+directly**, not by Claude or Opus implementing on Sol's behalf. The write-mode
+invocation is `codex exec --sandbox workspace-write --full-auto -C
+<isolated-worktree>`, with these invariants:
+
+- **Isolated worktree only.** Sol writes in a dedicated worktree or clone, never
+  the shared checkout — this contains the blast radius of an approvals-off
+  (`--full-auto`) agent, which holds no other session's uncommitted work and is
+  discarded after the branch is pushed. Never use `--sandbox
+  danger-full-access`, and never point write-mode at the shared working tree.
+- **Every gate and wall still applies.** Sol's output goes through the same
+  deterministic verification (`make validate`/`make test`, `uv run cc doctor`),
+  fresh independent review, Ledger and kanban/mission approval, and
+  operator-controlled merge. Sol writing changes only who holds the pen.
+- **A blocked write is a blocker, not a fallback.** If the harness policy
+  classifier blocks `codex exec --sandbox workspace-write` (it treats an
+  approvals-off write-and-execute agent as unsafe by default), surface it to the
+  operator, who can allow the pattern with a scoped `Bash(codex exec --sandbox
+  workspace-write:*)` permission rule. Do not silently transfer the
+  implementation to Claude or Opus and log it as a routine substitution
+  exception — when the exception fires every session it has become the default
+  and the allocation contract is hollow.
+
+Reviewer independence is assigned by authorship — no model or session reviews
+its own output: Claude or Opus implemented → **Sol** reviews (fresh, read-only);
+Sol implemented → **Fable, Opus, or a fresh Sol session** reviews, never the
+implementing or a resumed session.
+
 ### Goal-driven KPI leaderboard loop
 
 Run every non-trivial improvement or evaluation task as a champion-challenger

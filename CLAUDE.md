@@ -70,6 +70,22 @@ friction is not "unavailable" — fix the worktree/sandbox first. Record in ever
 medium/high-risk packet: required profile, resolved model + effort, availability
 evidence, fallback rule, independent-review profile, and the work allocation.
 
+**Sol write-mode implementation.** `deep_code`/`throughput` work means **Sol
+writes the code**, not Claude/Opus on Sol's behalf: `codex exec --sandbox
+workspace-write --full-auto -C <isolated worktree>` — always a dedicated
+worktree/clone, never the shared checkout, never `--sandbox danger-full-access`.
+The normal verify → independent-review → operator-merge gates (and the Ledger /
+kanban approval walls) still apply. If the harness policy classifier blocks the
+write (it treats an approvals-off write+exec agent as unsafe by default), that
+is a **blocker to surface to the operator** (who can allow it with a scoped
+`Bash(codex exec --sandbox workspace-write:*)` permission rule) — **not** a
+silent handoff to Claude/Opus logged as a routine exception. When the exception
+fires every session, the allocation contract is fiction.
+
+**Reviewer independence flips with the author** (no model or session reviews its
+own output): Claude/Opus wrote → **Sol** reviews (fresh, read-only); Sol wrote →
+**Fable/Opus or a fresh Sol session** reviews — never the implementing session.
+
 **Destructive-action double-agreement gate:** any delete / drop / truncate /
 force-overwrite / irreversible action (including Ledger/queue/durable-state
 mutations) requires **two independent models** to confirm it is safe (Sol +
