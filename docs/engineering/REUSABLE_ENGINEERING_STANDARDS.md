@@ -36,19 +36,28 @@ declare production readiness without deterministic evidence. Claude Code and
 Codex are coding executors, not LiteLLM chat models.
 
 Route work through stable capability profiles, then resolve the exact model
-from the installed harness catalog. Current preferred mappings are:
+from the installed harness catalog. Codex-side executors consolidate to the
+Sol family only: `deep_code` and `throughput` are both filled by Sol,
+differentiated by reasoning effort, not by model. Query the live catalog
+(e.g. `codex debug models`, lower `priority` = more current) each session
+rather than reusing a model slug from memory or an earlier session. Current
+preferred mappings are:
 - `strategic_steward` -> Fable 5 for architecture, planning, methodology,
   documentation, security/threat review, validation design, and final semantic
   integration.
-- `deep_code` -> Sol-capable GPT/Codex for difficult cross-module coding,
-  state/concurrency work, migrations, hard debugging, and deep code review.
+- `deep_code` -> Sol-capable GPT/Codex at reasoning effort `xhigh` (or the
+  strongest tier the live catalog exposes for the hardest segments) for
+  difficult cross-module coding, state/concurrency work, migrations, hard
+  debugging, and deep code review.
 - `generalist` -> Opus for most normal engineering, implementation, tests,
   review, documentation, and coordination.
-- `throughput` -> Terra for a large share of bounded implementation, targeted
-  tests, mechanical refactors, inventories, and evidence collection.
+- `throughput` -> Sol-capable GPT/Codex at reasoning effort `high` (the
+  standing default; do not drop below it) for a large share of bounded
+  implementation, targeted tests, mechanical refactors, inventories, and
+  evidence collection.
 - `independent_verifier` -> a fresh read-only model/session selected for the
-  artifact: Fable-class for architecture/security/validation and Sol/GPT-class
-  for complex code paths when available.
+  artifact: Fable-class for architecture/security/validation and Sol-class
+  (effort matched to risk) for complex code paths when available.
 
 For each medium/high-risk packet record the required capability profile,
 preferred family, resolved harness/model ID, supported reasoning effort,
@@ -59,6 +68,12 @@ qualified for the same profile; otherwise stop and escalate. Never silently
 downgrade high-risk work or infer the actual model from an alias. Prefer
 cross-family review; if unavailable, disclose reduced independence and require
 a fresh read-only context plus deterministic gates.
+
+Any delete/drop/truncate/force-overwrite or otherwise hard-to-undo action
+requires two independent models to confirm it is safe (not two sessions of
+the same model, unless disclosed as reduced independence) before it is even
+proposed to the user, plus the user's explicit current-turn approval. A prior
+approval for a similarly-shaped action does not carry forward.
 
 Qualify replacements on representative repository tasks using correctness,
 contract adherence, security findings, edit precision, test quality, tool
@@ -74,6 +89,32 @@ provenance-backed evidence. Keep quality evaluation separate from serving
 evaluation. For time-ordered learning work, use past-only features and temporal
 splits. Use `uv` for dependency changes, update every consuming
 `pyproject.toml`, prove `uv sync`, and include dependency metadata with code.
+
+Goal-driven KPI leaderboard loop (run every non-trivial improvement/evaluation
+task as a champion-challenger loop, not a one-shot):
+1. Frame — define KPI(s) + goal (target + stop condition) from data, never an
+   invented threshold; record the current champion as baseline (none -> first
+   validated attempt becomes it); keep quality-eval KPIs distinct from
+   serving-eval KPIs.
+2. Attempt (loop body) — one challenger via the full workflow: bounded packet
+   -> Sol implementation (effort by risk) -> deterministic verification (make
+   validate/test, uv run cc doctor) -> fresh independent review. No fake/default
+   values; past-only inputs + temporal splits for time-ordered work.
+3. Evidence gate — a challenger scores ONLY with reproducible runtime evidence
+   from real data (historical where time-ordered, plus a current run) and
+   passing validations/tests. Unproven attempts do not enter the leaderboard.
+4. Leaderboard — append each validated challenger's KPIs with provenance
+   (commit, config/contract version, exact command, exit status) to the ranked
+   leaderboard artifact; promote to champion ONLY when it beats the incumbent
+   on the agreed metric AND clears the same gates. Do not bypass the Ledger or
+   kanban/mission approval flow to record or promote a result.
+5. Goal check, then keep improving — when the goal is met and validated, report
+   it with the leaderboard, then keep looping challenger attempts to push past
+   it until diminishing returns, budget exhaustion, or the user's stop.
+6. Stop honestly — a metric gain alone never promotes: require baselines,
+   coverage, calibration/uncertainty where applicable, and out-of-time
+   behavior. Report regressions and dropped coverage; never silently truncate
+   the search or the leaderboard.
 
 Run all relevant verification. Config changes require `make validate`; code
 changes require appropriate tests and normally `make lint`/`make test`; runtime
