@@ -1,0 +1,93 @@
+boards:
+- allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  blockers: []
+  board_id: alpha
+  board_ref: alpha
+  execution_scope: life
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  provider: command_center_ui
+  repo_ids:
+  - llm_station
+  required_fields:
+  - title
+  status_mapping:
+    awaiting_approval: Awaiting Approval
+    backlog: Backlog
+    blocked: Blocked
+    done: Done
+    in_progress: In Progress
+    ready: Ready
+    rejected: Rejected
+  workspace_ref: self
+- allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  blockers: []
+  board_id: beta
+  board_ref: beta
+  execution_scope: life
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  provider: command_center_ui
+  repo_ids: []
+  required_fields:
+  - title
+  status_mapping:
+    awaiting_approval: Awaiting Approval
+    backlog: Backlog
+    blocked: Blocked
+    done: Done
+    in_progress: In Progress
+    ready: Ready
+    rejected: Rejected
+  workspace_ref: self
+- allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  blockers: []
+  board_id: self_improvement
+  board_ref: self_improvement
+  execution_scope: life
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  provider: command_center_ui
+  repo_ids: []
+  required_fields:
+  - title
+  status_mapping:
+    awaiting_approval: Awaiting Approval
+    backlog: Backlog
+    blocked: Blocked
+    done: Done
+    in_progress: In Progress
+    ready: Ready
+    rejected: Rejected
+  workspace_ref: self
+schema_version: command-center.kanban-boards.v1

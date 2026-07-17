@@ -1,0 +1,8 @@
+schema_version: '1'
+roles:
+  chat:
+    - alias: chat
+      provider: ollama
+      model: qwen3:30b
+      priority: 1
+      local: true

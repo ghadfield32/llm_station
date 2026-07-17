@@ -19,6 +19,7 @@ from .schemas import (
     CaptureRecord,
     CaptureView,
 )
+from .store import CaptureConversionConflict
 
 # the immutable CaptureRecord fields the Ledger row carries back
 _RECORD_FIELDS = (
@@ -72,6 +73,27 @@ class LedgerCaptureStore:
                               json={"classification": cls.model_dump(), "ts": at})
         if r.status_code == 404:
             raise KeyError(f"no such capture: {cls.capture_id}")
+        r.raise_for_status()
+
+    def mark_converted(
+        self, capture_id: str, work_item_ids: list[str], *,
+        conversation_id: str | None, operation_key: str | None = None, at: str,
+    ) -> None:
+        r = self._client.post(
+            f"/capture/{capture_id}/converted",
+            json={
+                "work_item_ids": work_item_ids,
+                "conversation_id": conversation_id,
+                "operation_key": operation_key,
+                "ts": at,
+            },
+        )
+        if r.status_code == 404:
+            raise KeyError(f"no such capture: {capture_id}")
+        if r.status_code == 409:
+            raise CaptureConversionConflict(r.json().get(
+                "detail", "capture conversion conflict",
+            ))
         r.raise_for_status()
 
     def view(self, capture_id: str) -> CaptureView:

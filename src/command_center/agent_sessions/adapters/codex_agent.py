@@ -27,7 +27,6 @@ quota (plan_type as reported by account()), not per-call API billing.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -37,7 +36,6 @@ from ..store import SessionStoreProtocol
 
 # Repo root: src/command_center/agent_sessions/adapters/codex_agent.py -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_AUTONOMY_CONFIG = _REPO_ROOT / "configs" / "autonomy.yaml"
 _MODEL_PREFS_CONFIG = _REPO_ROOT / "configs" / "agent-session-models.yaml"
 
 # Two notification class names were found live for command-execution output
@@ -66,26 +64,39 @@ def _import_sdk() -> Any:
     return oc
 
 
-def _resolve_repo_path(repo_id: str) -> Path:
-    """Uses cli/repo_registry.py's OWN canonical resolver — not a
-    reimplementation. A registered repo must resolve identically everywhere
-    (this adapter, `cc repo-verify`, the cockpit) and path-boundary/symlink
-    policy must live in exactly one place. Also eliminates this module's own
-    direct `yaml` import (see the mypy note this used to carry)."""
-    from command_center.cli.repo_registry import load_autonomy_config, resolve_repo_local_path
+def _effort_name(value: Any) -> str:
+    """Normalize ONE reasoning-effort entry to its canonical string name.
 
-    if not _AUTONOMY_CONFIG.is_file():
-        raise RuntimeError(f"configs/autonomy.yaml not found at {_AUTONOMY_CONFIG}")
-    cfg = load_autonomy_config(_AUTONOMY_CONFIG)
-    manifest = next((m for m in cfg.repo_manifests if m.repo_id == repo_id), None)
-    if manifest is None:
-        raise RuntimeError(f"repo_id {repo_id!r} is not registered in configs/autonomy.yaml")
-    path = resolve_repo_local_path(manifest, _REPO_ROOT, dict(os.environ))
-    if path is None:
-        raise RuntimeError(
-            f"repo_id {repo_id!r} has no resolvable local_path_ref "
-            f"(got {manifest.local_path_ref!r})")
-    return path
+    The openai-codex SDK has shipped plain strings, enums with `.value`, dicts
+    like {"reasoningEffort": "medium"}, and wrapper objects whose
+    `.reasoning_effort` is itself an enum. Normalize nested known shapes
+    recursively. Anything else is NEW upstream drift — raise so the catalog
+    surfaces a legible error instead of leaking an unrenderable object to the
+    browser (the 2026-07-16 blank agent-panel incident: React throws on object
+    children)."""
+    if isinstance(value, str):
+        return value
+    name: Any = None
+    if isinstance(value, dict):
+        name = value.get("reasoningEffort") or value.get("value")
+    else:
+        for attr in ("value", "reasoning_effort", "reasoningEffort"):
+            name = getattr(value, attr, None)
+            if name is not None:
+                break
+    if name is not None and name is not value:
+        return _effort_name(name)
+    raise ValueError(
+        f"unrecognized reasoning-effort shape from the Codex SDK: {value!r}")
+
+
+def _resolve_repo_path(repo_id: str) -> Path:
+    """Delegate to the ONE shared context resolver (registered autonomy
+    manifests + the Home workspace special case). Resolution/symlink policy
+    lives in exactly one place — this adapter, `cc repo-verify`, and the cockpit
+    all agree because they all go through it."""
+    from ..context_resolver import resolve_context_path
+    return resolve_context_path(repo_id)
 
 
 def _load_model_prefs() -> dict[str, Any]:
@@ -294,8 +305,14 @@ def _translate(notif: Any, state: "_TurnState | None" = None) -> list[AgentEvent
             total = u.total.model_dump(mode="json")
         except Exception:
             total = str(u.total)
-        return [AgentEvent("usage", {"total": total,
-                                     "context_window": u.model_context_window})]
+        return [AgentEvent("usage", {
+            "total": total,
+            "context_window": u.model_context_window,
+            # Codex runs against the operator's subscription session. The SDK
+            # exposes tokens but no per-turn dollar charge.
+            "cost_usd": None,
+            "cost_source": "subscription_not_metered",
+        })]
     if t == "ErrorNotification":
         if notif.will_retry:
             # transient, the SDK is retrying on its own — not a terminal
@@ -384,22 +401,24 @@ class CodexAgentHarness:
         model list (client.models()), which carries per-model reasoning-effort
         metadata (default_reasoning_effort + supported_reasoning_efforts) so the
         UI can offer only the efforts a model actually supports. Hidden models
-        are dropped."""
+        are dropped. Effort entries are normalized to canonical STRING names —
+        the catalog contract the cockpit renders verbatim."""
         client = await self._client_ready()
         response = await client.models()
         out: list[dict[str, Any]] = []
         for m in response.data:
             if getattr(m, "hidden", False):
                 continue
-            efforts = [getattr(e, "value", e)
-                       for e in (getattr(m, "supported_reasoning_efforts", None) or [])]
+            efforts = [_effort_name(e) for e in
+                       (getattr(m, "supported_reasoning_efforts", None) or [])]
             default_effort = getattr(m, "default_reasoning_effort", None)
             out.append({
                 "id": getattr(m, "id", None),
                 "display_name": getattr(m, "display_name", getattr(m, "id", "")),
                 "description": getattr(m, "description", "") or "",
                 "is_default": bool(getattr(m, "is_default", False)),
-                "default_effort": getattr(default_effort, "value", default_effort),
+                "default_effort": (None if default_effort is None
+                                   else _effort_name(default_effort)),
                 "supported_efforts": efforts,
                 "context_options": [],
                 "available": True,

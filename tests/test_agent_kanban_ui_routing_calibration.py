@@ -19,6 +19,7 @@ def _load(monkeypatch, *, enabled=True):
     mod = importlib.util.module_from_spec(spec)
     sys.modules["akui_routing_calib_test"] = mod
     spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "CONFIGS_DIR", ROOT / "configs")
     monkeypatch.setattr(mod, "WORKGRAPH_ENABLED", enabled)
     mod._workgraph_service = None
     mod._telemetry_service = None

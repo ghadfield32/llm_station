@@ -1,0 +1,621 @@
+schema_version: command-center.kanban-boards.v1
+boards:
+- board_id: personal_todos
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: personal_todos
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - title
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: llm_station_command_center
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: llm_station_command_center
+  repo_ids:
+  - llm_station
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+  dependency_fields:
+  - blocked_by
+  - unblocks
+- board_id: betts_basketball
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: betts_basketball
+  repo_ids:
+  - betts_basketball
+  status_mapping:
+    awaiting_approval: Awaiting Approval
+    backlog: Backlog
+    blocked: Blocked
+    done: Done
+    in_progress: In Progress
+    ready: Ready
+    rejected: Rejected
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - block_card
+  - finish_todo
+  - reject_card
+  - stage_card
+  - start_todo
+  forbidden_agent_verbs:
+  - approve_card
+  - delete_board
+  - delete_card
+  - deploy
+  - merge
+  blockers: []
+- board_id: betts_basketball_grand_todo
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: betts_basketball_grand_todo
+  repo_ids:
+  - betts_basketball
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Archived
+    awaiting_approval: Ready
+  required_fields:
+  - item_id
+  - title
+  - category
+  - source_ref
+  - source_sha256
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: job_search_pipeline_internal
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: job_search_pipeline_internal
+  repo_ids:
+  - llm_station
+  status_mapping:
+    awaiting_approval: Interviewing
+    backlog: Suggested Jobs
+    blocked: Needs Geoff
+    done: Completed
+    in_progress: In Progress
+    ready: Selected by Geoff
+    rejected: Rejected / Skip
+  required_fields:
+  - job_key
+  - company
+  - role_title
+  - location
+  - remote_type
+  - source
+  - portal
+  - apply_url
+  - salary_text
+  - salary_min
+  - salary_max
+  - category
+  - fit_score
+  - automation_class
+  - manual_reason
+  - resume_variant
+  - why_apply
+  - risks
+  - deadline
+  - last_seen_at
+  - application_id
+  - next_action
+  - materials_path
+  - company_tier
+  - score_explanation
+  - claude_review_url
+  allowed_agent_verbs:
+  - add_mission_card
+  - block_card
+  - finish_todo
+  - reject_card
+  - stage_card
+  - start_todo
+  forbidden_agent_verbs:
+  - approve_card
+  - delete_board
+  - delete_card
+  - deploy
+  - merge
+  blockers:
+  - Job-search board has an extra domain column, Closed / Archived, enforced by command_center.job_search.board.
+- board_id: reading_library
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: reading_library
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: To read
+    ready: Reading
+    in_progress: Reading
+    done: Done
+    blocked: Blocked
+    rejected: Archived
+    awaiting_approval: To read
+  required_fields:
+  - title
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: research_papers
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: research_papers
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Inbox
+    ready: Reading
+    in_progress: Reading
+    done: Read
+    blocked: Blocked
+    rejected: Archived
+    awaiting_approval: Inbox
+  required_fields:
+  - title
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: research_repos
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: research_repos
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Inbox
+    ready: Trying
+    in_progress: Using
+    done: Archived
+    blocked: Blocked
+    rejected: Archived
+    awaiting_approval: Inbox
+  required_fields:
+  - title
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: dag_operations
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: dag_operations
+  repo_ids:
+  - llm_station
+  status_mapping:
+    backlog: Manual
+    ready: Active
+    in_progress: Active
+    done: Retired
+    blocked: Broken
+    rejected: Retired
+    awaiting_approval: Paused
+  required_fields:
+  - dag_id
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: linkedin_content_pipeline_internal
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: linkedin_content_pipeline_internal
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Draft
+    ready: In Queue
+    in_progress: Scheduled
+    done: Published
+    blocked: Needs Geoff
+    rejected: Rejected
+    awaiting_approval: Needs Geoff
+  required_fields:
+  - account
+  - hook
+  - body
+  - tags
+  - source_ref
+  - scheduled_for
+  - approval_state
+  allowed_agent_verbs:
+  - add_mission_card
+  - block_card
+  - finish_todo
+  - reject_card
+  - stage_card
+  - start_todo
+  forbidden_agent_verbs:
+  - approve_card
+  - delete_board
+  - delete_card
+  - deploy
+  - merge
+  blockers:
+  - Publishing remains operator-approved through the existing LinkedIn publisher;
+    this internal board only owns draft/review state.
+- board_id: home_house
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: home_house
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: movies_shows
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: movies_shows
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: site_basketball
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: site_basketball
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: station_improvements
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: station_improvements
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: kanban_improvements
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: kanban_improvements
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: business
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: business
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: tech_hardware_setup
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: tech_hardware_setup
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - MissionID
+  - RepoID
+  - Risk
+  - LastSync
+  - Section
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
+- board_id: self_improvement
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: self_improvement
+  execution_scope: life
+  repo_ids: []
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Rejected
+    awaiting_approval: Awaiting Approval
+  required_fields:
+  - title
+  - experiment_id
+  - pillar
+  - evidence
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []

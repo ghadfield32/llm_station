@@ -155,6 +155,10 @@ services:
       context: .
       dockerfile: services/agent_kanban_ui/Dockerfile
     restart: unless-stopped
+    # Grand reconciliation can take tens of seconds on Docker Desktop bind
+    # mounts. Let Uvicorn finish and release cross-OS O_EXCL lock files before
+    # Compose replaces the container; foreign stale locks otherwise fail closed.
+    stop_grace_period: 90s
     environment:
       - LEDGER_BASE_URL=http://ledger:8090
       - GROWTHOS_AGENT_LOG=/logs/agent_calls.jsonl
@@ -165,6 +169,7 @@ services:
       # mode, governed card moves write events into this mount.
       - KANBAN_EVENT_LOG=/snapshot/kanban-events.jsonl
       - KANBAN_BOARD_STORE=/snapshot/boards
+      - BETTS_GRAND_TODO_SOURCE=/workspace/betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md
       - LEDGER_UI_URL=${LEDGER_UI_URL:-}
       # Chat + governed writes turn the UI into a channel. 1 here = full console;
       # remove it for a read-only
@@ -173,6 +178,10 @@ services:
       # Full-console only: allow Controls -> All Boards to edit
       # configs/domain_surfaces.yaml after schema validation.
       - KANBAN_UI_DOMAIN_CONFIG_WRITES=1
+      # Canonical captures/work placements must survive cockpit restarts. The
+      # full console refuses work writes when the Work Graph is not durable.
+      - KANBAN_UI_CAPTURE_LEDGER=1
+      - KANBAN_UI_WORKGRAPH_LEDGER=1
       # Chat flight recorder: full-fidelity per-turn transcripts (tool args,
       # results, injected context, final answer) under the ./generated mount —
       # host-persisted, gitignored, never leaves the machine. Set
@@ -190,6 +199,8 @@ services:
       # Growth OS actions use the same governed board store and event log as the UI.
       - GROWTHOS_BOARD_STORE=/snapshot/boards
       - GROWTHOS_KANBAN_EVENT_LOG=/snapshot/kanban-events.jsonl
+      - GROWTHOS_WATCHER_STATUS=/app/watcher-state/watcher_status.json
+      - GROWTHOS_RESEARCH_REFRESH=/app/watcher-state/research_refresh.json
       # Agent Sessions (Claude Agent / Codex Agent, structurally separate from
       # GatewayCore chat above — see WORKLOG.md "Agent-session chat
       # integration"). The worker runs on the HOST (own SDK/CLI auth, same
@@ -228,6 +239,10 @@ services:
       # writes still go through governed verbs (approval remains structurally refused).
       - ./growth_os:/app/growth_os
       - ./.env:/app/.env:ro
+      - ./growth_os/_state:/app/watcher-state
+      # Canonical GRAND TODO: RW because tracked-card edits and archive moves
+      # atomically update the Markdown source before refreshing the projection.
+      - ${BETTS_BASKETBALL_LOCAL_PATH:-../betts_basketball}:/workspace/betts_basketball
     ports: ["127.0.0.1:${KANBAN_UI_PORT:-8787}:8787"]
     depends_on:
       ledger: { condition: service_started }
@@ -237,6 +252,75 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    networks: [core]
+
+  # First-party upkeep for Papers, Repos, and DAGs. AppFlowy is historical
+  # recovery input only; ongoing writes use the same governed stores as the UI.
+  growthos-watcher:
+    profiles: ["ui"]
+    build:
+      context: .
+      dockerfile: growth_os/Dockerfile
+    restart: unless-stopped
+    # A signal requests shutdown; the current curator/Airflow cycle completes
+    # and releases every lock before Docker escalates. A strict research unit
+    # can take more than five minutes on the local model, so this bound must
+    # cover a full configured unit rather than Docker's short default drain.
+    stop_grace_period: 900s
+    env_file: growth_os/.env
+    environment:
+      - GROWTHOS_DRY_RUN=false
+      - GROWTHOS_BOARD_STORE=/snapshot/boards
+      - GROWTHOS_KANBAN_EVENT_LOG=/snapshot/kanban-events.jsonl
+      - GROWTHOS_STATE_DIR=/app/_state
+      - GROWTHOS_WATCHER_STATUS=/app/_state/watcher_status.json
+      - GROWTHOS_RESEARCH_REFRESH=/app/_state/research_refresh.json
+      # Cadence preserved from the retired behavior: hourly intake, daily
+      # brief/guidelines/retention after 06:00 container-local time.
+      - GROWTHOS_WATCH_INTERVAL_SECONDS=3600
+      - GROWTHOS_CONTROL_POLL_SECONDS=5
+      - GROWTHOS_DAILY_HOUR=6
+      - OLLAMA_BASE_URL=${OLLAMA_API_BASE:-http://host.docker.internal:11434}
+      - LEDGER_BASE_URL=http://ledger:8090
+      - KANBAN_UI_BASE_URL=http://agent-kanban-ui:8787
+      - AIRFLOW_BASE_URL=http://host.docker.internal:8090
+      - GROWTHOS_KANBAN_IMPORTED=/snapshot/kanban-imported.json
+      - GROWTHOS_STANDARDS_PATH=/cc_configs/standards.yaml
+      # Board-visible Papers/Repos intake is the curator's authoritative input.
+      # The watcher fails closed if this validated contract is unavailable.
+      - GROWTHOS_DOMAIN_SURFACES=/cc_configs/domain_surfaces.yaml
+      - GROWTHOS_AUTONOMY_CONFIG=/cc_configs/autonomy.yaml
+      # Every upkeep cycle is gated on an immutable, verified snapshot of the
+      # current source watermark. These paths are an explicit allowlist.
+      - KANBAN_BACKUP_ROOT=/backups/kanban
+      - KANBAN_BACKUP_LEDGER_DB=/backup-sources/ledger/ledger.db
+      - KANBAN_BACKUP_BOARD_CONFIG=/cc_configs/kanban_boards.yaml
+      - KANBAN_BACKUP_DOMAIN_CONFIG=/cc_configs/domain_surfaces.yaml
+      - KANBAN_BACKUP_AUTONOMY_CONFIG=/cc_configs/autonomy.yaml
+      - KANBAN_BACKUP_CONFIG_INTENT=/cc_configs/.transactions/board-module.json
+      - KANBAN_BACKUP_CONFIG_AUDIT=/cc_configs/config_audit.jsonl
+      - KANBAN_BACKUP_JOB_SEARCH=/backup-sources/job_search
+      - KANBAN_BACKUP_JOB_SEARCH_MEMORY=/backup-sources/job_search/job_search_memory.sqlite
+      - KANBAN_BACKUP_GROWTH_EXPORT=/app/_export
+      - KANBAN_BACKUP_GROWTH_MEMORY=/app/_state/memory.db
+      - KANBAN_BACKUP_GRAND_TODO=/backup-sources/betts/docs/backend/projects/GRAND_TODO_LIST.md
+      - KANBAN_BACKUP_CHAT_THREADS=/snapshot/chat-threads.json
+      - KANBAN_BACKUP_CHAT_TRANSCRIPTS=/snapshot/chat-transcripts
+      - KANBAN_BACKUP_MEMORY=/snapshot/memory
+      - KANBAN_BACKUP_MAINTENANCE_EVENTS=/snapshot/kanban-maintenance-events.jsonl
+      - KANBAN_BACKUP_APPFLOWY_RECOVERY=/backup-sources/appflowy-recovery
+    volumes:
+      - ./generated:/snapshot
+      - ./growth_os/_state:/app/_state
+      - ./growth_os/_export:/app/_export
+      - ./configs:/cc_configs:ro
+      - ${KANBAN_BACKUP_HOST_PATH:-./backups}:/backups
+      - ledger_data:/backup-sources/ledger:ro
+      - ./data/job_search:/backup-sources/job_search:ro
+      - ${BETTS_BASKETBALL_LOCAL_PATH:-../betts_basketball}:/backup-sources/betts:ro
+      - ./archive/appflowy/legacy-growth-os:/backup-sources/appflowy-recovery:ro
+    depends_on:
+      ledger: { condition: service_started }
     networks: [core]
 
   # Apache Airflow (profile: airflow) — runs dags/self_improvement_daily.py on a
@@ -258,17 +342,54 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=false
       - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
       - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
-      # The DAG's observer-only flags (see dags/self_improvement_daily.py). Card
-      # drafting stays OFF here — flip via Kanban/env only when wired.
+      # The DAG's observer-only flags (see dags/self_improvement_daily.py). It
+      # drafts only Backlog cards to the first-party Self Improvement board.
       - SELF_IMPROVEMENT_APPLY=true
-      - SELF_IMPROVEMENT_KANBAN=false
+      - SELF_IMPROVEMENT_KANBAN=true
+      - SELF_IMPROVEMENT_BOARD_ID=self_improvement
+      - SELF_IMPROVEMENT_BOARD_CONFIG=/opt/airflow/repo/configs/kanban_boards.yaml
+      - SELF_IMPROVEMENT_REPO_CONFIG=/opt/airflow/repo/configs/autonomy.yaml
+      - SELF_IMPROVEMENT_REPO_ROOT=/opt/airflow/repo
+      - BETTS_BASKETBALL_LOCAL_PATH=/backup-sources/betts
       - LEDGER_DB_PATH=/opt/airflow/ledger/ledger.db
       - PYTHONPATH=/opt/airflow/repo/src
+      # Scheduled and dataset-triggered DAGs refuse to mutate until this exact
+      # current watermark has an immutable verified snapshot.
+      - KANBAN_BACKUP_ROOT=/backups/kanban
+      - KANBAN_BACKUP_LEDGER_DB=/backup-sources/ledger/ledger.db
+      - GROWTHOS_BOARD_STORE=/snapshot/boards
+      - GROWTHOS_KANBAN_EVENT_LOG=/snapshot/kanban-events.jsonl
+      - KANBAN_BOARD_STORE=/snapshot/boards
+      - KANBAN_EVENT_LOG=/snapshot/kanban-events.jsonl
+      - SELF_IMPROVEMENT_REPORT_PATH=/snapshot/self-improvement-report.md
+      - KANBAN_BACKUP_BOARD_CONFIG=/opt/airflow/repo/configs/kanban_boards.yaml
+      - KANBAN_BACKUP_DOMAIN_CONFIG=/opt/airflow/repo/configs/domain_surfaces.yaml
+      - KANBAN_BACKUP_AUTONOMY_CONFIG=/opt/airflow/repo/configs/autonomy.yaml
+      - KANBAN_BACKUP_CONFIG_INTENT=/opt/airflow/repo/configs/.transactions/board-module.json
+      - KANBAN_BACKUP_CONFIG_AUDIT=/opt/airflow/repo/configs/config_audit.jsonl
+      - KANBAN_BACKUP_JOB_SEARCH=/opt/airflow/ledger/job_search
+      - KANBAN_BACKUP_JOB_SEARCH_MEMORY=/opt/airflow/ledger/job_search/job_search_memory.sqlite
+      - GROWTHOS_STATE_DIR=/backup-sources/growth-state
+      - KANBAN_BACKUP_GROWTH_MEMORY=/backup-sources/growth-state/memory.db
+      - KANBAN_BACKUP_GROWTH_EXPORT=/backup-sources/growth-export
+      - KANBAN_BACKUP_GRAND_TODO=/backup-sources/betts/docs/backend/projects/GRAND_TODO_LIST.md
+      - KANBAN_BACKUP_CHAT_THREADS=/snapshot/chat-threads.json
+      - KANBAN_BACKUP_CHAT_TRANSCRIPTS=/snapshot/chat-transcripts
+      - KANBAN_BACKUP_MEMORY=/snapshot/memory
+      - KANBAN_BACKUP_MAINTENANCE_EVENTS=/snapshot/kanban-maintenance-events.jsonl
+      - KANBAN_BACKUP_APPFLOWY_RECOVERY=/backup-sources/appflowy-recovery
     volumes:
       - ./dags:/opt/airflow/dags:ro            # the DAG, read-only
       - ./src:/opt/airflow/repo/src:ro         # command_center package (live, no rebuild)
       - ./configs:/opt/airflow/repo/configs:ro # read-only config the scanners read
       - ./data:/opt/airflow/ledger             # ledger.db the ObserverCharter writes
+      - ./generated:/snapshot                  # canonical DAG outputs + backup sources
+      - ./growth_os/_state:/backup-sources/growth-state:ro
+      - ./growth_os/_export:/backup-sources/growth-export:ro
+      - ${BETTS_BASKETBALL_LOCAL_PATH:-../betts_basketball}:/backup-sources/betts:ro
+      - ./archive/appflowy/legacy-growth-os:/backup-sources/appflowy-recovery:ro
+      - ledger_data:/backup-sources/ledger:ro
+      - ${KANBAN_BACKUP_HOST_PATH:-./backups}:/backups
       - airflow_data:/opt/airflow              # AIRFLOW_HOME state (db, cfg, logs)
     ports: ["127.0.0.1:8080:8080"]
     networks: [core]

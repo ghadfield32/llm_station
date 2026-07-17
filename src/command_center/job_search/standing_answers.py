@@ -17,6 +17,11 @@ import yaml
 
 STANDING_ANSWERS_FILENAME = "standing_answers.yml"
 ANSWERS_MATERIAL_FILENAME = "application_answers.md"
+DEFAULT_NEVER_AUTO_TOPICS = (
+    "eeo", "self_identification", "disability", "veteran_status",
+    "legal_certification", "work_authorization", "sponsorship",
+    "background_check",
+)
 
 
 def standing_answers_path(base: Path) -> Path:
@@ -99,26 +104,45 @@ def render_application_answers(
     salary_text: str | None = None,
     currency: str | None = None,
     detected_phrases: list[str] | None = None,
+    never_auto_answer: list[str] | tuple[str, ...] | None = None,
 ) -> str:
     """application_answers.md: every standing answer (these questions appear
     on most portals), with the ones actually detected in THIS posting flagged.
     Deterministic rendering — reviewable and editable per application."""
-    if not answers:
+    from command_center.job_search.automation_policy import (
+        is_never_auto_question,
+    )
+
+    protected_topics = list(
+        DEFAULT_NEVER_AUTO_TOPICS
+        if never_auto_answer is None else never_auto_answer)
+    safe_answers = []
+    for row in answers:
+        policy_text = "\n".join([
+            str(row.get("topic") or ""),
+            str(row.get("question") or ""),
+            str(row.get("answer") or ""),
+            *[str(value) for value in (row.get("covers") or [])],
+        ])
+        if not is_never_auto_question(policy_text, protected_topics):
+            safe_answers.append(row)
+    if not safe_answers:
         return (
             "# Application Answers\n\n"
-            "No standing answers on file (profile/standing_answers.yml is "
-            "missing or empty) — every detected question routes to Geoff.\n")
+            "No non-sensitive standing answers are available for this packet. "
+            "Protected or detected unanswered questions route to Geoff.\n")
     detected = {str(p).lower() for p in (detected_phrases or [])}
     lines = [
         "# Application Answers",
         "",
         "Geoff's standing answers, rendered for this application. Questions",
         "detected in this posting are marked **(asked in this posting)**.",
+        "Protected questions are omitted and always stay with Geoff.",
         "Edit per-application here, or change the defaults in",
         "profile/standing_answers.yml (Jobs settings drawer).",
         "",
     ]
-    for row in answers:
+    for row in safe_answers:
         covers = {str(p).lower() for p in (row.get("covers") or [])}
         asked = bool(covers & detected)
         marker = " **(asked in this posting)**" if asked else ""

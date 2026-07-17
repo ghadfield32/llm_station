@@ -110,3 +110,39 @@ def test_action_words_still_carry_signal():
 def test_empty_log_yields_no_rules():
     assert RoutingCalibrator([]).derive() == []
     assert RoutingCalibrator([]).board_rules(lambda b: "d") == []
+
+
+def test_punctuation_shrapnel_never_becomes_a_keyword():
+    # "e.g." normalizes to the tokens "e"/"g" — the live cockpit showed a
+    # board suggestion that "matched 'g', 'e'". Fragments below three chars
+    # are shrapnel, not signal (except the known real short terms).
+    calib = RoutingCalibrator([
+        _c("update the plan (e.g. do X or Y)", "site_basketball",
+           "2026-07-01T00:00:00+00:00"),
+        _c("fix e g artifacts in ui", "site_basketball",
+           "2026-07-02T00:00:00+00:00"),
+    ])
+    keywords = {r.keyword for r in calib.derive()}
+    assert "e" not in keywords
+    assert "g" not in keywords
+    assert "x" not in keywords
+
+
+def test_short_allowlist_terms_survive():
+    calib = RoutingCalibrator([
+        _c("finish the cv pipeline", "site_basketball",
+           "2026-07-01T00:00:00+00:00"),
+    ])
+    assert "cv" in {r.keyword for r in calib.derive()}
+
+
+def test_function_words_like_if_and_not_carry_no_signal():
+    # the live cockpit suggested a board because 'if', 'not', 'provide'
+    # matched — closed-class words co-occur with everything
+    calib = RoutingCalibrator([
+        _c("if we can not provide this then stop", "station_improvements",
+           "2026-07-01T00:00:00+00:00"),
+    ])
+    keywords = {r.keyword for r in calib.derive()}
+    assert keywords.isdisjoint({"if", "not", "can", "then"})
+    assert "provide" in keywords or "stop" in keywords  # content words remain

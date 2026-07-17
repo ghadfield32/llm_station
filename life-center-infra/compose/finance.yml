@@ -1,0 +1,23 @@
+# Finance tier — Actual Budget. SENSITIVE (budgeting): admit ONLY after the
+# sensitive-data gate (mature secrets/auth + proven encrypted export/restore).
+# Split out of the lifestyle tier so it can never be swept up in a convenience
+# bundle by accident. Command Center boards receive health/recovery status
+# only — never balances or transactions.
+# Must be named explicitly (`lc up --profile finance`); excluded from `all`.
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  actual:
+    image: actualbudget/actual-server:25.3.1  # pin: @sha256 before real data
+    container_name: lc-actual
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${ACTUAL_PORT:-5006}:5006"
+    environment:
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/actual/data:/data

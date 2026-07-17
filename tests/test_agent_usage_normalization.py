@@ -58,6 +58,24 @@ def test_api_lane_usage_records_real_cost():
     assert s.cost_source == CostSource.PROVIDER_REPORTED
 
 
+def test_codex_cached_input_is_a_subset_not_added_twice():
+    payload = {
+        "cost_usd": None,
+        "cost_source": "subscription_not_metered",
+        "total": {
+            "input_tokens": 100,
+            "cached_input_tokens": 80,
+            "output_tokens": 25,
+            "total_tokens": 125,
+        },
+    }
+    sample = agent_usage_sample(payload, runtime_id="codex_agent")
+    assert sample.input_tokens == 100
+    assert sample.cached_input_tokens == 80
+    assert sample.total_tokens == 125
+    assert sample.cost_source == CostSource.SUBSCRIPTION_NOT_METERED
+
+
 # ── per-model / per-effort attribution ───────────────────────────────────────
 
 def test_rank_by_model_and_effort():

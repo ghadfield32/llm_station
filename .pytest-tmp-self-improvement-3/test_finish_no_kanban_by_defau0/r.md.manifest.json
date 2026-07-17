@@ -1,0 +1,26 @@
+{
+  "counts": {
+    "n_drafted": 1,
+    "n_failed": 0,
+    "n_findings": 1,
+    "n_sources": 1
+  },
+  "git_sha": "963b0631844b8549cf6ca4cda416400890231e34",
+  "input_sha256": "75902bc9d0669baf8d569b775046b76ad870a75b45b4a0cc40991f9b672efcf1",
+  "library_versions": {
+    "PyYAML": "6.0.3",
+    "pydantic": "2.13.4",
+    "python": "3.12.6"
+  },
+  "method": "wsjf",
+  "output_sha256": "999e4a03973758b69fadbf463dcfe427622f03bb44dd9c1b5d0597e2b4ab4def",
+  "produced_at": "2026-06-13T08:00:00+00:00",
+  "schema_version": "1.0",
+  "sources": [
+    {
+      "error": "",
+      "name": "code_health",
+      "ok": true
+    }
+  ]
+}

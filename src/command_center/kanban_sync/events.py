@@ -8,6 +8,8 @@ never produce a legal event, so no projection of them is possible.
 from __future__ import annotations
 
 import hashlib
+import os
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -15,6 +17,7 @@ from typing import Any, Literal
 from pydantic import model_validator
 
 from command_center.schemas import Strict
+from command_center.write_locking import event_log_write_lock
 
 # Allowed event types — the only events a projection may act on.
 ALLOWED_EVENT_TYPES = frozenset({
@@ -61,7 +64,12 @@ assert ALLOWED_EVENT_TYPES.isdisjoint(FORBIDDEN_EVENT_TYPES), \
 
 
 def normalize_status(status: str | None) -> str:
-    return (status or "").strip().casefold().replace(" ", "_")
+    # NFKC + strip zero-width/control chars (Unicode category Cf/Cc) BEFORE
+    # folding, so a disguised approval status ("Appro​ved") normalizes to
+    # the same value a human-owned status does and can't slip the wall.
+    s = unicodedata.normalize("NFKC", status or "")
+    s = "".join(ch for ch in s if unicodedata.category(ch) not in {"Cf", "Cc"})
+    return s.strip().casefold().replace(" ", "_")
 
 
 _HUMAN_OWNED_NORM = frozenset(normalize_status(s) for s in _HUMAN_OWNED_STATUSES)
@@ -126,19 +134,26 @@ class EventLog:
         self.path = Path(path)
 
     def read(self) -> list[KanbanEvent]:
-        if not self.path.is_file():
-            return []
-        out: list[KanbanEvent] = []
-        for line in self.path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                out.append(KanbanEvent.model_validate_json(line))
-        return out
+        with event_log_write_lock(self.path):
+            if not self.path.is_file():
+                return []
+            out: list[KanbanEvent] = []
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    out.append(KanbanEvent.model_validate_json(line))
+            return out
 
     def append(self, event: KanbanEvent) -> KanbanEvent:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(event.model_dump_json() + "\n")
+        # One shared lock serializes appends from every board and from both the
+        # host CLI and Docker cockpit. A JSONL record can never interleave with
+        # another process's record.
+        with event_log_write_lock(self.path):
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(event.model_dump_json() + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
         return event
 
     def read_after(self, *, offset: int) -> tuple[list[dict[str, Any]], int]:

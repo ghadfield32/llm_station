@@ -1,0 +1,13 @@
+{
+  "threads": [
+    {
+      "conversation_id": "keep",
+      "id": "keep",
+      "title": "Keep",
+      "updated_at": "2026-07-16T23:12:06.930235+00:00",
+      "target": "GatewayCore",
+      "last_prompt": "stay",
+      "model": ""
+    }
+  ]
+}

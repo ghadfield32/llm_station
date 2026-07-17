@@ -109,7 +109,12 @@ def test_idempotency_guards_present(src):
 
 
 def test_kanban_drafting_is_wired_and_optional(src):
-    # the daily DAG can draft human-gated cards, gated by an env flag (off by default)
+    # the wired first-party board receives drafts by default; report-only is an explicit opt-out
     assert "SELF_IMPROVEMENT_KANBAN" in src
     assert "draft_kanban=KANBAN" in src
-    assert '"false"' in src                     # default off — opt-in only
+    assert '"true"' in src
+
+
+def test_sources_expand_from_the_validated_repository_registry(src):
+    assert "dag_support.scheduled_source_registry()" in src
+    assert "SOURCE_REGISTRY" not in src

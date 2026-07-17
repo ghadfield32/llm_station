@@ -181,8 +181,9 @@ def test_full_lifecycle_over_real_http(client):
     assert sent.status_code == 202   # fire-and-forget background run
     assert sent.json()["status"] == "accepted"
 
-    events = _wait_for_events(client, session_id, min_count=2, after_sequence=1)
-    assert [e["type"] for e in events] == ["assistant_message", "session_idle"]
+    events = _wait_for_events(client, session_id, min_count=3, after_sequence=1)
+    assert [e["type"] for e in events] == [
+        "user_message", "assistant_message", "session_idle"]
     all_events = client.get(f"/api/agent-sessions/{session_id}/events",
                             headers=_auth()).json()
     sequences = [e["sequence"] for e in all_events]
@@ -311,10 +312,11 @@ def test_concurrent_message_to_the_same_session_is_rejected():
                 r = await client.get(f"/api/agent-sessions/{session_id}/events",
                                      headers=_auth())
                 events = r.json()
-                if len(events) >= 2:
+                if len(events) >= 3:
                     break
                 await asyncio.sleep(0.01)
-            assert [e["type"] for e in events] == ["assistant_message", "session_idle"]
+            assert [e["type"] for e in events] == [
+        "user_message", "assistant_message", "session_idle"]
 
     asyncio.run(_run())
 
@@ -351,8 +353,9 @@ def test_approval_lifecycle_over_real_http(client):
         "mode": "workspace"}).json()["session_id"]
     client.post(f"/api/agent-sessions/{session_id}/messages",
                headers=_auth(), json={"prompt": "write a file"})
-    events = _wait_for_events(client, session_id, min_count=1, after_sequence=1)
-    approval_id = events[0]["payload"]["approval_id"]
+    events = _wait_for_events(client, session_id, min_count=2, after_sequence=1)
+    approval_id = next(e for e in events
+                       if e["type"] == "approval_required")["payload"]["approval_id"]
 
     resolved = client.post(
         f"/api/agent-sessions/{session_id}/approvals/{approval_id}",
@@ -498,3 +501,185 @@ def test_worker_shutdown_skips_harnesses_without_the_optional_hook():
             "repo_id": "r", "mode": "analysis"})
         assert created.status_code == 200
     # no exception on exit == pass
+
+
+# ---- model-catalog contract: the 2026-07-16 blank-panel regression ----------
+# The openai-codex SDK returned reasoning-effort DICTS where the cockpit
+# contract expects strings; React threw on the object child and the agent
+# panel unmounted blank. Two defenses, both tested here: the adapter
+# normalizes every shape the SDK has shipped, and the worker VALIDATES the
+# catalog at the serving boundary so any future drift becomes a legible
+# catalog error instead of an unrenderable payload.
+
+def test_effort_name_normalizes_every_shipped_sdk_shape():
+    from enum import Enum
+
+    from command_center.agent_sessions.adapters.codex_agent import _effort_name
+
+    class _Effort(Enum):
+        MEDIUM = "medium"
+
+    class _Obj:
+        reasoning_effort = "high"
+
+    class _NestedObj:
+        reasoning_effort = _Effort.MEDIUM
+
+    assert _effort_name("low") == "low"                          # plain string
+    assert _effort_name({"description": "Balances speed",        # current SDK
+                         "reasoningEffort": "medium"}) == "medium"
+    assert _effort_name({"value": "xhigh"}) == "xhigh"
+    assert _effort_name(_Effort.MEDIUM) == "medium"              # enum .value
+    assert _effort_name(_Obj()) == "high"                        # attr shape
+    assert _effort_name(_NestedObj()) == "medium"                # live wrapper -> enum
+    assert _effort_name({"reasoningEffort": _Effort.MEDIUM}) == "medium"
+    with pytest.raises(ValueError, match="unrecognized reasoning-effort"):
+        _effort_name(42)                                         # new drift
+
+
+def test_model_catalog_boundary_rejects_object_efforts_legibly(client_factory=None):
+    from command_center.agent_sessions.registry import (
+        HarnessDescriptor,
+        HarnessRegistry,
+    )
+
+    class _DriftedHarness:
+        async def list_models(self):
+            return [{
+                "id": "gpt-x", "display_name": "GPT X",
+                "supported_efforts": [
+                    {"description": "d", "reasoningEffort": "medium"}],
+            }]
+
+    registry = HarnessRegistry([HarnessDescriptor(
+        harness_id="drifted", label="Drifted", production=False,
+        supported_modes=("analysis",), factory=lambda: _DriftedHarness())])
+    app = build_app(store=SessionStore(), token=TOKEN, registry=registry)
+    http = TestClient(app)
+    body = http.get("/api/agent-harnesses/drifted/models",
+                    headers=_auth()).json()
+    # drift never reaches the browser: empty catalog + legible reason
+    assert body["models"] == []
+    assert "model discovery failed" in body["error"]
+    assert "supported_efforts" in body["error"]
+
+
+def test_model_catalog_boundary_passes_valid_entries():
+    from command_center.agent_sessions.registry import (
+        HarnessDescriptor,
+        HarnessRegistry,
+    )
+
+    class _GoodHarness:
+        async def list_models(self):
+            return [{
+                "id": "gpt-x", "display_name": "GPT X", "is_default": True,
+                "default_effort": "medium",
+                "supported_efforts": ["low", "medium", "high"],
+            }]
+
+    registry = HarnessRegistry([HarnessDescriptor(
+        harness_id="good", label="Good", production=False,
+        supported_modes=("analysis",), factory=lambda: _GoodHarness())])
+    app = build_app(store=SessionStore(), token=TOKEN, registry=registry)
+    http = TestClient(app)
+    body = http.get("/api/agent-harnesses/good/models", headers=_auth()).json()
+    assert body["models"][0]["supported_efforts"] == ["low", "medium", "high"]
+    assert body["models"][0]["available"] is True                # default fill
+
+
+def test_user_message_is_durably_persisted_in_the_transcript(client):
+    """2026-07-16 'none of our own messages': the durable event log must
+    include the HUMAN's prompt, so replay after a refresh shows both sides."""
+    created = client.post("/api/agent-sessions", headers=_auth(), json={
+        "harness_id": "fake", "conversation_id": "c-echo", "repo_id": "r",
+        "mode": "analysis"})
+    sid = created.json()["session_id"]
+    client.post(f"/api/agent-sessions/{sid}/messages", headers=_auth(),
+                json={"prompt": "show me the workspace"})
+    events = _wait_for_events(client, sid, min_count=3, after_sequence=1)
+    user_events = [e for e in events if e["type"] == "user_message"]
+    assert len(user_events) == 1
+    assert user_events[0]["payload"]["text"] == "show me the workspace"
+    # ordering: the user's turn precedes every assistant event it caused
+    first_assistant = next(i for i, e in enumerate(events)
+                           if e["type"].startswith("assistant"))
+    assert events.index(user_events[0]) < first_assistant
+
+
+def test_handoff_endpoint_returns_bounded_packet_and_records_evidence(client):
+    """Phase 3: POST /handoff assembles a BOUNDED typed packet from the source
+    session's stored events (never an unlimited transcript) and records a
+    handoff_started event on the source session as evidence."""
+    session_id = client.post("/api/agent-sessions", headers=_auth(), json={
+        "harness_id": "fake", "conversation_id": "conv-h",
+        "repo_id": "llm_station", "mode": "analysis"}).json()["session_id"]
+    client.post(f"/api/agent-sessions/{session_id}/messages",
+                headers=_auth(), json={"prompt": "review the drift"})
+    _wait_for_events(client, session_id, min_count=3, after_sequence=1)
+
+    r = client.post(f"/api/agent-sessions/{session_id}/handoff",
+                    headers=_auth(),
+                    json={"to_harness": "claude_code_local",
+                          "goal": "finish the review"})
+    assert r.status_code == 200
+    body = r.json()
+    packet, prompt = body["packet"], body["prompt"]
+    # typed context carried across the switch
+    assert packet["to_harness"] == "claude_code_local"
+    assert packet["repo_id"] == "llm_station"
+    assert packet["permission_profile"] == "read_only"
+    assert packet["source_session_id"] == session_id
+    assert packet["goal"] == "finish the review"
+    # bounded — not the whole transcript
+    assert len(packet["selected_messages"]) <= 6
+    assert "Hand-off from" in prompt and "claude_code_local" in prompt
+
+    # evidence: a handoff_started event is now on the SOURCE session
+    events = client.get(f"/api/agent-sessions/{session_id}/events",
+                        headers=_auth()).json()
+    assert any(e["type"] == "handoff_started" for e in events)
+
+
+def test_handoff_endpoint_unknown_session_404s(client):
+    r = client.post("/api/agent-sessions/AS-nope/handoff", headers=_auth(),
+                    json={"to_harness": "codex_agent"})
+    assert r.status_code == 404
+
+
+def test_attachments_resolve_clamps_and_refuses_secrets(client):
+    """POST /api/attachments/resolve resolves typed attachments on the host
+    against the selected context root: a normal repo file resolves with a
+    digest; a secret path is refused and surfaced (never dropped)."""
+    r = client.post("/api/attachments/resolve", headers=_auth(), json={
+        "repo_id": "llm_station", "external_egress": False,
+        "items": [
+            {"attachment_id": "a1", "kind": "file", "rel_path": "WORKLOG.md",
+             "display_name": "WORKLOG.md"},
+            {"attachment_id": "a2", "kind": "file", "rel_path": ".env",
+             "display_name": ".env"},
+            {"attachment_id": "a3", "kind": "work_item", "resource_id": "W-1",
+             "display_name": "a work item"},
+        ]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    kinds = {res["attachment"]["attachment_id"]: res for res in body["resolutions"]
+             if res["attachment"]}
+    # WORKLOG.md resolved with a digest; work_item resolved by id
+    assert "a1" in kinds and kinds["a1"]["attachment"]["content_digest"]
+    assert "a3" in kinds and kinds["a3"]["attachment"]["resource_id"] == "W-1"
+    # .env refused + surfaced in the blocked summary
+    assert any(r_["refusal"] and "secret" in r_["refusal"]["reason"]
+               for r_ in body["resolutions"])
+    assert len(body["summary"]["blocked"]) == 1
+
+
+def test_attachments_resolve_marks_external_egress(client):
+    r = client.post("/api/attachments/resolve", headers=_auth(), json={
+        "repo_id": "llm_station", "external_egress": True,
+        "items": [{"attachment_id": "a1", "kind": "file", "rel_path": "WORKLOG.md",
+                   "display_name": "WORKLOG.md"}]})
+    assert r.status_code == 200
+    att = r.json()["resolutions"][0]["attachment"]
+    assert att is not None and att["egress_allowed"] is False   # must be acked
+    assert r.json()["summary"]["any_leaves_machine"] is True

@@ -19,6 +19,7 @@ def _load(monkeypatch, *, capture=True, workgraph=True):
     mod = importlib.util.module_from_spec(spec)
     sys.modules["akui_capture_convert_test"] = mod
     spec.loader.exec_module(mod)
+    monkeypatch.setattr(mod, "CONFIGS_DIR", ROOT / "configs")
     monkeypatch.setattr(mod, "CAPTURE_ENABLED", capture)
     monkeypatch.setattr(mod, "WORKGRAPH_ENABLED", workgraph)
     mod._capture_service = None
@@ -36,10 +37,8 @@ def _capture(client, text="research old NBA footage for biomechanics", **kw):
 def _plan():
     return {"items": [
         {"ref": "feas", "title": "CV feasibility", "kind": "research",
-         "primary_board": {"board_id": "basketball_cv", "domain_id": "basketball_cv"}},
-        {"ref": "lic", "title": "Licensing", "kind": "research",
-         "primary_board": {"board_id": "research", "domain_id": "research"}}],
-        "edges": [{"from_ref": "lic", "to_ref": "feas", "relation": "blocks"}]}
+         "primary_board": {"board_id": "basketball_cv", "domain_id": "basketball_cv"}}],
+        "edges": []}
 
 
 def test_convert_creates_work_with_capture_provenance_and_routes_capture(monkeypatch):
@@ -49,9 +48,9 @@ def test_convert_creates_work_with_capture_provenance_and_routes_capture(monkeyp
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["capture_id"] == cid
-    # two canonical items, each stamped with the originating capture
+    # one canonical item stamped with the originating capture
     items = client.get("/api/work-items").json()
-    assert len(items) == 2
+    assert len(items) == 1
     assert all(i["capture_id"] == cid for i in items)
     assert all(i["conversation_id"] == "chat-5" for i in items)   # capture's chat
     # the capture is now in the 'routed' lane — recoverable, not destroyed
@@ -69,6 +68,19 @@ def test_convert_preview_is_side_effect_free(monkeypatch):
     assert client.get(f"/api/captures/{cid}").json()["processing_status"] == "captured"
 
 
+def test_prepared_capture_chat_id_survives_route_and_conversion(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    cid = _capture(client, requested_mode="prepare_now")
+    prepared = client.post(f"/api/captures/{cid}/prepare").json()
+    expected = f"capture:{cid}"
+    assert prepared["conversation_id"] == expected
+    proposal = client.post(f"/api/captures/{cid}/route", json={}).json()
+    assert proposal["conversation_id"] == expected
+    converted = client.post(f"/api/captures/{cid}/convert", json=_plan())
+    assert converted.status_code == 201, converted.text
+    assert client.get("/api/work-items").json()[0]["conversation_id"] == expected
+
+
 def test_convert_unknown_capture_is_404(monkeypatch):
     _mod, client = _load(monkeypatch)
     assert client.post("/api/captures/nope/convert",
@@ -77,14 +89,15 @@ def test_convert_unknown_capture_is_404(monkeypatch):
                        json=_plan()).status_code == 404
 
 
-def test_convert_cycle_is_409_and_capture_stays_captured(monkeypatch):
+def test_convert_requires_one_item_and_preview_still_checks_cycles(monkeypatch):
     _mod, client = _load(monkeypatch)
     cid = _capture(client)
     bad = {"items": [{"ref": "a", "title": "A"}, {"ref": "b", "title": "B"}],
            "edges": [{"from_ref": "a", "to_ref": "b", "relation": "blocks"},
                      {"from_ref": "b", "to_ref": "a", "relation": "blocks"}]}
-    assert client.post(f"/api/captures/{cid}/convert", json=bad).status_code == 409
-    # the work side is atomic AND the capture was not marked (mark happens after)
+    assert client.post(f"/api/captures/{cid}/work-preview", json=bad).status_code == 409
+    assert client.post(f"/api/captures/{cid}/convert", json=bad).status_code == 400
+    # apply is bounded to one provenance item and the capture is untouched
     assert client.get("/api/work-items").json() == []
     assert client.get(f"/api/captures/{cid}").json()["processing_status"] == "captured"
 

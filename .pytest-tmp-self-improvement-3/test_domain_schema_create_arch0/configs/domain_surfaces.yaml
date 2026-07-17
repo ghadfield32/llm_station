@@ -1,0 +1,1248 @@
+schema_version: command-center.domain-surfaces.v1
+domains:
+- domain_id: betts_basketball_grand_todo
+  title: "Betts Grand TODO \u2014 Source Tracker"
+  card_component: generic_task
+  source: board_store
+  board_id: betts_basketball_grand_todo
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Blocked
+  - Done
+  - Archived
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Blocked: block_card
+    Done: finish_todo
+    Archived: finish_todo
+  summary_fields:
+  - name: item_id
+    label: Item
+  - name: category
+    label: Category
+    kind: badge
+  - name: source_status
+    label: Source status
+    kind: badge
+  - name: target
+    label: Target
+  drawer_fields:
+  - name: description
+    label: Canonical tracker entry
+    kind: markdown
+  - name: source_notes
+    label: Source notes
+    kind: markdown
+  - name: completed
+    label: Completed
+  - name: source_ref
+    label: Canonical source
+  - name: source_sha256
+    label: Source SHA-256
+  - name: source_revision_count
+    label: Preserved revisions
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  intake:
+    producer: grand_todo_import
+    mode: projection
+    summary: Canonical Betts GRAND TODO Markdown is reconciled only by an explicit
+      sync or a governed card mutation; board reads are read-only.
+    schedule: explicit sync; board view polls the stored projection
+    source_refs:
+    - betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md
+    parameters: {}
+    editable: false
+  empty_state:
+    title: GRAND TODO not imported yet
+    hint: Preview the canonical Betts tracker, then apply its merge-only projection.
+    command: uv run cc grand-todo-import --apply
+- domain_id: job_application
+  title: Jobs
+  card_component: job_application
+  source: board_store
+  board_id: job_search_pipeline_internal
+  columns:
+  - Suggested Jobs
+  - Selected by Geoff
+  - In Progress
+  - Needs Geoff
+  - Completed
+  - Interviewing
+  - Rejected / Skip
+  - Closed / Archived
+  column_actions:
+    Suggested Jobs: add_mission_card
+    Selected by Geoff: stage_card
+    In Progress: start_todo
+    Needs Geoff: block_card
+    Completed: finish_todo
+    Interviewing: stage_card
+    Rejected / Skip: reject_card
+    Closed / Archived: finish_todo
+  summary_fields:
+  - name: company
+    label: Company
+  - name: role_title
+    label: Role
+  - name: fit_score
+    label: Fit
+    kind: score
+  - name: salary_text
+    label: Salary
+    kind: money
+  - name: automation_class
+    label: Automation
+    kind: badge
+  - name: resume_variant
+    label: Resume
+    kind: badge
+  drawer_fields:
+  - name: why_apply
+    label: Why apply
+    kind: markdown
+  - name: risks
+    label: Risks
+    kind: markdown
+  - name: score_explanation
+    label: Score explanation
+    kind: markdown
+  - name: manual_reason
+    label: Manual blockers
+    kind: markdown
+  - name: apply_url
+    label: Posting
+    kind: url
+  - name: portal
+    label: Portal
+    kind: badge
+  - name: location
+    label: Location
+  - name: remote_type
+    label: Remote
+    kind: badge
+  - name: deadline
+    label: Deadline
+    kind: datetime
+  - name: next_action
+    label: Next action
+    kind: markdown
+  - name: materials_path
+    label: Materials
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - block_card
+  - reject_card
+  - finish_todo
+  intake:
+    producer: job_search_daily
+    mode: scheduled
+    summary: Ranked job discovery and pasted postings feed this application pipeline.
+    schedule: daily and on demand
+    source_refs:
+    - configs/job_search.yaml
+    - data/job_search/profile/search_settings.yml
+    parameters: {}
+    editable: false
+  empty_state:
+    title: No jobs surfaced yet
+    hint: The daily DAG writes ranked suggestions here; you can also rank a pasted
+      posting.
+    command: uv run cc job-search suggest --from-file <posting.md>
+- domain_id: linkedin_post
+  title: Posts
+  card_component: linkedin_post
+  source: board_store
+  board_id: linkedin_content_pipeline_internal
+  columns:
+  - Draft
+  - In Queue
+  - Scheduled
+  - Published
+  - Needs Geoff
+  column_actions:
+    Draft: add_mission_card
+    In Queue: stage_card
+    Scheduled: start_todo
+    Published: finish_todo
+    Needs Geoff: block_card
+  summary_fields:
+  - name: account
+    label: Account
+    kind: badge
+  - name: hook
+    label: Hook
+  - name: scheduled_for
+    label: Scheduled
+    kind: datetime
+  - name: approval_state
+    label: Approval
+    kind: badge
+  drawer_fields:
+  - name: body
+    label: Post
+    kind: markdown
+  - name: tags
+    label: Tags
+    kind: list
+  - name: source_ref
+    label: Source
+  - name: post_urn
+    label: PostURN
+  allowed_actions:
+  - stage_card
+  - block_card
+  - reject_card
+  intake:
+    producer: cockpit_composer
+    mode: manual
+    summary: Human-reviewed LinkedIn drafts are composed directly in the cockpit.
+    schedule: on demand
+    source_refs:
+    - configs/content.yaml
+    parameters:
+      instructions: Add source-backed post ideas and keep publishing human-approved.
+    editable: true
+  empty_state:
+    title: No posts queued
+    hint: Create a draft here, review its LinkedIn preview, then move it through the
+      queue.
+    command: Open Posts and choose New post
+- domain_id: book
+  title: Books
+  card_component: book
+  source: board_store
+  board_id: reading_library
+  columns:
+  - To read
+  - Reading
+  - Done
+  - Archived
+  column_actions:
+    To read: add_mission_card
+    Reading: start_todo
+    Done: finish_todo
+    Archived: reject_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: author
+    label: Author
+  - name: tier
+    label: Priority
+    kind: badge
+  - name: genre
+    label: Genre
+    kind: badge
+  drawer_fields:
+  - name: description
+    label: Details
+    kind: markdown
+  - name: isbn
+    label: ISBN
+  - name: section
+    label: Section
+  - name: module
+    label: Module
+  - name: hours
+    label: Hours
+  - name: genre
+    label: Genre
+    kind: badge
+  - name: type
+    label: Format / source label
+    kind: badge
+  - name: current_chapter
+    label: Current chapter
+  - name: current_page
+    label: Current page
+  - name: total_pages
+    label: Total pages
+  - name: progress_percent
+    label: Progress percent
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - reject_card
+  intake:
+    producer: cockpit_book_editor
+    mode: manual
+    summary: Books, reading positions, and chapter-aware ordered notes are managed
+      directly from the searchable library desk.
+    schedule: on demand
+    source_refs:
+    - generated/boards/reading_library
+    parameters:
+      instructions: Add books that support active projects, durable skills, or personal
+        learning.
+    editable: true
+  empty_state:
+    title: No books in the library yet
+    hint: The Growth OS library board holds the reading list; add `library` to the
+      board worker's UI_BOARDS and regenerate the snapshot.
+    command: Open Books and add a card
+- domain_id: paper
+  title: Papers
+  card_component: paper
+  source: board_store
+  board_id: research_papers
+  columns:
+  - Inbox
+  - Reading
+  - Read
+  - Archived
+  summary_fields:
+  - name: title
+    label: Title
+  - name: score
+    label: Source discovery score
+    kind: score
+  - name: useful_for
+    label: Topics
+    kind: badge
+  drawer_fields:
+  - name: authors
+    label: Authors
+  - name: published
+    label: Published
+    kind: datetime
+  - name: primary_category
+    label: Primary arXiv area
+    kind: badge
+  - name: comment
+    label: Author notes
+    kind: markdown
+  - name: journal_ref
+    label: Journal reference
+  - name: doi
+    label: DOI
+  - name: abstract
+    label: Abstract
+    kind: markdown
+  - name: url
+    label: Link
+    kind: url
+  - name: score
+    label: Source discovery score
+    kind: score
+  - name: work_areas
+    label: Areas of work
+    kind: list
+  - name: use_cases
+    label: Use cases
+    kind: list
+  - name: research_priority
+    label: Review priority
+    kind: badge
+  - name: relevance_score
+    label: Relevance to our work
+    kind: score
+  - name: potential_impact_score
+    label: Potential impact
+    kind: score
+  - name: implementation_readiness_score
+    label: Implementation readiness
+    kind: score
+  - name: evidence_confidence_score
+    label: Evidence confidence
+    kind: score
+  - name: estimated_effort
+    label: Prototype effort
+    kind: badge
+  - name: applicable_projects
+    label: Applicable registered folders
+    kind: list
+  - name: best_project
+    label: Best-fit folder
+    kind: badge
+  - name: best_project_fit_score
+    label: Best folder fit
+    kind: score
+  - name: project_fit_summary
+    label: Folder fit and suggested applications
+    kind: markdown
+  - name: useful_for_us
+    label: How this could help us
+    kind: markdown
+  - name: pros
+    label: Pros
+    kind: list
+  - name: cons
+    label: Cons
+    kind: list
+  - name: key_details
+    label: Key implementation details
+    kind: list
+  - name: implementation_notes
+    label: Implementation notes
+    kind: list
+  - name: code_links
+    label: Code repositories
+    kind: list
+  - name: related_links
+    label: Related links
+    kind: list
+  - name: review_topics
+    label: Review boards
+    kind: list
+  - name: analysis_status
+    label: Analysis status
+    kind: badge
+  - name: analysis_schema_version
+    label: Analysis contract
+    kind: badge
+  - name: analysis_origin
+    label: Analysis origin
+    kind: badge
+  - name: analysis_model
+    label: Analysis model
+  - name: analysis_generated_at
+    label: Analysis generated
+    kind: datetime
+  - name: analysis_input_sha256
+    label: Analysis input SHA-256
+  - name: analysis_error_code
+    label: Analysis error
+    kind: badge
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  intake:
+    producer: growth_os_arxiv
+    mode: scheduled
+    summary: Recent arXiv papers are queried, scored against our interests, enriched
+      locally, and the top results enter Inbox.
+    schedule: hourly
+    source_refs:
+    - configs/domain_surfaces.yaml#paper.intake.parameters
+    - growth_os/config/sources.yaml#interest_profile
+    - growth_os/config/sources.yaml#scoring
+    parameters:
+      enabled: true
+      top_n: 12
+      lookback_days: 3
+      analysis_batch_size: 25
+      categories:
+      - cs.LG
+      - stat.ML
+      - cs.CV
+      - cs.CL
+      - cs.AI
+      - stat.ME
+      - stat.AP
+      review_topics:
+      - Bayesian forecasting
+      - Sports analytics
+      - Player tracking computer vision
+      - LLM agents
+      - MLOps and feature stores
+    editable: true
+  empty_state:
+    title: No papers in the queue
+    hint: The research-digest intake feeds the papers board; sync lands here.
+    command: uv run cc research-digest feed
+- domain_id: repo
+  title: Repos
+  card_component: repo
+  source: board_store
+  board_id: research_repos
+  columns:
+  - Inbox
+  - Trying
+  - Using
+  - Archived
+  summary_fields:
+  - name: title
+    label: Repo
+  - name: language
+    label: Language
+    kind: badge
+  - name: stars
+    label: Stars
+    kind: badge
+  - name: score
+    label: Source discovery score
+    kind: score
+  drawer_fields:
+  - name: why
+    label: Why it matters
+    kind: markdown
+  - name: url
+    label: Link
+    kind: url
+  - name: topics
+    label: Topics
+  - name: owner
+    label: Owner
+  - name: updated
+    label: Updated
+    kind: datetime
+  - name: pushed_at
+    label: Last code push
+    kind: datetime
+  - name: license
+    label: License
+    kind: badge
+  - name: default_branch
+    label: Default branch
+  - name: forks
+    label: Forks
+  - name: open_issues
+    label: Open issues
+  - name: archived
+    label: Archived upstream
+    kind: badge
+  - name: score
+    label: Source discovery score
+    kind: score
+  - name: work_areas
+    label: Areas of work
+    kind: list
+  - name: use_cases
+    label: Use cases
+    kind: list
+  - name: research_priority
+    label: Review priority
+    kind: badge
+  - name: relevance_score
+    label: Relevance to our work
+    kind: score
+  - name: potential_impact_score
+    label: Potential impact
+    kind: score
+  - name: implementation_readiness_score
+    label: Implementation readiness
+    kind: score
+  - name: evidence_confidence_score
+    label: Evidence confidence
+    kind: score
+  - name: estimated_effort
+    label: Prototype effort
+    kind: badge
+  - name: applicable_projects
+    label: Applicable registered folders
+    kind: list
+  - name: best_project
+    label: Best-fit folder
+    kind: badge
+  - name: best_project_fit_score
+    label: Best folder fit
+    kind: score
+  - name: project_fit_summary
+    label: Folder fit and suggested applications
+    kind: markdown
+  - name: useful_for_us
+    label: How this could help us
+    kind: markdown
+  - name: pros
+    label: Pros
+    kind: list
+  - name: cons
+    label: Cons
+    kind: list
+  - name: key_details
+    label: Key implementation details
+    kind: list
+  - name: implementation_notes
+    label: Implementation notes
+    kind: list
+  - name: code_links
+    label: Code repositories
+    kind: list
+  - name: related_links
+    label: Related links
+    kind: list
+  - name: review_topics
+    label: Review boards
+    kind: list
+  - name: analysis_status
+    label: Analysis status
+    kind: badge
+  - name: analysis_schema_version
+    label: Analysis contract
+    kind: badge
+  - name: analysis_origin
+    label: Analysis origin
+    kind: badge
+  - name: analysis_model
+    label: Analysis model
+  - name: analysis_generated_at
+    label: Analysis generated
+    kind: datetime
+  - name: analysis_input_sha256
+    label: Analysis input SHA-256
+  - name: analysis_error_code
+    label: Analysis error
+    kind: badge
+  allowed_actions:
+  - add_mission_card
+  intake:
+    producer: growth_os_github
+    mode: scheduled
+    summary: GitHub repository searches are scored against our interests, enriched
+      locally, and the top results enter Inbox.
+    schedule: hourly
+    source_refs:
+    - configs/domain_surfaces.yaml#repo.intake.parameters
+    - growth_os/config/sources.yaml#interest_profile
+    - growth_os/config/sources.yaml#scoring
+    parameters:
+      enabled: true
+      top_n: 10
+      lookback_days: 7
+      min_stars: 25
+      analysis_batch_size: 25
+      review_topics:
+      - Bayesian forecasting
+      - Sports analytics
+      - Player tracking computer vision
+      - LLM agents
+      - MLOps and feature stores
+    editable: true
+  empty_state:
+    title: No repos on the board
+    hint: The repo scout feeds this board; registered work repos live in configs/autonomy.yaml.
+    command: uv run cc onboard repo
+- domain_id: dag
+  title: DAGs
+  card_component: dag
+  source: board_store
+  board_id: dag_operations
+  columns:
+  - Active
+  - Paused
+  - Manual
+  - Broken
+  - Retired
+  summary_fields:
+  - name: dag_id
+    label: DAG
+  - name: last_run
+    label: Last run
+    kind: datetime
+  - name: state
+    label: State
+    kind: badge
+  - name: owner
+    label: Owner
+  drawer_fields:
+  - name: schedule
+    label: Schedule
+  - name: next_run
+    label: Next run
+    kind: datetime
+  - name: description
+    label: Description
+    kind: markdown
+  - name: failure_summary
+    label: Notes
+    kind: markdown
+  - name: related_repo
+    label: Path
+  allowed_actions:
+  - add_mission_card
+  - block_card
+  intake:
+    producer: growth_os_airflow_sync
+    mode: scheduled
+    summary: Live Airflow metadata is synchronized into this operations board.
+    schedule: hourly
+    source_refs:
+    - growth_os/config/projects.yaml
+    parameters: {}
+    editable: false
+  empty_state:
+    title: No DAGs visible
+    hint: The Airflow scheduler is not reporting; runs appear once it is up.
+- domain_id: self_improvement
+  title: Self Improvement
+  card_component: generic_task
+  source: board_store
+  board_id: self_improvement
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Opportunity
+  - name: pillar
+    label: Pillar
+    kind: badge
+  - name: risk
+    label: Risk
+    kind: badge
+  - name: score
+    label: Score
+    kind: score
+  drawer_fields:
+  - name: action
+    label: Proposed action
+    kind: markdown
+  - name: acceptance
+    label: Acceptance and evidence
+    kind: markdown
+  - name: source
+    label: Discovery source
+    kind: badge
+  - name: evidence
+    label: Evidence
+    kind: markdown
+  - name: unknowns
+    label: Unknowns
+    kind: markdown
+  - name: notes
+    label: Traceability
+    kind: markdown
+  - name: repo_ids
+    label: Repositories
+    kind: list
+  - name: repository_reason
+    label: Why check these repositories
+    kind: markdown
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: self_improvement_daily
+    mode: scheduled
+    summary: Ranked, deduplicated opportunities from the observer-only self-improvement
+      DAG.
+    schedule: daily at 06:00 UTC and on scan-request events
+    source_refs:
+    - dags/self_improvement_daily.py
+    - src/command_center/improvement/discovery
+    - configs/kanban_boards.yaml
+    parameters:
+      coverage: all registered boards except this output board, plus code, ledger,
+        research, dependency, model, and provider signals
+      output_policy: top-ranked Backlog drafts only; approval remains human-only
+    editable: false
+  empty_state:
+    title: No improvement opportunities drafted
+    hint: The daily scan writes its highest-ranked, evidence-backed findings here.
+    command: uv run cc improvement-scan --apply
+- domain_id: mission
+  title: Missions
+  card_component: mission
+  source: ledger_missions
+  columns:
+  - awaiting_approval
+  - open
+  - approved
+  - running
+  - blocked
+  - done
+  - killed
+  - failed
+  summary_fields:
+  - name: action
+    label: Mission
+  - name: repo
+    label: Repo
+    kind: badge
+  - name: risk
+    label: Risk
+    kind: badge
+  - name: status
+    label: Status
+    kind: badge
+  drawer_fields:
+  - name: created_at
+    label: Created
+    kind: datetime
+  allowed_actions: []
+  intake:
+    producer: ledger
+    mode: event
+    summary: Signed Ledger mission lifecycle events populate this board.
+    schedule: live
+    source_refs:
+    - services/ledger
+    parameters: {}
+    editable: false
+  empty_state:
+    title: No missions
+    hint: Draft one from a board card or the bridge.
+    command: uv run cc kanban-bridge --dry-run
+- domain_id: generic_task
+  title: General Todos
+  card_component: generic_task
+  source: board_store
+  board_id: personal_todos
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Task
+  - name: kind
+    label: Kind
+    kind: badge
+  - name: priority
+    label: Priority
+    kind: badge
+  - name: due_at
+    label: Due
+    kind: datetime
+  drawer_fields:
+  - name: description
+    label: Notes
+    kind: markdown
+  - name: owner
+    label: Owner
+  - name: capture_id
+    label: Capture
+  - name: conversation_id
+    label: Conversation
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed captures and chat TODOs are routed onto the canonical Work Graph
+      and projected here.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    - src/command_center/work_graph
+    parameters:
+      instructions: General personal and cross-project tasks without a more specific
+        destination.
+    editable: true
+  empty_state:
+    title: No todos yet
+    hint: Capture something, choose Prepare now, then route it here after review.
+- domain_id: home_house
+  title: Home & House
+  card_component: generic_task
+  source: board_store
+  board_id: home_house
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: status
+    label: Status
+  drawer_fields:
+  - name: description
+    label: Description
+  - name: notes
+    label: Notes
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed captures and chat TODOs about home projects are routed here.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    parameters:
+      instructions: Home repairs, maintenance, services, purchases, and house projects.
+    editable: true
+  empty_state:
+    title: No Home & House cards yet
+    hint: House projects, repairs, and home services.
+- domain_id: movies_shows
+  title: Movies & Shows
+  card_component: generic_task
+  source: board_store
+  board_id: movies_shows
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: status
+    label: Status
+  drawer_fields:
+  - name: description
+    label: Description
+  - name: notes
+    label: Notes
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed movie and show captures are routed into this watch queue.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    parameters:
+      instructions: Films, series, documentaries, and viewing follow-ups.
+    editable: true
+  empty_state:
+    title: No Movies & Shows cards yet
+    hint: 'Watch queue: films and series.'
+- domain_id: site_basketball
+  title: Site & Basketball
+  card_component: generic_task
+  source: board_store
+  board_id: site_basketball
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: status
+    label: Status
+  drawer_fields:
+  - name: description
+    label: Description
+  - name: notes
+    label: Notes
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed Betts Basketball and site-development captures are routed here.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    parameters:
+      instructions: Basketball analytics, site features, data pipelines, models, and
+        research ideas.
+    editable: true
+  empty_state:
+    title: No Site & Basketball cards yet
+    hint: 'Basketball analytics site: features, pipelines, research ideas.'
+- domain_id: station_improvements
+  title: Station Improvements
+  card_component: generic_task
+  source: board_store
+  board_id: station_improvements
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: status
+    label: Status
+  drawer_fields:
+  - name: description
+    label: Description
+  - name: notes
+    label: Notes
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed LLM Station platform and infrastructure improvements are routed
+      here.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    parameters:
+      instructions: LLM Station reliability, evaluation, tooling, infrastructure,
+        and platform upgrades.
+    editable: true
+  empty_state:
+    title: No Station Improvements cards yet
+    hint: LLM Station / kanban platform upgrades.
+- domain_id: kanban_improvements
+  title: Kanban Improvements
+  card_component: generic_task
+  source: board_store
+  board_id: kanban_improvements
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: status
+    label: Status
+  drawer_fields:
+  - name: description
+    label: Description
+  - name: notes
+    label: Notes
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed Kanban experience and workflow improvements are routed here.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    parameters:
+      instructions: Board, intake, agenda, duplicate, routing, and assistant-selector
+        improvements.
+    editable: true
+  empty_state:
+    title: No Kanban Improvements cards yet
+    hint: 'Board/intake/agenda UX work: duplicates, occurrences, Agenda, assistant
+      selector. Primary home; items also project onto Station Improvements.'
+- domain_id: business
+  title: Business
+  card_component: generic_task
+  source: board_store
+  board_id: business
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: status
+    label: Status
+  drawer_fields:
+  - name: description
+    label: Description
+  - name: notes
+    label: Notes
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed business operations and opportunity captures are routed here.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    parameters:
+      instructions: Business operations, revenue opportunities, partnerships, and
+        administration.
+    editable: true
+  empty_state:
+    title: No Business cards yet
+    hint: 'Business development: consent-first partner outreach, pilot offers, and
+      delivery. Agents draft; Geoff approves.'
+- domain_id: tech_hardware_setup
+  title: Tech Hardware Setup
+  card_component: generic_task
+  source: board_store
+  board_id: tech_hardware_setup
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Done
+  - Blocked
+  - Rejected
+  - Awaiting Approval
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Done: finish_todo
+    Blocked: block_card
+    Rejected: reject_card
+    Awaiting Approval: stage_card
+  summary_fields:
+  - name: title
+    label: Title
+  - name: status
+    label: Status
+  drawer_fields:
+  - name: description
+    label: Description
+  - name: notes
+    label: Notes
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  - reject_card
+  intake:
+    producer: universal_intake
+    mode: event
+    summary: Reviewed workstation, network, and hardware setup captures are routed
+      here.
+    schedule: on reviewed capture conversion
+    source_refs:
+    - src/command_center/intake
+    parameters:
+      instructions: Workstation hardware, networking, peripherals, storage, and technical
+        setup.
+    editable: true
+  empty_state:
+    title: No Tech Hardware Setup cards yet
+    hint: "Hardware, network, storage, and Life Center build-out \u2014 gated plan\
+      \ from docs/operations/HARDWARE_AND_LIFE_CENTER_PLAN.md."
+- domain_id: test_board
+  title: Test Board
+  archived: false
+  card_component: generic_task
+  source: fixtures
+  columns:
+  - Backlog
+  - Done
+  column_actions: {}
+  summary_fields:
+  - name: title
+    label: Title
+    kind: text
+  drawer_fields:
+  - name: notes
+    label: Notes
+    kind: markdown
+  allowed_actions:
+  - stage_card
+  - finish_todo
+  empty_state:
+    title: No cards
+    hint: Nothing queued.
+  intake:
+    producer: manual
+    mode: manual
+    summary: Cards are added directly from this board.
+    schedule: on demand
+    source_refs: []
+    parameters: {}
+    editable: true

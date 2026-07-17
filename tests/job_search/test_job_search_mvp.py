@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -20,7 +21,10 @@ from command_center.job_search.application_memory import (
     create_prepared_application,
     mark_submitted,
 )
-from command_center.job_search.cli import main as job_search_main
+from command_center.job_search.cli import (
+    _daily_discovery_terms,
+    main as job_search_main,
+)
 from command_center.job_search.automation_policy import can_submit, classify_automation
 from command_center.job_search.config import load_config
 from command_center.job_search.interview_prep import render_answer_bank, select_stories
@@ -48,6 +52,29 @@ def test_config_validates_and_auto_submit_is_disabled():
     assert not cfg.job_search.submit_without_geoff_selection
     assert cfg.job_search.require_geoff_selection
     assert not can_submit(cfg)
+
+
+def test_daily_discovery_includes_every_company_watchlist_target():
+    cfg = load_config()
+    keywords, company_targets, remotive_searches = _daily_discovery_terms(
+        cfg, run_day=date(2026, 7, 15))
+    expected_companies = {
+        company
+        for group in cfg.company_targets.model_dump(mode="python").values()
+        for company in group
+    }
+    assert set(company_targets) == expected_companies
+    assert len(remotive_searches) <= 24
+    searched_over_rotation = set()
+    for offset in range(max(1, len(company_targets))):
+        searched_over_rotation.update(_daily_discovery_terms(
+            cfg, run_day=date(2026, 7, 15) + timedelta(days=offset))[2])
+    assert expected_companies.issubset(searched_over_rotation)
+
+    dag_source = (ROOT / "dags" / "job_search_daily.py").read_text(
+        encoding="utf-8")
+    assert "_daily_discovery_terms(cfg)" in dag_source
+    assert "tags=remotive_searches" in dag_source
 
 
 def test_application_id_includes_job_key_to_avoid_same_title_collisions():
@@ -284,13 +311,25 @@ def test_retention_dry_run_mutates_nothing_and_apply_archives_stale(tmp_path):
     result = apply_retention(root=tmp_path, today=date(2026, 2, 5))
     assert raw["application_id"] in result["archived"]
     assert (app_dir / "ARCHIVED_MINIMAL_LEDGER_WRITTEN.txt").exists()
+    assert (app_dir / "generated_resume.md").exists()  # rich files are not deleted
     db_path = tmp_path / "applications_archive" / "outcomes.sqlite"
     with sqlite3.connect(db_path) as db:
         count = db.execute("SELECT count(*) FROM outcomes").fetchone()[0]
+        first_archived_at = db.execute(
+            "SELECT archived_at FROM outcomes").fetchone()[0]
     assert count == 1
 
+    second_plan = plan_retention(root=tmp_path, today=date(2026, 3, 5))
+    assert second_plan["records"][0]["action"] == "already_archived"
+    repeated = apply_retention(root=tmp_path, today=date(2026, 3, 5))
+    assert repeated["archived"] == []
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT count(*) FROM outcomes").fetchone()[0] == 1
+        assert db.execute(
+            "SELECT archived_at FROM outcomes").fetchone()[0] == first_archived_at
 
-def test_active_process_extends_retention_plan(tmp_path):
+
+def test_stale_active_process_expires_when_retention_date_passes(tmp_path):
     cfg = load_config()
     bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
     job = _job("basketball_ai_data_scientist.md")
@@ -305,10 +344,102 @@ def test_active_process_extends_retention_plan(tmp_path):
     raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
     raw["status"] = "interviewing"
     raw["stage"] = "interviewing"
+    raw["applied_at"] = "2025-12-01"
     raw["retention_until"] = (date(2026, 1, 1) - timedelta(days=1)).isoformat()
     record_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     plan = plan_retention(root=tmp_path, today=date(2026, 2, 5))
-    assert plan["records"][0]["action"] == "retain_active_process"
+    assert plan["records"][0]["action"] == "archive_compact"
+
+
+def test_only_explicit_process_furthering_note_refreshes_retention(tmp_path):
+    cfg = load_config()
+    bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
+    job = _job("basketball_ai_data_scientist.md")
+    app_dir = create_prepared_application(
+        job, score_job(job, bank, cfg), classify_automation(job, cfg),
+        select_resume(job, bank, cfg), root=tmp_path,
+    )
+    record_path = app_dir / "application.yml"
+    raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    raw["retention_until"] = "2000-01-01"
+    raw["rich_compacted"] = True
+    raw["archived_at"] = "2000-02-01"
+    record_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    ordinary = append_note_text(
+        raw["application_id"], "manual_note", "Checked the listing.",
+        root=tmp_path)
+    unchanged = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    assert ordinary["furthers_process"] is False
+    assert unchanged["retention_until"] == "2000-01-01"
+    assert unchanged["rich_compacted"] is True
+
+    qualifying = append_note_text(
+        raw["application_id"], "recruiter_email", "Interview requested.",
+        root=tmp_path, furthers_process=True)
+    refreshed = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    assert qualifying["furthers_process"] is True
+    assert refreshed["retention_until"] > "2000-01-01"
+    assert refreshed["rich_compacted"] is False
+    assert refreshed["archived_at"] is None
+
+
+def test_unsubmitted_packet_never_enters_applied_job_ledger(tmp_path):
+    cfg = load_config()
+    bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
+    job = _job("basketball_ai_data_scientist.md")
+    app_dir = create_prepared_application(
+        job, score_job(job, bank, cfg), classify_automation(job, cfg),
+        select_resume(job, bank, cfg), root=tmp_path,
+    )
+    record_path = app_dir / "application.yml"
+    raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    raw["retention_until"] = "2000-01-01"
+    record_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    plan = plan_retention(root=tmp_path, today=date(2026, 2, 5))
+    assert plan["records"][0]["action"] == "retain_not_applied"
+    result = apply_retention(root=tmp_path, today=date(2026, 2, 5))
+    assert result["archived"] == []
+    with sqlite3.connect(result["db_path"]) as db:
+        assert db.execute("SELECT count(*) FROM outcomes").fetchone()[0] == 0
+
+
+def test_concurrent_notes_preserve_every_event_and_qualifying_retention(tmp_path):
+    cfg = load_config()
+    bank = ensure_bank(tmp_path / "profile" / "achievement_bank.yml")
+    job = _job("basketball_ai_data_scientist.md")
+    app_dir = create_prepared_application(
+        job, score_job(job, bank, cfg), classify_automation(job, cfg),
+        select_resume(job, bank, cfg), root=tmp_path,
+    )
+    app_id = app_dir.name
+    mark_submitted(app_id, root=tmp_path)
+
+    def add(index: int) -> None:
+        append_note_text(
+            app_id,
+            "recruiter_email" if index == 0 else "manual_note",
+            f"parallel note {index}",
+            root=tmp_path,
+            furthers_process=index == 0,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(add, range(16)))
+
+    events = [
+        json.loads(line)
+        for line in (app_dir / "communications.jsonl").read_text(
+            encoding="utf-8").splitlines()
+    ]
+    assert {event["summary"] for event in events} >= {
+        f"parallel note {index}" for index in range(16)
+    }
+    record = yaml.safe_load(
+        (app_dir / "application.yml").read_text(encoding="utf-8"))
+    assert record["rich_compacted"] is False
+    assert record["archived_at"] is None
 
 
 def test_example_validation_summary_has_three_jobs():

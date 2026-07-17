@@ -80,7 +80,7 @@ Geoff reviews on phone/AppFlowy, drags good ones -> Selected by Geoff
 process-selected --apply -> In Progress -> Needs Geoff (always, for now)
 Geoff applies manually using the generated materials + checklist
 Geoff drags card to Completed -> 30-day rich memory starts
-Recruiter/interview activity -> Interviewing -> retention extends
+Explicitly marked furthering recruiter/interview activity -> Interviewing -> retention extends
 ```
 
 Nothing is ever auto-submitted. `auto_submit_enabled` is schema-rejected if
@@ -217,16 +217,15 @@ workflow as adding a plain achievement.
 ## What happens when a recruiter reaches out?
 
 ```text
-uv run cc job-search note <application_id> --type recruiter_call --file notes.md
+uv run cc job-search note <application_id> --type recruiter_call --file notes.md --furthers-process
 ```
 
 This appends a summary to `communications.jsonl`, moves the board card to
 `Interviewing`, extends the retention window to 30 days past *this* event,
-and regenerates `followups.md` with a next action. Do this for phone
-screens, recruiter emails, hiring-manager notes, or anything else - the
-`note_type` just needs to contain "recruiter" or "interview" to trigger the
-board move; other note types still get logged to `communications.jsonl` and
-still refresh `followups.md`.
+and regenerates `followups.md` with a next action. The explicit
+`--furthers-process` flag is required for the stage/retention change; recruiter
+rejections and ordinary notes can be recorded without it and do not advance the
+card or clock. The cockpit exposes the same choice as a checkbox.
 
 Note: as of 2026-07-08, regenerating materials (`generate-materials` /
 `process-selected`) for a job that already has notes logged **no longer
@@ -243,23 +242,28 @@ silently erased any recruiter notes already logged that day.
   `cover_letter.md`, `recruiter_message.md`, `resume_selection_report.md`
   (claim traceability), `answer_bank.md` (see "The answer bank" above),
   `communications.jsonl`, `recruiter_notes.md`, and `followups.md`.
-- Rich data is kept for **30 days from `last_activity_at`**, not from
-  `applied_at` - so a fresh recruiter note always buys another 30 days.
-  Active statuses that extend retention: `recruiter_contact`,
+- Rich data is kept through the per-record `retention_until` date (30 days by
+  default and adjustable from Cockpit Controls). A note refreshes that date only
+  when the operator explicitly marks it as furthering the process; an ordinary
+  note or stale active status does not extend retention.
+  Statuses recognized as active while the current window is still valid:
+  `recruiter_contact`,
   `interviewing`, `phone_screen`, `take_home`, `onsite`, `offer`,
   `negotiation`.
-- After that, `cc job-search retention --apply` compacts the folder to a
-  minimal ledger row in `data/job_search/applications_archive/outcomes.sqlite`
+- After that, `cc job-search retention --apply` writes an idempotent minimal
+  ledger row in `data/job_search/applications_archive/outcomes.sqlite`
   (company, title, source, portal, outcome, category, resume variant, fit
   score, salary range, bullet IDs used) and writes an
   `ARCHIVED_MINIMAL_LEDGER_WRITTEN.txt` marker. The MVP writes minimal
-  archive rows only - rich file deletion is disabled by default through
+  archive rows only - rich file deletion is disabled through
   `purge_rich_files: false`. Always run `--dry-run` first to see exactly what
-  would be archived.
-- This is what keeps `data/job_search/` from growing without bound while
-  still preserving everything needed to build a fast follow-up case if a
-  company reaches back out months later (the archive row + bullet IDs are
-  enough to regenerate materials on demand).
+  would be archived. Repeated apply runs leave the original archive timestamp
+  unchanged. A later explicitly furthering communication reactivates the rich
+  record and starts a new window. Prepared-but-never-submitted packets never
+  enter the applied-job outcome ledger.
+- Because rich deletion is disabled, this does **not** bound disk growth. It
+  preserves the rich folder plus the minimal outcome row so a later follow-up
+  can use the original evidence.
 
 ## What if Claude Code is unavailable?
 

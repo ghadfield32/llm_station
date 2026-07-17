@@ -5,12 +5,14 @@ round-trip serialization the dynamic task mapping relies on.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from command_center.improvement.discovery import (
     CodeHealthScanner, DependencyScanner, Finding, KanbanScanner, LedgerHealthScanner,
     ModelRegistryScanner, PapersScanner, Pillar, ScanOutcome, build_scanner, finish,
-    offline_specs, scan_one,
+    offline_specs, registered_repository_specs, scan_one, scheduled_source_registry,
 )
 from command_center.improvement.discovery import dag_support
 from command_center.improvement.discovery.dag_support import SOURCE_REGISTRY
@@ -65,6 +67,22 @@ def test_scan_one_feed_with_records(tmp_path):
                 "candidate": 0.9, "incumbent": 0.8, "direction": "increase"}]
     out = scan_one(spec, _reg(tmp_path), fetch=lambda _s: records)
     assert out["error"] == "" and len(out["findings"]) == 1
+
+
+def test_scan_one_attaches_repository_scope_and_reason(tmp_path):
+    spec = {
+        "name": "repo_scoped_models", "kind": "model_registry",
+        "pillar": "updated_metrics", "config": {
+            "repo_ids": ["example_repo"],
+            "repository_reason": "Its model adapter can benefit from this candidate.",
+        },
+    }
+    records = [{"model": "m", "provider": "p", "metric": "acc",
+                "candidate": 0.9, "incumbent": 0.8, "direction": "increase"}]
+    out = scan_one(spec, _reg(tmp_path), fetch=lambda _s: records)
+    detail = out["findings"][0]["detail"]
+    assert detail["repo_ids"] == ["example_repo"]
+    assert detail["repository_reason"].startswith("Its model adapter")
 
 
 def test_scan_one_captures_fetch_failure_not_swallowed(tmp_path):
@@ -174,6 +192,32 @@ def test_source_registry_spans_pillars_and_offline_subset():
     assert offline == {"code_health", "ledger"}      # the two network-free sources
 
 
+def test_scheduled_registry_expands_every_registered_repository(monkeypatch, tmp_path):
+    monkeypatch.delenv("BETTS_BASKETBALL_LOCAL_PATH", raising=False)
+    specs = registered_repository_specs(
+        "configs/autonomy.yaml", self_root=tmp_path / "llm_station")
+    by_name = {spec["name"]: spec for spec in specs}
+    assert set(by_name) == {"code_health_llm_station", "code_health_betts_basketball"}
+    assert by_name["code_health_llm_station"]["config"]["root"] == str(
+        tmp_path / "llm_station")
+    betts = by_name["code_health_betts_basketball"]["config"]
+    assert Path(betts["root"]).parts[-2:] == (
+        "__missing_registered_repo_path__", "betts_basketball")
+    assert betts["repo_ids"] == ["betts_basketball"]
+    assert "declared capabilities" in betts["repository_reason"]
+
+
+def test_scheduled_registry_replaces_single_static_code_scan(monkeypatch, tmp_path):
+    monkeypatch.setenv("SELF_IMPROVEMENT_REPO_CONFIG", "configs/autonomy.yaml")
+    monkeypatch.setenv("SELF_IMPROVEMENT_REPO_ROOT", str(tmp_path))
+    monkeypatch.delenv("BETTS_BASKETBALL_LOCAL_PATH", raising=False)
+    specs = scheduled_source_registry()
+    code_specs = [spec for spec in specs if spec["kind"] == "code_health"]
+    assert {spec["config"]["repo_ids"][0] for spec in code_specs} == {
+        "llm_station", "betts_basketball"}
+    assert all(spec["name"] != "code_health" for spec in code_specs)
+
+
 def test_codesota_source_registered_and_runs_through_scan_one(tmp_path):
     """The frontier-watch CodeSOTA source is a registered model_registry feed, and its
     adapter-shaped records flow through the DAG's single-source path to findings."""
@@ -205,6 +249,18 @@ def test_fetch_records_live_source_bypasses_the_variable(monkeypatch):
     records = dag_support.fetch_records({"name": "codesota"}, variable_get)
     assert records == [{"model": "live", "metric": "m", "candidate": 2, "incumbent": 1}]
     assert variable_calls == []               # the Variable path was never touched
+
+
+def test_kanban_source_is_live_and_never_uses_a_stale_airflow_variable(monkeypatch):
+    variable_calls: list[str] = []
+    monkeypatch.setitem(dag_support.LIVE_FETCHERS, "kanban_cycle_time",
+                        lambda: [{"board_id": "b", "title": "x"}])
+    records = dag_support.fetch_records(
+        {"name": "kanban_cycle_time"},
+        lambda key: variable_calls.append(key) or "[]",
+    )
+    assert records == [{"board_id": "b", "title": "x"}]
+    assert variable_calls == []
 
 
 def test_fetch_records_non_live_source_reads_its_variable():

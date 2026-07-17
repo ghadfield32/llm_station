@@ -71,6 +71,15 @@ def test_create_board_module_writes_both_configs_with_safe_governance(monkeypatc
     assert surface["source"] == "board_store"
     assert surface["card_component"] == "generic_task"
     assert surface["board_id"] == "my_books"
+    assert surface["intake"] == {
+        "producer": "universal_intake",
+        "mode": "event",
+        "summary": "reading list",
+        "schedule": "on reviewed capture conversion",
+        "source_refs": ["src/command_center/intake"],
+        "parameters": {"instructions": "reading list"},
+        "editable": True,
+    }
     from command_center.schemas.contracts import DomainSurfacesConfig
     DomainSurfacesConfig.model_validate(dom)
 
@@ -109,6 +118,24 @@ def test_empty_title_is_400(monkeypatch, tmp_path):
     assert tc.post("/api/board-module", json={"title": "   "}).status_code == 400
 
 
+def test_custom_columns_are_rejected_without_partial_config_writes(
+    monkeypatch, tmp_path,
+):
+    _mod, tc = _load(monkeypatch, tmp_path)
+    before_domains = (tmp_path / "domain_surfaces.yaml").read_bytes()
+    before_registry = (tmp_path / "kanban_boards.yaml").read_bytes()
+
+    response = tc.post(
+        "/api/board-module",
+        json={"title": "Broken Workflow", "columns": ["Ideas", "Done"]},
+    )
+
+    assert response.status_code == 400
+    assert "canonical-status mapping" in response.json()["detail"]
+    assert (tmp_path / "domain_surfaces.yaml").read_bytes() == before_domains
+    assert (tmp_path / "kanban_boards.yaml").read_bytes() == before_registry
+
+
 def test_create_is_write_gated_503(monkeypatch, tmp_path):
     mod, tc = _load(monkeypatch, tmp_path, writes=False)
     r = tc.post("/api/board-module", json={"title": "Papers"})
@@ -130,3 +157,10 @@ def test_frontend_has_a_guided_create_board_wizard():
     # reachable from the Boards controls surface, with a live preview
     assert "Create board" in src
     assert "schema-preview" in src
+    # Every board renders the standard intake contract; Paper/Repo drawers can
+    # hand source-backed research to a selected registered repository.
+    assert "function BoardIntakePanel" in src
+    assert "<BoardIntakePanel spec={spec}" in src
+    assert "function ResearchImplementationHandoff" in src
+    assert "Prepare implementation handoff" in src
+    assert "Sync canonical source" in src

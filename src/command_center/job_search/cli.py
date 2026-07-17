@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -200,7 +201,8 @@ def cmd_finalize(args) -> int:
         **result,
         "board_sync": board_sync,
         "cockpit_hint": (
-            "drag the cockpit card to Completed (or press Approve & Submit) to "
+            "after submitting on the employer portal, drag the cockpit card to "
+            "Completed (or press I submitted externally — record it) to "
             "sync the internal board; already-applied records complete "
             "idempotently without a second email"),
     }, indent=2, ensure_ascii=False))
@@ -208,8 +210,17 @@ def cmd_finalize(args) -> int:
 
 
 def cmd_note(args) -> int:
-    event = append_note(args.application_id, args.type, Path(args.file))
-    note_activity_on_board(args.application_id, args.type)
+    event = append_note(
+        args.application_id,
+        args.type,
+        Path(args.file),
+        furthers_process=args.furthers_process,
+    )
+    note_activity_on_board(
+        args.application_id,
+        args.type,
+        furthers_process=args.furthers_process,
+    )
     print(json.dumps(event, indent=2))
     return 0
 
@@ -351,6 +362,50 @@ def cmd_process_selected(args) -> int:
     )
 
 
+REMOTIVE_DAILY_QUERY_BUDGET = 24
+
+
+def _daily_discovery_terms(
+    cfg, *, run_day: date | None = None,
+) -> tuple[list[str], list[str], list[str]]:
+    """Return all configured terms plus a bounded, rotating Remotive slice.
+
+    All watched companies stay in the source-of-truth list. When that list is
+    larger than the polite daily request budget, the starting offset rotates by
+    date so every company is searched over successive runs without producing an
+    unbounded burst against the public API.
+    """
+    keywords = sorted({
+        keyword.strip()
+        for category in cfg.job_categories
+        for keyword in category.keywords
+        if keyword.strip()
+    })
+    company_targets = sorted({
+        company.strip()
+        for group in cfg.company_targets.model_dump(mode="python").values()
+        for company in group
+        if company.strip()
+    })
+    ordered = company_targets + [
+        keyword for keyword in keywords if keyword not in set(company_targets)]
+    if len(ordered) <= REMOTIVE_DAILY_QUERY_BUDGET:
+        remotive_searches = ordered
+    else:
+        watched = company_targets or ordered
+        day = run_day or date.today()
+        offset = day.toordinal() % len(watched)
+        rotated = watched[offset:] + watched[:offset]
+        remotive_searches = rotated[:REMOTIVE_DAILY_QUERY_BUDGET]
+        if len(remotive_searches) < REMOTIVE_DAILY_QUERY_BUDGET:
+            remotive_searches.extend(
+                value for value in ordered
+                if value not in remotive_searches
+            )
+            remotive_searches = remotive_searches[:REMOTIVE_DAILY_QUERY_BUDGET]
+    return keywords, company_targets, remotive_searches
+
+
 def cmd_daily(args) -> int:
     """The full daily pipeline in one command — the same sequence the Airflow
     DAG runs, so a host scheduler (Windows Task / cron) can drive the job
@@ -363,14 +418,23 @@ def cmd_daily(args) -> int:
     cfg = load_config()
     # search terms derive from the ADJUSTABLE job categories (same source the
     # DAG uses) so editing a category's keywords changes what daily looks for
-    keywords = sorted({kw for c in cfg.job_categories for kw in c.keywords})
+    keywords, company_targets, remotive_searches = _daily_discovery_terms(cfg)
     jobicy_tags = sorted({kw.lower().replace(" ", "-") for kw in keywords})
-    summary: dict = {"operation": "daily", "keywords": keywords}
+    summary: dict = {
+        "operation": "daily",
+        "keywords": keywords,
+        "company_targets": company_targets,
+        "remotive_searches_today": remotive_searches,
+    }
 
     runs = [
         discover_live_postings(sources=["jobicy"], tags=jobicy_tags,
                                count=args.count, write=True),
-        discover_live_postings(sources=["remotive"], tags=keywords,
+        # Remotive accepts free-text searches, so watched company names are
+        # first-class discovery queries alongside role keywords. Jobicy accepts
+        # taxonomy tags rather than arbitrary company names; RemoteOK is a full
+        # feed and is filtered/scored after retrieval.
+        discover_live_postings(sources=["remotive"], tags=remotive_searches,
                                count=args.count, write=True),
         discover_live_postings(sources=["remoteok"], tags=[],
                                count=args.count, write=True),
@@ -448,6 +512,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("application_id")
     p.add_argument("--type", required=True)
     p.add_argument("--file", required=True)
+    p.add_argument(
+        "--furthers-process",
+        action="store_true",
+        help="Explicitly mark this communication as advancing the hiring process",
+    )
     p.set_defaults(func=cmd_note)
 
     p = sub.add_parser("followup")

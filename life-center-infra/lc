@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# lc — thin wrapper around lc.py (keeps the CLI cross-platform).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec python3 "$DIR/lc.py" "$@"

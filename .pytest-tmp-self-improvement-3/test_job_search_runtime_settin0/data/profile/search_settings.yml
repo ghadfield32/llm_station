@@ -1,0 +1,5 @@
+job_search:
+  max_suggested_jobs_per_day: 40
+  max_bot_possible_suggestions_per_day: 15
+  max_manual_required_suggestions_per_day: 25
+  max_selected_jobs_per_day: 10

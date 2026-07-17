@@ -1,0 +1,109 @@
+# Labeled Match & Organize evaluation cases — REAL fixtures from the
+# 2026-07-16 phone-todo import plus its known misses, kept as permanent
+# regression evidence. `label` is the expected human-true relationship:
+#   exact | paraphrase_same | occurrence | expansion | subject_related |
+#   not_same
+# `capture_raw` (optional) is the existing item's immutable source text —
+# present only where real capture provenance existed.
+schema_version: command-center.match-organize-eval.v1
+cases:
+  # ---- exact repeats (caught by the old exact matcher too) ----------------
+  - id: movie-exact-wire
+    label: exact
+    new: "The wire"
+    existing: "The wire"
+  - id: movie-exact-pianist
+    label: exact
+    new: "The pianist"
+    existing: "The pianist"
+  - id: punctuation-recaulk
+    label: exact
+    new: "re-caulk   BATHTUB!"
+    existing: "Re caulk bathtub"
+
+  # ---- the five paraphrased job-search requests the old matcher MISSED ----
+  - id: jobsearch-companion
+    label: paraphrase_same
+    new: "Make kanban job hunt have a go through application with you setup so you can work through it one by one page by page together if wanted."
+    existing: "Build a page-by-page job application companion"
+    capture_raw: "Make kanban job hunt have a go through application with you setup so you can work through it one by one page by page together if wanted."
+  - id: jobsearch-linkedin
+    label: paraphrase_same
+    new: "Kanban should included the follow up messages to people we actually know on LinkedIn and recommended people to connect with on LinkedIn"
+    existing: "Add LinkedIn known-contact follow-ups and connection suggestions"
+    capture_raw: "Kanban should included the follow up messages to people we actually know on LinkedIn and recommended people to connect with on LinkedIn"
+  - id: jobsearch-watchlist
+    label: paraphrase_same
+    new: "Have an easy company search add on so it keeps up with whatever companies you want"
+    existing: "Add an editable company watchlist for job search"
+    capture_raw: "Have an easy company search add on so it keeps up with whatever companies you want"
+  - id: jobsearch-questions
+    label: paraphrase_same
+    new: "Learns from questions we can’t answer so we can add those to our collection with typical answers for different job types"
+    existing: "Learn unanswered application questions by job type"
+    capture_raw: "Learns from questions we can’t answer so we can add those to our collection with typical answers for different job types"
+  - id: jobsearch-retention
+    label: paraphrase_same
+    new: "It should keep a bare database of jobs applied to (lasting 30 days (adjustable)) ynless we mark we got a communication furthering the process."
+    existing: "Add adjustable 30-day application outcome memory"
+    capture_raw: "It should keep a bare database of jobs applied to (lasting 30 days (adjustable)) ynless we mark we got a communication furthering the process."
+
+  # ---- paraphrases WITHOUT shared source (the hard tier) ------------------
+  - id: mj-appointment
+    label: paraphrase_same
+    new: "Schedule the MJ appointment"
+    existing: "Book MJ appt"
+  - id: recaulk-tub
+    label: paraphrase_same
+    new: "I need to recaulk the tub"
+    existing: "Re caulk bathtub"
+
+  # ---- repeated progress ---------------------------------------------------
+  - id: applied-again
+    label: occurrence
+    new: "I applied to jobs again"
+    existing: "Apply to more jobs"
+    existing_status: done
+  - id: applied-three-more
+    label: occurrence
+    new: "Applied to three more jobs"
+    existing: "Apply to more jobs"
+    existing_status: done
+  - id: rewatched
+    label: occurrence
+    new: "watched tenet again"
+    existing: "Watch tenet"
+    existing_status: done
+
+  # ---- expansion -----------------------------------------------------------
+  - id: watchlist-expansion
+    label: expansion
+    new: "Build an editable company watchlist. Track competitor companies. Refresh the list weekly. Notify me when a target company posts a suitable job."
+    existing: "Build an editable company watchlist"
+
+  # ---- same subject, different deliverable (must NOT read as same work) ---
+  - id: camera-research-buy
+    label: subject_related
+    new: "Buy the selected camera setup"
+    existing: "Research the best camera setup"
+  - id: cv-post-vs-research
+    label: subject_related
+    new: "Post about the CV research results on LinkedIn"
+    existing: "Set up computer vision plan and get video of different basketballs"
+
+  # ---- negatives (must never flag same-work) --------------------------------
+  - id: passport-vs-jobs
+    label: not_same
+    new: "Apply for a passport renewal"
+    existing: "Apply to more jobs"
+  - id: toilet-vs-tenet
+    label: not_same
+    new: "Fix the downstairs toilet"
+    existing: "Watch tenet"
+
+  # ---- dependency false-positive regressions (router-level) ----------------
+dependency_negatives:
+  - "Burn after reading"
+  - "One of them days"
+  - "How to lose a guy in 10 days"
+  - "Get tie for the grey suit at mens warehouse before movie or something"

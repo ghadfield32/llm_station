@@ -1,0 +1,74 @@
+# Docs tier — Paperless-ngx (scanned records: OCR metadata + archival retrieval).
+# Split recovery unit (see plan): /srv/appdata/paperless (db/index/config) +
+# /tank/personal/paperless (originals/archive/exports). A db without originals,
+# or originals without metadata, is a partial recovery.
+# Admission gate: dummy originals + exporter/importer restore into a clean,
+# version-matched instance BEFORE any real tax/medical/insurance records.
+#
+# paperless_db_data and paperless_data are NAMED volumes: Postgres fsync
+# reliability and the search-index/classifier's many small files both suffer on
+# a host bind mount (see files.yml for the full rationale). media/consume/export
+# stay host bind mounts since documents need to be dropped in/pulled out.
+
+networks:
+  lc_core:
+    name: lc_core
+
+volumes:
+  paperless_db_data:
+  paperless_data:
+
+services:
+  paperless-db:
+    image: postgres:16.4-alpine  # pin: @sha256 before real data
+    container_name: lc-paperless-db
+    restart: unless-stopped
+    networks: [lc_core]
+    environment:
+      - POSTGRES_DB=paperless
+      - POSTGRES_USER=paperless
+      - POSTGRES_PASSWORD=${PAPERLESS_DB_PASSWORD:?set PAPERLESS_DB_PASSWORD in .env}
+    volumes:
+      - paperless_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  paperless-redis:
+    image: redis:7.4-alpine  # pin: @sha256 before real data
+    container_name: lc-paperless-redis
+    restart: unless-stopped
+    networks: [lc_core]
+
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.13  # pin: @sha256 before real data
+    container_name: lc-paperless
+    restart: unless-stopped
+    networks: [lc_core]
+    depends_on:
+      paperless-db:
+        condition: service_healthy
+      paperless-redis:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${PAPERLESS_PORT:-8000}:8000"
+    environment:
+      - PAPERLESS_REDIS=redis://paperless-redis:6379
+      - PAPERLESS_DBHOST=paperless-db
+      - PAPERLESS_DBUSER=paperless
+      - PAPERLESS_DBPASS=${PAPERLESS_DB_PASSWORD:?set PAPERLESS_DB_PASSWORD in .env}
+      - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY:?set PAPERLESS_SECRET_KEY in .env}
+      - PAPERLESS_TIME_ZONE=${LC_TZ:-UTC}
+      - PAPERLESS_URL=http://127.0.0.1:${PAPERLESS_PORT:-8000}
+    volumes:
+      - paperless_data:/usr/src/paperless/data
+      - ${LC_DATA:-./testdata/data}/personal/paperless/media:/usr/src/paperless/media
+      - ${LC_DATA:-./testdata/data}/personal/paperless/consume:/usr/src/paperless/consume
+      - ${LC_DATA:-./testdata/data}/personal/paperless/export:/usr/src/paperless/export
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

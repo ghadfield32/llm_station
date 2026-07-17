@@ -266,7 +266,7 @@ Found during the live visual pass and fixed (all live-verified):
 
 Goal: move beyond generic kanban cards so each operating domain has a visual
 grammar that matches the work: jobs look like applications, posts look like
-LinkedIn previews, books show reading progress, papers show research context,
+LinkedIn previews, books show bibliographic details and ordered notes, papers show research context,
 repos/DAGs show health, and upkeep/tasks stay compact.
 
 - [x] **7.1** domain registry — `configs/domain_surfaces.yaml` defines nine

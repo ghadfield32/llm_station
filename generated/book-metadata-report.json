@@ -1,0 +1,1767 @@
+{
+  "status": "dry_run",
+  "writes_performed": false,
+  "generated_at": "2026-07-16T23:01:04.592739+00:00",
+  "board_id": "reading_library",
+  "source": {
+    "checklist": "C:\\Users\\ghadf\\vscode_projects\\docker_projects\\llm_station\\data\\book-checklist.md",
+    "checklist_sha256": "97bb2df7df16a9a3f4ab0d01260f14709d3df3b5c502de62b11757abb2f76934",
+    "open_library_requests": 35,
+    "cache": "C:\\Users\\ghadf\\vscode_projects\\docker_projects\\llm_station\\generated\\book-metadata-cache.json"
+  },
+  "cards": 283,
+  "checklist_rows": 275,
+  "outcomes": {
+    "checklist_matched": 275,
+    "checklist_no_match": 1,
+    "missing_identity": 7,
+    "open_library_ambiguous": 96,
+    "open_library_matched": 140,
+    "open_library_no_match": 40
+  },
+  "changed_cards": 276,
+  "conflict_cards": 0,
+  "field_change_counts": {
+    "audio_hours_estimate": 275,
+    "book_metadata_importer": 276,
+    "book_metadata_last_imported_fields": 276,
+    "book_metadata_provenance": 276,
+    "first_publish_year": 140,
+    "genres": 85,
+    "isbns": 139,
+    "languages": 139,
+    "open_library_url": 140,
+    "open_library_work_id": 140,
+    "page_count_median": 136,
+    "publishers": 140,
+    "recommended_format": 275,
+    "subjects": 139
+  },
+  "truncated_batch_cards": 224,
+  "unresolved": [
+    {
+      "card_id": "book-the last days of socrates",
+      "title": "The Last Days of Socrates",
+      "author": "Plato",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL31479971W",
+        "/works/OL38891801W",
+        "/works/OL43253357W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-pathfinders: the golden age of arabic science",
+      "title": "Pathfinders: The Golden Age of Arabic Science",
+      "author": "Jim Al-Khalili",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-novum organum",
+      "title": "Novum Organum",
+      "author": "Francis Bacon",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL16621126W",
+        "/works/OL17997261W",
+        "/works/OL22224366W",
+        "/works/OL24844692W",
+        "/works/OL26202115W",
+        "/works/OL26408380W",
+        "/works/OL29096237W",
+        "/works/OL30051470W",
+        "/works/OL32982638W",
+        "/works/OL34142883W",
+        "/works/OL34169013W",
+        "/works/OL36375357W",
+        "/works/OL38879797W",
+        "/works/OL40293317W",
+        "/works/OL41281817W",
+        "/works/OL41783474W",
+        "/works/OL42307062W",
+        "/works/OL42711888W",
+        "/works/OL43517657W",
+        "/works/OL44463838W",
+        "/works/OL69399W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-cosmicomics",
+      "title": "Cosmicomics",
+      "author": "Italo Calvino",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL27821194W",
+        "/works/OL35281947W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the house of wisdom",
+      "title": "The House of Wisdom",
+      "author": "Jim Al-Khalili",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15976945W",
+        "/works/OL23618673W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-on the nature of things",
+      "title": "On the Nature of Things",
+      "author": "Lucretius",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15792563W",
+        "/works/OL37816999W",
+        "/works/OL39775466W",
+        "/works/OL39994793W",
+        "/works/OL40213508W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-discourse on method",
+      "title": "Discourse on Method",
+      "author": "René Descartes",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL24261133W",
+        "/works/OL25396935W",
+        "/works/OL27209781W",
+        "/works/OL28613859W",
+        "/works/OL31902506W",
+        "/works/OL35739634W",
+        "/works/OL36780743W",
+        "/works/OL40460542W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the works of archimedes",
+      "title": "The Works of Archimedes",
+      "author": "Archimedes",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15178307W",
+        "/works/OL19911660W",
+        "/works/OL5681640W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the odyssey",
+      "title": "The Odyssey",
+      "author": "Homer",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-siddhartha",
+      "title": "Siddhartha",
+      "author": "Hermann Hesse",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL25429681W",
+        "/works/OL27477938W",
+        "/works/OL29451916W",
+        "/works/OL37996080W",
+        "/works/OL872932W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-twenty thousand leagues under the seas",
+      "title": "Twenty Thousand Leagues Under the Seas",
+      "author": "Jules Verne",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL16503067W",
+        "/works/OL24894686W",
+        "/works/OL25359542W",
+        "/works/OL25553106W",
+        "/works/OL26518012W",
+        "/works/OL27202852W",
+        "/works/OL27237976W",
+        "/works/OL29040424W",
+        "/works/OL38145793W",
+        "/works/OL38178837W",
+        "/works/OL38308389W",
+        "/works/OL39487441W",
+        "/works/OL39700888W",
+        "/works/OL39824582W",
+        "/works/OL39965444W",
+        "/works/OL40571837W",
+        "/works/OL41577499W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-journey to the centre of the earth",
+      "title": "Journey to the Centre of the Earth",
+      "author": "Jules Verne",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15173607W",
+        "/works/OL16820479W",
+        "/works/OL21009118W",
+        "/works/OL21928247W",
+        "/works/OL22158480W",
+        "/works/OL22277365W",
+        "/works/OL26577550W",
+        "/works/OL29866916W",
+        "/works/OL30117359W",
+        "/works/OL30291871W",
+        "/works/OL33743550W",
+        "/works/OL38153976W",
+        "/works/OL40000161W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-an essay concerning human understanding",
+      "title": "An Essay Concerning Human Understanding",
+      "author": "John Locke",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15288832W",
+        "/works/OL15288833W",
+        "/works/OL15288835W",
+        "/works/OL16083002W",
+        "/works/OL16718671W",
+        "/works/OL20907443W",
+        "/works/OL24172952W",
+        "/works/OL24352787W",
+        "/works/OL24490680W",
+        "/works/OL24576524W",
+        "/works/OL24743093W",
+        "/works/OL27300538W",
+        "/works/OL31367335W",
+        "/works/OL31407483W",
+        "/works/OL32338698W",
+        "/works/OL32981425W",
+        "/works/OL34567054W",
+        "/works/OL36759470W",
+        "/works/OL37239234W",
+        "/works/OL37920968W",
+        "/works/OL40281094W",
+        "/works/OL42628096W",
+        "/works/OL43176515W",
+        "/works/OL43194338W",
+        "/works/OL43856180W",
+        "/works/OL43856183W",
+        "/works/OL43940406W",
+        "/works/OL43964615W",
+        "/works/OL44471406W",
+        "/works/OL45088974W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-range",
+      "title": "Range",
+      "author": "David Epstein",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL20131297W",
+        "/works/OL20803380W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-don quixote",
+      "title": "Don Quixote",
+      "author": "Miguel de Cervantes",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL14873218W",
+        "/works/OL24912344W",
+        "/works/OL25368229W",
+        "/works/OL26799707W",
+        "/works/OL27210341W",
+        "/works/OL28778250W",
+        "/works/OL29432245W",
+        "/works/OL31857306W",
+        "/works/OL35933248W",
+        "/works/OL37583728W",
+        "/works/OL37980084W",
+        "/works/OL40280382W",
+        "/works/OL40380270W",
+        "/works/OL40857530W",
+        "/works/OL40940619W",
+        "/works/OL41079450W",
+        "/works/OL41165092W",
+        "/works/OL43110094W",
+        "/works/OL43157758W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-kant: a biography",
+      "title": "Kant: A Biography",
+      "author": "Manfred Kuehn",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-euclid's elements",
+      "title": "Euclid's Elements",
+      "author": "Euclid",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL17722743W",
+        "/works/OL17722745W",
+        "/works/OL29746240W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the swerve",
+      "title": "The Swerve",
+      "author": "Stephen Greenblatt",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL16175780W",
+        "/works/OL20780671W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-an enquiry concerning human understanding",
+      "title": "An Enquiry Concerning Human Understanding",
+      "author": "David Hume",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15686545W",
+        "/works/OL20549266W",
+        "/works/OL35315066W",
+        "/works/OL42300049W",
+        "/works/OL43834767W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-flatland",
+      "title": "Flatland",
+      "author": "Edwin A. Abbott",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL118388W",
+        "/works/OL118393W",
+        "/works/OL44567223W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the mind on fire (pascal)",
+      "title": "The Mind on Fire (Pascal)",
+      "author": "ed. James Houston",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-euler: the master of us all",
+      "title": "Euler: The Master of Us All",
+      "author": "William Dunham",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-faraday, maxwell, and the electromagnetic field",
+      "title": "Faraday, Maxwell, and the Electromagnetic Field",
+      "author": "Forbes & Mahon",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-fermat's enigma (fermat & wiles)",
+      "title": "Fermat's Enigma (Fermat & Wiles)",
+      "author": "Simon Singh",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the gene: an intimate history",
+      "title": "The Gene: An Intimate History",
+      "author": "Siddhartha Mukherjee",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-against the gods",
+      "title": "Against the Gods",
+      "author": "Peter L. Bernstein",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15132363W",
+        "/works/OL21497584W",
+        "/works/OL3294011W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-rosalind franklin: the dark lady of dna",
+      "title": "Rosalind Franklin: The Dark Lady of DNA",
+      "author": "Brenda Maddox",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-jurassic park",
+      "title": "Jurassic Park",
+      "author": "Michael Crichton",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL42380219W",
+        "/works/OL46881W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-journey through genius",
+      "title": "Journey Through Genius",
+      "author": "William Dunham",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL2040048W",
+        "/works/OL37475170W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-on the origin of species",
+      "title": "On the Origin of Species",
+      "author": "Charles Darwin",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL16920552W",
+        "/works/OL20257238W",
+        "/works/OL20876681W",
+        "/works/OL21347460W",
+        "/works/OL21872213W",
+        "/works/OL22323743W",
+        "/works/OL24557989W",
+        "/works/OL25371084W",
+        "/works/OL26444735W",
+        "/works/OL26886722W",
+        "/works/OL27209534W",
+        "/works/OL27214436W",
+        "/works/OL27997538W",
+        "/works/OL28077445W",
+        "/works/OL29212502W",
+        "/works/OL29423782W",
+        "/works/OL29476268W",
+        "/works/OL30908760W",
+        "/works/OL34047731W",
+        "/works/OL34374962W",
+        "/works/OL35107227W",
+        "/works/OL35326096W",
+        "/works/OL35887298W",
+        "/works/OL36420630W",
+        "/works/OL38611521W",
+        "/works/OL39996366W",
+        "/works/OL40166731W",
+        "/works/OL40213054W",
+        "/works/OL40274550W",
+        "/works/OL40568687W",
+        "/works/OL40689964W",
+        "/works/OL40824257W",
+        "/works/OL40868575W",
+        "/works/OL41026835W",
+        "/works/OL41064583W",
+        "/works/OL41096221W",
+        "/works/OL41140599W",
+        "/works/OL41274117W",
+        "/works/OL41409202W",
+        "/works/OL41540039W",
+        "/works/OL41729032W",
+        "/works/OL44562054W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-frankenstein",
+      "title": "Frankenstein",
+      "author": "Mary Shelley",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL17441350W",
+        "/works/OL17504079W",
+        "/works/OL17610997W",
+        "/works/OL26860869W",
+        "/works/OL29565268W",
+        "/works/OL32513353W",
+        "/works/OL32550087W",
+        "/works/OL34291266W",
+        "/works/OL34412196W",
+        "/works/OL34872997W",
+        "/works/OL35117517W",
+        "/works/OL35779577W",
+        "/works/OL36141872W",
+        "/works/OL38079157W",
+        "/works/OL38122906W",
+        "/works/OL40173383W",
+        "/works/OL40444063W",
+        "/works/OL40725314W",
+        "/works/OL40779959W",
+        "/works/OL41048840W",
+        "/works/OL41537835W",
+        "/works/OL41706747W",
+        "/works/OL41735452W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-zero: the biography of a dangerous idea",
+      "title": "Zero: The Biography of a Dangerous Idea",
+      "author": "Charles Seife",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the time machine",
+      "title": "The Time Machine",
+      "author": "H. G. Wells",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL14950446W",
+        "/works/OL16043226W",
+        "/works/OL26673375W",
+        "/works/OL27039837W",
+        "/works/OL31657990W",
+        "/works/OL31665533W",
+        "/works/OL31925433W",
+        "/works/OL32494W",
+        "/works/OL36531209W",
+        "/works/OL37441518W",
+        "/works/OL37790048W",
+        "/works/OL42471600W",
+        "/works/OL4278045W",
+        "/works/OL43055715W",
+        "/works/OL43069822W",
+        "/works/OL43091099W",
+        "/works/OL43376556W",
+        "/works/OL43376576W",
+        "/works/OL43376582W",
+        "/works/OL52267W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the double helix",
+      "title": "The Double Helix",
+      "author": "James D. Watson",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL2125469W",
+        "/works/OL37901590W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-darwin: a tormented evolutionist",
+      "title": "Darwin: A Tormented Evolutionist",
+      "author": "Desmond & Moore",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-gödel's proof",
+      "title": "Gödel's Proof",
+      "author": "Nagel & Newman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL36359824W",
+        "/works/OL41247867W",
+        "/works/OL44137020W",
+        "/works/OL5567662W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-permutation city",
+      "title": "Permutation City",
+      "author": "Greg Egan",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL115336W",
+        "/works/OL25080521W",
+        "/works/OL27774608W",
+        "/works/OL34349041W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-alan turing: the enigma",
+      "title": "Alan Turing: The Enigma",
+      "author": "Andrew Hodges",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-cat's cradle",
+      "title": "Cat's Cradle",
+      "author": "Kurt Vonnegut",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL43084467W",
+        "/works/OL98454W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-surely you're joking, mr. feynman!",
+      "title": "Surely You're Joking, Mr. Feynman!",
+      "author": "Richard Feynman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL25183889W",
+        "/works/OL26350145W",
+        "/works/OL514629W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-ficciones",
+      "title": "Ficciones",
+      "author": "Jorge Luis Borges",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL110971W",
+        "/works/OL40315721W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the character of physical law",
+      "title": "The Character of Physical Law",
+      "author": "Richard Feynman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL17398794W",
+        "/works/OL271750W",
+        "/works/OL31415901W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-physics and philosophy",
+      "title": "Physics and Philosophy",
+      "author": "Werner Heisenberg",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL31439497W",
+        "/works/OL326412W",
+        "/works/OL42515730W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the right stuff",
+      "title": "The Right Stuff",
+      "author": "Tom Wolfe",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1925474W",
+        "/works/OL24695647W",
+        "/works/OL43079829W",
+        "/works/OL44185353W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-2001: a space odyssey",
+      "title": "2001: A Space Odyssey",
+      "author": "Arthur C. Clarke",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL31696297W",
+        "/works/OL43125206W",
+        "/works/OL44126237W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-black holes and time warps",
+      "title": "Black Holes and Time Warps",
+      "author": "Kip S. Thorne",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL21807353W",
+        "/works/OL3902081W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-travelling to infinity",
+      "title": "Travelling to Infinity",
+      "author": "Jane Hawking",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL19996054W",
+        "/works/OL9033042W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-first man",
+      "title": "First Man",
+      "author": "James R. Hansen",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL19731786W",
+        "/works/OL3492403W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the feynman lectures on physics",
+      "title": "The Feynman Lectures on Physics",
+      "author": "Feynman et al.",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL20721453W",
+        "/works/OL31715270W",
+        "/works/OL34720946W",
+        "/works/OL38760793W",
+        "/works/OL43199475W",
+        "/works/OL514630W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-disturbing the universe",
+      "title": "Disturbing the Universe",
+      "author": "Freeman Dyson",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL2007224W",
+        "/works/OL8203198W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-what do you care what other people think?",
+      "title": "What Do You Care What Other People Think?",
+      "author": "Richard Feynman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL28353213W",
+        "/works/OL34013944W",
+        "/works/OL43124078W",
+        "/works/OL514628W",
+        "/works/OL9228228M",
+        "/works/OL9477681M",
+        "/works/OL9796498M"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-einstein: his life and universe",
+      "title": "Einstein: His Life and Universe",
+      "author": "Walter Isaacson",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-a brief history of time",
+      "title": "A Brief History of Time",
+      "author": "Stephen Hawking",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1892617W",
+        "/works/OL42966859W",
+        "/works/OL43039040W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-big bang",
+      "title": "Big Bang",
+      "author": "Simon Singh",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL31156W",
+        "/works/OL32347993W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the emperor's new mind",
+      "title": "The Emperor's New Mind",
+      "author": "Roger Penrose",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-seven brief lessons on physics",
+      "title": "Seven Brief Lessons on Physics",
+      "author": "Carlo Rovelli",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-logicomix",
+      "title": "Logicomix",
+      "author": "Doxiadis & Papadimitriou",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-neuromancer",
+      "title": "Neuromancer",
+      "author": "William Gibson",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL27258W",
+        "/works/OL34957568W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-the annotated turing",
+      "title": "The Annotated Turing",
+      "author": "Charles Petzold",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL13590664W",
+        "/works/OL1972497W",
+        "/works/OL9372188W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-klara and the sun",
+      "title": "Klara and the Sun",
+      "author": "Kazuo Ishiguro",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL20883297W",
+        "/works/OL45607411W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-the dream machine (licklider)",
+      "title": "The Dream Machine (Licklider)",
+      "author": "M. Mitchell Waldrop",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15835908W",
+        "/works/OL4300550W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-do androids dream of electric sheep?",
+      "title": "Do Androids Dream of Electric Sheep?",
+      "author": "Philip K. Dick",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL17831868W",
+        "/works/OL17931075W",
+        "/works/OL2172356W",
+        "/works/OL28816518W",
+        "/works/OL31146497W",
+        "/works/OL31632042W",
+        "/works/OL32437664W",
+        "/works/OL36431174W",
+        "/works/OL39974269W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-the computer and the brain",
+      "title": "The Computer and the Brain",
+      "author": "John von Neumann",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1204971W",
+        "/works/OL37333596W",
+        "/works/OL37493196W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-the idea factory (bell labs)",
+      "title": "The Idea Factory (Bell Labs)",
+      "author": "Jon Gertner",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-grace hopper and the information age",
+      "title": "Grace Hopper and the Information Age",
+      "author": "Kurt W. Beyer",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-models of my life (simon)",
+      "title": "Models of My Life (Simon)",
+      "author": "Herbert A. Simon",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1205031W",
+        "/works/OL8203445W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the hitchhiker's guide to the galaxy",
+      "title": "The Hitchhiker's Guide to the Galaxy",
+      "author": "Douglas Adams",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL29319024W",
+        "/works/OL38737610W",
+        "/works/OL38839155W",
+        "/works/OL43067294W",
+        "/works/OL44810497W",
+        "/works/OL44810598W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-i, robot",
+      "title": "I, Robot",
+      "author": "Isaac Asimov",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1737302W",
+        "/works/OL43046449W",
+        "/works/OL46241W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-code: the hidden language",
+      "title": "Code: The Hidden Language",
+      "author": "Charles Petzold",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-selected writings on computing",
+      "title": "Selected Writings on Computing",
+      "author": "E. W. Dijkstra",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL22582226W",
+        "/works/OL4780095W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the art of computer programming",
+      "title": "The Art of Computer Programming",
+      "author": "Donald Knuth",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL16916445W",
+        "/works/OL16933893W",
+        "/works/OL19827901W",
+        "/works/OL257263W",
+        "/works/OL31882103W",
+        "/works/OL33259804W",
+        "/works/OL34721026W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-dark hero of the information age (wiener)",
+      "title": "Dark Hero of the Information Age (Wiener)",
+      "author": "Conway & Siegelman",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-player piano",
+      "title": "Player Piano",
+      "author": "Kurt Vonnegut",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL26424113W",
+        "/works/OL31657581W",
+        "/works/OL31673624W",
+        "/works/OL35299436W",
+        "/works/OL43080231W",
+        "/works/OL43085794W",
+        "/works/OL43306365W",
+        "/works/OL43306367W",
+        "/works/OL43306369W",
+        "/works/OL43306371W",
+        "/works/OL98484W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-altered carbon",
+      "title": "Altered Carbon",
+      "author": "Richard K. Morgan",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL20668162W",
+        "/works/OL29914687W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-machines who think",
+      "title": "Machines Who Think",
+      "author": "Pamela McCorduck",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL12446705W",
+        "/works/OL29042750W",
+        "/works/OL2980144W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-a thousand brains",
+      "title": "A Thousand Brains",
+      "author": "Jeff Hawkins",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL24217597W",
+        "/works/OL24312297W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-meditations",
+      "title": "Meditations",
+      "author": "Marcus Aurelius",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1317211W",
+        "/works/OL24348156W",
+        "/works/OL25479876W",
+        "/works/OL28521353W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the strategy of conflict",
+      "title": "The Strategy of Conflict",
+      "author": "Thomas Schelling",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL16062089W",
+        "/works/OL2259845W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-fahrenheit 451",
+      "title": "Fahrenheit 451",
+      "author": "Ray Bradbury",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL103123W",
+        "/works/OL25635788W",
+        "/works/OL42289741W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the wealth of nations",
+      "title": "The Wealth of Nations",
+      "author": "Adam Smith",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL14997560W",
+        "/works/OL16069718W",
+        "/works/OL17745607W",
+        "/works/OL20173089W",
+        "/works/OL24712460W",
+        "/works/OL26148505W",
+        "/works/OL27306691W",
+        "/works/OL28592700W",
+        "/works/OL31304804W",
+        "/works/OL4905703W",
+        "/works/OL4905709W",
+        "/works/OL76827W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-a canticle for leibowitz",
+      "title": "A Canticle for Leibowitz",
+      "author": "Walter M. Miller Jr.",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL2626638W",
+        "/works/OL34597458W",
+        "/works/OL43077321W",
+        "/works/OL43095475W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-amatka",
+      "title": "Amatka",
+      "author": "Karin Tidbeck",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL19332902W",
+        "/works/OL39498356W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-1984",
+      "title": "1984",
+      "author": "George Orwell",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL23745689W",
+        "/works/OL28627804W",
+        "/works/OL30827457W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-gödel, escher, bach",
+      "title": "Gödel, Escher, Bach",
+      "author": "Douglas Hofstadter",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL34998078W",
+        "/works/OL34998079W",
+        "/works/OL716850W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-we",
+      "title": "We",
+      "author": "Yevgeny Zamyatin",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-1q84",
+      "title": "1Q84",
+      "author": "Haruki Murakami",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-flowers for algernon",
+      "title": "Flowers for Algernon",
+      "author": "Daniel Keyes",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL35690145W",
+        "/works/OL515754W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-brave new world",
+      "title": "Brave New World",
+      "author": "Aldous Huxley",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL14942667W",
+        "/works/OL27690578W",
+        "/works/OL64365W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the accidental billionaires",
+      "title": "The Accidental Billionaires",
+      "author": "Ben Mezrich",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-perelandra",
+      "title": "Perelandra",
+      "author": "C. S. Lewis",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL21171858W",
+        "/works/OL31378144W",
+        "/works/OL31517232W",
+        "/works/OL34557135W",
+        "/works/OL35277274W",
+        "/works/OL36003953W",
+        "/works/OL36407049W",
+        "/works/OL41378253W",
+        "/works/OL41456208W",
+        "/works/OL43090470W",
+        "/works/OL43302146W",
+        "/works/OL44116414W",
+        "/works/OL44198647W",
+        "/works/OL71163W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the analects",
+      "title": "The Analects",
+      "author": "Confucius",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15092197W",
+        "/works/OL15183185W",
+        "/works/OL19762947W",
+        "/works/OL20215122W",
+        "/works/OL24164899W",
+        "/works/OL27033818W",
+        "/works/OL31999023W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-sapiens",
+      "title": "Sapiens",
+      "author": "Yuval Noah Harari",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL17075811W",
+        "/works/OL43336900W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-hands-on large language models",
+      "title": "Hands-On Large Language Models",
+      "author": "Alammar & Grootendorst (2024)",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-man's search for meaning",
+      "title": "Man's Search for Meaning",
+      "author": "Viktor Frankl",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the dark forest",
+      "title": "The Dark Forest",
+      "author": "Liu Cixin",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-death's end",
+      "title": "Death's End",
+      "author": "Liu Cixin",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-starship troopers",
+      "title": "Starship Troopers",
+      "author": "Robert A. Heinlein",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL39120024W",
+        "/works/OL59740W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-empires of light (edison/tesla)",
+      "title": "Empires of Light (Edison/Tesla)",
+      "author": "Jill Jonnes",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL24607109W",
+        "/works/OL2488115W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the book of five rings",
+      "title": "The Book of Five Rings",
+      "author": "Miyamoto Musashi",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL39568417W",
+        "/works/OL45363084W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-that hideous strength",
+      "title": "That Hideous Strength",
+      "author": "C. S. Lewis",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL31382769W",
+        "/works/OL31622826W",
+        "/works/OL32369765W",
+        "/works/OL34565538W",
+        "/works/OL34605264W",
+        "/works/OL35879632W",
+        "/works/OL38891247W",
+        "/works/OL43371690W",
+        "/works/OL43371695W",
+        "/works/OL44137817W",
+        "/works/OL45265385W",
+        "/works/OL71165W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-out of the silent planet",
+      "title": "Out of the Silent Planet",
+      "author": "C. S. Lewis",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL28157749W",
+        "/works/OL31648025W",
+        "/works/OL35277285W",
+        "/works/OL40616153W",
+        "/works/OL40646116W",
+        "/works/OL41132636W",
+        "/works/OL41466131W",
+        "/works/OL42731482W",
+        "/works/OL43062953W",
+        "/works/OL43298409W",
+        "/works/OL43298411W",
+        "/works/OL71166W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-tao te ching",
+      "title": "Tao Te Ching",
+      "author": "Laozi",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL30237157W",
+        "/works/OL40777938W",
+        "/works/OL44945661W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-james watt: making the world anew",
+      "title": "James Watt: Making the World Anew",
+      "author": "Ben Russell",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-hyperion",
+      "title": "Hyperion",
+      "author": "Dan Simmons",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1963268W",
+        "/works/OL26226142W",
+        "/works/OL28355138W",
+        "/works/OL34523825W",
+        "/works/OL34970326W",
+        "/works/OL37510672W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-ai engineering",
+      "title": "AI Engineering",
+      "author": "Chip Huyen (2025)",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the worlds i see (computer vision)",
+      "title": "The Worlds I See (computer vision)",
+      "author": "Fei-Fei Li",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-ender's game",
+      "title": "Ender's Game",
+      "author": "Orson Scott Card",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL38016689W",
+        "/works/OL49488W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the three-body problem (book 1)",
+      "title": "The Three-Body Problem (book 1)",
+      "author": "Liu Cixin",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-empire of ai",
+      "title": "Empire of AI",
+      "author": "Karen Hao (2025)",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-room to dream (david lynch)",
+      "title": "Room to Dream (David Lynch)",
+      "author": "Lynch & McKenna",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL20177151W",
+        "/works/OL34702106W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the revenant",
+      "title": "The Revenant",
+      "author": "Michael Punke",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL19994445W",
+        "/works/OL20494452W",
+        "/works/OL5850182W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the godfather",
+      "title": "The Godfather",
+      "author": "Mario Puzo",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1673205W",
+        "/works/OL37909765W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the boys",
+      "title": "The Boys",
+      "author": "Ennis & Robertson",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the jaws log",
+      "title": "The Jaws Log",
+      "author": "Carl Gottlieb",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15720319W",
+        "/works/OL15837375W",
+        "/works/OL16326232W",
+        "/works/OL6211498W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-future noir: the making of blade runner",
+      "title": "Future Noir: The Making of Blade Runner",
+      "author": "Paul M. Sammon",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-thrawn ascendancy: chaos rising",
+      "title": "Thrawn Ascendancy: Chaos Rising",
+      "author": "Timothy Zahn",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-adventures in the screen trade",
+      "title": "Adventures in the Screen Trade",
+      "author": "William Goldman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL16065142W",
+        "/works/OL29390824W",
+        "/works/OL486965W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-in the blink of an eye",
+      "title": "In the Blink of an Eye",
+      "author": "Walter Murch",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15837210W",
+        "/works/OL2973051W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the princess bride",
+      "title": "The Princess Bride",
+      "author": "William Goldman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15792076W",
+        "/works/OL19972269W",
+        "/works/OL486967W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-easy riders, raging bulls",
+      "title": "Easy Riders, Raging Bulls",
+      "author": "Peter Biskind",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL15835948W",
+        "/works/OL9483750W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-neverwhere",
+      "title": "Neverwhere",
+      "author": "Neil Gaiman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL29278173W",
+        "/works/OL679333W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-making movies",
+      "title": "Making Movies",
+      "author": "Sidney Lumet",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL12626692W",
+        "/works/OL15838126W",
+        "/works/OL3507994W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the great gatsby",
+      "title": "The Great Gatsby",
+      "author": "F. Scott Fitzgerald",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL34613639W",
+        "/works/OL34889963W",
+        "/works/OL34944765W",
+        "/works/OL35404729W",
+        "/works/OL43053311W",
+        "/works/OL43111509W",
+        "/works/OL468429W",
+        "/works/OL468431W",
+        "/works/OL7966747W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-dungeon crawler carl",
+      "title": "Dungeon Crawler Carl",
+      "author": "Matt Dinniman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL24593432W",
+        "/works/OL45171646W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-band of brothers",
+      "title": "Band of Brothers",
+      "author": "Stephen E. Ambrose",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL27731164W",
+        "/works/OL28226378W",
+        "/works/OL478550W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the nolan variations",
+      "title": "The Nolan Variations",
+      "author": "Tom Shone",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-the lord of the rings",
+      "title": "The Lord of the Rings",
+      "author": "J. R. R. Tolkien",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL27448W",
+        "/works/OL34714467W"
+      ],
+      "batch_truncated": true
+    },
+    {
+      "card_id": "book-thrawn: treason",
+      "title": "Thrawn: Treason",
+      "author": "Timothy Zahn",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-thrawn: alliances",
+      "title": "Thrawn: Alliances",
+      "author": "Timothy Zahn",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-not without laughter",
+      "title": "Not Without Laughter",
+      "author": "Langston Hughes",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL28566W",
+        "/works/OL45033217W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-american gods",
+      "title": "American Gods",
+      "author": "Neil Gaiman",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL36649559W",
+        "/works/OL37899403W",
+        "/works/OL679360W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-rebel without a crew",
+      "title": "Rebel Without a Crew",
+      "author": "Robert Rodriguez",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL2934383W",
+        "/works/OL8201197W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-a game of thrones (asoiaf bk1)",
+      "title": "A Game of Thrones (ASOIAF bk1)",
+      "author": "George R. R. Martin",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL1955908W",
+        "/works/OL257943W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-schindler's ark",
+      "title": "Schindler's Ark",
+      "author": "Thomas Keneally",
+      "reason": "open_library_ambiguous",
+      "candidate_work_ids": [
+        "/works/OL10619574W",
+        "/works/OL13439894W",
+        "/works/OL21162038W",
+        "/works/OL25639680W",
+        "/works/OL25644329W",
+        "/works/OL31868471W",
+        "/works/OL34561287W",
+        "/works/OL43337796W"
+      ],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-thrawn ascendancy: lesser evil",
+      "title": "Thrawn Ascendancy: Lesser Evil",
+      "author": "Timothy Zahn",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "book-thrawn ascendancy: greater good",
+      "title": "Thrawn Ascendancy: Greater Good",
+      "author": "Timothy Zahn",
+      "reason": "open_library_no_match",
+      "candidate_work_ids": [],
+      "batch_truncated": false
+    },
+    {
+      "card_id": "appflowy-row-3da8a370-2ef5-401f-8e96-dd19d3fb3b13",
+      "reason": "missing_identity"
+    },
+    {
+      "card_id": "appflowy-row-643ce4e4-102f-4d1c-821a-5f01fd085548",
+      "reason": "missing_identity"
+    },
+    {
+      "card_id": "appflowy-row-a622742d-7ff2-4d42-8add-8f206efdef96",
+      "reason": "missing_identity"
+    },
+    {
+      "card_id": "appflowy-row-c381730d-cdd1-4845-9699-bb6ad51be9fe",
+      "reason": "missing_identity"
+    },
+    {
+      "card_id": "appflowy-row-c7223bdf-70bd-4bd1-b1e2-ad4d06ffca76",
+      "reason": "missing_identity"
+    },
+    {
+      "card_id": "appflowy-row-f40f4358-cf24-4f09-9e9d-54f96c77f21f",
+      "reason": "missing_identity"
+    },
+    {
+      "card_id": "appflowy-row-f62a4989-5b59-429f-b05b-b0e138e2a2aa",
+      "reason": "missing_identity"
+    }
+  ],
+  "applied_cards": 0
+}

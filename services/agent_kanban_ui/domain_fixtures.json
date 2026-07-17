@@ -95,23 +95,6 @@
       "status": "Healthy"
     }
   ],
-  "machine_upkeep": [
-    {
-      "card_id": "upkeep-fixture-weekly",
-      "task": "Weekly readiness sweep",
-      "cadence": "weekly",
-      "last_done": "2026-07-08T00:00:00Z",
-      "health": "ok",
-      "checklist": [
-        "uv run cc doctor",
-        "uv run cc validate",
-        "uv run cc job-search retention --dry-run",
-        "uv run cc usage-digest"
-      ],
-      "notes": "Rotating gateway.log verified bounded; Ollama + LiteLLM + Ledger answering.",
-      "status": "Done"
-    }
-  ],
   "generic_task": [
     {
       "card_id": "task-fixture-1",

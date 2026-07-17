@@ -5,11 +5,13 @@ this pins the stable record everything else will build on.
 from __future__ import annotations
 
 import itertools
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from pydantic import ValidationError
 
 from command_center.intake import (
+    CaptureConversionConflict,
     CaptureService,
     CaptureRecord,
     InMemoryCaptureStore,
@@ -45,6 +47,28 @@ def test_split_bulk_list_splits_bullets_and_numbers():
     text = "- post about biomechanics\n- research shot detection\n3. call the dentist"
     assert split_bulk_list(text) == [
         "post about biomechanics", "research shot detection", "call the dentist"]
+
+
+def test_split_bulk_list_splits_phone_note_unicode_bullets():
+    # Phone note apps paste ◦ (U+25E6), ⁃ (U+2043), ‣ (U+2023) bullets —
+    # sometimes with a tab, and sometimes a lone empty bullet line.
+    text = "◦ Book MJ appt\n◦\tWatch tenet\n◦\n⁃ show the last 10 drafts\n‣ buy tickets"
+    assert split_bulk_list(text) == [
+        "Book MJ appt", "Watch tenet", "show the last 10 drafts", "buy tickets"]
+
+
+def test_split_strips_stacked_markers_but_never_content():
+    # Phone notes stack markers ("◦ - item"); strip formatting, keep words.
+    assert split_bulk_list("◦ - have LinkedIn prepared\n◦ - post about ESEA") == [
+        "have LinkedIn prepared", "post about ESEA"]
+
+
+def test_split_keeps_checked_lines_visible_between_bullets():
+    # A pasted ✓ line is NOT a bullet: it stays its own visible capture, so
+    # finished work is never silently turned into an open todo nor dropped.
+    text = "◦ open item one\n✓ already finished item\n◦ open item two"
+    assert split_bulk_list(text) == [
+        "open item one", "✓ already finished item", "open item two"]
 
 
 def test_split_single_free_text_is_one_capture():
@@ -94,3 +118,76 @@ def test_context_bindings_are_preserved_but_do_not_start_work():
     assert v.record.current_board_id == "basketball_cv"
     assert v.record.conversation_id == "chat-9"
     assert v.processing_status == "captured"     # saved, not executed
+
+
+def test_prepare_is_idempotent_and_keeps_full_raw_capture():
+    svc = _service()
+    raw = "First line\n\nSecond line with every original detail."
+    captured = svc.capture(raw, conversation_id="unrelated-chat")
+
+    first = svc.prepare(captured.record.capture_id)
+    first_view = svc.get(captured.record.capture_id)
+    repeated = svc.prepare(captured.record.capture_id)
+    repeated_view = svc.get(captured.record.capture_id)
+
+    assert first == repeated
+    assert first["conversation_id"] == f"capture:{captured.record.capture_id}"
+    assert first["processing_status"] == "ready_to_route"
+    assert raw in first["chat_prompt"]
+    assert {row["id"] for row in first["available_actions"]} == {
+        "continue_in_chat", "route_to_todos",
+        "choose_existing_board", "create_new_board",
+    }
+    assert first_view.event_count == repeated_view.event_count == 2
+    assert svc.get(captured.record.capture_id).record.raw_content == raw
+
+
+def test_prepare_unknown_capture_is_keyerror():
+    with pytest.raises(KeyError):
+        _service().prepare("never-seen")
+
+
+def test_atomic_capture_conversion_accepts_exact_retries_and_rejects_divergence():
+    svc = _service()
+    capture_id = svc.capture("route this").record.capture_id
+    svc.mark_converted(capture_id, ["W-1", "W-2"], conversation_id="chat-1")
+    first_count = svc.get(capture_id).event_count
+    svc.mark_converted(capture_id, ["W-1", "W-2"], conversation_id="chat-1")
+    assert svc.get(capture_id).event_count == first_count
+    with pytest.raises(CaptureConversionConflict, match="conflicting WorkItem link"):
+        svc.mark_converted(capture_id, ["W-3"], conversation_id="chat-1")
+
+
+def test_mixed_in_memory_capture_links_reject_before_routing():
+    svc = _service()
+    capture_id = svc.capture("mixed links").record.capture_id
+    from command_center.intake import CaptureEvent
+    svc._store.append_event(CaptureEvent(
+        capture_id=capture_id, ts="t1", kind="link",
+        payload={"work_item_ids": ["W-expected"], "conversation_id": "chat-1"},
+    ))
+    svc._store.append_event(CaptureEvent(
+        capture_id=capture_id, ts="t2", kind="link",
+        payload={"work_item_ids": ["W-foreign"], "conversation_id": "chat-2"},
+    ))
+    with pytest.raises(CaptureConversionConflict, match="conflicting WorkItem link"):
+        svc.mark_converted(
+            capture_id, ["W-expected"], conversation_id="chat-1",
+        )
+    assert svc.get(capture_id).processing_status == "captured"
+
+
+def test_concurrent_identical_capture_conversion_records_one_link():
+    svc = _service()
+    capture_id = svc.capture("route concurrently").record.capture_id
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(pool.map(
+            lambda _index: svc.mark_converted(
+                capture_id, [], conversation_id="chat-empty",
+            ),
+            range(4),
+        ))
+    events = svc._store.events(capture_id)
+    assert len([event for event in events if event.kind == "link"]) == 1
+    assert len([event for event in events if event.kind == "status"
+                and event.payload.get("status") == "routed"]) == 1

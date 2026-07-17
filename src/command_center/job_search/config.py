@@ -46,6 +46,24 @@ def merge_profile_settings(base: dict[str, Any],
         if isinstance(values, dict):
             merged.setdefault(section, {}).update(values)
 
+    company_targets = override.get("company_targets")
+    if isinstance(company_targets, dict):
+        target_section = merged.setdefault("company_targets", {})
+        for key in (
+            "faang",
+            "sports_teams_keywords",
+            "sports_tech_companies",
+            "major_other",
+        ):
+            if key in company_targets:
+                target_section[key] = company_targets[key]
+
+    retention = override.get("retention")
+    if isinstance(retention, dict) and "rich_application_cache_days" in retention:
+        merged.setdefault("retention", {})["rich_application_cache_days"] = (
+            retention["rich_application_cache_days"]
+        )
+
     patches = override.get("job_categories")
     if isinstance(patches, list):
         category_list = merged.setdefault("job_categories", [])

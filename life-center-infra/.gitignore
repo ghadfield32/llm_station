@@ -1,0 +1,12 @@
+# life-center-infra — never commit secrets or live state
+.env
+.env.*
+!.env.example
+secrets/
+appdata/
+backups/
+restore-tmp/
+*.key
+*.pem
+*.age
+.dockge/

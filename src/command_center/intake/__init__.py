@@ -16,7 +16,7 @@ from .schemas import (
 )
 from .service import CaptureService
 from .ledger_store import LedgerCaptureStore
-from .store import InMemoryCaptureStore
+from .store import CaptureConversionConflict, InMemoryCaptureStore
 
 __all__ = [
     "CAPTURE_KINDS",
@@ -26,6 +26,7 @@ __all__ = [
     "CaptureRecord",
     "CaptureView",
     "CaptureService",
+    "CaptureConversionConflict",
     "InMemoryCaptureStore",
     "LedgerCaptureStore",
     "split_bulk_list",

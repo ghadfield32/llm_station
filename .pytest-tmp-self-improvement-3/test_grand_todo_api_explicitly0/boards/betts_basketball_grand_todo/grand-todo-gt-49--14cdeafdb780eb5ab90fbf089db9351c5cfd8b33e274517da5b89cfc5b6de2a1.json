@@ -1,0 +1,30 @@
+{
+  "item_id": "GT-49",
+  "title": "Durable task 49",
+  "category": "GT — Grand Tasks",
+  "source_status": "📋 PLANNED",
+  "target": "_TBD_",
+  "completed": "_—_",
+  "source_notes": "note 49",
+  "description": "#### GT-49 · Durable task 49\r\n`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_\r\nKeep task 49 forever.\r\n**Notes:** note 49\r\n\r\n",
+  "source_kind": "tracked_item",
+  "source_ref": "betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md",
+  "source_anchor": "gt-49",
+  "source_sha256": "9660c5a45445bdd9606feb6e6c5ded026f0b1692c13e8587c8893d792d81fabf",
+  "source_revision_count": 1,
+  "source_revisions": [
+    {
+      "sha256": "9660c5a45445bdd9606feb6e6c5ded026f0b1692c13e8587c8893d792d81fabf",
+      "captured_at": "2026-07-16T23:12:00.615718+00:00",
+      "status": "📋 PLANNED",
+      "raw_markdown": "#### GT-49 · Durable task 49\r\n`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_\r\nKeep task 49 forever.\r\n**Notes:** note 49\r\n\r\n"
+    }
+  ],
+  "source_importer": "betts-grand-todo.v1",
+  "repo_id": "betts_basketball",
+  "sync_source_sha256": "9660c5a45445bdd9606feb6e6c5ded026f0b1692c13e8587c8893d792d81fabf",
+  "sync_board_status": "Backlog",
+  "sync_state": "synchronized",
+  "active_sync_conflict": null,
+  "card_id": "grand-todo-gt-49"
+}

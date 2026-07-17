@@ -532,16 +532,22 @@ class KanbanScanner(FeedScanner):
         age = float(record.get("age_days", 0))
         if age < self.max_age_days and not record.get("blocked"):
             return None
+        board_id = str(record.get("board_id") or "unknown-board")
+        card_id = str(record.get("card_id") or "unknown-card")
         return Finding(
             pillar=Pillar.AUTOMATION, source=self.name,
-            title=f"unblock/automate: {record['title'][:60]}",
-            claim=f"card aged {age:.0f}d in '{record.get('column', '?')}'"
+            title=f"unblock/automate [{board_id}]: {record['title'][:60]}",
+            claim=f"card aged {age:.0f}d in '{record.get('column', '?')}' on {board_id}"
                   + (" (blocked)" if record.get("blocked") else ""),
-            evidence=f"{self.name}: '{record['title']}' age={age}d blocked={record.get('blocked')}",
+            evidence=(f"{self.name}: board={board_id} card={card_id} "
+                      f"'{record['title']}' age={age}d blocked={record.get('blocked')}"),
             confidence=0.7, impact=0.4, ease=0.5, time_criticality=min(1.0, age / 30.0),
             suggested_target_type=TargetType.WORKFLOW, suggested_risk=RiskTier.L1,
             unknowns="whether the delay is process toil or a genuine dependency",
-            detail={"age_days": age, "column": record.get("column")})
+            detail={"age_days": age, "column": record.get("column"),
+                    "board_id": board_id, "card_id": card_id,
+                    "repo_ids": list(record.get("repo_ids") or []),
+                    "repository_reason": str(record.get("repository_reason") or "")})
 
 
 class ResearchSourceScanner(FeedScanner):

@@ -1,0 +1,31 @@
+{
+  "counts": {
+    "n_drafted": 1,
+    "n_failed": 1,
+    "n_findings": 1,
+    "n_sources": 2
+  },
+  "git_sha": "963b0631844b8549cf6ca4cda416400890231e34",
+  "input_sha256": "687843238d742859c3049565213c2c68142abe8c68710e4010b41f7e0d6d3124",
+  "library_versions": {
+    "PyYAML": "6.0.3",
+    "pydantic": "2.13.4",
+    "python": "3.12.6"
+  },
+  "method": "wsjf",
+  "output_sha256": "73a43c0d07f7cd5a82d9ccdd0740e28cc326518b14ce96ed36effbc7590f92e6",
+  "produced_at": "2026-06-13T08:00:00+00:00",
+  "schema_version": "1.0",
+  "sources": [
+    {
+      "error": "ConnectionError: down",
+      "name": "arxiv",
+      "ok": false
+    },
+    {
+      "error": "",
+      "name": "code_health",
+      "ok": true
+    }
+  ]
+}

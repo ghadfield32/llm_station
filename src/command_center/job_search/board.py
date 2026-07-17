@@ -1132,12 +1132,15 @@ def note_activity_on_board(
     *,
     root: Path | None = None,
     cfg: JobSearchConfig | None = None,
+    furthers_process: bool = False,
 ) -> dict[str, Any]:
     config = cfg or load_config()
     base = root or data_root(config)
     path = board_state_path(base, config)
     if not path.exists():
         return {"status": "not_configured", "updated_cards": [], "writes_performed": False}
+    if not furthers_process:
+        return {"status": "recorded_without_stage_change", "updated_cards": [], "writes_performed": False}
     if "recruiter" not in note_type and "interview" not in note_type:
         return {"status": "ignored_note_type", "updated_cards": [], "writes_performed": False}
     state = load_local_state(base, config)

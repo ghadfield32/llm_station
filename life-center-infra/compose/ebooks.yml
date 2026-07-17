@@ -1,0 +1,25 @@
+# Ebooks tier — Calibre-Web. DISABLED BY DEFAULT (excluded from `all`).
+# Split out of the media tier: Audiobookshelf's ebook support is basic, so only
+# admit this when you actually need one of: a real Calibre database, OPDS or an
+# ebook-reader integration, metadata editing, or conversion/serious library
+# management. Must be named explicitly (`lc up --profile ebooks`).
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:0.6.24  # pin: @sha256 before real data
+    container_name: lc-calibre-web
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${CALIBRE_WEB_PORT:-8083}:8083"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/calibre-web/config:/config
+      - ${LC_DATA:-./testdata/data}/media/books:/books

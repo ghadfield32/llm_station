@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -39,6 +40,7 @@ from command_center.job_search.schemas import (
     FitResult,
     ResumeSelection,
 )
+from command_center.write_locking import application_memory_write_lock
 
 REVIEW_NOTES_FILENAME = "review_notes.md"
 
@@ -84,11 +86,13 @@ def _run_agent_writer(
     bank: AchievementBank,
     *,
     trace_step: str,
+    publish: bool = True,
 ) -> dict:
     """Generate resume/cover letter/recruiter message with the LLM writer and
-    overwrite the packet files. Returns the `generation` provenance dict for
-    application.yml; on failure the template files stay in place and the failure
-    is recorded (mode template_fallback + error) — visible, never silent."""
+    optionally publish the packet files. Regeneration uses ``publish=False`` so
+    a slow model result can be compared with current human edits before any
+    material is replaced. Returns provenance plus an internal staged payload
+    map in that mode; on failure the existing files stay in place."""
     now = datetime.now(timezone.utc).isoformat()
     if not _agent_writer_enabled():
         return {
@@ -101,16 +105,15 @@ def _run_agent_writer(
             inputs, bank, trace_path=app_dir / TRACE_FILENAME, trace_step=trace_step)
     except AgentWriterError as exc:
         return {"mode": "template_fallback", "error": str(exc), "generated_at": now}
-    (app_dir / "generated_resume.md").write_text(materials.resume + "\n", encoding="utf-8")
-    (app_dir / "resume_ats.txt").write_text(
-        resume_ats_text(materials.resume), encoding="utf-8")
-    (app_dir / "cover_letter.md").write_text(materials.cover_letter + "\n", encoding="utf-8")
-    (app_dir / "recruiter_message.md").write_text(
-        materials.recruiter_message + "\n", encoding="utf-8")
+    payloads = {
+        "generated_resume.md": materials.resume + "\n",
+        "resume_ats.txt": resume_ats_text(materials.resume),
+        "cover_letter.md": materials.cover_letter + "\n",
+        "recruiter_message.md": materials.recruiter_message + "\n",
+    }
     if materials.answers.strip():
-        (app_dir / "answer_bank.md").write_text(
-            materials.answers + "\n", encoding="utf-8")
-    return {
+        payloads["answer_bank.md"] = materials.answers + "\n"
+    result = {
         "mode": "agent",
         "model": materials.model,
         "attempts": materials.attempts,
@@ -124,6 +127,14 @@ def _run_agent_writer(
         "format_example": bool(inputs.format_example.strip()),
         "tone_flags": materials.tone_flags,
     }
+    if publish:
+        for filename, text in payloads.items():
+            atomic_write_text(app_dir / filename, text)
+    else:
+        # Internal-only staging value: callers must pop this before persisting
+        # generation provenance to application.yml.
+        result["_material_payloads"] = payloads
+    return result
 
 
 def _today() -> date:
@@ -131,7 +142,25 @@ def _today() -> date:
 
 
 def _write_yaml(path: Path, data: object) -> None:
-    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    atomic_write_text(path, yaml.safe_dump(data, sort_keys=False))
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Replace a text file atomically so lock-free readers see old or new."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
 
 
 def create_prepared_application(
@@ -236,7 +265,8 @@ def create_prepared_application(
             load_standing_answers(base),
             salary_max=job.salary_max, salary_text=job.salary_text,
             currency=job.currency,
-            detected_phrases=automation.auto_answered),
+            detected_phrases=automation.auto_answered,
+            never_auto_answer=cfg.application_questions.never_auto_answer),
         encoding="utf-8")
     record.generation = _run_agent_writer(
         app_dir,
@@ -414,44 +444,48 @@ def reclassify_application(
 
     cfg = load_config()
     base = root or data_root(cfg)
-    app_dir, record = load_application(app_id, root=root)
-    before = str(record.automation_class.value if hasattr(
-        record.automation_class, "value") else record.automation_class)
-    if record.applied_at:
-        return {"application_id": app_id, "changed": False,
-                "before": before, "after": before, "skipped": "already_applied"}
+    with application_memory_write_lock(base, app_id):
+        app_dir, record = load_application(app_id, root=base)
+        before = str(record.automation_class.value if hasattr(
+            record.automation_class, "value") else record.automation_class)
+        if record.applied_at:
+            return {"application_id": app_id, "changed": False,
+                    "before": before, "after": before,
+                    "skipped": "already_applied"}
 
-    job = _rebuild_canonical_job(app_dir, record)
-    automation = classify_automation(job, cfg)
-    after = automation.value.value
+        job = _rebuild_canonical_job(app_dir, record)
+        automation = classify_automation(job, cfg)
+        after = automation.value.value
 
-    record.automation_class = automation.value
-    record.manual_required = automation.value != AutomationClass.BOT_POSSIBLE
-    record.manual_reason = (
-        "; ".join(automation.blockers) if automation.blockers
-        else automation.reason)
-    record.auto_answered = list(automation.auto_answered)
-    save_application(app_dir, record)
+        record.automation_class = automation.value
+        record.manual_required = automation.value != AutomationClass.BOT_POSSIBLE
+        record.manual_reason = (
+            "; ".join(automation.blockers) if automation.blockers
+            else automation.reason)
+        record.auto_answered = list(automation.auto_answered)
 
-    # keep the deterministic answers file in step with the re-detected questions
-    standing = load_standing_answers(base)
-    (app_dir / "application_answers.md").write_text(
-        render_application_answers(
-            standing, salary_max=record.salary.max,
-            salary_text=record.salary.notes, currency=record.salary.currency,
-            detected_phrases=automation.auto_answered),
-        encoding="utf-8")
-    record.materials.setdefault("application_answers", "application_answers.md")
-    save_application(app_dir, record)
+        # Keep the deterministic answers file and record in one writer boundary.
+        standing = load_standing_answers(base)
+        atomic_write_text(
+            app_dir / "application_answers.md",
+            render_application_answers(
+                standing, salary_max=record.salary.max,
+                salary_text=record.salary.notes, currency=record.salary.currency,
+                detected_phrases=automation.auto_answered,
+                never_auto_answer=cfg.application_questions.never_auto_answer),
+        )
+        record.materials.setdefault(
+            "application_answers", "application_answers.md")
+        save_application(app_dir, record)
 
-    return {
-        "application_id": app_id,
-        "changed": before != after,
-        "before": before, "after": after,
-        "blockers": automation.blockers,
-        "auto_answered": automation.auto_answered,
-        "manual_reason": record.manual_reason,
-    }
+        return {
+            "application_id": app_id,
+            "changed": before != after,
+            "before": before, "after": after,
+            "blockers": automation.blockers,
+            "auto_answered": automation.auto_answered,
+            "manual_reason": record.manual_reason,
+        }
 
 
 def reclassify_suggestion(
@@ -486,17 +520,24 @@ def reclassify_suggestion(
 
 def mark_submitted(app_id: str, *, root: Path | None = None) -> ApplicationRecord:
     cfg = load_config()
-    app_dir, record = load_application(app_id, root=root)
-    today = _today()
-    record.status = "applied"
-    record.stage = "completed"
-    record.applied_at = today.isoformat()
-    record.last_activity_at = today.isoformat()
-    record.retention_until = (today + timedelta(days=cfg.retention.rich_application_cache_days)).isoformat()
-    record.followup["next_action"] = "Wait 5 business days, then follow up if no response."
-    save_application(app_dir, record)
-    generate_followup(app_dir)
-    return record
+    base = root or data_root(cfg)
+    with application_memory_write_lock(base, app_id):
+        app_dir, record = load_application(app_id, root=base)
+        if record.applied_at:
+            return record
+        today = _today()
+        record.status = "applied"
+        record.stage = "completed"
+        record.applied_at = today.isoformat()
+        record.last_activity_at = today.isoformat()
+        record.retention_until = (
+            today + timedelta(days=cfg.retention.rich_application_cache_days)
+        ).isoformat()
+        record.followup["next_action"] = (
+            "Wait 5 business days, then follow up if no response.")
+        save_application(app_dir, record)
+        generate_followup(app_dir)
+        return record
 
 
 def append_note_text(
@@ -506,36 +547,66 @@ def append_note_text(
     *,
     root: Path | None = None,
     source: str = "manual_note",
+    furthers_process: bool = False,
 ) -> dict:
     cfg = load_config()
-    app_dir, record = load_application(app_id, root=root)
-    summary = content.strip().splitlines()[0][:240] if content.strip() else "Empty note."
-    now = datetime.now(timezone.utc)
-    event = {
-        "ts": now.isoformat(),
-        "type": note_type,
-        "summary": summary,
-        "action_needed": "Review follow-up pack and reply draft.",
-        "source": source,
-    }
-    with (app_dir / "communications.jsonl").open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(event) + "\n")
-    record.last_activity_at = now.date().isoformat()
-    record.status = (
-        "recruiter_contact"
-        if "recruiter" in note_type or "interview" in note_type
-        else record.status
-    )
-    record.retention_until = (now.date() + timedelta(days=cfg.retention.rich_application_cache_days)).isoformat()
-    record.followup["next_action"] = event["action_needed"]
-    save_application(app_dir, record)
-    generate_followup(app_dir)
-    return event
+    base = root or data_root(cfg)
+    with application_memory_write_lock(base, app_id):
+        app_dir, record = load_application(app_id, root=base)
+        summary = (
+            content.strip().splitlines()[0][:240]
+            if content.strip() else "Empty note.")
+        now = datetime.now(timezone.utc)
+        event = {
+            "ts": now.isoformat(),
+            "type": note_type,
+            "summary": summary,
+            "action_needed": "Review follow-up pack and reply draft.",
+            "source": source,
+            "furthers_process": furthers_process,
+        }
+        with (app_dir / "communications.jsonl").open(
+            "a", encoding="utf-8"
+        ) as fh:
+            fh.write(json.dumps(event) + "\n")
+        record.last_activity_at = now.date().isoformat()
+        if furthers_process and (
+            "recruiter" in note_type or "interview" in note_type
+        ):
+            record.status = "recruiter_contact"
+        if furthers_process and cfg.retention.extend_when_active:
+            record.retention_until = (
+                now.date()
+                + timedelta(days=cfg.retention.rich_application_cache_days)
+            ).isoformat()
+            # A later real communication reactivates the still-present rich record.
+            # The historical minimal outcome row remains useful, but retention must
+            # not treat this application as already compacted while the process is live.
+            record.rich_compacted = False
+            record.archived_at = None
+        record.followup["next_action"] = event["action_needed"]
+        save_application(app_dir, record)
+        generate_followup(app_dir)
+        return event
 
 
-def append_note(app_id: str, note_type: str, note_file: Path, *, root: Path | None = None) -> dict:
+def append_note(
+    app_id: str,
+    note_type: str,
+    note_file: Path,
+    *,
+    root: Path | None = None,
+    furthers_process: bool = False,
+) -> dict:
     content = note_file.read_text(encoding="utf-8")
-    return append_note_text(app_id, note_type, content, root=root, source="manual_note")
+    return append_note_text(
+        app_id,
+        note_type,
+        content,
+        root=root,
+        source="manual_note",
+        furthers_process=furthers_process,
+    )
 
 
 def read_job_description(app_dir: Path) -> str:
@@ -556,17 +627,20 @@ def request_changes(
     """Geoff's 'not ready / needs updates' action: record the note, flip the
     review gate to changes_requested, and log it in communications. Regeneration
     is a separate explicit step so a failed model call never loses the note."""
-    app_dir, record = load_application(app_id, root=root)
+    cfg = load_config()
+    base = root or data_root(cfg)
     text = notes.strip()
     if not text:
         raise ValueError("request_changes requires a non-empty note")
-    _append_review_note(app_dir, text)
-    record.review_state = "changes_requested"
-    save_application(app_dir, record)
-    append_note_text(
-        app_id, "review_changes_requested", text, root=root, source=source)
-    _, record = load_application(app_id, root=root)
-    return app_dir, record
+    with application_memory_write_lock(base, app_id):
+        app_dir, record = load_application(app_id, root=base)
+        _append_review_note(app_dir, text)
+        record.review_state = "changes_requested"
+        save_application(app_dir, record)
+        append_note_text(
+            app_id, "review_changes_requested", text, root=base, source=source)
+        _, record = load_application(app_id, root=base)
+        return app_dir, record
 
 
 def regenerate_materials(
@@ -581,6 +655,10 @@ def regenerate_materials(
     cfg = load_config()
     base = root or data_root(cfg)
     app_dir, record = load_application(app_id, root=root)
+    start_revision = record.revision
+    start_review_state = record.review_state
+    start_review_notes = _read_review_notes(app_dir)
+    start_manual_edits = list(record.generation.get("manual_edits") or [])
     description = read_job_description(app_dir)
     if not description.strip():
         raise ValueError(
@@ -597,7 +675,7 @@ def regenerate_materials(
             matched_keywords=list(record.keywords.get("matched", [])),
             fit_reasons=record.fit.reasons,
             fit_score=record.fit.score,
-            reviewer_notes=_read_review_notes(app_dir),
+            reviewer_notes=start_review_notes,
             writing_style=_load_writing_style(base),
             master_bank=ensure_master_bank_text(base),
             contact=load_contact(base),
@@ -606,40 +684,61 @@ def regenerate_materials(
         ),
         writer_bank,
         trace_step=f"regenerate_materials_rev{record.revision + 1}",
+        publish=False,
     )
     if generation.get("mode") != "agent":
         # Keep changes_requested: the notes were NOT addressed. Surfacing the
         # error is the fix path, not quietly reverting to templates.
         raise AgentWriterError(str(generation.get("error") or "agent writer failed"))
-    # Refresh the deterministic standing answers alongside the regenerated
-    # materials so profile edits (Jobs settings drawer) propagate on the next
-    # regenerate; detected questions are re-derived from the stored JD.
+    staged_payloads = dict(generation.pop("_material_payloads", {}))
+    # Stage deterministic standing answers alongside the model output. Nothing
+    # becomes visible until the compare-and-publish boundary below.
     standing = load_standing_answers(base)
     asked, _uncovered = split_detected_phrases(
         description, cfg.automation.manual_phrases, standing)
-    (app_dir / "application_answers.md").write_text(
-        render_application_answers(
+    staged_payloads["application_answers.md"] = render_application_answers(
             standing,
             salary_max=record.salary.max, salary_text=record.salary.notes,
-            currency=record.salary.currency, detected_phrases=asked),
-        encoding="utf-8")
-    # Re-load before mutating: the model call above can take minutes, and a
-    # note that landed meanwhile (append_note_text load->save) must not be
-    # clobbered by saving this function's stale pre-call snapshot.
-    app_dir, record = load_application(app_id, root=root)
-    record.generation = generation
-    record.revision = record.revision + 1
-    record.review_state = "ready_for_review"
-    record.last_activity_at = _today().isoformat()
-    record.materials.setdefault("application_answers", "application_answers.md")
-    save_application(app_dir, record)
-    append_note_text(
-        app_id,
-        "materials_regenerated",
-        f"Materials regenerated (revision {record.revision}) addressing "
-        f"{len(_read_review_notes(app_dir))} review note(s).",
-        root=root,
-        source="agent_writer",
-    )
-    _, record = load_application(app_id, root=root)
-    return app_dir, record
+            currency=record.salary.currency, detected_phrases=asked,
+            never_auto_answer=cfg.application_questions.never_auto_answer)
+    # Re-load before publishing: ordinary communications may land during the
+    # model call and are preserved, but a new change request, another revision,
+    # or a governed manual edit invalidates the model's input snapshot.
+    with application_memory_write_lock(base, app_id):
+        app_dir, record = load_application(app_id, root=base)
+        current_review_notes = _read_review_notes(app_dir)
+        current_manual_edits = list(
+            record.generation.get("manual_edits") or [])
+        if (
+            record.revision != start_revision
+            or record.review_state != start_review_state
+            or current_review_notes != start_review_notes
+            or current_manual_edits != start_manual_edits
+            or record.applied_at
+        ):
+            raise AgentWriterError(
+                "packet changed while materials were generating; the stale "
+                "draft was not published. Review the newer human changes and "
+                "run regeneration again."
+            )
+        for filename, text in staged_payloads.items():
+            atomic_write_text(app_dir / filename, text)
+        if current_manual_edits:
+            generation["manual_edits"] = current_manual_edits
+        record.generation = generation
+        record.revision = start_revision + 1
+        record.review_state = "ready_for_review"
+        record.last_activity_at = _today().isoformat()
+        record.materials.setdefault(
+            "application_answers", "application_answers.md")
+        save_application(app_dir, record)
+        append_note_text(
+            app_id,
+            "materials_regenerated",
+            f"Materials regenerated (revision {record.revision}) addressing "
+            f"{len(_read_review_notes(app_dir))} review note(s).",
+            root=base,
+            source="agent_writer",
+        )
+        _, record = load_application(app_id, root=base)
+        return app_dir, record

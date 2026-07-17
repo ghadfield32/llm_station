@@ -457,7 +457,7 @@ For every active application:
 Manual note flow:
 
 ```text
-cc job-search note <application_id> --type phone_screen --file notes.md
+cc job-search note <application_id> --type phone_screen --file notes.md --furthers-process
 ```
 
 The note command should append a summary to `communications.jsonl`, update
@@ -528,7 +528,7 @@ uv run cc job-search process-selected --dry-run
 uv run cc job-search digest
 uv run cc job-search generate-materials <job_key> --selected-by-geoff
 uv run cc job-search mark-submitted <application_id>
-uv run cc job-search note <application_id> --type recruiter_call --file notes.md
+uv run cc job-search note <application_id> --type recruiter_call --file notes.md --furthers-process
 uv run cc job-search followup <application_id>
 uv run cc job-search retention --dry-run
 uv run cc job-search retention --apply

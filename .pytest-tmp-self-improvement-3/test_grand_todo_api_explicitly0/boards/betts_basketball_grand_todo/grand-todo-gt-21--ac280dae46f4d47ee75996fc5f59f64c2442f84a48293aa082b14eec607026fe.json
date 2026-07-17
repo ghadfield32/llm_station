@@ -1,0 +1,30 @@
+{
+  "item_id": "GT-21",
+  "title": "Durable task 21",
+  "category": "GT — Grand Tasks",
+  "source_status": "📋 PLANNED",
+  "target": "_TBD_",
+  "completed": "_—_",
+  "source_notes": "note 21",
+  "description": "#### GT-21 · Durable task 21\r\n`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_\r\nKeep task 21 forever.\r\n**Notes:** note 21\r\n\r\n",
+  "source_kind": "tracked_item",
+  "source_ref": "betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md",
+  "source_anchor": "gt-21",
+  "source_sha256": "2872a668003ba88d942e2be52b83fdbeec1e7790d63d1bbac617b7942519f70f",
+  "source_revision_count": 1,
+  "source_revisions": [
+    {
+      "sha256": "2872a668003ba88d942e2be52b83fdbeec1e7790d63d1bbac617b7942519f70f",
+      "captured_at": "2026-07-16T23:12:00.615718+00:00",
+      "status": "📋 PLANNED",
+      "raw_markdown": "#### GT-21 · Durable task 21\r\n`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_\r\nKeep task 21 forever.\r\n**Notes:** note 21\r\n\r\n"
+    }
+  ],
+  "source_importer": "betts-grand-todo.v1",
+  "repo_id": "betts_basketball",
+  "sync_source_sha256": "2872a668003ba88d942e2be52b83fdbeec1e7790d63d1bbac617b7942519f70f",
+  "sync_board_status": "Backlog",
+  "sync_state": "synchronized",
+  "active_sync_conflict": null,
+  "card_id": "grand-todo-gt-21"
+}

@@ -28,6 +28,11 @@ from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, Field
 
+from .deduplication import (
+    DuplicateChecker,
+    DuplicateReport,
+    _contains_action,
+)
 from .planner import PlanBoardRef, WorkPlanIn, WorkPlanItemIn, summarize_plan
 from .schemas import BoardSuggestion, RoutingQuestion, WorkGraphPlanSummary
 
@@ -63,6 +68,12 @@ class DuplicateCandidate(BaseModel):
     reason: str
 
 
+class RefDuplicateReport(BaseModel):
+    """The rich, evidence-tagged duplicate report for ONE proposed item."""
+    ref: str
+    report: DuplicateReport
+
+
 class RoutingProposal(BaseModel):
     """A PROPOSAL, never a commit. `plan` is a ready-to-review WorkPlanIn (board
     left unset unless one rule matched); the human confirms the questions and
@@ -74,6 +85,9 @@ class RoutingProposal(BaseModel):
     board_suggestions: list[BoardSuggestion] = Field(default_factory=list)
     needs_confirmation: list[RoutingQuestion] = Field(default_factory=list)
     duplicate_candidates: list[DuplicateCandidate] = Field(default_factory=list)
+    # evidence-tagged findings (exact AND paraphrase-aware) per item ref; the
+    # legacy duplicate_candidates list above stays for existing consumers
+    duplicate_reports: list[RefDuplicateReport] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -92,13 +106,17 @@ class WorkRouter:
     def __init__(self, *, split: Callable[[str], list[str]],
                  board_rules: Sequence[BoardRule] = (),
                  known_boards: Sequence[str] = (),
-                 existing_titles: Sequence[tuple[str, str]] = ()) -> None:
+                 existing_titles: Sequence[tuple[str, str]] = (),
+                 duplicate_checker: DuplicateChecker | None = None) -> None:
         # split: text -> list of deliverable lines (inject intake.split_bulk_list)
         # existing_titles: (work_item_id, title) pairs for exact-dup detection
+        # duplicate_checker: optional evidence-tagged checker (exact AND
+        # paraphrase-aware); exact-title detection still works without it
         self._split = split
         self._rules = list(board_rules)
         self._known_boards = list(known_boards)
         self._existing = [(wid, _normalize(t)) for wid, t in existing_titles]
+        self._checker = duplicate_checker
 
     def route(self, text: str, *, conversation_id: str | None = None,
               capture_id: str | None = None) -> RoutingProposal:
@@ -107,6 +125,7 @@ class WorkRouter:
         suggestions: list[BoardSuggestion] = []
         questions: list[RoutingQuestion] = []
         dups: list[DuplicateCandidate] = []
+        reports: list[RefDuplicateReport] = []
         notes: list[str] = []
 
         for i, line in enumerate(lines):
@@ -119,7 +138,7 @@ class WorkRouter:
             items.append(WorkPlanItemIn(ref=ref, title=title, kind=kind,
                                         primary_board=primary))
 
-            self._flag_duplicate(ref, title, norm, dups, questions)
+            self._flag_duplicate(ref, title, norm, dups, questions, reports)
             self._flag_dependency(ref, norm, title, questions)
 
         if not items:
@@ -130,7 +149,7 @@ class WorkRouter:
             conversation_id=conversation_id, capture_id=capture_id, plan=plan,
             summary=summarize_plan(plan),
             board_suggestions=suggestions, needs_confirmation=questions,
-            duplicate_candidates=dups, notes=notes)
+            duplicate_candidates=dups, duplicate_reports=reports, notes=notes)
 
     # ---- board routing: evidence-tagged suggestion, else ask -----------------
     def _route_board(self, ref: str, norm: str, suggestions: list[BoardSuggestion],
@@ -142,18 +161,24 @@ class WorkRouter:
                         if re.search(rf"\b{re.escape(w)}\b", norm)])
                    for r in self._rules]
         matched = [(r, ws) for r, ws in matched if ws]
+
+        def _why(words: list[str]) -> str:
+            # show at most three matched keywords — a wall of quoted tokens
+            # is noise, not evidence, to a human reader
+            shown = ", ".join(repr(w) for w in words[:3])
+            extra = len(words) - 3
+            return f"matched {shown}" + (f" +{extra} more" if extra > 0 else "")
+
         if len(matched) == 1:
             rule, words = matched[0]
             suggestions.append(BoardSuggestion(
-                ref=ref, board_id=rule.board_id,
-                reason=f"matched {', '.join(repr(w) for w in words)}"))
+                ref=ref, board_id=rule.board_id, reason=_why(words)))
             return PlanBoardRef(board_id=rule.board_id, domain_id=rule.domain_id)
         # zero or ambiguous matches → the human picks; never auto-routed
         if len(matched) > 1:
             for rule, words in matched:
                 suggestions.append(BoardSuggestion(
-                    ref=ref, board_id=rule.board_id,
-                    reason=f"matched {', '.join(repr(w) for w in words)}"))
+                    ref=ref, board_id=rule.board_id, reason=_why(words)))
         questions.append(RoutingQuestion(
             ref=ref, question="Which board should this go on?",
             options=([r.board_id for r, _ in matched] if matched
@@ -162,7 +187,36 @@ class WorkRouter:
 
     def _flag_duplicate(self, ref: str, title: str, norm: str,
                         dups: list[DuplicateCandidate],
-                        questions: list[RoutingQuestion]) -> None:
+                        questions: list[RoutingQuestion],
+                        reports: list[RefDuplicateReport]) -> None:
+        if self._checker is not None:
+            report = self._checker.check(title)
+            if report.findings:
+                reports.append(RefDuplicateReport(ref=ref, report=report))
+            strong = next(
+                (f for f in report.findings if f.match_class in
+                 ("exact_same", "likely_same", "repeat_occurrence")), None)
+            if strong is not None:
+                why = strong.evidence[0].detail if strong.evidence else \
+                    strong.match_class
+                dups.append(DuplicateCandidate(
+                    ref=ref,
+                    existing_work_item_id=strong.existing_work_item_id,
+                    existing_title=strong.title,
+                    reason=f"{strong.match_class}: {why}"))
+                if strong.match_class == "repeat_occurrence":
+                    q = (f"'{title}' sounds like progress on "
+                         f"'{strong.title}' ({strong.canonical_status}) — "
+                         "add an update to it instead of a new task?")
+                else:
+                    q = (f"'{title}' looks like existing work "
+                         f"'{strong.title}' ({strong.canonical_status}) — "
+                         "what should happen?")
+                questions.append(RoutingQuestion(
+                    ref=ref, question=q,
+                    options=list(strong.allowed_resolutions)))
+            return
+        # no checker injected: the original exact-normalized-title rule
         for wid, existing_norm in self._existing:
             if existing_norm and existing_norm == norm:
                 dups.append(DuplicateCandidate(
@@ -176,9 +230,25 @@ class WorkRouter:
 
     def _flag_dependency(self, ref: str, norm: str, title: str,
                          questions: list[RoutingQuestion]) -> None:
+        """A dependency question requires TWO identifiable deliverables joined
+        by the relation word. Short phrases (media/proper-name titles like
+        'Burn After Reading') never qualify; a relation word whose far side
+        has no recognizable action ('...before movie or something') asks for
+        TIMING, never a fabricated graph edge."""
         hit = next((w for w in _DEP_WORDS if w in norm), None)
-        if hit is not None:
+        if hit is None:
+            return
+        left, _, right = norm.partition(hit.strip(","))
+        left_actions = _contains_action(left)
+        right_actions = _contains_action(right)
+        if left_actions and right_actions:
             questions.append(RoutingQuestion(
                 ref=ref, question=f"'{title}' reads like a dependency "
                 f"(matched {hit!r}) — which item does it block or depend on?",
                 options=[]))
+        elif left_actions:
+            questions.append(RoutingQuestion(
+                ref=ref, question=f"'{title}' mentions a time context "
+                f"({hit!r}) — want to add a due date or a note instead?",
+                options=["add_due_date", "add_note", "ignore"]))
+        # no recognizable action on either side: title-like text, ask nothing

@@ -78,6 +78,12 @@ CREATE INDEX IF NOT EXISTS ix_work_placements_item
     ON work_placements (work_item_id);
 CREATE INDEX IF NOT EXISTS ix_work_placements_board
     ON work_placements (board_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_work_placements_active_target
+    ON work_placements (work_item_id, board_id, domain_id)
+    WHERE removed_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_work_placements_active_primary
+    ON work_placements (work_item_id)
+    WHERE is_primary = 1 AND removed_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_work_edges_from ON work_edges (from_work_item_id);
 CREATE INDEX IF NOT EXISTS ix_work_edges_to ON work_edges (to_work_item_id);
 CREATE INDEX IF NOT EXISTS ix_work_events_item

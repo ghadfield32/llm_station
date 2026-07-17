@@ -97,7 +97,10 @@ class CaptureView(BaseModel):
     updated_at: str
 
 
-_SPLIT_PREFIX = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+")
+# Bullets include the Unicode markers phone note apps emit on paste:
+# ◦ U+25E6 white, ⁃ U+2043 hyphen, ‣ U+2023 triangular. A marker at
+# end-of-line is an empty bullet: recognized, then dropped as empty.
+_SPLIT_PREFIX = re.compile(r"^\s*(?:[-*+•◦⁃‣]|\d+[.)])(?:\s+|$)")
 
 
 def split_bulk_list(text: str) -> list[str]:
@@ -123,7 +126,10 @@ def split_bulk_list(text: str) -> list[str]:
         if _SPLIT_PREFIX.match(line):
             saw_marker = True
             flush()
-            buf.append(_SPLIT_PREFIX.sub("", line).strip())
+            # strip stacked markers ("◦ - item") — formatting, never content
+            while _SPLIT_PREFIX.match(line):
+                line = _SPLIT_PREFIX.sub("", line, count=1)
+            buf.append(line.strip())
             flush()
         else:
             buf.append(line)

@@ -7,7 +7,9 @@ from pathlib import Path
 import yaml
 
 from command_center.job_search.config import data_root, ensure_data_dirs, load_config
+from command_center.job_search.application_memory import save_application
 from command_center.job_search.schemas import ApplicationRecord
+from command_center.write_locking import application_memory_write_lock
 
 
 def _parse_day(value: str) -> date:
@@ -57,7 +59,13 @@ def plan_retention(*, root: Path | None = None, today: date | None = None) -> di
         active = record.status in active_statuses or record.stage == "interviewing"
         if record.keep_rich:
             action = "retain_keep_rich"
-        elif active:
+        elif not record.applied_at:
+            # The outcomes ledger is specifically a history of jobs actually
+            # submitted. Prepared/abandoned packets remain outside that DB.
+            action = "retain_not_applied"
+        elif record.rich_compacted and record.archived_at:
+            action = "already_archived"
+        elif active and retention_until >= now:
             action = "retain_active_process"
         elif retention_until < now:
             action = "archive_compact"
@@ -91,45 +99,56 @@ def apply_retention(*, root: Path | None = None, today: date | None = None) -> d
         if row["action"] != "archive_compact":
             continue
         app_dir = Path(row["path"])
-        record = ApplicationRecord.model_validate(
-            yaml.safe_load((app_dir / "application.yml").read_text(encoding="utf-8"))
-        )
-        archived_at = plan["today"]
-        with sqlite3.connect(db_path) as db:
-            db.execute(
-                """
-                INSERT OR REPLACE INTO outcomes (
-                    application_id, company, role_title, source, portal, applied_at,
-                    final_status, category, resume_variant, fit_score, salary_min, salary_max,
-                    bullet_ids_used, archived_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record.application_id,
-                    record.company,
-                    record.role_title,
-                    record.source,
-                    record.portal,
-                    record.applied_at,
-                    record.status,
-                    record.category,
-                    record.resume_variant,
-                    record.fit.score,
-                    record.salary.min,
-                    record.salary.max,
-                    ",".join(record.bullet_ids_used),
-                    archived_at,
-                ),
+        application_id = str(row["application_id"])
+        with application_memory_write_lock(base, application_id):
+            # Re-read under the same lock used by notes/submission. A plan can
+            # become stale between preview and apply; a qualifying message must
+            # win instead of being overwritten by archival metadata.
+            record = ApplicationRecord.model_validate(
+                yaml.safe_load(
+                    (app_dir / "application.yml").read_text(encoding="utf-8"))
             )
-        record.archived_at = archived_at
-        record.rich_compacted = True
-        (app_dir / "application.yml").write_text(
-            yaml.safe_dump(record.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
-        )
-        (app_dir / "ARCHIVED_MINIMAL_LEDGER_WRITTEN.txt").write_text(
-            "Minimal archive row written. Rich file deletion is disabled by default.\n",
-            encoding="utf-8",
-        )
-        archived.append(record.application_id)
+            retention_until = _parse_day(record.retention_until)
+            if (
+                not record.applied_at
+                or record.keep_rich
+                or (record.rich_compacted and record.archived_at)
+                or retention_until >= _parse_day(plan["today"])
+            ):
+                continue
+            archived_at = plan["today"]
+            with sqlite3.connect(db_path) as db:
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO outcomes (
+                        application_id, company, role_title, source, portal, applied_at,
+                        final_status, category, resume_variant, fit_score, salary_min, salary_max,
+                        bullet_ids_used, archived_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        record.application_id,
+                        record.company,
+                        record.role_title,
+                        record.source,
+                        record.portal,
+                        record.applied_at,
+                        record.status,
+                        record.category,
+                        record.resume_variant,
+                        record.fit.score,
+                        record.salary.min,
+                        record.salary.max,
+                        ",".join(record.bullet_ids_used),
+                        archived_at,
+                    ),
+                )
+            record.archived_at = archived_at
+            record.rich_compacted = True
+            save_application(app_dir, record)
+            (app_dir / "ARCHIVED_MINIMAL_LEDGER_WRITTEN.txt").write_text(
+                "Minimal archive row written. Rich file deletion is disabled by default.\n",
+                encoding="utf-8",
+            )
+            archived.append(record.application_id)
     return {"archived": archived, "db_path": str(db_path), "plan": plan}
-

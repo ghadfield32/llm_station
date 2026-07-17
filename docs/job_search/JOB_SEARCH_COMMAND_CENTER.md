@@ -90,7 +90,7 @@ has already moved to `Selected by Geoff` or unprepared `In Progress`.
 The first-party cockpit reads this same internal board store through
 `configs/domain_surfaces.yaml -> job_application`. The SPA has a top-level
 `Sections` view plus sidebar shortcuts for Jobs, Posts, Books, Papers, Repos,
-DAGs, Upkeep, and Tasks. Jobs render as lane-backed job cards across all 8
+DAGs, Self Improvement, and Tasks. Jobs render as lane-backed job cards across all 8
 pipeline stages, Posts render as LinkedIn-style previews, and other domain
 types use their own card grammar. Fixture-backed domains always show a
 `demo data` badge; the Jobs domain reports `board_store`.

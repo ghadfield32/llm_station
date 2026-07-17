@@ -371,7 +371,7 @@ Access (on the do-not-build list by default).
 | **Proactive Runner** | Scheduled checks on already-done work. Holds no secrets; its strongest autonomous act is opening a gated mission. |
 | **Discord Gateway** | Discord ↔ LiteLLM (`chat`) ↔ the Growth OS action layer. Fail-fast without `DISCORD_BOT_TOKEN`. The `chat` role is qwen3 (instruct), **not** qwen3-coder — chat surfaces narrate before tool calls, and qwen3-coder's Ollama native parser drops those calls (see §14, 2026-06-13). |
 | Uptime Kuma + restic | Health monitoring and backups. |
-| *(optional profile `ui`)* **Agent Kanban UI / Cockpit** | First-party PWA cockpit over the Ledger, internal board store, the AppFlowy board-snapshot projection, agent-call log, and GatewayCore chat. Primary nav sits at the **top** on mobile: **All Boards** (typed domain boards — jobs/posts/papers/repos/dags/books/upkeep/missions, live-sourced from `appflowy_board`/`board_store`/`ledger_missions`, never silent fixtures) plus **Controls** (runtime APIs, board registry, job-search/profile settings). Chat is **one gateway, one harness**: GatewayCore + LiteLLM, model switching is a role dropdown (no ORCA/OmniAgent/OxyGent specialist links — removed 2026-07-10), with an **All Chats** review index (`GET /api/chat/conversations`, every conversation across every surface, task-kind badges, delete-per-thread), a per-conversation **flight-recorder full story** (untruncated tool args/results + context provenance, paginated, click-through from any card's Story tab to the exact moment), and **scoped chats** anchored to any registered repo. Board moves are a **one-step machine** — cards advance/retreat one lane at a time, never a skip; jobs enforce Geoff's 3 manual gates (select → agent-complete "Needs Geoff" → me-complete "Completed"). Governed writes can move board cards and edit profile overrides; approve/kill stay in the signed Ledger endpoints and merge/deploy/submit remain structurally unavailable. Loopback + Tailscale; React/Vite SPA built + served single-container by a FastAPI backend. Decision record: [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md). |
+| *(optional profile `ui`)* **Agent Kanban UI / Cockpit** | First-party PWA cockpit over the Ledger, internal board store, the AppFlowy board-snapshot projection, agent-call log, and GatewayCore chat. Primary nav sits at the **top** on mobile: **Kanban Boards** (typed execution projections, including **General Todos** and **Betts Grand TODO — Source Tracker**), **Master TODO List** (the comprehensive user-facing story ledger), and **Controls** (runtime APIs, board registry, job-search/profile settings). Chat is **one gateway, one harness**: GatewayCore + LiteLLM, model switching is a role dropdown (no ORCA/OmniAgent/OxyGent specialist links — removed 2026-07-10), with an **All Chats** review index (`GET /api/chat/conversations`, every conversation across every surface, task-kind badges, delete-per-thread), a per-conversation **flight-recorder full story** (untruncated tool args/results + context provenance, paginated, click-through from any card's Story tab to the exact moment), and **scoped chats** anchored to any registered repo. Board moves are a **one-step machine** — cards advance/retreat one lane at a time, never a skip; jobs enforce Geoff's 3 manual gates (select → agent-complete "Needs Geoff" → me-complete "Completed"). Governed writes can move board cards and edit profile overrides; approve/kill stay in the signed Ledger endpoints and merge/deploy/submit remain structurally unavailable. Loopback + Tailscale; React/Vite SPA built + served single-container by a FastAPI backend. Decision record: [reviews/2026-07-09-chat-control-full-story-review.md](reviews/2026-07-09-chat-control-full-story-review.md). |
 | *(optional profile)* Hermes | **Not adopted — evaluated 2026-06-13 → DEFER.** Hermes Agent is real now (v0.16.0, PyPI/official image); the old "phantom image" note is stale. An isolated spike (see change log + `evaluation/capability-assessment/hermes/DECISION.md`) found cross-session memory works but is just a local `MEMORY.md` (not beyond-stack) and self-improving skills did not auto-fire. LiteLLM + Ollama + the action layer serve its role; revisit only if autonomous skill self-improvement materializes. |
 
 ### The worker (4090 / currently the same workstation)
@@ -806,15 +806,17 @@ or publishes. The existing official-API/AppFlowy publisher remains a separate
 operator-approved path.
 
 **Board modules — create a whole board in-app (PRs #43, #44).** `POST
-/api/board-module` atomically creates BOTH a kanban board (repo/verb/status
+/api/board-module` transactionally creates BOTH a kanban board (repo/verb/status
 contract) AND its `generic_task` domain surface, so every board — including
 user-created ones — gets the same typed cards + chat + pipeline + usage treatment.
 Governance defaults are FIXED: wall verbs (`approve_card`, `merge`, `deploy`,
 `delete_card`, `delete_board`) stay forbidden and human approval/merge is
-unchanged. The write is atomic (both configs validate via their real Pydantic
-models before either is written), write-gated (`KANBAN_UI_CHAT_ENABLED` +
-`KANBAN_UI_DOMAIN_CONFIG_WRITES`), and audited (`config_audit.jsonl`); the browser
-never emits YAML. A guided `CreateBoardWizard` drives it.
+unchanged. Both configs validate via their real Pydantic models before a shared
+cross-process lock + before/after intent journal applies either file. Interrupted
+pairs roll forward on reconciliation; unrelated divergence fails closed. The
+write is gated (`KANBAN_UI_CHAT_ENABLED` + `KANBAN_UI_DOMAIN_CONFIG_WRITES`),
+and best-effort telemetry is appended to `config_audit.jsonl`; the browser never
+emits YAML. A guided `CreateBoardWizard` drives it.
 
 **First-class no-repository "life" boards (PR #44).** `KanbanBoardSpec` gains
 `execution_scope: life | repository | hybrid` (default `repository`, so every
@@ -831,14 +833,16 @@ stable record everything downstream appends to: `CaptureRecord` is frozen (the r
 thought is never edited in place; status/classification are appended events),
 `CaptureClassification` is separate, and `split_bulk_list()` splits a pasted idea
 list into one capture per bullet/line while a single free-text paste stays one
-capture — nothing is lost. API (gated by `KANBAN_UI_CAPTURE_ENABLED`, default on —
-a benign in-memory list with no repo/Ledger/config side effects): `POST
+capture — nothing is lost. API (gated by `KANBAN_UI_CAPTURE_ENABLED`, default on):
+`POST
 /api/captures`, `POST /api/captures/batch`, `GET /api/captures[/{id}]`, `GET
 /api/intake/inbox`. The Universal Inbox folds every capture into its lane and never
 drops one — recoverable even after routing. A global **"+ Capture"** composer
 (any screen; bulk-list toggle; save_only / prepare_later / prepare_now /
 create_task) plus an **Inbox** nav view. Guards:
 `tests/test_intake_capture.py`, `tests/test_agent_kanban_ui_capture.py`.
+The full-console Compose profile enables `KANBAN_UI_CAPTURE_LEDGER=1`; the
+in-memory store remains available for hermetic/dev use.
 
 **Readiness status.** PRs #41–#44 are **BUILT + HERMETIC_PROVEN** (web build green;
 targeted + full suite green in CI) and open, **not yet merged to `main`**. The
@@ -897,7 +901,10 @@ returns a `TaskBatchReceipt` — every created item carries its own clickable
 `POST /api/chat/work-items/preview` is **side-effect-free** (validated against a
 sandbox seeded from the real graph; provisional ids; nothing persisted);
 `POST /api/chat/work-items/commit` validates the whole plan first so an invalid
-plan (cycle, unknown ref) writes **nothing** — commit is atomic. Deliverable
+plan (cycle, unknown ref) writes **nothing**. Durable item/placement calls are
+sequential rather than one cross-store transaction: the cockpit TODO router
+therefore commits one item at a time, preserves each successful receipt, stops
+on failure, and never automatically retries an ambiguous response. Deliverable
 splitting / board auto-routing / duplicate detection from free text is a later
 phase: no evidence-backed calibration → **no silent auto-routing**. Creating
 work items/placements/edges is **planning, not a mission** — it starts no
@@ -908,9 +915,11 @@ approval wall.
 (§4.8) becomes connected work through the SAME planner:
 `POST /api/captures/{capture_id}/work-preview` (side-effect-free) and
 `POST /api/captures/{capture_id}/convert`. The capture supplies provenance — its
-id is stamped onto every created `WorkItem.capture_id` (work→capture), and its
+id is stamped onto its created `WorkItem.capture_id` (work→capture), and its
 batch + conversation carry through — while the caller supplies the plan structure
-(until classification/routing infers it). `convert` commits the plan, then calls
+(until classification/routing infers it). Conversion apply is deliberately
+bounded to one item and no edges per capture. `convert` creates or repairs that
+item and its requested placements, then calls
 `CaptureService.mark_converted` to append a `link` event with the created
 `work_item_ids` and move the capture to the `routed` lane: the capture is **never
 destroyed**, only linked to the work it produced and still recoverable in the
@@ -924,13 +933,77 @@ board suggestions (which keyword matched which injected rule), and emit the plan
 — but it **commits nothing** and **never silently auto-routes**. Anything not
 matched by exactly one rule leaves the item's board unset and raises a
 `needs_confirmation` question; a dependency word (`before`/`until`/…) raises a
-question rather than **inventing** an edge whose endpoints text can't fix; an
+question ONLY when recognizable actions sit on BOTH sides of it (noun forms
+count: `implementation`→implement) — action-on-one-side asks a TIMING question
+("add a due date?") and a bare title like "Burn after reading" asks nothing
+(DEPLOYED 2026-07-16); an
 **exact** normalized-title match against an existing item becomes a
-`duplicate_candidate` + question, never an auto-drop. No LLM, no fuzzy
+`duplicate_candidate` + question, never an auto-drop. Beyond exact titles,
+**Match & Organize** (`work_graph/deduplication.py`, DEPLOYED 2026-07-16)
+classifies each proposed item against existing work into eleven evidence-
+tagged classes — `exact_same` / `likely_same` / `possible_same` /
+`repeat_occurrence` / `expands_existing` / `subtask_of_existing` /
+`parent_of_existing` / `same_subject_related`, plus report-level
+`same_project_cluster` (a SubjectGroupSuggestion) and `board_fit_only`
+(a BoardFitSuggestion); `unrelated` is the absence of findings. Identity
+outranks repeat phrasing (an exact re-paste is the same statement, not new
+progress). Evidence stays plain-language (exact/normalized title, shared
+capture source, synonym-canonical action, entity overlap, token containment,
+asymmetric containment for expansion/parent). The checker is local-only (no
+external embeddings; the absent semantic backend is reported as
+`unavailable_lexical_only`, never simulated) and strictly side-effect-free;
+same-work matches suppress group/board suggestions so a duplicate can never
+be re-created as a "grouped" child. **Part-level expansion**: `extract_deltas`
+splits the new text into selectable fragments (detail / subtask / source_link
+/ recurrence / due_date / progress) novelty-filtered against the existing
+title AND description; `expand_existing` recomputes deltas server-side
+(clients cannot inject edited text), applies only the human-checked ids as an
+append-only `WorkEvent(kind="expansion")`, and turns subtask-target deltas
+into child items under `parent_of` edges — existing titles/descriptions are
+never rewritten. **Project groups are not boards**: `create_project_group`
+creates a `WorkItem(kind="project")` with `parent_of` edges to its members;
+`group_under_existing` files a new item under an existing parent. Repeated
+progress ("applied to jobs again") rides append-only
+`WorkEvent(kind="occurrence")` on the ONE canonical item instead of a
+duplicate card; every human resolution (reuse / add-occurrence / reopen /
+expand / add-child / group / create-project-group / create-separate /
+link-related / discard / archive-existing) is recorded as
+`WorkEvent(kind="duplicate_decision")` carrying the SERVER-recomputed match
+class — client claims cannot poison calibration. A routed/archived capture
+refuses re-resolution (409), so retries cannot mint duplicate children.
+Capture discard is `CaptureService.archive` — hidden from active Inbox lanes,
+raw text + history preserved; hard delete does not exist, and routed captures
+refuse archiving. The evaluation harness
+(`evaluation/match_organize/labeled-cases.yaml` +
+`scripts/eval_match_organize.py` + `tests/test_match_organize_eval.py`) pins
+the baseline-vs-candidate KPI leaderboard on real import cases (paraphrase
+recall 0.00→0.86; occurrence and expansion 0→1.0; negatives safe) and forces
+the two known misses to stay REPORTED until a local semantic stage or a
+deliberate rule change closes them. No LLM, no fuzzy
 thresholds. Its board rules are **learned from the correction log** (see
 calibration below); with no evidence yet, every board is a question against the
-boards that exist in the graph. The human reviews/edits the proposal, then calls
-`/convert` or `/commit`.
+validated compatible generic-board registry, including a newly created empty
+board before its first placement. Source-managed Grand TODO and specialized
+Jobs/Posts/Papers/Repos/DAGs are not generic routing targets. The human
+reviews/edits the proposal, then calls `/convert` or `/commit`.
+
+**Cockpit TODO routing.** Gateway chat input and recorded user/assistant lines
+offer **Route TODOs**. The review wizard shows each split item, evidence-backed
+suggestion, exact duplicate choice, and destination; unresolved items cannot be
+committed. The real `personal_todos` board is the prominent default, while the
+operator can select another compatible existing board or **Create a new board**
+through the same typed board-module gate with
+standard governed lanes with explicit unblock/reopen/restore paths and a
+human-owned approval wall. Every confirmed chat TODO is first saved as a durable
+capture, then converted one item at a time with backend-generated receipts.
+Capture `prepare_now` first opens the stable `capture:<id>` chat with the full
+raw text and explicit General Todos/existing/new-kanban actions, creates no work, and is
+idempotent across retries. Capture `create_task` uses the same routing path. An interrupted conversion is
+idempotently repaired by `capture_id`, including a missing requested placement,
+rather than duplicating the WorkItem. The write boundary rejects specialized,
+Grand TODO, or mismatched board references. Compatible board views recompute active placements
+from the durable Work Graph and refresh the open board on a non-overlapping
+15-second cadence.
 
 **Confirmation gate — "this will create …" (`summarize_plan`).**
 `POST /api/work-items/plan-summary` returns a **deterministic** count of a
@@ -2425,8 +2498,8 @@ cockpit refuses any lane skip with a 409 naming the legal next step; see the
             (triggers packet prep automatically — Geoff never touches In Progress)
 2. AGENT COMPLETE   In Progress -[agent finishes]-> Needs Geoff
             (agent-written resume/cover letter/outreach/answers, claim-checked)
-3. ME COMPLETE      Needs Geoff -[Geoff reviews + Approve & Submit]-> Completed
-            (validated submit -> mark_submitted -> email record -> evidence)
+3. ME COMPLETE      Needs Geoff -[Geoff submits externally, then records]-> Completed
+            (validated record -> mark_submitted -> email record -> evidence)
 
 Side branches (one step, either direction):
   Suggested Jobs <-> Rejected / Skip
@@ -2442,9 +2515,13 @@ failure, and the complete prompt/response for every attempt is persisted to
 `agent_trace.jsonl` per application (never silent — a malformed model
 response raises `AgentWriterError` rather than emitting an unchecked
 packet; failures fall back to the template path, recorded as
-`generation.mode=template_fallback`). A fit score with a full KPI-style
-breakdown and a rich data folder are retained 30 days past last activity
-before compacting to a minimal archive ledger row. Hard-coded manual
+`generation.mode=template_fallback`). After an application is recorded as
+externally submitted, its per-record rich-memory window defaults to 30 days
+(1–365 adjustable). Only an explicitly marked process-furthering communication
+refreshes that date; ordinary notes and stale active labels do not. When the
+date expires, retention apply writes one idempotent minimal applied-job outcome
+row and an eligibility marker. Rich-file deletion remains disabled, so this is
+an archival eligibility clock rather than a disk-growth bound. Hard-coded manual
 blockers (LinkedIn/Indeed/Workday/Greenhouse/Lever/Ashby portals, EEO/self-ID/
 sponsorship/salary questions) route to `Needs Geoff` — see
 `MANUAL_APPLICATION_RULES.md`.
@@ -2453,7 +2530,8 @@ sponsorship/salary questions) route to `Needs Geoff` — see
 card): Overview/Resume/Cover Letter/Answers/Recruiter Msg/Follow-ups/
 Checklist/JD/Agent Trace/**Story** tabs, direct edit-in-place on any
 material (recorded as a `manual_edit` story moment), `request-changes` +
-regenerate against accumulated review notes, and **Approve & Submit** —
+regenerate against accumulated review notes, and **I submitted externally —
+record it** —
 the same governed `Completed` move as a drag, gated on `packet_validation.py`
 (errors block, warnings surface). `finalize.py` runs **before** the governed
 event is emitted, so a blocked or duplicate finalize never logs a move it
@@ -2464,6 +2542,28 @@ submission). `record_email.py` always writes `submission_email.html`;
 real SMTP send needs `DISCOVERY_SMTP_HOST/USER/PASSWORD/FROM` +
 `JOB_SEARCH_EMAIL_TO` — unconfigured by default, so submissions are
 `recorded_only` until an operator sets those.
+
+The card's **work page-by-page in chat** action is a conversational companion,
+not browser control: it carries authoritative card/application provenance,
+requests one visible non-secret portal page at a time, refuses passwords,
+MFA/CAPTCHA/secret tokens, stops on protected/legal questions, and never claims
+to submit the employer form. Company watchlists and the 1–365 day retention
+window are editable in Controls through locked, schema-validated profile writes.
+
+**Private job-search memory.** `<job-search data root>/job_search_memory.sqlite`
+stores only operator-entered LinkedIn relationships, explicit non-sensitive
+application-question occurrences, and category-scoped candidate answers. The
+migrated SQLite store uses foreign keys, bounded locking, and explicit write
+transactions; private reads and writes are console-gated and reads are
+`no-store`. Relationship ids are immutable UUIDs with reversible archive state.
+Question capture is a separate action after saving a portal note, and the server
+derives the application and job category from the real card/application record.
+Candidate answers are inert until a human reviews and saves one through the
+existing Standing Answer editor; protected topics and credential-shaped values
+are rejected again at that promotion boundary. Per-card outreach uses exact normalized company
+matches and operator-entered names to return deterministic, unsent drafts plus
+role search phrases; it performs no LinkedIn lookup, sending, or sent-state
+mutation and never places private relationship notes into draft text.
 
 The **Story tab** (`_job_card_story`) is the card's full linear history —
 governed board moves, every agent generation attempt (expandable to the
@@ -3261,8 +3361,8 @@ HERMETIC_PROVEN; consolidated into one PR → `main` (`feat/work-graph-complete`
   backend-chosen canonical target (primary board › any board › Work Map);
   `GET /api/work/{id}/resolve` returns target + link receipt.
 - **Phase E — chat creation receipts.** `ChatWorkPlanner` +
-  `POST /api/chat/work-items/preview` (side-effect-free) / `…/commit` (atomic;
-  an invalid plan writes nothing) → `TaskBatchReceipt` with clickable links per
+  `POST /api/chat/work-items/preview` (side-effect-free) / `…/commit` (an invalid
+  plan writes nothing; durable application is sequential) → `TaskBatchReceipt` with clickable links per
   item. Structured plan in, navigable receipts out — no free-text auto-routing
   yet. Planning only: creates no mission, touches no wall verb.
 
@@ -3553,13 +3653,14 @@ in the process: the `/health` probe was hitting a nonexistent `/v1/health` path.
   page. Snap now lives only on short strips (tabs/chips); board/list
   scrolling works normally. The phone nav bar moved from the bottom to the
   **top**.
-- **Real board data.** `paper`/`repo`/`dag`/`book` domains previously
+- **Real board data.** `paper`/`repo`/`dag` domains previously
   rendered one fixture card each. A new `appflowy_board` domain source
   (`services/agent_kanban_ui/app.py` `_appflowy_board_cards`) reads the
   worker's `board-snapshot.json` read-only, with an honest `origin` +
   snapshot timestamp + the board's real lanes — live counts: papers 225,
-  repos 60, dags 90. `library` was added to `channels/board_state.UI_BOARDS`
-  so Books fills on the next snapshot regenerate.
+  repos 60, dags 90. Books now reads the first-party `reading_library` board
+  store and governed event log as current truth; AppFlowy is historical recovery
+  input only.
 - **network_health told the operator a healthy stack was down** — it
   probed `localhost` from inside the cockpit container. Fixed to read
   `LITELLM_BASE_URL`/`OLLAMA_API_BASE` (compose now sets both for the

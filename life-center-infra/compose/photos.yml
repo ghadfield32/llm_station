@@ -1,0 +1,66 @@
+# Photos tier — Immich. Admission gate: duplicate/import and full restore.
+# Keep photo/video ORIGINALS independently recoverable (Class A). Immich is a
+# viewer/organizer, not the sole copy of irreplaceable originals.
+#
+# immich_db_data is a NAMED volume: Postgres needs reliable fsync semantics its
+# data directory, which a host bind mount cannot guarantee (see files.yml for
+# the full rationale). Photo uploads stay on the host bind mount below so they
+# remain visible/recoverable outside the container.
+
+networks:
+  lc_core:
+    name: lc_core
+
+volumes:
+  immich_db_data:
+
+services:
+  immich-db:
+    image: ghcr.io/immich-app/postgres:16-vectorchord0.4.3  # pin: @sha256 before real data
+    container_name: lc-immich-db
+    restart: unless-stopped
+    networks: [lc_core]
+    environment:
+      - POSTGRES_DB=immich
+      - POSTGRES_USER=immich
+      - POSTGRES_PASSWORD=${IMMICH_DB_PASSWORD:?set IMMICH_DB_PASSWORD in .env}
+    volumes:
+      - immich_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U immich"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  immich-redis:
+    image: valkey/valkey:8-alpine  # pin: @sha256 before real data
+    container_name: lc-immich-redis
+    restart: unless-stopped
+    networks: [lc_core]
+
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:release  # pin: @sha256 before real data
+    container_name: lc-immich-server
+    restart: unless-stopped
+    networks: [lc_core]
+    depends_on:
+      immich-db:
+        condition: service_healthy
+      immich-redis:
+        condition: service_started
+    ports:
+      - "127.0.0.1:${IMMICH_PORT:-2283}:2283"
+    environment:
+      - DB_HOSTNAME=immich-db
+      - DB_USERNAME=immich
+      - DB_DATABASE_NAME=immich
+      - DB_PASSWORD=${IMMICH_DB_PASSWORD:?set IMMICH_DB_PASSWORD in .env}
+      - REDIS_HOSTNAME=immich-redis
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_DATA:-./testdata/data}/photos:/usr/src/app/upload
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:2283/api/server/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

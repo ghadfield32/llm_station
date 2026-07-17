@@ -1,0 +1,290 @@
+schema_version: command-center.job-search.v1
+job_search:
+  enabled: false
+  timezone: America/New_York
+  daily_run_time: 08:00
+  require_geoff_selection: true
+  submit_without_geoff_selection: false
+  auto_submit_enabled: false
+  max_suggested_jobs_per_day: 50
+  max_bot_possible_suggestions_per_day: 25
+  max_manual_required_suggestions_per_day: 25
+  max_selected_jobs_per_day: 25
+  board_name: job_search_pipeline
+  data_root: C:\Users\ghadf\vscode_projects\docker_projects\llm_station\.pytest-tmp-self-improvement-3\test_job_search_locations_sett0\data
+  digest_path: generated/job-search-digest.md
+ranking:
+  min_score_to_show: 70
+  min_score_to_recommend_apply: 82
+  sports_domain_bonus: 8
+  founder_operator_bonus_for_startups: 6
+  missing_salary_penalty: 3
+  manual_required_penalty: 2
+  target_company_bonus: 6
+  location_ambiguous_penalty: 8
+  language_preferred_penalty: 6
+  employment_mismatch_penalty: 6
+locations:
+  mode: regions
+  remote_ok: true
+  remote_types_allowed:
+  - remote
+  - hybrid
+  - onsite
+  employment_types_allowed:
+  - full_time
+  countries:
+  - United States
+  regions:
+  - Florida
+  - Arizona
+  - Philadelphia
+  - Colorado
+  - Washington
+  - Seattle
+  - Oregon
+languages:
+  spoken:
+  - English
+  require_spoken_for_apply: true
+retention:
+  rich_application_cache_days: 30
+  extend_when_active: true
+  purge_rich_files: false
+  active_statuses:
+  - recruiter_contact
+  - interviewing
+  - phone_screen
+  - take_home
+  - onsite
+  - offer
+  - negotiation
+automation:
+  confidence_threshold: 0.85
+  mvp_submit_behavior: disabled_prepare_only
+  manual_portals:
+  - LinkedIn
+  - Indeed
+  - Workday
+  - Greenhouse
+  - Lever
+  - Ashby
+  manual_phrases:
+  - captcha
+  - multi-factor authentication
+  - mfa
+  - login required
+  - sign in
+  - equal employment opportunity
+  - voluntary self identification
+  - disability
+  - veteran
+  - work authorization
+  - sponsorship
+  - salary expectation
+  - relocation
+  - security clearance
+  - background check
+  - legal certification
+  blocked_actions:
+  - bypass_login
+  - bypass_mfa
+  - bypass_captcha
+  - answer_eeo
+  - answer_self_id
+  - answer_legal_certification
+  - send_message_without_approval
+  - submit_restricted_application
+  - mass_apply
+application_questions:
+  default_policy: draft_or_route_manual
+  review_required:
+  - work_authorization
+  - sponsorship
+  - eeo
+  - self_identification
+  - disability
+  - veteran_status
+  - legal_certification
+  - background_check
+  - salary_expectation
+  - relocation
+  - start_date
+  - non_compete
+  - security_clearance
+  draft_defaults:
+    why_interested: This role matches my analytics engineering, applied ML, experimentation,
+      and sports/product analytics background. I would tailor this to the company
+      and role before submitting.
+    compensation: I am flexible depending on scope, level, and total compensation.
+      If the listed range is accurate, it is directionally aligned with roles I am
+      targeting.
+    remote_or_hybrid: I am targeting remote US roles and selected hybrid roles where
+      the location and team fit make sense.
+    availability: I can share availability after reviewing the interview schedule
+      request.
+    portfolio: Use only approved portfolio/project links from the profile evidence
+      files.
+  never_auto_answer:
+  - eeo
+  - self_identification
+  - disability
+  - veteran_status
+  - legal_certification
+  - work_authorization
+  - sponsorship
+  - background_check
+resume_variants:
+- product_data_scientist
+- applied_ml_data_scientist
+- analytics_data_scientist
+- analytics_engineer
+- ml_engineer
+- sports_data_scientist
+- lead_senior_data_scientist
+- data_architecture_manager
+- founder_operator_product_ai
+job_categories:
+- id: product_data_scientist
+  resume_variant: product_data_scientist
+  keywords:
+  - product analytics
+  - experimentation
+  - a/b testing
+  - metrics
+  - cohort
+  - retention
+  role_focus: primary
+- id: applied_ml_data_scientist
+  resume_variant: applied_ml_data_scientist
+  keywords:
+  - machine learning
+  - forecasting
+  - bayesian
+  - model evaluation
+  - python
+  - mlflow
+  role_focus: primary
+- id: analytics_data_scientist
+  resume_variant: analytics_data_scientist
+  keywords:
+  - sql
+  - dashboard
+  - tableau
+  - power bi
+  - insights
+  - stakeholder
+  role_focus: secondary
+- id: analytics_engineer
+  resume_variant: analytics_engineer
+  keywords:
+  - dbt
+  - snowflake
+  - airflow
+  - data modeling
+  - elt
+  - analytics engineering
+  role_focus: secondary
+- id: ml_engineer
+  resume_variant: ml_engineer
+  keywords:
+  - fastapi
+  - mlops
+  - docker
+  - pytorch
+  - deployment
+  - ci/cd
+  role_focus: secondary
+- id: sports_data_scientist
+  resume_variant: sports_data_scientist
+  keywords:
+  - sports
+  - basketball
+  - nba
+  - player valuation
+  - roster
+  - betting
+  - fan analytics
+  role_focus: primary
+- id: lead_senior_data_scientist
+  resume_variant: lead_senior_data_scientist
+  keywords:
+  - lead
+  - senior
+  - principal
+  - strategy
+  - mentoring
+  - technical leadership
+  role_focus: primary
+- id: data_architecture_manager
+  resume_variant: data_architecture_manager
+  keywords:
+  - data architecture
+  - platform
+  - governance
+  - data strategy
+  - manager
+  role_focus: secondary
+- id: founder_operator_product_ai
+  resume_variant: founder_operator_product_ai
+  keywords:
+  - founder
+  - startup
+  - ai product
+  - product strategy
+  - full-stack
+  - operator
+  role_focus: primary
+company_targets:
+  faang:
+  - Meta
+  - Facebook
+  - Google
+  - Alphabet
+  - Amazon
+  - Apple
+  - Netflix
+  major_other:
+  - Disney
+  - ESPN
+  - Figure AI
+  sports_tech_companies:
+  - Second Spectrum
+  - Sportradar
+  - Genius Sports
+  - Hawk-Eye
+  - Catapult Sports
+  - Zelus Analytics
+  - Kitman Labs
+  - Sportlogiq
+  - DraftKings
+  - FanDuel
+  - Swish Analytics
+  - STATS Perform
+  - Opta
+  - Pro Football Focus
+  - PFF
+  - Synergy Sports
+  - Tracab
+  sports_teams_keywords:
+  - NBA
+  - NFL
+  - MLB
+  - NHL
+  - MLS
+  - WNBA
+  - Premier League
+  - UEFA
+  - Olympic
+  - national team
+  - basketball club
+  - football club
+  - baseball club
+  - hockey club
+  - athletic club
+executor_fallback:
+  primary: claude-code
+  fallback: codex-cli
+  prompt_path: docs/job_search/JOB_SEARCH_IMPLEMENTATION_PROMPT.md
+  rule: Run the same CLI workflow with Codex when Claude Code is unavailable; do not
+    change safety gates by executor.

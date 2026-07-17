@@ -43,7 +43,6 @@ from ..store import SessionStoreProtocol
 
 # src/command_center/agent_sessions/adapters/claude_agent.py -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_AUTONOMY_CONFIG = _REPO_ROOT / "configs" / "autonomy.yaml"
 _MODEL_PREFS_CONFIG = _REPO_ROOT / "configs" / "agent-session-models.yaml"
 
 # The read-only tool set. can_use_tool ALLOWS exactly these and denies everything
@@ -80,23 +79,10 @@ def _import_sdk() -> Any:
 
 
 def _resolve_repo_path(repo_id: str) -> Path:
-    """Reuses cli/repo_registry.py's canonical resolver (never a
-    reimplementation) — identical resolution/symlink policy to the Codex adapter,
-    `cc repo-verify`, and the cockpit."""
-    from command_center.cli.repo_registry import load_autonomy_config, resolve_repo_local_path
-
-    if not _AUTONOMY_CONFIG.is_file():
-        raise RuntimeError(f"configs/autonomy.yaml not found at {_AUTONOMY_CONFIG}")
-    cfg = load_autonomy_config(_AUTONOMY_CONFIG)
-    manifest = next((m for m in cfg.repo_manifests if m.repo_id == repo_id), None)
-    if manifest is None:
-        raise RuntimeError(f"repo_id {repo_id!r} is not registered in configs/autonomy.yaml")
-    path = resolve_repo_local_path(manifest, _REPO_ROOT, dict(os.environ))
-    if path is None:
-        raise RuntimeError(
-            f"repo_id {repo_id!r} has no resolvable local_path_ref "
-            f"(got {manifest.local_path_ref!r})")
-    return path
+    """Delegate to the ONE shared context resolver (registered autonomy
+    manifests + the Home workspace special case)."""
+    from ..context_resolver import resolve_context_path
+    return resolve_context_path(repo_id)
 
 
 def _load_model_prefs() -> dict[str, Any]:

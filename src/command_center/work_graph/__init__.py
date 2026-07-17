@@ -29,6 +29,17 @@ from .schemas import (
     WorkPlacementSummary,
 )
 from .calibration import DerivedRule, RoutingCalibrator
+from .deduplication import (
+    BoardFitSuggestion,
+    DuplicateChecker,
+    DuplicateEvidence,
+    DuplicateFinding,
+    DuplicateReport,
+    ExistingWorkContext,
+    ExpansionDelta,
+    SubjectGroupSuggestion,
+    extract_deltas,
+)
 from .ledger_store import LedgerWorkGraphStore
 from .packet import (
     AcceptanceCriterion,
@@ -57,6 +68,7 @@ from .planner import (
 from .router import (
     BoardRule,
     DuplicateCandidate,
+    RefDuplicateReport,
     RoutingProposal,
     WorkRouter,
 )
@@ -100,6 +112,16 @@ __all__ = [
     "RoutingProposal",
     "BoardRule",
     "DuplicateCandidate",
+    "RefDuplicateReport",
+    "DuplicateChecker",
+    "DuplicateEvidence",
+    "DuplicateFinding",
+    "DuplicateReport",
+    "ExistingWorkContext",
+    "ExpansionDelta",
+    "SubjectGroupSuggestion",
+    "BoardFitSuggestion",
+    "extract_deltas",
     "WorkGraphPlanSummary",
     "summarize_plan",
     "RoutingCorrection",

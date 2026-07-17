@@ -27,7 +27,11 @@ from pydantic import BaseModel, Field
 from .planner import WorkPlanIn, summarize_plan
 from .schemas import WorkGraphPlanSummary
 
-_REVIEW_STATUSES = ("pending", "approved", "changes_requested", "error")
+_REVIEW_STATUSES = ("pending", "reviewed", "approved", "changes_requested", "error")
+# Outcomes an AGENT reviewer may record — advisory only. "approved" is
+# deliberately absent: an agent review can never satisfy the readiness gate;
+# only a human may approve (plan §6 "an agent review can never approve work").
+_AGENT_REVIEW_STATUSES = ("reviewed", "changes_requested", "error")
 _PACKET_STATUSES = ("draft", "in_review", "ready", "committed")
 
 # The reviewable plan-content a revision's content_digest covers. Reviews,
@@ -63,12 +67,15 @@ class AcceptanceCriterion(BaseModel):
 class ReviewSlot(BaseModel):
     """A slot for one independent review (by an agent role or a judge). Starts
     `pending`; filled by the review-orchestration slice or set manually by a
-    human. `session_id` links to the agent-session/judge run that produced it."""
+    human. `session_id` links to the agent-session/judge run that produced it.
+    `reviewer_kind` records WHO last set it — an agent review is ADVISORY and can
+    never be `approved` (only a human approval satisfies the readiness gate)."""
     role: str                          # e.g. claude_code_local | codex_agent | skeptic
-    status: str = "pending"            # pending | approved | changes_requested | error
+    status: str = "pending"            # pending | reviewed | approved | changes_requested | error
     summary: str = ""
     findings: list[str] = Field(default_factory=list)
     session_id: str | None = None
+    reviewer_kind: str | None = None   # agent | human (who last set the outcome)
     reviewed_at: str | None = None
 
 
@@ -324,14 +331,25 @@ class PacketService:
     def set_review(self, packet_id: str, role: str, *, status: str,
                    summary: str = "", findings: Sequence[str] = (),
                    session_id: str | None = None,
+                   reviewer_kind: str = "human",
                    expected_revision: int | None = None) -> ReadinessPacket:
-        """Set the outcome of a review slot, BOUND to the packet's current revision
-        (a human override now; the review orchestration will use the same path
-        later). Rejects unknown role/status, a committed packet (frozen), and a
+        """Set the outcome of a review slot, BOUND to the packet's current
+        revision. Rejects unknown role/status, a committed packet (frozen), and a
         stale expected_revision (a review of an older revision — 409). Does NOT
-        mint a new revision: reviews are not part of the content digest."""
+        mint a new revision: reviews are not part of the content digest.
+
+        THE INVARIANT (plan §6): an AGENT review is advisory and can never be
+        `approved` — only a human approval satisfies the readiness gate, so an
+        agent can never unlock commit by reviewing its own work."""
         if status not in _REVIEW_STATUSES:
             raise PacketError(f"unknown review status: {status!r}")
+        if reviewer_kind not in ("agent", "human"):
+            raise PacketError(f"unknown reviewer_kind: {reviewer_kind!r}")
+        if reviewer_kind == "agent" and status not in _AGENT_REVIEW_STATUSES:
+            raise PacketError(
+                f"an agent review may not set status {status!r} — agent reviews "
+                f"are advisory ({', '.join(_AGENT_REVIEW_STATUSES)}); only a "
+                f"human may approve a packet")
         packet = self._store.get(packet_id)
         self._require_open(packet)
         self._check_revision(packet, expected_revision)
@@ -343,6 +361,7 @@ class PacketService:
         slot.summary = summary
         slot.findings = list(findings)
         slot.session_id = session_id
+        slot.reviewer_kind = reviewer_kind
         slot.reviewed_at = now
         packet.updated_at = now
         packet.status = self._status_of(packet)

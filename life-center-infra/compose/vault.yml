@@ -1,0 +1,27 @@
+# Vault tier — password manager. ADMITTED LAST (Gate 7).
+#
+# Plan preference: keep Bitwarden Cloud through earlier stabilization, then
+# evaluate the OFFICIAL Bitwarden self-host (incl. Bitwarden Lite). Vaultwarden
+# below is a community implementation offered ONLY as an optional evaluation —
+# Bitwarden does not guarantee official-client compatibility with non-official
+# servers. Do not migrate a real vault until a complete offline recovery + client
+# access test passes. Must be named explicitly; excluded from `all`.
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  vaultwarden:
+    image: vaultwarden/server:1.33.2  # pin: @sha256 before real data
+    container_name: lc-vaultwarden
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${VAULTWARDEN_PORT:-8222}:80"
+    environment:
+      - SIGNUPS_ALLOWED=false
+      - ADMIN_TOKEN=${VAULTWARDEN_ADMIN_TOKEN:?set VAULTWARDEN_ADMIN_TOKEN in .env}
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/vaultwarden:/data

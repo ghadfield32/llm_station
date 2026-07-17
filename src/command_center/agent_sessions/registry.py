@@ -63,6 +63,12 @@ class HarnessRegistry:
                 # doesn't explicitly declare otherwise) genuinely does
                 # resolve approvals interactively.
                 "interactive_approvals": getattr(harness, "interactive_approvals", True),
+                # True for a harness that sends repo contents to a PAID EXTERNAL
+                # API (openrouter_agent). The UI must show an explicit "this
+                # context will leave the machine" confirmation before the first
+                # send. Defaults False: local subscription runtimes keep content
+                # on-box (Claude/Codex).
+                "external_egress": getattr(harness, "external_egress", False),
             })
         return results
 
@@ -153,4 +159,16 @@ def default_registry(store: SessionStoreProtocol) -> HarnessRegistry:
             factory=lambda: __import__(
                 "command_center.agent_sessions.adapters.claude_agent",
                 fromlist=["ClaudeAgentHarness"]).ClaudeAgentHarness(store)),
+        # OpenRouter read-only EXECUTOR: the paid fallback for the Claude/Codex
+        # ROLES when their subscription is exhausted. probe() is off unless the
+        # frontier lane is explicitly enabled + a key is present (the same paid-
+        # egress opt-in the frontier CHAT lane uses) — never available by import.
+        HarnessDescriptor(
+            harness_id="openrouter_agent",
+            label="OpenRouter Agent (paid role fallback)", production=True,
+            supported_modes=("analysis",),
+            factory=lambda: __import__(
+                "command_center.agent_sessions.adapters.openrouter_agent",
+                fromlist=["OpenRouterAgentHarness"]).OpenRouterAgentHarness(
+                    store)),
     ])

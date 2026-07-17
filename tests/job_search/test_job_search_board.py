@@ -459,9 +459,10 @@ def test_interviewing_cards_include_retention_status(tmp_path):
     raw = yaml.safe_load(record_path.read_text(encoding="utf-8"))
     raw["status"] = "interviewing"
     raw["stage"] = "interviewing"
+    raw["applied_at"] = (date.today() - timedelta(days=31)).isoformat()
     raw["retention_until"] = (date.today() - timedelta(days=1)).isoformat()
     record_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
     card["column"] = "Interviewing"
     save_local_state(tmp_path, state)
     snapshot = board_snapshot(backend="local", root=tmp_path)
-    assert snapshot["active_retention"][0]["retention"]["action"] == "retain_active_process"
+    assert snapshot["active_retention"][0]["retention"]["action"] == "archive_compact"

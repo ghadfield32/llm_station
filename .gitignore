@@ -56,6 +56,8 @@ archive/appflowy/files.zip
 archive/appflowy/extracted/
 growth_os/_state/
 growth_os/_export/
+# Immutable runtime snapshots contain private operational state and are never committed.
+backups/
 
 # ── Disposable generated output (regenerate: `make render` / `make schema`) ─
 generated/litellm-config.yaml

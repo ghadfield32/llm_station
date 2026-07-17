@@ -58,6 +58,79 @@ def test_top_drivers_rolls_unattributed_samples_into_an_explicit_bucket():
     assert out["rows"][0]["share"] == 1.0
 
 
+def test_top_drivers_excludes_non_additive_snapshots():
+    from dataclasses import replace
+
+    from command_center.usage.schemas import SampleKind
+
+    svc = _seeded()
+    original = svc.store.samples_since("fake_runtime")[0]
+    svc.store.ingest_sample(replace(
+        original,
+        sample_id="snapshot",
+        source_hash="snapshot",
+        sample_kind=SampleKind.SESSION_TOTAL,
+    ))
+    out = cv.top_drivers(
+        svc, runtime_id="fake_runtime",
+        dimension="mission", metric="total_tokens",
+    )
+    assert out["rows"][0]["metric_value"] == 1000.0
+
+
+def test_recent_activity_is_sanitized_and_includes_runtime_kpis():
+    from command_center.usage.agent_usage import agent_usage_sample
+
+    svc = UsageService(UsageStore())
+    sample = agent_usage_sample(
+        {"usage": {"input_tokens": 100, "cached_input_tokens": 80,
+                   "output_tokens": 25}, "duration_ms": 2000,
+         "cost_source": "subscription_not_metered"},
+        runtime_id="codex_agent", repo_id="llm_station",
+        conversation_id="private-conversation-id", model="recorded-model",
+        effort="high", observed_at="2026-07-16T12:00:00+00:00")
+    svc.store.ingest_sample(sample)
+
+    out = cv.recent_activity(svc, runtime_id="codex_agent")
+    assert out["rows"][0]["purpose"] == "Repository llm_station"
+    assert out["rows"][0]["model"] == "recorded-model"
+    assert out["rows"][0]["total_tokens"] == 125
+    assert out["kpis"]["average_tokens_per_call"] == 125.0
+    assert out["kpis"]["cached_input_share_percent"] == 80.0
+    assert out["kpis"]["success_rate_percent"] is None
+    assert "private-conversation-id" not in str(out)
+
+
+def test_codex_rollup_identifies_subscription_for_legacy_rows():
+    from command_center.usage.agent_usage import agent_usage_sample
+
+    svc = UsageService(UsageStore())
+    svc.store.ingest_sample(agent_usage_sample(
+        {"total": {"input_tokens": 10, "output_tokens": 2,
+                   "total_tokens": 12}},
+        runtime_id="codex_agent",
+        observed_at="2026-07-16T12:00:00+00:00",
+    ))
+    rolled = svc.runtime_status("codex_agent").to_dict()["rolled_usage"]
+    assert rolled["cost_usd"] is None
+    assert rolled["cost_source"] == "subscription_not_metered"
+
+
+def test_agent_average_runtime_requires_duration_for_every_call():
+    from command_center.usage.agent_usage import agent_usage_sample
+
+    svc = UsageService(UsageStore())
+    for index, duration in enumerate((1000, 0)):
+        svc.store.ingest_sample(agent_usage_sample(
+            {"total": {"input_tokens": 10, "output_tokens": 2,
+                       "total_tokens": 12}, "duration_ms": duration},
+            runtime_id="codex_agent",
+            observed_at=f"2026-07-16T12:00:0{index}+00:00",
+        ))
+    detail = cv.recent_activity(svc, runtime_id="codex_agent")
+    assert detail["kpis"]["average_duration_ms"] is None
+
+
 def test_collector_health_reports_ran_and_never_ran():
     svc = _seeded()
     health = {h["collector_id"]: h for h in cv.collector_health(svc, ["fake", "ghost"])}

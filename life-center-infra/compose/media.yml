@@ -1,0 +1,47 @@
+# Media tier — Jellyfin (video) + Audiobookshelf (audiobooks/podcasts).
+# Admission gate: playback/metadata/rebuild-restore; sample library restore.
+# Legally held media only. Integrated-GPU transcoding on the appliance; keep the
+# RTX GPUs free for CV/model work.
+# Ebooks are a SEPARATE tier (compose/ebooks.yml, Calibre-Web) — do not stretch
+# this tier into the ebook authority; it's disabled by default on purpose.
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:10.10.3  # pin: @sha256 before real data
+    container_name: lc-jellyfin
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${JELLYFIN_PORT:-8096}:8096"
+    # For Intel Quick Sync transcoding, uncomment after confirming /dev/dri:
+    # devices:
+    #   - /dev/dri:/dev/dri
+    environment:
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/jellyfin/config:/config
+      - ${LC_APPDATA:-./appdata}/jellyfin/cache:/cache
+      - ${LC_DATA:-./testdata/data}/media:/media:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8096/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:2.17.5  # pin: @sha256 before real data
+    container_name: lc-audiobookshelf
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${AUDIOBOOKSHELF_PORT:-13378}:80"
+    environment:
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/audiobookshelf/config:/config
+      - ${LC_APPDATA:-./appdata}/audiobookshelf/metadata:/metadata
+      - ${LC_DATA:-./testdata/data}/media/audiobooks:/audiobooks

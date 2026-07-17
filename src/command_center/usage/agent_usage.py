@@ -43,13 +43,16 @@ def agent_usage_sample(payload: Mapping[str, Any], *, runtime_id: str,
     usage = payload.get("usage") or payload.get("total") or {}
 
     # Claude reports uncached `input_tokens` PLUS separate cache_creation /
-    # cache_read; store input_tokens as the TOTAL processed and cached_input as
-    # the cached portion, so uncached_input (= input - cached) is honest.
-    uncached_in = _int(usage, "input_tokens")
+    # cache_read. Codex reports `input_tokens` with cached input already
+    # included. The cache-creation field is the structured discriminator
+    # between those provider shapes; adding every cache field unconditionally
+    # double-counted Codex input in historical rows.
+    reported_in = _int(usage, "input_tokens")
     cache_read = _int(usage, "cache_read_input_tokens", "cached_input_tokens")
     cache_create = _int(usage, "cache_creation_input_tokens")
     cached = cache_read + cache_create
-    input_total = uncached_in + cached
+    input_total = (reported_in + cached
+                   if "cache_creation_input_tokens" in usage else reported_in)
     output = _int(usage, "output_tokens")
     reasoning = _int(usage, "reasoning_tokens", "reasoning_output_tokens")
     total = _int(usage, "total_tokens") or (input_total + output)
@@ -77,3 +80,21 @@ def agent_usage_sample(payload: Mapping[str, Any], *, runtime_id: str,
         model=model, effort=effort, context_mode=context_mode,
         attribution=Attribution(agent_session_id=session_id, repo_id=repo_id,
                                 conversation_id=conversation_id))
+
+
+def effective_token_counts(sample: UsageSample) -> tuple[int, int, int, int]:
+    """Return display/roll-up token counts, repairing legacy Codex rows.
+
+    Before the provider shapes were distinguished, cached Codex input was
+    added to an input count that already included it. The provider-reported
+    total remained correct, so the inconsistent identity
+    ``input + output > total`` identifies those retained rows without changing
+    any raw evidence. New rows already satisfy the identity and pass through.
+    """
+    input_tokens = sample.input_tokens
+    cached_tokens = sample.cached_input_tokens
+    if (sample.runtime_id == "codex_agent" and sample.total_tokens > 0
+            and input_tokens + sample.output_tokens > sample.total_tokens):
+        input_tokens = max(0, sample.total_tokens - sample.output_tokens)
+    cached_tokens = min(cached_tokens, input_tokens)
+    return input_tokens, cached_tokens, sample.output_tokens, sample.total_tokens

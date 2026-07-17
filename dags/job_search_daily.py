@@ -33,13 +33,24 @@ if AIRFLOW_AVAILABLE:
     )
     def job_search_daily():
         @task
-        def load_profile() -> dict:
+        def verified_runtime_backup() -> dict:
+            """Hard prerequisite: no daily job mutation without a verified snapshot."""
+            from command_center.runtime_backup import create_default_snapshot
+
+            manifest = create_default_snapshot()
+            return {key: manifest.get(key) for key in (
+                "snapshot_id", "source_set_watermark", "gate_checked_at",
+                "created_at", "consistency", "reused_exact_watermark",
+            ) if manifest.get(key) is not None}
+
+        @task
+        def load_profile(_backup: dict) -> dict:
             from command_center.job_search.profile_ingest import ingest_profile
 
             return ingest_profile()
 
         @task
-        def validate_examples() -> dict:
+        def validate_examples(_backup: dict) -> dict:
             from pathlib import Path
 
             from command_center.job_search.cli import _suggest_from_file
@@ -58,10 +69,13 @@ if AIRFLOW_AVAILABLE:
             return {"examples": rows}
 
         @task
-        def discover_live() -> dict:
+        def discover_live(_backup: dict) -> dict:
             from pathlib import Path
 
-            from command_center.job_search.cli import _suggest_from_file
+            from command_center.job_search.cli import (
+                _daily_discovery_terms,
+                _suggest_from_file,
+            )
             from command_center.job_search.config import load_config
             from command_center.job_search.live_sources import discover_live_postings
 
@@ -70,11 +84,8 @@ if AIRFLOW_AVAILABLE:
             # editable from the cockpit Jobs settings drawer) — changing a
             # category's keywords changes what this DAG looks for tomorrow.
             cfg = load_config()
-            keywords = sorted({
-                kw
-                for category in cfg.job_categories
-                for kw in category.keywords
-            })
+            keywords, company_targets, remotive_searches = (
+                _daily_discovery_terms(cfg))
             # Jobicy wants slug-style tags; Remotive takes free text.
             jobicy_tags = sorted({kw.lower().replace(" ", "-") for kw in keywords})
 
@@ -96,7 +107,7 @@ if AIRFLOW_AVAILABLE:
                 ),
                 discover_live_postings(
                     sources=["remotive"],
-                    tags=keywords,
+                    tags=remotive_searches,
                     count=100,
                     write=True,
                 ),
@@ -127,6 +138,8 @@ if AIRFLOW_AVAILABLE:
                 )
             return {
                 "runs": runs,
+                "company_targets": company_targets,
+                "remotive_searches_today": remotive_searches,
                 "postings_found": sum(run["postings_found"] for run in runs),
                 "posting_paths": posting_paths,
                 "suggestions_written": suggestions,
@@ -146,7 +159,7 @@ if AIRFLOW_AVAILABLE:
             return process_selected(backend="internal", apply=True, executor="codex")
 
         @task
-        def retention_plan() -> dict:
+        def retention_plan(_backup: dict) -> dict:
             from command_center.job_search.retention import plan_retention
 
             return plan_retention()
@@ -164,12 +177,13 @@ if AIRFLOW_AVAILABLE:
 
             return str(write_digest())
 
-        profile = load_profile()
-        live = discover_live()
-        examples = validate_examples()
+        backup = verified_runtime_backup()
+        profile = load_profile(backup)
+        live = discover_live(backup)
+        examples = validate_examples(backup)
         published = publish_to_board(live)
         processed = process_geoff_selected(published)
-        retention = retention_plan()
+        retention = retention_plan(backup)
         emit_digest(profile, live, examples, published, processed, retention)
 
     dag = job_search_daily()

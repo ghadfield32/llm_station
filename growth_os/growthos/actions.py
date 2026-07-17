@@ -842,3 +842,31 @@ def review_lesson(lesson_key: str, quality: int) -> str:
 def latest_brief() -> str:
     briefs = sorted(Path("_export").glob("brief_*.md"))
     return briefs[-1].read_text(encoding="utf-8") if briefs else "no briefs yet"
+
+
+# ------------------------------------------------- universal capture --------
+
+def capture_todo(text: str, process: str = "create_task") -> str:
+    """Save a personal todo/idea/note into Universal Capture (the cockpit
+    Inbox). This is the RIGHT path for any new todo — movies to watch, home
+    chores, errands, project ideas — it is saved-not-started, then Match &
+    Organize checks duplicates/expansions/grouping before anything is created.
+    process: 'create_task' (review + route now) or 'save_only' (just save)."""
+    import httpx
+    base = os.environ.get("KANBAN_UI_BASE_URL", "http://agent-kanban-ui:8787")
+    text = (text or "").strip()
+    if not text:
+        return "nothing to capture — give me the todo text"
+    if process not in ("create_task", "save_only", "prepare_later"):
+        return f"invalid process {process!r}; use create_task or save_only"
+    try:
+        r = httpx.post(f"{base}/api/captures", timeout=15, json={
+            "raw_content": text, "requested_mode": process,
+            "source_type": "chat"})
+        r.raise_for_status()
+        cid = r.json()["record"]["capture_id"]
+    except Exception as exc:                     # fail loud, never invent
+        return f"capture failed ({exc}) — the cockpit may be unreachable"
+    return (f"captured as {cid} — saved, not started. Open the Inbox and "
+            "press 'Choose destination' to review matches and route it "
+            "(duplicates, expansions, and grouping are checked there).")

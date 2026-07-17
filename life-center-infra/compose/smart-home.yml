@@ -1,0 +1,24 @@
+# Smart-home tier — Home Assistant.
+#
+# NOTE (plan): the preferred deployment is Home Assistant OS in an ISOLATED VM or
+# a DEDICATED device, so essential automations survive desktop/appliance GPU
+# maintenance and reboots. This container form is a CONVENIENCE for early,
+# non-critical evaluation only — it is NOT the recommended production topology.
+# Must be named explicitly (`lc up --profile smart-home`); excluded from `all`.
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2025.3  # pin: @sha256 before real data
+    container_name: lc-homeassistant
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:8123:8123"
+    environment:
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/homeassistant/config:/config

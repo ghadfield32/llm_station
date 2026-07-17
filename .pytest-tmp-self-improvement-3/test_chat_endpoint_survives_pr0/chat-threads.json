@@ -1,0 +1,13 @@
+{
+  "threads": [
+    {
+      "conversation_id": "c-long",
+      "id": "c-long",
+      "title": "job description job description job description job...",
+      "updated_at": "2026-07-16T23:12:07.485084+00:00",
+      "target": "GatewayCore",
+      "last_prompt": "job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description job description",
+      "model": "chat"
+    }
+  ]
+}

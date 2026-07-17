@@ -30,7 +30,9 @@ Network                direct 2.5 GbE UDR7 links to Life Center and downstairs
                        desktop; no switch or second access point initially
 Network gateway        UniFi Dream Router 7 (UDR7), replacing—not nesting behind—
                        the basic Spectrum router when the Life Center is built
-CasaOS                 omitted
+CasaOS                 omitted as authority (optional disposable launcher only)
+One-command mechanism  idempotent `lc` bootstrap (source of truth) + optional
+                       Dockge pane; see HARDWARE_AND_LIFE_CENTER_PLAN.md
 Password manager       Bitwarden Cloud through Gate 7
 ```
 

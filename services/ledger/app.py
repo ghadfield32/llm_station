@@ -431,6 +431,12 @@ CREATE INDEX IF NOT EXISTS ix_work_placements_item
     ON work_placements (work_item_id);
 CREATE INDEX IF NOT EXISTS ix_work_placements_board
     ON work_placements (board_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_work_placements_active_target
+    ON work_placements (work_item_id, board_id, domain_id)
+    WHERE removed_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_work_placements_active_primary
+    ON work_placements (work_item_id)
+    WHERE is_primary = 1 AND removed_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_work_edges_from ON work_edges (from_work_item_id);
 CREATE INDEX IF NOT EXISTS ix_work_edges_to ON work_edges (to_work_item_id);
 CREATE INDEX IF NOT EXISTS ix_work_events_item
@@ -1419,6 +1425,13 @@ class CaptureClassifyIn(BaseModel):
     ts: str
 
 
+class CaptureConvertedIn(BaseModel):
+    work_item_ids: list[str]
+    conversation_id: Optional[str] = None
+    operation_key: Optional[str] = None
+    ts: str
+
+
 def _require_capture(c, capture_id: str) -> None:
     if not c.execute("SELECT 1 FROM captures WHERE capture_id=?",
                      (capture_id,)).fetchone():
@@ -1443,9 +1456,37 @@ def _capture_view(c, capture_id: str) -> dict:
 @app.post("/capture")
 def create_capture(body: CaptureIn):
     with closing(_db()) as c:
-        # idempotent on replay by capture_id — a repeat write is a no-op
-        if c.execute("SELECT 1 FROM captures WHERE capture_id=?",
-                     (body.capture_id,)).fetchone() is None:
+        c.execute("BEGIN IMMEDIATE")
+        existing = c.execute(
+            "SELECT * FROM captures WHERE capture_id=?", (body.capture_id,),
+        ).fetchone()
+        if existing is not None:
+            stored = dict(existing)
+            stored["attachments"] = (
+                json.loads(stored["attachments"]) if stored.get("attachments") else []
+            )
+            supplied = {
+                "raw_content": body.raw_content,
+                "source_type": body.source_type,
+                "source_ref": body.source_ref,
+                "captured_at": body.captured_at,
+                "captured_by": body.captured_by,
+                "current_board_id": body.current_board_id,
+                "current_card_id": body.current_card_id,
+                "conversation_id": body.conversation_id,
+                "batch_id": body.batch_id,
+                "attachments": body.attachments,
+                "requested_mode": body.requested_mode,
+            }
+            divergent = sorted(
+                field for field, value in supplied.items() if stored.get(field) != value
+            )
+            if divergent:
+                raise HTTPException(
+                    409,
+                    "capture ID replay changes immutable fields: " + ", ".join(divergent),
+                )
+        else:
             c.execute(
                 "INSERT INTO captures (capture_id, raw_content, source_type, "
                 "source_ref, captured_at, ingested_at, captured_by, current_board_id, "
@@ -1461,7 +1502,7 @@ def create_capture(body: CaptureIn):
                 "INSERT INTO capture_events (capture_id, ts, kind, payload) VALUES (?,?,?,?)",
                 (body.capture_id, body.captured_at, "status",
                  json.dumps({"status": body.status, "created": True})))
-            c.commit()
+        c.commit()
         return _capture_view(c, body.capture_id)
 
 
@@ -1498,6 +1539,64 @@ def classify_capture(capture_id: str, body: CaptureClassifyIn):
         c.execute("INSERT INTO capture_events (capture_id, ts, kind, payload) "
                   "VALUES (?,?,?,?)",
                   (capture_id, body.ts, "classify", json.dumps(body.classification)))
+        c.commit()
+        return _capture_view(c, capture_id)
+
+
+@app.post("/capture/{capture_id}/converted")
+def mark_capture_converted(capture_id: str, body: CaptureConvertedIn):
+    """Atomically record the exact WorkItem links and routed status."""
+    payload = {
+        "work_item_ids": body.work_item_ids,
+        "conversation_id": body.conversation_id,
+    }
+    if body.operation_key is not None:
+        payload["operation_key"] = body.operation_key
+    with closing(_db()) as c:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT * FROM captures WHERE capture_id=?", (capture_id,),
+        ).fetchone()
+        if row is None:
+            c.rollback()
+            raise HTTPException(404, f"no such capture: {capture_id}")
+        link_rows = c.execute(
+            "SELECT payload FROM capture_events WHERE capture_id=? AND kind='link' "
+            "ORDER BY event_seq",
+            (capture_id,),
+        ).fetchall()
+        links = [json.loads(link["payload"]) for link in link_rows]
+        conflicting = [link for link in links if link != payload]
+        if conflicting:
+            c.rollback()
+            raise HTTPException(
+                409, "capture has a different WorkItem link in conflicting history",
+            )
+        exact = payload in links
+        if row["processing_status"] == "routed":
+            if exact:
+                c.commit()
+                return _capture_view(c, capture_id)
+            c.rollback()
+            raise HTTPException(
+                409, "capture is already routed with a different WorkItem link",
+            )
+        if not exact:
+            c.execute(
+                "INSERT INTO capture_events (capture_id, ts, kind, payload) "
+                "VALUES (?,?,?,?)",
+                (capture_id, body.ts, "link", json.dumps(payload)),
+            )
+        c.execute(
+            "UPDATE captures SET processing_status='routed', updated_at=? "
+            "WHERE capture_id=?",
+            (body.ts, capture_id),
+        )
+        c.execute(
+            "INSERT INTO capture_events (capture_id, ts, kind, payload) "
+            "VALUES (?,?,?,?)",
+            (capture_id, body.ts, "status", json.dumps({"status": "routed"})),
+        )
         c.commit()
         return _capture_view(c, capture_id)
 
@@ -1556,15 +1655,141 @@ def _edge_to_dict(r) -> dict:
     return d
 
 
+def _atomic_work_event(body: dict, *, work_item_id: str) -> dict:
+    event = body.get("event")
+    if (
+        not isinstance(event, dict)
+        or not isinstance(event.get("ts"), str)
+        or not isinstance(event.get("kind"), str)
+        or not isinstance(event.get("payload"), dict)
+    ):
+        raise HTTPException(422, "event must contain string ts/kind and object payload")
+    return event
+
+
+def _insert_work_event(c, work_item_id: str, event: dict) -> None:
+    c.execute(
+        "INSERT INTO work_events (work_item_id, ts, kind, payload) VALUES (?,?,?,?)",
+        (work_item_id, event["ts"], event["kind"], json.dumps(event["payload"])),
+    )
+
+
+def _blocking_edge_would_cycle(c, frm: str, to: str, *, excluding: str | None = None) -> bool:
+    rows = c.execute(
+        "SELECT edge_id, from_work_item_id, to_work_item_id FROM work_edges "
+        "WHERE removed_at IS NULL AND blocking=1",
+    ).fetchall()
+    adjacency: dict[str, list[str]] = {}
+    for row in rows:
+        if excluding is not None and row["edge_id"] == excluding:
+            continue
+        adjacency.setdefault(row["from_work_item_id"], []).append(row["to_work_item_id"])
+    seen: set[str] = set()
+    stack = [to]
+    while stack:
+        node = stack.pop()
+        if node == frm:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(adjacency.get(node, []))
+    return False
+
+
 @app.post("/work-item")
 def upsert_work_item(body: dict):
     vals = [body.get(col) for col in _WORK_ITEM_COLS]
+    event = body.get("event")
+    if event is None:
+        raise HTTPException(422, "WorkItem creation requires an atomic created event")
+    event = _atomic_work_event(body, work_item_id=str(body.get("work_item_id")))
+    if body.get("canonical_status") not in _CANONICAL_WORK_STATUSES:
+        raise HTTPException(422, "invalid canonical WorkItem status")
     with closing(_db()) as c:
-        c.execute(f"INSERT OR REPLACE INTO work_items ({', '.join(_WORK_ITEM_COLS)}) "
-                  f"VALUES ({', '.join('?' * len(_WORK_ITEM_COLS))})", vals)
-        c.commit()
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            c.execute(f"INSERT INTO work_items ({', '.join(_WORK_ITEM_COLS)}) "
+                      f"VALUES ({', '.join('?' * len(_WORK_ITEM_COLS))})", vals)
+        except sqlite3.IntegrityError as exc:
+            c.rollback()
+            raise HTTPException(
+                409, f"work item {body.get('work_item_id')!r} already exists",
+            ) from exc
+        if event is not None:
+            _insert_work_event(c, body["work_item_id"], event)
         row = c.execute("SELECT * FROM work_items WHERE work_item_id=?",
                         (body["work_item_id"],)).fetchone()
+        c.commit()
+    return dict(row)
+
+
+_WORK_ITEM_MUTABLE_COLS = frozenset(
+    col for col in _WORK_ITEM_COLS
+    if col not in {"work_item_id", "created_at", "description", "primary_board_id"}
+)
+_CANONICAL_WORK_STATUSES = frozenset({
+    "backlog", "ready", "in_progress", "blocked", "awaiting_approval",
+    "done", "rejected", "archived",
+})
+
+
+@app.patch("/work-item/{work_item_id}")
+def update_work_item_fields(work_item_id: str, body: dict):
+    """Apply a field-specific WorkItem update, optionally with one audit event.
+
+    Full-row replacement is deliberately unavailable after creation. SQLite's
+    write transaction makes the named-field change and event indivisible while
+    leaving concurrently edited fields untouched.
+    """
+    fields = body.get("fields")
+    event = body.get("event")
+    if not isinstance(fields, dict) or not fields:
+        raise HTTPException(422, "fields must be a non-empty object")
+    unknown = sorted(set(fields) - _WORK_ITEM_MUTABLE_COLS)
+    if unknown:
+        raise HTTPException(422, f"immutable or unknown WorkItem fields: {unknown}")
+    if event is None:
+        raise HTTPException(422, "WorkItem field updates require an atomic audit event")
+    if (
+        "canonical_status" in fields
+        and fields["canonical_status"] not in _CANONICAL_WORK_STATUSES
+    ):
+        raise HTTPException(422, "invalid canonical WorkItem status")
+    if (
+        not isinstance(event, dict)
+        or not isinstance(event.get("ts"), str)
+        or not isinstance(event.get("kind"), str)
+        or not isinstance(event.get("payload"), dict)
+    ):
+        raise HTTPException(422, "event must contain string ts/kind and object payload")
+    if "canonical_status" in fields and (
+        event["kind"] != "status"
+        or event["payload"].get("status") != fields["canonical_status"]
+    ):
+        raise HTTPException(422, "canonical status update and audit event must match")
+    assignments = ", ".join(f"{field}=?" for field in fields)
+    with closing(_db()) as c:
+        c.execute("BEGIN IMMEDIATE")
+        if c.execute(
+            "SELECT 1 FROM work_items WHERE work_item_id=?", (work_item_id,),
+        ).fetchone() is None:
+            c.rollback()
+            raise HTTPException(404, f"no such work item: {work_item_id}")
+        c.execute(
+            f"UPDATE work_items SET {assignments} WHERE work_item_id=?",
+            [*fields.values(), work_item_id],
+        )
+        c.execute(
+            "INSERT INTO work_events (work_item_id, ts, kind, payload) "
+            "VALUES (?,?,?,?)",
+            (work_item_id, event["ts"], event["kind"],
+             json.dumps(event["payload"])),
+        )
+        row = c.execute(
+            "SELECT * FROM work_items WHERE work_item_id=?", (work_item_id,),
+        ).fetchone()
+        c.commit()
     return dict(row)
 
 
@@ -1585,22 +1810,240 @@ def get_work_item_ledger(work_item_id: str):
     return dict(row)
 
 
+@app.put("/work-item/{work_item_id}/description")
+def compare_and_set_work_item_description(work_item_id: str, body: dict):
+    """Atomically CAS the organized description and append its audit event.
+
+    The existing work_items/work_events tables are sufficient; keeping both
+    writes in one SQLite transaction prevents a description/event split-brain.
+    """
+    required = (
+        "expected_updated_at", "expected_description", "description", "updated_at",
+    )
+    if any(not isinstance(body.get(field), str) for field in required):
+        raise HTTPException(422, "description update fields must be strings")
+    expected_updated_at = body["expected_updated_at"]
+    expected_description = body["expected_description"]
+    description = body["description"]
+    updated_at = body["updated_at"]
+    payload = {
+        "previous_description": expected_description,
+        "description": description,
+        "expected_updated_at": expected_updated_at,
+    }
+    encoded_payload = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    with closing(_db()) as c:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT * FROM work_items WHERE work_item_id=?", (work_item_id,),
+        ).fetchone()
+        if row is None:
+            c.rollback()
+            raise HTTPException(404, f"no such work item: {work_item_id}")
+        current = dict(row)
+        if current["description"] == description:
+            prior = c.execute(
+                "SELECT payload FROM work_events WHERE work_item_id=? "
+                "AND kind='description_edited' ORDER BY event_seq",
+                (work_item_id,),
+            ).fetchall()
+            exact_retry = any(
+                json.dumps(json.loads(event["payload"]), separators=(",", ":"),
+                           sort_keys=True) == encoded_payload
+                for event in prior
+            )
+            if exact_retry or (
+                current["updated_at"] == expected_updated_at
+                and current["description"] == expected_description
+            ):
+                c.commit()
+                return {"item": current, "event_appended": False}
+        cursor = c.execute(
+            "UPDATE work_items SET description=?, updated_at=? "
+            "WHERE work_item_id=? AND updated_at=? AND description=?",
+            (description, updated_at, work_item_id, expected_updated_at,
+             expected_description),
+        )
+        if cursor.rowcount != 1:
+            c.rollback()
+            raise HTTPException(
+                409,
+                "work item changed; refresh its story before editing the description",
+            )
+        c.execute(
+            "INSERT INTO work_events (work_item_id, ts, kind, payload) VALUES (?,?,?,?)",
+            (work_item_id, updated_at, "description_edited", encoded_payload),
+        )
+        updated = c.execute(
+            "SELECT * FROM work_items WHERE work_item_id=?", (work_item_id,),
+        ).fetchone()
+        c.commit()
+    return {"item": dict(updated), "event_appended": True}
+
+
 @app.post("/work-placement")
 def upsert_placement(body: dict):
+    event = body.get("event")
+    if event is None:
+        raise HTTPException(422, "placement creation requires an atomic event")
+    event = _atomic_work_event(body, work_item_id=str(body.get("work_item_id")))
     with closing(_db()) as c:
-        c.execute(
-            "INSERT OR REPLACE INTO work_placements (placement_id, work_item_id, "
-            "board_id, domain_id, is_primary, placement_stage, card_component, "
-            "local_fields, created_at, removed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (body["placement_id"], body["work_item_id"], body["board_id"],
-             body["domain_id"], int(bool(body.get("is_primary"))),
-             body.get("placement_stage"), body.get("card_component", "generic_task"),
-             json.dumps(body.get("local_fields") or {}), body["created_at"],
-             body.get("removed_at")))
-        c.commit()
+        c.execute("BEGIN IMMEDIATE")
+        work_item_id = body["work_item_id"]
+        if c.execute(
+            "SELECT 1 FROM work_items WHERE work_item_id=?", (work_item_id,),
+        ).fetchone() is None:
+            c.rollback()
+            raise HTTPException(404, f"no such work item: {work_item_id}")
+        if c.execute(
+            "SELECT 1 FROM work_placements WHERE placement_id=?", (body["placement_id"],),
+        ).fetchone() is not None:
+            c.rollback()
+            raise HTTPException(409, "placement ID already exists")
+        if body.get("removed_at") is None:
+            same_target = c.execute(
+                "SELECT placement_id FROM work_placements WHERE work_item_id=? "
+                "AND board_id=? AND domain_id=? AND removed_at IS NULL "
+                "AND placement_id<>?",
+                (work_item_id, body["board_id"], body["domain_id"], body["placement_id"]),
+            ).fetchone()
+            if same_target is not None:
+                c.rollback()
+                raise HTTPException(409, "work item already has an active placement on that board/domain")
+            if body.get("is_primary"):
+                primary = c.execute(
+                    "SELECT placement_id FROM work_placements WHERE work_item_id=? "
+                    "AND is_primary=1 AND removed_at IS NULL AND placement_id<>?",
+                    (work_item_id, body["placement_id"]),
+                ).fetchone()
+                if primary is not None:
+                    c.rollback()
+                    raise HTTPException(409, "work item already has an active primary placement")
+        try:
+            c.execute(
+                "INSERT OR REPLACE INTO work_placements (placement_id, work_item_id, "
+                "board_id, domain_id, is_primary, placement_stage, card_component, "
+                "local_fields, created_at, removed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (body["placement_id"], work_item_id, body["board_id"],
+                 body["domain_id"], int(bool(body.get("is_primary"))),
+                 body.get("placement_stage"), body.get("card_component", "generic_task"),
+                 json.dumps(body.get("local_fields") or {}), body["created_at"],
+                 body.get("removed_at")))
+        except sqlite3.IntegrityError as exc:
+            c.rollback()
+            raise HTTPException(409, "placement violates an active uniqueness invariant") from exc
+        if body.get("is_primary"):
+            c.execute(
+                "UPDATE work_items SET primary_board_id=?, updated_at=? "
+                "WHERE work_item_id=?",
+                (body["board_id"], event["ts"], work_item_id),
+            )
+        _insert_work_event(c, work_item_id, event)
         row = c.execute("SELECT * FROM work_placements WHERE placement_id=?",
                         (body["placement_id"],)).fetchone()
+        c.commit()
     return _placement_to_dict(row)
+
+
+@app.post("/work-placement/{placement_id}/remove")
+def remove_placement_atomic(placement_id: str, body: dict):
+    removed_at = body.get("removed_at")
+    if not isinstance(removed_at, str):
+        raise HTTPException(422, "removed_at must be a string")
+    with closing(_db()) as c:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT * FROM work_placements WHERE placement_id=?", (placement_id,),
+        ).fetchone()
+        if row is None:
+            c.rollback()
+            raise HTTPException(404, f"no such placement: {placement_id}")
+        effective_at = row["removed_at"] or removed_at
+        if row["removed_at"] is None:
+            c.execute(
+                "UPDATE work_placements SET removed_at=? WHERE placement_id=?",
+                (effective_at, placement_id),
+            )
+        if row["is_primary"]:
+            active_primary = c.execute(
+                "SELECT board_id FROM work_placements WHERE work_item_id=? "
+                "AND is_primary=1 AND removed_at IS NULL ORDER BY rowid LIMIT 1",
+                (row["work_item_id"],),
+            ).fetchone()
+            expected_board = active_primary["board_id"] if active_primary else None
+            c.execute(
+                "UPDATE work_items SET primary_board_id=?, updated_at=? "
+                "WHERE work_item_id=? AND primary_board_id IS NOT ?",
+                (expected_board, effective_at, row["work_item_id"], expected_board),
+            )
+        prior = c.execute(
+            "SELECT 1 FROM work_events WHERE work_item_id=? AND kind='placement_removed' "
+            "AND json_extract(payload, '$.placement_id')=?",
+            (row["work_item_id"], placement_id),
+        ).fetchone()
+        if prior is None:
+            _insert_work_event(c, row["work_item_id"], {
+                "ts": effective_at,
+                "kind": "placement_removed",
+                "payload": {
+                    "placement_id": placement_id,
+                    "board_id": row["board_id"],
+                    "domain_id": row["domain_id"],
+                    "is_primary": bool(row["is_primary"]),
+                },
+            })
+        updated = c.execute(
+            "SELECT * FROM work_placements WHERE placement_id=?", (placement_id,),
+        ).fetchone()
+        c.commit()
+    return _placement_to_dict(updated)
+
+
+@app.post("/work-placement/{placement_id}/repair")
+def repair_placement_atomic(placement_id: str, body: dict):
+    """Repair only a pre-existing active placement; never create or replace it."""
+    supplied = body.get("placement")
+    if not isinstance(supplied, dict) or supplied.get("placement_id") != placement_id:
+        raise HTTPException(422, "exact placement record is required")
+    event = _atomic_work_event(
+        {**supplied, "event": body.get("event")},
+        work_item_id=str(supplied.get("work_item_id")),
+    )
+    with closing(_db()) as c:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute(
+            "SELECT * FROM work_placements WHERE placement_id=?", (placement_id,),
+        ).fetchone()
+        if row is None:
+            c.rollback()
+            raise HTTPException(404, f"no such placement: {placement_id}")
+        stored = _placement_to_dict(row)
+        if stored != supplied or row["removed_at"] is not None:
+            c.rollback()
+            raise HTTPException(409, "placement changed while repairing its audit boundary")
+        if row["is_primary"]:
+            other = c.execute(
+                "SELECT 1 FROM work_placements WHERE work_item_id=? AND is_primary=1 "
+                "AND removed_at IS NULL AND placement_id<>?",
+                (row["work_item_id"], placement_id),
+            ).fetchone()
+            if other is not None:
+                c.rollback()
+                raise HTTPException(409, "work item has conflicting active primary placements")
+            c.execute(
+                "UPDATE work_items SET primary_board_id=?, updated_at=? "
+                "WHERE work_item_id=? AND primary_board_id IS NOT ?",
+                (row["board_id"], event["ts"], row["work_item_id"], row["board_id"]),
+            )
+        prior = c.execute(
+            "SELECT 1 FROM work_events WHERE work_item_id=? AND kind='placement_added' "
+            "AND json_extract(payload, '$.placement_id')=?",
+            (row["work_item_id"], placement_id),
+        ).fetchone()
+        if prior is None:
+            _insert_work_event(c, row["work_item_id"], event)
+        c.commit()
+    return stored
 
 
 @app.get("/work-placement/{placement_id}")
@@ -1632,19 +2075,72 @@ def list_placements_ledger(work_item_id: Optional[str] = None,
 
 @app.post("/work-edge")
 def upsert_edge(body: dict):
+    event = body.get("event")
+    if event is None:
+        raise HTTPException(422, "edge creation requires an atomic event")
+    event = _atomic_work_event(body, work_item_id=str(body.get("from_work_item_id")))
     with closing(_db()) as c:
+        c.execute("BEGIN IMMEDIATE")
+        frm, to = body["from_work_item_id"], body["to_work_item_id"]
+        if c.execute("SELECT 1 FROM work_items WHERE work_item_id=?", (frm,)).fetchone() is None:
+            c.rollback()
+            raise HTTPException(404, f"no such work item: {frm}")
+        if c.execute("SELECT 1 FROM work_items WHERE work_item_id=?", (to,)).fetchone() is None:
+            c.rollback()
+            raise HTTPException(404, f"no such work item: {to}")
+        blocking = bool(body.get("blocking")) and body.get("removed_at") is None
+        if blocking and frm == to:
+            c.rollback()
+            raise HTTPException(409, "a blocking edge cannot point at itself")
+        if blocking and _blocking_edge_would_cycle(c, frm, to, excluding=body["edge_id"]):
+            c.rollback()
+            raise HTTPException(409, "edge would create a cycle among blocking/structural relations")
         c.execute(
             "INSERT OR REPLACE INTO work_edges (edge_id, from_work_item_id, "
             "to_work_item_id, relation, blocking, reason, evidence_refs, created_by, "
             "created_at, removed_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (body["edge_id"], body["from_work_item_id"], body["to_work_item_id"],
-             body["relation"], int(bool(body.get("blocking"))), body.get("reason"),
-             json.dumps(body.get("evidence_refs") or []), body.get("created_by"),
-             body["created_at"], body.get("removed_at")))
-        c.commit()
+            (body["edge_id"], frm, to, body["relation"], int(bool(body.get("blocking"))),
+             body.get("reason"), json.dumps(body.get("evidence_refs") or []),
+             body.get("created_by"), body["created_at"], body.get("removed_at")))
+        _insert_work_event(c, frm, event)
         row = c.execute("SELECT * FROM work_edges WHERE edge_id=?",
                         (body["edge_id"],)).fetchone()
+        c.commit()
     return _edge_to_dict(row)
+
+
+@app.post("/work-edge/{edge_id}/remove")
+def remove_edge_atomic(edge_id: str, body: dict):
+    removed_at = body.get("removed_at")
+    if not isinstance(removed_at, str):
+        raise HTTPException(422, "removed_at must be a string")
+    with closing(_db()) as c:
+        c.execute("BEGIN IMMEDIATE")
+        row = c.execute("SELECT * FROM work_edges WHERE edge_id=?", (edge_id,)).fetchone()
+        if row is None:
+            c.rollback()
+            raise HTTPException(404, f"no such edge: {edge_id}")
+        effective_at = row["removed_at"] or removed_at
+        if row["removed_at"] is None:
+            c.execute("UPDATE work_edges SET removed_at=? WHERE edge_id=?", (effective_at, edge_id))
+        prior = c.execute(
+            "SELECT 1 FROM work_events WHERE work_item_id=? AND kind='edge_removed' "
+            "AND json_extract(payload, '$.edge_id')=?",
+            (row["from_work_item_id"], edge_id),
+        ).fetchone()
+        if prior is None:
+            _insert_work_event(c, row["from_work_item_id"], {
+                "ts": effective_at,
+                "kind": "edge_removed",
+                "payload": {
+                    "edge_id": edge_id,
+                    "to": row["to_work_item_id"],
+                    "relation": row["relation"],
+                },
+            })
+        updated = c.execute("SELECT * FROM work_edges WHERE edge_id=?", (edge_id,)).fetchone()
+        c.commit()
+    return _edge_to_dict(updated)
 
 
 @app.get("/work-edge/{edge_id}")
@@ -1668,7 +2164,17 @@ def list_edges_ledger(active_only: int = 1):
 
 @app.post("/work-item/{work_item_id}/event")
 def add_work_event(work_item_id: str, body: dict):
+    if (
+        not isinstance(body.get("ts"), str)
+        or not isinstance(body.get("kind"), str)
+        or not isinstance(body.get("payload", {}), dict)
+    ):
+        raise HTTPException(422, "event must contain string ts/kind and object payload")
     with closing(_db()) as c:
+        if c.execute(
+            "SELECT 1 FROM work_items WHERE work_item_id=?", (work_item_id,),
+        ).fetchone() is None:
+            raise HTTPException(404, f"no such work item: {work_item_id}")
         c.execute("INSERT INTO work_events (work_item_id, ts, kind, payload) "
                   "VALUES (?,?,?,?)",
                   (work_item_id, body["ts"], body["kind"],

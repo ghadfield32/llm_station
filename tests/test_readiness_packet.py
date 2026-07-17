@@ -184,3 +184,60 @@ def test_changes_requested_then_approved_restores_readiness():
 def test_unknown_packet_is_keyerror():
     with pytest.raises(KeyError):
         _packets().get("never-seen")
+
+
+# ── plan §6 invariant: an agent review can never approve/commit ──────────────
+
+def test_agent_review_may_not_approve():
+    svc = _packets()
+    p = svc.assemble(_plan(), review_roles=["codex_agent"])
+    with pytest.raises(PacketError, match="agent review may not set status"):
+        svc.set_review(p.packet_id, "codex_agent", status="approved",
+                       reviewer_kind="agent", summary="lgtm")
+    # the slot is untouched — still pending, packet not ready
+    assert svc.get(p.packet_id).reviews[0].status == "pending"
+    assert not svc.is_ready(svc.get(p.packet_id))
+
+
+def test_agent_review_records_advisory_findings():
+    svc = _packets()
+    p = svc.assemble(_plan(), review_roles=["codex_agent"])
+    p2 = svc.set_review(p.packet_id, "codex_agent", status="reviewed",
+                        reviewer_kind="agent", summary="read it, no blockers",
+                        findings=["consider a test"])
+    slot = p2.reviews[0]
+    assert slot.status == "reviewed" and slot.reviewer_kind == "agent"
+    assert slot.findings == ["consider a test"]
+    # advisory-only: an agent 'reviewed' does NOT satisfy the readiness gate
+    assert not svc.is_ready(p2)
+
+
+def test_only_human_approval_unlocks_readiness():
+    svc = _packets()
+    p = svc.assemble(_plan(), review_roles=["codex_agent"])
+    svc.set_review(p.packet_id, "codex_agent", status="reviewed",
+                   reviewer_kind="agent")
+    assert not svc.is_ready(svc.get(p.packet_id))         # agent advisory only
+    p2 = svc.set_review(p.packet_id, "codex_agent", status="approved",
+                        reviewer_kind="human", summary="approved by operator")
+    assert p2.reviews[0].reviewer_kind == "human"
+    assert svc.is_ready(p2) and p2.status == "ready"
+
+
+def test_revise_stales_a_human_approval_back_to_pending():
+    svc = _packets()
+    p = svc.assemble(_plan(), review_roles=["codex_agent"])
+    svc.set_review(p.packet_id, "codex_agent", status="approved",
+                   reviewer_kind="human")
+    assert svc.is_ready(svc.get(p.packet_id))
+    revised = svc.revise(p.packet_id, research="new detail")
+    assert revised.reviews[0].status == "pending"          # approval was rev-bound
+    assert not svc.is_ready(revised)                       # commit re-gated
+
+
+def test_unknown_reviewer_kind_rejected():
+    svc = _packets()
+    p = svc.assemble(_plan(), review_roles=["codex_agent"])
+    with pytest.raises(PacketError, match="reviewer_kind"):
+        svc.set_review(p.packet_id, "codex_agent", status="reviewed",
+                       reviewer_kind="robot")

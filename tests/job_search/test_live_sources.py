@@ -151,6 +151,7 @@ def test_discover_live_postings_supports_remotive_searches(tmp_path, monkeypatch
         )
 
     monkeypatch.setattr("command_center.job_search.live_sources.fetch_remotive", fake_fetch_remotive)
+    monkeypatch.setattr("command_center.job_search.live_sources.time.sleep", lambda _: None)
 
     result = discover_live_postings(
         sources=["remotive"],
@@ -166,6 +167,38 @@ def test_discover_live_postings_supports_remotive_searches(tmp_path, monkeypatch
         {"source": "remotive", "query_type": "search", "search": "data", "postings": 1, "skipped": 0},
         {"source": "remotive", "query_type": "search", "search": "ai", "postings": 1, "skipped": 0},
     ]
+
+
+def test_remotive_failure_is_recorded_and_later_queries_survive(tmp_path, monkeypatch):
+    calls: list[str] = []
+
+    def fake_fetch(search: str, *, timeout: float = 20.0):
+        del timeout
+        calls.append(search)
+        if search == "rate-limited-company":
+            request = httpx.Request("GET", "https://remotive.com/api/remote-jobs")
+            response = httpx.Response(429, request=request)
+            raise httpx.HTTPStatusError(
+                "rate limited", request=request, response=response)
+        return parse_remotive_jobs({"jobs": [{
+            "id": 42, "company_name": "Survivor Co", "title": "Data Role",
+            "url": "https://example.test/jobs/42", "description": "SQL",
+        }]})
+
+    monkeypatch.setattr(
+        "command_center.job_search.live_sources.fetch_remotive", fake_fetch)
+    monkeypatch.setattr(
+        "command_center.job_search.live_sources.time.sleep", lambda _: None)
+    result = discover_live_postings(
+        sources=["remotive"],
+        tags=["rate-limited-company", "survivor-company"],
+        count=10, root=tmp_path, write=False)
+
+    assert calls == ["rate-limited-company", "survivor-company"]
+    assert result["postings_found"] == 1
+    assert result["sources"][0]["error"] == (
+        "remotive query failed: HTTP 429")
+    assert result["sources"][1]["postings"] == 1
 
 
 def test_discover_live_postings_supports_jobicy_industries(tmp_path, monkeypatch):

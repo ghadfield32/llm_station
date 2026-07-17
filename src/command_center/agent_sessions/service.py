@@ -80,6 +80,11 @@ class AgentSessionService:
         if record.status == "closed":
             raise ValueError(f"session {session_id!r} is closed")
         harness = self._harness_for(record)
+        # The durable transcript must include what the HUMAN said. Without
+        # this, replay after a refresh shows only the agent's half of the
+        # conversation (2026-07-16: "none of our own messages" in the chat).
+        yield self.store.append_event(
+            session_id, AgentEvent("user_message", {"text": prompt}))
         async for event in harness.send(session_id, prompt):
             yield event
 

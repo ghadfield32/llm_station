@@ -1,0 +1,62 @@
+# Foundation tier — always brought up first by `lc bootstrap` / `lc up`.
+# Monitoring + backups. Everything binds 127.0.0.1 and is shared over Tailscale
+# Serve (no public Funnel). Images use version tags here; pin every image by
+# @sha256 digest before real-data admission (see LIFE_CENTER_SECURITY_BASELINE.md,
+# container supply-chain family).
+#
+# Dockge is NOT here. It has Docker Engine API access via the mounted socket,
+# which is root-equivalent host control (see compose/admin-gui.yml) — that is
+# not something to bring up by default alongside monitoring/backups every time.
+# It is its own privileged, human-only, on-demand tier: `lc up --profile admin-gui`.
+#
+# Two more foundation-required pieces from the plan are intentionally NOT
+# compose services here: Tailscale (host-level daemon, installed/configured
+# outside Docker) and a Life Center health/status exporter (not yet built —
+# roadmap item; Uptime Kuma covers reachability probing in the meantime).
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  # ── uptime-kuma: local service/backup-age health ───────────────────────────
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.16  # pin: @sha256 before real data
+    container_name: lc-uptime-kuma
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${UPTIME_KUMA_PORT:-3001}:3001"
+    volumes:
+      - ${LC_APPDATA:-./appdata}/uptime-kuma:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "node -e 'require(\"http\").get(\"http://127.0.0.1:3001\",r=>process.exit(r.statusCode<500?0:1)).on(\"error\",()=>process.exit(1))'"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ── restic backup one-shot (3-2-1). Invoked via `lc backup`, not on `up`. ──
+  # Identity separation: the local repo (bind mount above) has no restic-level
+  # ACL — anyone with filesystem access to it can forget/prune, so treat "who
+  # can run `lc backup ... forget/prune`" as an operational discipline, not a
+  # cryptographic boundary. The B2 off-site leg (RESTIC_B2_REPOSITORY, see
+  # .env.example) is where real identity separation is possible and matters:
+  # scope a write-only B2 application key for the daily backup job, a separate
+  # read-only key for restore drills, and keep a third full-access key offline
+  # for maintenance (forget/prune) only. A credential that can rewrite/forget
+  # snapshots can destroy recovery history, so it should not be the same
+  # credential the daily job runs with.
+  backup:
+    image: restic/restic:0.17.3  # pin: @sha256 before real data
+    container_name: lc-backup
+    profiles: [backup]  # excluded from `up`; run with `docker compose run --rm backup`
+    networks: [lc_core]
+    environment:
+      - RESTIC_REPOSITORY=${RESTIC_REPOSITORY:-/backups/restic}
+      - RESTIC_PASSWORD=${RESTIC_PASSWORD:-}
+    volumes:
+      - ${LC_BACKUP_TARGET:-./backups}:/backups
+      - ${LC_APPDATA:-./appdata}:/appdata:ro
+      - ${LC_DATA:-./testdata/data}:/data:ro
+    entrypoint: ["restic"]
+    command: ["snapshots"]  # `lc backup` overrides with `backup`

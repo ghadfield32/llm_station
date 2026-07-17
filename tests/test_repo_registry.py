@@ -282,3 +282,52 @@ def test_enable_manifest_in_text_idempotent_on_already_clean_blockers():
 def test_enable_manifest_in_text_unknown_repo_raises():
     with pytest.raises(ValueError, match="not found"):
         repo_registry._enable_manifest_in_text(_ENABLE_FIXTURE, "missing")
+
+
+# ---- config/contract drift regression (2026-07-17 stale-worker incident) ----
+# A concurrent change added research_capabilities to configs/autonomy.yaml AND
+# the RepoManifest contract as a matched pair; the RUNNING worker was stale
+# (old contract in memory, new config on disk) -> "Extra inputs are not
+# permitted". The fix was a worker restart, NOT extra="allow". These lock the
+# contract so the field stays typed and unknown fields stay rejected.
+
+def _valid_manifest_dict() -> dict:
+    """A fully-valid manifest as a plain dict, via the real builder — so these
+    tests exercise the actual contract, not a hand-guessed field set."""
+    from command_center.cli.repo_registry import build_repo_manifest_block
+    m = build_repo_manifest_block(
+        repo_id="x", remote_url="https://example/x.git",
+        local_path_ref="self", kanban_board_id="tasks")
+    return m.model_dump(mode="json")
+
+
+def test_repo_manifest_rejects_unknown_fields():
+    from pydantic import ValidationError
+    from command_center.schemas.contracts import RepoManifest
+    base = _valid_manifest_dict()
+    RepoManifest(**base)                        # baseline: valid manifest builds
+    with pytest.raises(ValidationError, match="not permitted|extra_forbidden"):
+        RepoManifest(**base, totally_unknown_field=["oops"])
+
+
+def test_research_capabilities_is_typed_and_validated():
+    from pydantic import ValidationError
+    from command_center.schemas.contracts import RepoManifest
+    base = _valid_manifest_dict()
+    base.pop("research_capabilities", None)
+    m = RepoManifest(**base, research_capabilities=["local llm serving"])
+    assert m.research_capabilities == ["local llm serving"]
+    assert RepoManifest(**base).research_capabilities == []   # empty default ok
+    with pytest.raises(ValidationError, match="unique|duplicate"):
+        RepoManifest(**base, research_capabilities=["a", "a"])
+
+
+def test_live_autonomy_config_validates_against_current_contract():
+    # the exact failure surface: the checked-in config must load under the
+    # current contract (a stale worker is an OPS problem, caught by restart —
+    # never by relaxing the schema)
+    from pathlib import Path
+    from command_center.cli.repo_registry import load_autonomy_config
+    root = Path(__file__).resolve().parents[1]
+    cfg = load_autonomy_config(root / "configs" / "autonomy.yaml")
+    assert cfg.repo_manifests                    # loads clean, no ValidationError

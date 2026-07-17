@@ -14,11 +14,15 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 EventType = Literal[
-    "session_started", "assistant_delta", "assistant_message",
+    "session_started", "user_message", "assistant_delta", "assistant_message",
     "tool_requested", "approval_required", "approval_resolved",
     "tool_started", "tool_output", "tool_finished",
     "file_changed", "command_started", "command_finished",
     "usage", "rate_limit", "warning",
+    # Phase 3: a bounded hand-off between assistants (Claude ⇄ Codex ⇄
+    # OpenRouter). `handoff_started` is recorded on the SOURCE session (with the
+    # bounded packet as evidence); the target resumes its own per-harness slot.
+    "handoff_started", "handoff_completed",
     "session_idle", "session_failed", "session_closed",
 ]
 

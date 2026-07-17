@@ -283,6 +283,19 @@ def _jobicy_query_error(exc: httpx.HTTPStatusError) -> dict[str, Any]:
     }
 
 
+def _live_query_error(source: str, exc: httpx.HTTPError) -> dict[str, Any]:
+    response = exc.response if isinstance(exc, httpx.HTTPStatusError) else None
+    status_code = response.status_code if response is not None else None
+    return {
+        "source_id": "",
+        "reason": (
+            f"{source} query failed: HTTP {status_code}"
+            if status_code is not None else f"{source} query failed: network error"
+        ),
+        "status_code": status_code,
+    }
+
+
 def write_posting(posting: LivePosting, *, root: Path, run_date: date | None = None) -> Path:
     day = run_date or date.today()
     folder = root / "source_cache" / "live_postings" / f"{posting.source}_{day.isoformat()}"
@@ -310,8 +323,10 @@ def discover_live_postings(
     source_rows: list[dict[str, Any]] = []
     seen_urls: set[str] = set()
 
-    tag_list = list(tags)
-    industry_list = list(industries)
+    tag_list = list(dict.fromkeys(
+        value.strip() for value in tags if value.strip()))
+    industry_list = list(dict.fromkeys(
+        value.strip() for value in industries if value.strip()))
 
     for source in sources:
         if source == "jobicy":
@@ -387,8 +402,23 @@ def discover_live_postings(
                     all_postings.append(posting)
         elif source == "remotive":
             searches = tag_list or [""]
-            for search in searches:
-                postings, source_skipped = fetch_remotive(search)
+            for i, search in enumerate(searches):
+                if i:
+                    time.sleep(0.4)  # polite throttle between free-text requests
+                try:
+                    postings, source_skipped = fetch_remotive(search)
+                except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+                    error = _live_query_error(source, exc)
+                    source_rows.append({
+                        "source": source,
+                        "query_type": "search",
+                        "search": search,
+                        "postings": 0,
+                        "skipped": 1,
+                        "error": error["reason"],
+                    })
+                    skipped.append({"source": source, "search": search, **error})
+                    continue
                 source_rows.append({
                     "source": source,
                     "query_type": "search",

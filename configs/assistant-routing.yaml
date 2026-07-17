@@ -1,0 +1,49 @@
+schema_version: command-center.assistant-routing.v1
+enabled: false
+default_mode: preview_only
+evidence:
+  usage_max_age_seconds: 300
+  preview_ttl_seconds: 60
+  unknown_usage:
+    local_unmetered_gateway: eligible_with_disclosure
+    agent_or_paid_lane: confirmation_required
+categories:
+  conversation:
+    capability_profile: local_action_chat
+    risk_ceiling: L0_read_only
+    candidates:
+    - assistant_id: gatewaycore
+      preference: 1
+  repository_analysis:
+    capability_profile: generalist
+    risk_ceiling: L2_local_edits
+    candidates:
+    - assistant_id: claude_code_local
+      preference: 1
+    - assistant_id: codex_agent
+      preference: 2
+    - assistant_id: openrouter_agent
+      preference: 3
+  deep_code:
+    capability_profile: deep_code
+    risk_ceiling: L3_external_write
+    candidates:
+    - assistant_id: codex_agent
+      preference: 1
+    - assistant_id: claude_code_local
+      preference: 2
+    - assistant_id: openrouter_agent
+      preference: 3
+  planning_architecture:
+    capability_profile: strategic_steward
+    risk_ceiling: L2_local_edits
+    candidates:
+    - assistant_id: claude_code_local
+      preference: 1
+    - assistant_id: codex_agent
+      preference: 2
+    - assistant_id: openrouter_agent
+      preference: 3
+manual_only_model_lanes:
+- frontier
+- local_frontier

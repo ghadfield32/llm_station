@@ -1,0 +1,175 @@
+{
+  "schema_version": "command-center.match-organize-eval.v1",
+  "case_count": 18,
+  "kpis": {
+    "baseline": {
+      "exact_recall": {
+        "value": 1.0,
+        "n": 3
+      },
+      "paraphrase_recall": {
+        "value": 0.0,
+        "n": 7
+      },
+      "paraphrase_miss_rate": {
+        "value": 1.0,
+        "n": 7
+      },
+      "occurrence_vs_new_task_accuracy": {
+        "value": 0.0,
+        "n": 3
+      },
+      "expansion_classification_accuracy": {
+        "value": 0.0,
+        "n": 1
+      },
+      "subject_separation_accuracy": {
+        "value": 1.0,
+        "n": 2
+      },
+      "negative_safety": {
+        "value": 1.0,
+        "n": 2
+      },
+      "false_automatic_merges": {
+        "value": 0,
+        "n": 18
+      },
+      "silent_discarded_captures": {
+        "value": 0,
+        "n": 18
+      },
+      "source_data_loss": {
+        "value": 0,
+        "n": 18
+      }
+    },
+    "candidate": {
+      "exact_recall": {
+        "value": 1.0,
+        "n": 3
+      },
+      "paraphrase_recall": {
+        "value": 0.8571428571428571,
+        "n": 7
+      },
+      "paraphrase_miss_rate": {
+        "value": 0.1428571428571429,
+        "n": 7
+      },
+      "occurrence_vs_new_task_accuracy": {
+        "value": 1.0,
+        "n": 3
+      },
+      "expansion_classification_accuracy": {
+        "value": 1.0,
+        "n": 1
+      },
+      "subject_separation_accuracy": {
+        "value": 0.5,
+        "n": 2
+      },
+      "negative_safety": {
+        "value": 1.0,
+        "n": 2
+      },
+      "false_automatic_merges": {
+        "value": 0,
+        "n": 18
+      },
+      "silent_discarded_captures": {
+        "value": 0,
+        "n": 18
+      },
+      "source_data_loss": {
+        "value": 0,
+        "n": 18
+      }
+    }
+  },
+  "dependency_false_positives": [],
+  "misses": {
+    "baseline": [
+      {
+        "id": "jobsearch-companion",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "jobsearch-linkedin",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "jobsearch-watchlist",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "jobsearch-questions",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "jobsearch-retention",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "mj-appointment",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "recaulk-tub",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "applied-again",
+        "label": "occurrence",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "applied-three-more",
+        "label": "occurrence",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "rewatched",
+        "label": "occurrence",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "watchlist-expansion",
+        "label": "expansion",
+        "class": "unrelated",
+        "correct": false
+      }
+    ],
+    "candidate": [
+      {
+        "id": "recaulk-tub",
+        "label": "paraphrase_same",
+        "class": "unrelated",
+        "correct": false
+      },
+      {
+        "id": "camera-research-buy",
+        "label": "subject_related",
+        "class": "possible_same",
+        "correct": false
+      }
+    ]
+  }
+}

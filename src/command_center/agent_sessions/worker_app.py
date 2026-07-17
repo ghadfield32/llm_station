@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .events import AgentEvent
 from .protocol import ApprovalDecision, SessionStart
@@ -32,6 +32,22 @@ from .store import SessionStoreProtocol
 
 
 logger = logging.getLogger(__name__)
+
+
+class ModelCatalogEntry(BaseModel):
+    """The ONE model-catalog shape the cockpit picker renders verbatim.
+    Adapters normalize their SDK-native shapes to this; validating at the
+    serving boundary turns silent contract drift (e.g. an SDK returning
+    effort OBJECTS where strings are expected) into a legible catalog error
+    instead of a blank browser panel (2026-07-16 incident)."""
+    id: str
+    display_name: str
+    description: str = ""
+    is_default: bool = False
+    default_effort: str | None = None
+    supported_efforts: list[str] = Field(default_factory=list)
+    context_options: list[str] = Field(default_factory=list)
+    available: bool = True
 
 
 def _default_store() -> SessionStoreProtocol:
@@ -79,6 +95,26 @@ class MessageIn(BaseModel):
 class ApprovalIn(BaseModel):
     approved: bool
     reason: str = ""
+
+
+class HandoffIn(BaseModel):
+    to_harness: str
+    goal: str | None = None
+    open_questions: list[str] = Field(default_factory=list)
+
+
+class AttachmentRequestIn(BaseModel):
+    attachment_id: str
+    kind: str
+    rel_path: str | None = None
+    resource_id: str | None = None
+    display_name: str
+
+
+class AttachmentResolveIn(BaseModel):
+    repo_id: str | None = None            # context to resolve path kinds against
+    external_egress: bool = False         # is the target harness a paid external one?
+    items: list[AttachmentRequestIn] = Field(default_factory=list)
 
 
 _CLAUDE_HARNESSES = ("claude_code_local", "claude_agent")
@@ -261,6 +297,16 @@ def build_app(*, store: SessionStoreProtocol | None = None,
     def health() -> dict:
         return {"status": "ok"}
 
+    @app.get("/api/runtime-fingerprint", dependencies=[Depends(_authed)])
+    def runtime_fingerprint() -> dict:
+        """Read-only drift detector: this WORKER process's source root, git SHA,
+        tracked-config SHA-256s, and whether its (in-memory) contract still
+        validates the on-disk config. cc assistant-doctor compares this to the
+        host so config/source drift is caught BEFORE a session fails (see the
+        2026-07-17 AutonomyConfig incident)."""
+        from .fingerprint import compute_fingerprint
+        return compute_fingerprint()
+
     @app.get("/api/agent-harnesses", dependencies=[Depends(_authed)])
     async def list_harnesses() -> list[dict]:
         return await service.list_harnesses()
@@ -271,9 +317,13 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         """Runtime-discovered model catalog for the harness selector (Codex live
         SDK models incl. supported reasoning efforts; Claude validated aliases).
         A discovery failure (e.g. the SDK login expired) surfaces as an empty
-        list + a reason, never a 500 that blanks the picker."""
+        list + a reason, never a 500 that blanks the picker. Every entry is
+        VALIDATED against the one catalog contract the cockpit renders
+        verbatim — adapter/SDK shape drift becomes a legible error here, never
+        an unrenderable object in the browser."""
         try:
-            models = await service.list_models(harness_id)
+            models = [ModelCatalogEntry(**m).model_dump()
+                      for m in await service.list_models(harness_id)]
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         except Exception as exc:
@@ -362,6 +412,53 @@ def build_app(*, store: SessionStoreProtocol | None = None,
                     service.get_events(session_id, after_sequence)]
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/agent-sessions/{session_id}/handoff",
+             dependencies=[Depends(_authed)])
+    def build_handoff(session_id: str, body: HandoffIn) -> dict:
+        """Assemble a BOUNDED hand-off packet from this session's stored events
+        (a briefing — never an unlimited transcript forward, per the plan §6)
+        and record `handoff_started` on the SOURCE session as evidence. The
+        caller seeds the target assistant with the returned `prompt`; the
+        target resumes its own per-harness slot."""
+        from .events import AgentEvent
+        from .handoff import build_handoff_packet, render_handoff_prompt
+        try:
+            record = service.get_session(session_id)
+            events = service.get_events(session_id, 0)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        packet = build_handoff_packet(
+            source_record=record, events=events, to_harness=body.to_harness,
+            goal=body.goal, open_questions=body.open_questions)
+        store.append_event(session_id, AgentEvent(
+            "handoff_started",
+            {"to_harness": body.to_harness, "packet": packet.model_dump()}))
+        return {"packet": packet.model_dump(),
+                "prompt": render_handoff_prompt(packet)}
+
+    @app.post("/api/attachments/resolve", dependencies=[Depends(_authed)])
+    def resolve_attachments(body: AttachmentResolveIn) -> dict:
+        """Resolve + safety-check the composer's typed attachments on the HOST
+        (where the real context roots live). Path kinds are clamped to the
+        selected context root and refused on secret/escape/oversize; blocked
+        ones are REPORTED in the summary, never dropped."""
+        from .attachments import resolve_attachment, summarize_attachments
+        from .context_resolver import resolve_context_path
+        root = None
+        if body.repo_id:
+            try:
+                root = resolve_context_path(body.repo_id)
+            except Exception:      # unresolved context -> path kinds refuse cleanly
+                root = None
+        resolutions = [
+            resolve_attachment(
+                attachment_id=it.attachment_id, kind=it.kind, rel_path=it.rel_path,
+                resource_id=it.resource_id, display_name=it.display_name,
+                context_root=root, external_egress=body.external_egress)
+            for it in body.items]
+        return {"resolutions": [r.model_dump() for r in resolutions],
+                "summary": summarize_attachments(resolutions)}
 
     @app.post("/api/agent-sessions/{session_id}/approvals/{approval_id}",
              dependencies=[Depends(_authed)])

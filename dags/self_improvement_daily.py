@@ -55,9 +55,9 @@ REPORT_ASSET = Dataset("command-center://improvement/daily-report")
 LEDGER_DB_PATH = os.environ.get("LEDGER_DB_PATH", "data/ledger.db")
 # Apply (draft real cards) by default; set to "false" for a read-only preview run.
 APPLY = os.environ.get("SELF_IMPROVEMENT_APPLY", "true").lower() == "true"
-# Draft the top findings as human-gated mission_intake cards each morning (off by default —
-# opt in once the workspace board is reachable from the scheduler). Approval stays a human drag.
-KANBAN = os.environ.get("SELF_IMPROVEMENT_KANBAN", "false").lower() == "true"
+# Draft the top findings to the first-party Self Improvement board each morning.
+# Set false only for an explicit report-only deployment. Approval stays human-only.
+KANBAN = os.environ.get("SELF_IMPROVEMENT_KANBAN", "true").lower() == "true"
 KANBAN_TOP = int(os.environ.get("SELF_IMPROVEMENT_KANBAN_TOP", "3"))
 
 
@@ -107,11 +107,21 @@ def _fetch(spec: dict) -> list[dict]:
     doc_md=__doc__,
 )
 def self_improvement_daily():
+    @task
+    def verified_runtime_backup() -> dict:
+        """Hard prerequisite for both scheduled and dataset-triggered runs."""
+        from command_center.runtime_backup import create_default_snapshot
+
+        manifest = create_default_snapshot()
+        return {key: manifest.get(key) for key in (
+            "snapshot_id", "source_set_watermark", "gate_checked_at",
+            "created_at", "consistency", "reused_exact_watermark",
+        ) if manifest.get(key) is not None}
 
     @task
-    def list_sources() -> list[dict]:
-        """The standing source set the scan fans out over (stage 1 is mapped over this)."""
-        return dag_support.SOURCE_REGISTRY
+    def list_sources(_backup: dict) -> list[dict]:
+        """Sources plus one code-health scan per currently registered repository."""
+        return dag_support.scheduled_source_registry()
 
     @task
     def scan(spec: dict) -> dict:
@@ -127,7 +137,10 @@ def self_improvement_daily():
         date = context["ds"]            # YYYY-MM-DD (logical date)
         now_iso = context["ts"]         # ISO-8601 logical timestamp
         report = dag_support.finish(outcomes, _registry(), date=date, now_iso=now_iso,
-                                    apply=APPLY, draft_kanban=KANBAN, kanban_top=KANBAN_TOP)
+                                    apply=APPLY, draft_kanban=KANBAN, kanban_top=KANBAN_TOP,
+                                    report_path=os.environ.get(
+                                        "SELF_IMPROVEMENT_REPORT_PATH",
+                                        "generated/self-improvement-report.md"))
         n_failed = report["n_failed"]
         if n_failed:
             # surfaced, not hidden: failed sources are in the report; flag them at the DAG level
@@ -136,7 +149,8 @@ def self_improvement_daily():
         return report
 
     # stage 1 fans out per source; stages 2–5 collect and emit.
-    outcomes = scan.expand(spec=list_sources())
+    backup = verified_runtime_backup()
+    outcomes = scan.expand(spec=list_sources(backup))
     classify_rank_draft_emit(outcomes)
 
 

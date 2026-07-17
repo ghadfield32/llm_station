@@ -138,7 +138,41 @@ def rank_and_trim(items: list[CuratedItem], scorer, top_n: int,
     list itself already expresses relevance. Broad searches (papers/repos) keep
     the positive-score gate."""
     scorer(items)
+    # A user-selected review topic is itself relevance evidence. Keep those
+    # matches eligible even when the static interest profile has not yet been
+    # taught the new topic and keyword fallback would otherwise score it zero.
+    for item in items:
+        if item.extra.get("review_topics") and item.score <= 0:
+            item.score = 0.001
     items.sort(key=lambda x: x.score, reverse=True)
     floor = 0 if include_zero else 1e-9
     relevant = [i for i in items if i.score >= floor]
-    return relevant[:top_n] if top_n else relevant
+    if not top_n:
+        return relevant
+    # Reserve the best candidate for every explicitly configured topic before
+    # filling the remaining global score slots. This makes topic adjustment
+    # additive instead of letting high-scoring broad-category hits crowd a new
+    # topic out of a small top-N.
+    selected: list[CuratedItem] = []
+    selected_ids: set[str] = set()
+    review_topics = list(dict.fromkeys(
+        topic
+        for item in relevant
+        for topic in item.extra.get("review_topics", [])
+        if isinstance(topic, str) and topic
+    ))
+    for topic in review_topics:
+        candidate = next(
+            (item for item in relevant if topic in item.extra.get("review_topics", [])),
+            None,
+        )
+        if candidate is not None and candidate.external_id not in selected_ids:
+            selected.append(candidate)
+            selected_ids.add(candidate.external_id)
+    for item in relevant:
+        if len(selected) >= top_n:
+            break
+        if item.external_id not in selected_ids:
+            selected.append(item)
+            selected_ids.add(item.external_id)
+    return selected[:top_n]

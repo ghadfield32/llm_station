@@ -8,7 +8,7 @@ same stable record. Clock + id factory are injected so it stays hermetic.
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from .schemas import (
     INBOX_STATUSES,
@@ -22,6 +22,29 @@ from .store import InMemoryCaptureStore
 # requested_mode -> the status a fresh capture lands in. Only "captured" today;
 # routing/preparation (later phases) advance it. Saving is never starting work.
 _START_STATUS = "captured"
+
+_PREPARE_ACTIONS = (
+    {
+        "id": "continue_in_chat",
+        "label": "Continue in chat",
+        "description": "Clarify and organize the capture before choosing a destination.",
+    },
+    {
+        "id": "route_to_todos",
+        "label": "Add to General Todos",
+        "description": "Route the capture to the General Todos board.",
+    },
+    {
+        "id": "choose_existing_board",
+        "label": "Choose an existing kanban",
+        "description": "Review the available boards and choose the best existing home.",
+    },
+    {
+        "id": "create_new_board",
+        "label": "Create a new kanban",
+        "description": "Define a new board only when the capture represents a distinct realm.",
+    },
+)
 
 
 class CaptureService:
@@ -59,6 +82,43 @@ class CaptureService:
     def list(self, *, status: str | None = None) -> list[CaptureView]:
         return self._store.list(status=status)
 
+    def prepare(self, capture_id: str) -> dict:
+        """Open an idempotent routing conversation without creating work.
+
+        The prompt is derived from the immutable record, so it survives a
+        service restart and always carries the complete captured text. The
+        stable conversation id is independent of whichever chat thread was
+        active when the thought was captured.
+        """
+        current = self._store.view(capture_id)  # KeyError if unknown
+        if current.processing_status in {"routed", "archived"}:
+            raise ValueError(
+                f"capture {capture_id} is already {current.processing_status}"
+            )
+        if current.processing_status != "ready_to_route":
+            self._store.set_status(capture_id, "ready_to_route", at=self._clock())
+        conversation_id = f"capture:{capture_id}"
+        raw_content = current.record.raw_content
+        chat_prompt = (
+            "Help Geoff prepare this saved capture for routing. Do not start or "
+            "create work yet. Preserve the raw capture as immutable source text, "
+            "clarify it conversationally if needed, then offer these choices: "
+            "continue in chat, add it to General Todos, choose an existing kanban, or "
+            "create a new kanban. A route must remain an explicit later choice.\n\n"
+            f"Capture ID: {capture_id}\n"
+            "IMMUTABLE RAW CAPTURE (complete, verbatim)\n"
+            "--- BEGIN RAW CAPTURE ---\n"
+            f"{raw_content}\n"
+            "--- END RAW CAPTURE ---"
+        )
+        return {
+            "capture_id": capture_id,
+            "conversation_id": conversation_id,
+            "processing_status": "ready_to_route",
+            "chat_prompt": chat_prompt,
+            "available_actions": [dict(action) for action in _PREPARE_ACTIONS],
+        }
+
     def inbox(self) -> dict:
         """The Universal Inbox: every capture grouped into its lane, in canonical
         order, plus a total. Nothing is ever dropped — a capture is recoverable
@@ -74,20 +134,41 @@ class CaptureService:
                     if s not in INBOX_STATUSES and c]
         return {"columns": columns, "total": len(views)}
 
-    def mark_converted(self, capture_id: str, work_item_ids: list[str], *,
-                       conversation_id: str | None = None) -> CaptureView:
+    def mark_converted(self, capture_id: str, work_item_ids: Sequence[str], *,
+                       conversation_id: str | None = None,
+                       operation_key: str | None = None) -> CaptureView:
         """Record that a capture became canonical work: append a 'link' event
         carrying the created work_item_ids, then move the capture to the 'routed'
         lane. The capture is NEVER destroyed — it stays recoverable in the Inbox,
         now linked to the work it produced (capture→work; the reverse work→capture
         lives on WorkItem.capture_id). KeyError if the capture is unknown."""
-        self._store.view(capture_id)          # KeyError if unknown
+        now = self._clock()
+        self._store.mark_converted(
+            capture_id, list(work_item_ids),
+            conversation_id=conversation_id, operation_key=operation_key, at=now,
+        )
+        return self._store.view(capture_id)
+
+    def archive(self, capture_id: str, *, reason: str) -> CaptureView:
+        """Safe discard: hide the capture from the active Inbox lanes while
+        PRESERVING its immutable raw record and full event history. Never a
+        hard delete; a routed capture cannot be archived (it is already the
+        provenance of canonical work). Idempotent."""
+        current = self._store.view(capture_id)  # KeyError if unknown
+        if current.processing_status == "archived":
+            return current
+        if current.processing_status == "routed":
+            raise ValueError(
+                f"capture {capture_id} is routed — it is the provenance of "
+                "existing work and cannot be discarded")
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("an archive reason is required")
         now = self._clock()
         self._store.append_event(CaptureEvent(
-            capture_id=capture_id, ts=now, kind="link",
-            payload={"work_item_ids": list(work_item_ids),
-                     "conversation_id": conversation_id}))
-        self._store.set_status(capture_id, "routed", at=now)
+            capture_id=capture_id, ts=now, kind="archived",
+            payload={"reason": reason}))
+        self._store.set_status(capture_id, "archived", at=now)
         return self._store.view(capture_id)
 
 

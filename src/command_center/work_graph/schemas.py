@@ -23,6 +23,10 @@ WorkItemKind = Literal[
 CanonicalStatus = Literal[
     "backlog", "ready", "in_progress", "blocked", "awaiting_approval", "done",
     "rejected", "archived"]
+CANONICAL_STATUSES: tuple[str, ...] = (
+    "backlog", "ready", "in_progress", "blocked", "awaiting_approval", "done",
+    "rejected", "archived",
+)
 
 WorkRelation = Literal[
     "parent_of", "blocks", "related_to", "implements", "informs",

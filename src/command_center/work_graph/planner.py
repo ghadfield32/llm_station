@@ -6,7 +6,9 @@ Two operations over the same routine:
     a read-only snapshot of the real graph, so cycle/edge checks are faithful,
     then throws the sandbox away. Nothing is persisted; ids are provisional.
   * commit(plan)  — validates in a sandbox FIRST (so an invalid plan writes
-    NOTHING — atomic), then applies to the durable service and returns real ids.
+    NOTHING), then applies to the service and returns real ids. Durable transport
+    failure can interrupt application; callers must not represent a multi-item
+    commit as cross-request atomic or retry it blindly.
 
 This is deterministic: it takes an explicit plan and never infers structure from
 free text. Natural-language deliverable-splitting / board-routing / dedup is a
@@ -29,6 +31,7 @@ from .schemas import (
     WorkItemSummary,
     WorkPlacement,
     WorkPlacementSummary,
+    WorkRelation,
 )
 from .service import WorkGraphService
 
@@ -59,7 +62,7 @@ class WorkPlanItemIn(BaseModel):
 class WorkPlanEdgeIn(BaseModel):
     from_ref: str                    # a plan item ref OR an existing work_item_id
     to_ref: str
-    relation: str
+    relation: WorkRelation
     reason: str | None = None
 
 
@@ -86,8 +89,9 @@ class ChatWorkPlanner:
         return receipt
 
     def commit(self, plan: WorkPlanIn) -> TaskBatchReceipt:
-        # dry-run the WHOLE plan first: an invalid plan (cycle, unknown edge ref)
-        # raises here and the durable graph is never touched — commit is atomic.
+        # Dry-run the whole plan first: malformed structure/cycles fail before
+        # durable writes. The later durable calls are sequential, so transport
+        # failure is intentionally NOT described as transactionally atomic.
         self._apply(self._seeded_sandbox(), plan)
         receipt = self._apply(self._service, plan)
         receipt.preview = False

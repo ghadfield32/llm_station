@@ -1,0 +1,13 @@
+{
+  "threads": [
+    {
+      "conversation_id": "job_application:job_1",
+      "id": "job_application:job_1",
+      "title": "What is the next action?",
+      "updated_at": "2026-07-16T23:12:06.095489+00:00",
+      "target": "GatewayCore",
+      "last_prompt": "What is the next action?",
+      "model": "chat"
+    }
+  ]
+}

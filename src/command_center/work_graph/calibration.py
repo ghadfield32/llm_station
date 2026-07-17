@@ -34,13 +34,24 @@ from .schemas import RoutingCorrection
 _STOPWORDS: frozenset[str] = frozenset({
     "a", "an", "the", "to", "of", "and", "or", "for", "in", "on", "at", "by",
     "with", "from", "my", "is", "it", "this", "that", "be", "as", "are", "was",
-    "we", "i", "you", "do", "did", "up", "out"})
+    "we", "i", "you", "do", "did", "up", "out", "if", "not", "no", "so", "can",
+    "could", "should", "would", "will", "have", "has", "had", "them", "they",
+    "there", "then", "than", "when", "what", "which", "who", "how", "all",
+    "any", "some", "but", "into", "about", "just", "like"})
+
+# Minimum keyword length: normalization turns "e.g." into the tokens "e"/"g" —
+# one- and two-letter fragments are punctuation shrapnel, not routing signal.
+# ("cv" is the known real two-letter term; it is explicitly allowed.)
+_MIN_TOKEN_LEN = 3
+_SHORT_ALLOWLIST: frozenset[str] = frozenset({"cv", "ai", "ml"})
 
 
 def _tokens(title: str) -> set[str]:
     # Unique tokens per correction: a word repeated in one title counts once, so
     # its support = number of distinct corrections, not word frequency.
-    return {t for t in _normalize(title).split() if t and t not in _STOPWORDS}
+    return {t for t in _normalize(title).split()
+            if t and t not in _STOPWORDS
+            and (len(t) >= _MIN_TOKEN_LEN or t in _SHORT_ALLOWLIST)}
 
 
 class DerivedRule(BaseModel):

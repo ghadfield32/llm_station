@@ -74,6 +74,21 @@ class AgentWorkerClient:
         return self._request("POST", f"/api/agent-sessions/{session_id}/messages",
                              json={"prompt": prompt})
 
+    def build_handoff(self, session_id: str, *, to_harness: str,
+                      goal: str | None = None,
+                      open_questions: list[str] | None = None) -> httpx.Response:
+        return self._request(
+            "POST", f"/api/agent-sessions/{session_id}/handoff",
+            json={"to_harness": to_harness, "goal": goal,
+                  "open_questions": open_questions or []})
+
+    def resolve_attachments(self, *, repo_id: str | None, external_egress: bool,
+                            items: list) -> httpx.Response:
+        return self._request(
+            "POST", "/api/attachments/resolve",
+            json={"repo_id": repo_id, "external_egress": external_egress,
+                  "items": items})
+
     def get_events(self, session_id: str, after_sequence: int = 0) -> httpx.Response:
         return self._request("GET", f"/api/agent-sessions/{session_id}/events",
                              params={"after_sequence": after_sequence})

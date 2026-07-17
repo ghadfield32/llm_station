@@ -40,3 +40,21 @@ def test_mark_converted_links_and_routes_but_preserves_the_capture():
 def test_mark_converted_unknown_capture_is_keyerror():
     with pytest.raises(KeyError):
         _svc().mark_converted("never-seen", ["W-1"])
+
+
+def test_mark_converted_uses_one_atomic_store_boundary_not_split_status_calls(
+    monkeypatch,
+):
+    svc = _svc()
+    cid = svc.capture("durable conversion").record.capture_id
+    def forbidden_split_call(*_args, **_kwargs):
+        raise AssertionError("atomic conversion must not call set_status separately")
+
+    monkeypatch.setattr(svc._store, "set_status", forbidden_split_call)
+    view = svc.mark_converted(cid, ["W-1"])
+    assert view.processing_status == "routed"
+    assert len([e for e in svc._store.events(cid) if e.kind == "link"]) == 1
+    assert len([
+        e for e in svc._store.events(cid)
+        if e.kind == "status" and e.payload.get("status") == "routed"
+    ]) == 1

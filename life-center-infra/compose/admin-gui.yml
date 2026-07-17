@@ -1,0 +1,36 @@
+# Admin-GUI tier — Dockge. PRIVILEGED, human-only, on demand. NOT foundation.
+#
+# Dockge is NOT a read-only viewer. It talks to the Docker Engine API over the
+# mounted socket; the daemon normally runs with root-equivalent host privilege,
+# and Docker's own docs note unsecured daemon access can grant root-level host
+# control. Mounting the socket `:ro` blocks filesystem-style writes to the
+# socket *path* — it does NOT make the Docker API read-only. A container that
+# can reach the socket at all can create/exec/mount containers with host
+# access, which is privilege-equivalent to root on this machine.
+#
+# Rules:
+#   - never expose beyond the management tailnet/VLAN;
+#   - never let an agent or the Life Center MCP reach it;
+#   - start it only to do human administration, then `lc down --profile admin-gui`.
+# Must be named explicitly (`lc up --profile admin-gui`); excluded from
+# `all`/`everything` is NOT required (it's useful during the desktop trial too)
+# but it is excluded from every default/production bundle.
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  dockge:
+    image: louislam/dockge:1.4.2  # pin: @sha256 before real data
+    container_name: lc-dockge
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${DOCKGE_PORT:-5001}:5001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${LC_APPDATA:-./appdata}/dockge:/app/data
+      - ${LC_APPDATA:-./appdata}/dockge-stacks:/opt/stacks
+    environment:
+      - DOCKGE_STACKS_DIR=/opt/stacks

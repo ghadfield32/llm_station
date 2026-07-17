@@ -1,0 +1,32 @@
+# Versioned retention policy (NOT hard-coded app defaults). Revise from measured
+# reuse and retained-growth evidence. Mirrors the plan's CV/model retention table
+# and data classes A/B/C. Times are initial hypotheses — tighten, never loosen to
+# pass a camera or free space.
+version: 1
+
+data_classes:
+  A_irreplaceable:
+    examples: [photos, personal_video, documents, scans, vault_recovery, home_assistant_config]
+    protection: [primary, redundant_local, separate_local_backup, encrypted_offsite, restore_tests]
+  B_expensive_to_recreate:
+    examples: [annotations, curated_datasets, fine_tuned_adapters, embeddings, eval_artifacts,
+               website_db_object_exports, book_metadata, open_design_od_projects]
+    protection: [local_backup, selective_offsite]
+  C_reproducible:
+    examples: [public_base_models, container_images, thumbnails, caches, reacquirable_media]
+    protection: [catalog_license_source_revision_hashes]  # redownload where economical
+
+cv_and_model_retention:
+  decoded_frame_caches: "3-7 days"
+  failed_raw_and_scratch: "7-14 days"
+  temporary_transcodes_crops: "14 days"
+  analysis_only_partner_raw: "30 days unless agreement is shorter"
+  training_approved_raw: "60-90 days unless explicitly promoted"
+  proxies_reproducible_intermediates: "90-180 days"
+  selected_truth_review_clips: "retain only by explicit consent-compatible promotion"
+  gold_labels_and_irreplaceable_sources: "permanent, backed up by class"
+
+capacity_guardrails:
+  alert_at_pool_pct: 70
+  expansion_or_eviction_before_pct: 80
+  reserve_free_pct: 20

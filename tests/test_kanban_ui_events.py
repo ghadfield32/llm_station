@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,6 +14,21 @@ from command_center.kanban_sync import EventLog, emit_event
 
 APP = Path(__file__).resolve().parents[1] / "services" / "agent_kanban_ui" / "app.py"
 NOW = datetime(2026, 6, 20, 12, 0, tzinfo=timezone.utc)
+
+
+def test_event_log_imports_cleanly_before_board_provider_in_fresh_process():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from command_center.kanban_sync.events import EventLog; print(EventLog.__name__)",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "EventLog"
 
 
 @pytest.fixture

@@ -1227,9 +1227,144 @@ class DomainEmptyState(Strict):
     command: str | None = None   # the exact cc command that fills this surface
 
 
+DomainIntakeValue = bool | int | float | str | list[str]
+
+
+class DomainIntakeSpec(Strict):
+    """Board-visible, producer-owned inputs for one domain surface.
+
+    ``source`` on :class:`DomainSurfaceSpec` names where cards are stored. This
+    contract separately names what produces them and the inputs that producer
+    consumes. Producer ids are intentionally extensible; the two automated
+    Growth OS producers receive additional exact validation because their
+    parameters drive network queries on the next watcher cycle.
+    """
+
+    producer: str = "manual"
+    mode: Literal["manual", "scheduled", "event", "projection", "external"] = "manual"
+    summary: str = Field(
+        default="Cards are added directly from this board.",
+        min_length=1,
+        max_length=500,
+    )
+    schedule: str = Field(default="on demand", min_length=1, max_length=120)
+    source_refs: list[str] = Field(default_factory=list, max_length=20)
+    parameters: dict[str, DomainIntakeValue] = Field(default_factory=dict, max_length=30)
+    editable: bool = True
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not _REPO_ID_RE.match(self.producer):
+            raise ValueError(
+                f"intake producer {self.producer!r} must be a stable id")
+        if len(self.source_refs) != len(set(self.source_refs)):
+            raise ValueError("intake source_refs must be unique")
+        if any(not ref.strip() or len(ref) > 300 for ref in self.source_refs):
+            raise ValueError("intake source_refs must be non-empty and at most 300 chars")
+        for name, value in self.parameters.items():
+            if not _REPO_ID_RE.match(name):
+                raise ValueError(
+                    f"intake parameter {name!r} must be a stable id")
+            if isinstance(value, str) and len(value) > 2000:
+                raise ValueError(f"intake parameter {name!r} is longer than 2000 chars")
+            if isinstance(value, list):
+                if len(value) > 100 or any(not item.strip() or len(item) > 500 for item in value):
+                    raise ValueError(
+                        f"intake parameter {name!r} must contain 1-100 non-empty "
+                        "strings of at most 500 chars")
+        self._validate_growth_os_parameters()
+        return self
+
+    def _validate_growth_os_parameters(self) -> None:
+        shapes = {
+            "growth_os_arxiv": {
+                "enabled": bool,
+                "top_n": int,
+                "lookback_days": int,
+                "analysis_batch_size": int,
+                "categories": list,
+                "review_topics": list,
+            },
+            "growth_os_github": {
+                "enabled": bool,
+                "top_n": int,
+                "lookback_days": int,
+                "min_stars": int,
+                "analysis_batch_size": int,
+                "review_topics": list,
+            },
+        }
+        expected = shapes.get(self.producer)
+        if expected is None:
+            return
+        if set(self.parameters) != set(expected):
+            raise ValueError(
+                f"{self.producer} intake parameters must be exactly "
+                f"{sorted(expected)}; got {sorted(self.parameters)}")
+        for name, expected_type in expected.items():
+            value = self.parameters[name]
+            if expected_type is int:
+                valid = type(value) is int and value >= 0
+            elif expected_type is bool:
+                valid = type(value) is bool
+            else:
+                valid = (
+                    isinstance(value, list)
+                    and all(isinstance(item, str) and item.strip() for item in value)
+                )
+            if not valid:
+                raise ValueError(
+                    f"{self.producer} intake parameter {name!r} has invalid type/value")
+        top_n = self.parameters["top_n"]
+        lookback_days = self.parameters["lookback_days"]
+        if self.parameters["enabled"] and type(top_n) is int and top_n < 1:
+            raise ValueError(f"{self.producer} top_n must be at least 1 while enabled")
+        if type(top_n) is int and top_n > 500:
+            raise ValueError(f"{self.producer} top_n must be <= 500")
+        if type(lookback_days) is int and lookback_days > 365:
+            raise ValueError(f"{self.producer} lookback_days must be <= 365")
+        batch_size = self.parameters["analysis_batch_size"]
+        if type(batch_size) is int and not 1 <= batch_size <= 200:
+            raise ValueError(
+                f"{self.producer} analysis_batch_size must be between 1 and 200")
+        from command_center.research_topics import normalize_research_topics
+        try:
+            topics = normalize_research_topics(self.parameters["review_topics"])
+        except ValueError as exc:
+            raise ValueError(f"{self.producer} review_topics: {exc}") from exc
+        if self.parameters["enabled"] and not topics:
+            raise ValueError(
+                f"{self.producer} needs at least one review topic while enabled")
+        if topics != self.parameters["review_topics"]:
+            raise ValueError(
+                f"{self.producer} review_topics must be normalized and unique")
+        if (
+            self.parameters["enabled"]
+            and type(top_n) is int
+            and top_n < len(topics)
+        ):
+            raise ValueError(
+                f"{self.producer} top_n must cover all configured review_topics")
+        if self.producer == "growth_os_arxiv":
+            categories = self.parameters["categories"]
+            category_re = re.compile(
+                r"^[A-Za-z][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)?$")
+            if len(categories) != len(set(categories)):
+                raise ValueError("growth_os_arxiv categories must be unique")
+            if any(
+                len(category) > 50
+                or category != category.strip()
+                or not category_re.fullmatch(category)
+                for category in categories
+            ):
+                raise ValueError(
+                    "growth_os_arxiv categories must be valid arXiv category ids")
+
+
 class DomainSurfaceSpec(Strict):
     domain_id: str
     title: str
+    archived: bool = False
     card_component: str
     source: Literal["board_store", "ledger_missions", "fixtures"]
     board_id: str | None = None          # required iff source == board_store
@@ -1239,6 +1374,7 @@ class DomainSurfaceSpec(Strict):
     drawer_fields: list[DomainFieldSpec] = Field(default_factory=list)
     allowed_actions: list[str] = Field(default_factory=list)
     empty_state: DomainEmptyState
+    intake: DomainIntakeSpec = Field(default_factory=DomainIntakeSpec)
 
     @model_validator(mode="after")
     def _checks(self):
@@ -2111,6 +2247,11 @@ class RepoManifest(Strict):
     # Where the repo lives on this machine. Stored as 'self' (the control-plane
     # repo) or an 'env:NAME' reference; never a committed absolute path.
     local_path_ref: str | None = None
+    # Exact capability vocabulary used to ground Paper/Repo folder-fit scoring.
+    # New manifests may start empty, but then research analysis must treat the
+    # folder as having no declared direct fit rather than guessing from its name.
+    research_capabilities: list[str] = Field(
+        default_factory=list, max_length=12)
     # The repo's OWN required CI check names that gate its PRs (the PR-check loop +
     # branch protection use these). Empty -> fall back to the global
     # branch_protection_verification.required_status_check_contexts (the self repo).
@@ -2160,6 +2301,14 @@ class RepoManifest(Strict):
                     f"repo {self.repo_id!r} local_path_ref must be 'self' or an 'env:NAME' "
                     "reference; a committed absolute path would leak machine layout"
                 )
+        if (
+            any(not capability.strip() for capability in self.research_capabilities)
+            or len(self.research_capabilities)
+            != len(set(self.research_capabilities))
+        ):
+            raise ValueError(
+                f"repo {self.repo_id!r} research_capabilities must be unique "
+                "non-blank strings")
         if self.autonomous_edits_enabled:
             if self.blockers:
                 raise ValueError(f"repo {self.repo_id!r} enabled manifests cannot list blockers")
@@ -3036,3 +3185,66 @@ class JudgeVerdict(Strict):
     blocking_reasons: list[str] = []
     defensive_bloat_detected: bool = False
     scope_creep_detected: bool = False
+
+
+# ---- assistant-routing.yaml -------------------------------------------------
+# Task-category -> Assistant routing policy, per
+# docs/architecture/task-assistant-routing.md. VERSION ONE IS PREVIEW-ONLY:
+# `default_mode` admits no other value, so the config cannot enable silent
+# dispatch even when `enabled` flips true. Frontier model lanes are settings
+# behind a chosen Assistant, never Assistant candidates themselves (rule 6).
+class AssistantRouteCandidate(Strict):
+    assistant_id: str
+    preference: int = Field(ge=1)
+
+
+class AssistantRouteCategory(Strict):
+    capability_profile: str
+    risk_ceiling: RiskTier
+    candidates: list[AssistantRouteCandidate] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        prefs = [c.preference for c in self.candidates]
+        if len(prefs) != len(set(prefs)):
+            raise ValueError(
+                "duplicate candidate preferences — ties are ambiguous and "
+                "rejected, never resolved by guessing (design rule 10)")
+        ids = [c.assistant_id for c in self.candidates]
+        if len(ids) != len(set(ids)):
+            raise ValueError("duplicate assistant_id in one category")
+        return self
+
+
+class AssistantRoutingUnknownUsage(Strict):
+    local_unmetered_gateway: Literal[
+        "eligible_with_disclosure", "confirmation_required"]
+    agent_or_paid_lane: Literal["confirmation_required"]
+
+
+class AssistantRoutingEvidence(Strict):
+    usage_max_age_seconds: int = Field(ge=1)
+    preview_ttl_seconds: int = Field(ge=1)
+    unknown_usage: AssistantRoutingUnknownUsage
+
+
+class AssistantRoutingConfig(Strict):
+    schema_version: Literal["command-center.assistant-routing.v1"]
+    enabled: bool
+    default_mode: Literal["preview_only"]
+    evidence: AssistantRoutingEvidence
+    categories: dict[str, AssistantRouteCategory] = Field(min_length=1)
+    manual_only_model_lanes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        lanes = set(self.manual_only_model_lanes)
+        for name, category in self.categories.items():
+            for candidate in category.candidates:
+                if candidate.assistant_id in lanes:
+                    raise ValueError(
+                        f"category {name!r}: {candidate.assistant_id!r} is a "
+                        "manual-only model lane, not an Assistant — model "
+                        "lanes are settings behind a chosen Assistant "
+                        "(design rule 6)")
+        return self

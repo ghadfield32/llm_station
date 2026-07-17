@@ -66,29 +66,10 @@ guidelines:
     - https://github.com/ollama/ollama/releases.atom
 
 sources:
-  arxiv:
-    enabled: true
-    top_n: 12
-    lookback_days: 3
-    categories: [cs.LG, stat.ML, cs.CV, cs.CL, cs.AI, stat.ME, stat.AP]
-    queries:
-      - "all:Bayesian AND all:forecasting"
-      - "all:sports AND all:tracking"
-      - "all:LLM AND all:agent"
-
-  github:
-    enabled: true
-    top_n: 10
-    lookback_days: 7
-    min_stars: 25
-    queries:
-      - "bayesian forecasting language:python"
-      - "sports analytics basketball"
-      - "player tracking computer vision"
-      - "llm agents framework"
-      - "mlops feature store"
-    topics: [bayesian, forecasting, sports-analytics, computer-vision, llm, mlops]
-
+  # Papers and Repos are intentionally absent here. Their arXiv/GitHub inputs
+  # live on the corresponding board intake contracts in
+  # configs/domain_surfaces.yaml, which is what the cockpit edits and the
+  # watcher validates before every run.
   signals:
     enabled: true
     top_n: 15

@@ -1,0 +1,24 @@
+# Network tier — AdGuard Home (DNS). SENSITIVE: DNS failure breaks the household.
+# Admit ONLY after a tested bypass/fallback DNS path exists (plan + GATE0 five-zone
+# policy). Must be named explicitly (`lc up --profile network`); excluded from `all`.
+# Bind DNS to the Services VLAN address in production, not 0.0.0.0.
+
+networks:
+  lc_core:
+    name: lc_core
+
+services:
+  adguard:
+    image: adguard/adguardhome:v0.107.55  # pin: @sha256 before real data
+    container_name: lc-adguard
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      # Admin UI on loopback (share via Tailscale). DNS ports must bind the
+      # intended LAN/VLAN interface in production — 127.0.0.1 here is a safe seed.
+      - "127.0.0.1:${ADGUARD_PORT:-3000}:3000"
+      - "127.0.0.1:53:53/tcp"
+      - "127.0.0.1:53:53/udp"
+    volumes:
+      - ${LC_APPDATA:-./appdata}/adguard/work:/opt/adguardhome/work
+      - ${LC_APPDATA:-./appdata}/adguard/conf:/opt/adguardhome/conf

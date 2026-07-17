@@ -1,6 +1,7 @@
 """Hermetic tests for the first-party governed board layer."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -81,6 +82,203 @@ def test_upsert_is_atomic_under_concurrent_reads(tmp_path):
     assert not errors, f"concurrent read observed a partial write: {errors[:1]}"
 
 
+def test_list_cards_cache_reuses_stable_projection_and_invalidates_on_write(
+    tmp_path, monkeypatch,
+):
+    """Large board reads are cached, but field writes remain immediately live."""
+    import command_center.boards.command_center_provider as provider_module
+
+    provider = _internal(tmp_path)
+    provider.upsert_card("card-1", {"title": "First"}, status="Backlog")
+    original = provider_module._read_card_file
+    reads = 0
+
+    def counted_read(path):
+        nonlocal reads
+        reads += 1
+        return original(path)
+
+    monkeypatch.setattr(provider_module, "_read_card_file", counted_read)
+    assert provider.list_cards()[0]["title"] == "First"
+    cold_reads = reads
+    assert cold_reads >= 1
+
+    # A second provider instance (the normal API pattern) shares the stable
+    # projection without touching the bind-mounted card files again.
+    assert _internal(tmp_path).list_cards()[0]["title"] == "First"
+    assert reads == cold_reads
+
+    provider.upsert_card("card-1", {"title": "Updated"})
+    assert _internal(tmp_path).list_cards()[0]["title"] == "Updated"
+    assert reads > cold_reads
+
+
+def test_list_cards_cold_scan_reads_each_consumed_artifact_once(tmp_path, monkeypatch):
+    """The status fold and statusless-card pass must not parse one file twice."""
+    import command_center.boards.command_center_provider as provider_module
+
+    provider = _internal(tmp_path)
+    provider.upsert_card("folded", {"title": "Folded"}, status="Backlog")
+    provider.upsert_card("statusless", {"title": "Statusless"})
+    provider._invalidate_list_cache()
+    original = provider_module._read_card_file
+    paths = []
+
+    def recorded_read(path):
+        paths.append(path)
+        return original(path)
+
+    monkeypatch.setattr(provider_module, "_read_card_file", recorded_read)
+    assert {card["card_id"] for card in provider.list_cards()} == {
+        "folded", "statusless",
+    }
+    assert len(paths) == len(set(paths)) == 2
+
+
+def test_atomic_field_mutations_preserve_every_concurrent_append(tmp_path):
+    """A read-before-upsert append loses updates; the board-locked mutation does not."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    provider = _internal(tmp_path)
+    provider.upsert_card("book-1", {"title": "Concurrency in Practice"})
+
+    def append_note(index: int) -> None:
+        def mutate(current, _cards):
+            assert current is not None
+            notes = list(current.get("book_notes", []))
+            notes.append({"note_id": f"note-{index}", "sequence": len(notes) + 1})
+            return {**current, "book_notes": notes}
+
+        provider.mutate_card_fields("book-1", mutate)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(append_note, range(24)))
+
+    notes = provider._read_fields("book-1")["book_notes"]
+    assert len(notes) == 24
+    assert {note["note_id"] for note in notes} == {
+        f"note-{index}" for index in range(24)
+    }
+    assert [note["sequence"] for note in notes] == list(range(1, 25))
+
+
+def test_atomic_batch_field_mutation_scans_once_and_updates_exact_cards(
+    tmp_path, monkeypatch,
+):
+    provider = _internal(tmp_path)
+    for index in range(3):
+        provider.upsert_card(f"book-{index}", {"title": f"Book {index}"})
+    original_list_cards = provider.list_cards
+    scans = 0
+
+    def counted_list_cards():
+        nonlocal scans
+        scans += 1
+        return original_list_cards()
+
+    monkeypatch.setattr(provider, "list_cards", counted_list_cards)
+    result = provider.mutate_card_fields_batch({
+        "book-0": lambda current: {**current, "genre": "History"},
+        "book-2": lambda current: {**current, "genre": "Science"},
+    })
+
+    assert scans == 1
+    assert set(result) == {"book-0", "book-2"}
+    assert provider._read_fields("book-0")["genre"] == "History"
+    assert "genre" not in provider._read_fields("book-1")
+    assert provider._read_fields("book-2")["genre"] == "Science"
+
+
+def test_atomic_batch_field_mutation_validates_every_replacement_before_writing(
+    tmp_path,
+):
+    provider = _internal(tmp_path)
+    provider.upsert_card("book-0", {"title": "Book 0"})
+
+    with pytest.raises(KeyError, match="missing"):
+        provider.mutate_card_fields_batch({
+            "book-0": lambda current: {**current, "genre": "History"},
+            "missing": lambda current: current,
+        })
+
+    assert "genre" not in provider._read_fields("book-0")
+
+
+def test_atomic_create_callback_sees_prior_concurrent_create(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    provider = _internal(tmp_path)
+
+    def create(index: int) -> str:
+        card_id = f"candidate-{index}"
+
+        def mutate(_current, cards):
+            if any(card.get("title") == "Same Book" for card in cards):
+                raise ValueError("duplicate book")
+            return {"title": "Same Book"}
+
+        try:
+            provider.mutate_card_fields(card_id, mutate, create=True)
+        except ValueError:
+            return "duplicate"
+        return "created"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(create, range(2)))
+
+    assert sorted(outcomes) == ["created", "duplicate"]
+    assert [card["title"] for card in provider.list_cards()] == ["Same Book"]
+
+
+def test_atomic_create_rolls_back_fields_when_governed_event_fails(tmp_path):
+    provider = _internal(tmp_path)
+
+    def fail_event() -> None:
+        raise OSError("event log unavailable")
+
+    with pytest.raises(OSError, match="event log unavailable"):
+        provider.mutate_card_fields(
+            "book-uncommitted",
+            lambda _current, _cards: {"title": "Never Half Created"},
+            create=True,
+            after_write=fail_event,
+        )
+
+    assert provider.list_cards() == []
+    assert not provider._card_path("book-uncommitted").exists()
+
+
+def test_atomic_event_mutation_reads_only_the_locked_target_card(
+    tmp_path, monkeypatch,
+):
+    """A one-card status write must not read every field document on the board."""
+    provider = _internal(tmp_path)
+    provider.upsert_card(
+        "target", {"title": "Target", "private_marker": "preserved"},
+        status="Backlog",
+    )
+    for index in range(40):
+        provider.upsert_card(
+            f"other-{index}", {"title": f"Other {index}"},
+            status="Backlog",
+        )
+
+    def whole_board_read_is_a_regression():
+        pytest.fail("status mutation materialized the complete board")
+
+    monkeypatch.setattr(provider, "list_cards", whole_board_read_is_a_regression)
+    observed = {}
+
+    def mutate(card):
+        observed.update(card)
+        return card["status"]
+
+    assert provider.mutate_card_event("target", mutate) == "Backlog"
+    assert observed["card_id"] == "target"
+    assert observed["private_marker"] == "preserved"
+    assert observed["status"] == "Backlog"
+
+
 # ---- factory ----------------------------------------------------------------
 
 def test_factory_builds_first_party_provider(tmp_path):
@@ -144,6 +342,35 @@ def test_internal_card_ids_cannot_traverse_paths(tmp_path):
     # separators are stripped, so the file cannot escape the board's store dir
     assert "/" not in stored[0].name and "\\" not in stored[0].name
     assert stored[0].resolve().parent == store
+
+
+def test_internal_card_filenames_do_not_alias_distinct_exact_ids(tmp_path):
+    p = _internal(tmp_path)
+    ids = ["a/b", "a?b", "Card", "card"]
+    for index, card_id in enumerate(ids):
+        p.upsert_card(card_id, {"value": index})
+
+    stored = list((tmp_path / "boards" / "b1").glob("*.json"))
+    assert len(stored) == len(ids)
+    assert len({path.name.casefold() for path in stored}) == len(ids)
+    assert {card["card_id"] for card in p.list_cards()} == set(ids)
+
+
+def test_internal_reads_legacy_card_path_without_deleting_it(tmp_path):
+    p = _internal(tmp_path)
+    p.store_dir.mkdir(parents=True)
+    legacy = p.store_dir / "legacy_id.json"
+    legacy.write_text(
+        json.dumps({"card_id": "legacy/id", "value": "retained"}),
+        encoding="utf-8",
+    )
+
+    assert p._read_fields("legacy/id")["value"] == "retained"
+    p.upsert_card("legacy/id", {"new": True})
+    assert legacy.is_file()
+    assert p._read_fields("legacy/id") == {
+        "card_id": "legacy/id", "value": "retained", "new": True,
+    }
 
 
 def test_internal_fieldless_card_surfaces_with_none_status(tmp_path):

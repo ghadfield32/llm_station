@@ -1,0 +1,5 @@
+{"ts": "2026-07-16T23:12:07.277566+00:00", "conversation_id": "paged", "surface": "app", "model_role": "chat", "user_text": "turn 0", "context_blocks": [], "events": [], "final": "answer 0"}
+{"ts": "2026-07-16T23:12:07.278566+00:00", "conversation_id": "paged", "surface": "app", "model_role": "chat", "user_text": "turn 1", "context_blocks": [], "events": [], "final": "answer 1"}
+{"ts": "2026-07-16T23:12:07.279000+00:00", "conversation_id": "paged", "surface": "app", "model_role": "chat", "user_text": "turn 2", "context_blocks": [], "events": [], "final": "answer 2"}
+{"ts": "2026-07-16T23:12:07.279566+00:00", "conversation_id": "paged", "surface": "app", "model_role": "chat", "user_text": "turn 3", "context_blocks": [], "events": [], "final": "answer 3"}
+{"ts": "2026-07-16T23:12:07.291569+00:00", "conversation_id": "paged", "surface": "app", "model_role": "chat", "user_text": "turn 4", "context_blocks": [], "events": [], "final": "answer 4"}

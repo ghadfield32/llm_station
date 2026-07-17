@@ -2,9 +2,13 @@
 
 **Status:** adopted architecture; the desktop memory gate is resolved, while
 Life Center implementation remains gated by the verification items below.  
-**Reviewed:** 2026-07-13 (revised after the DDR5 replacement).  
+**Reviewed:** 2026-07-17 (Open Design dev-lane tool and the one-command
+`lc` bootstrap decision).  
 **Scope:** the RTX 4090 desktop, MSI RTX 5080 laptop, Betts Basketball/CV
-workloads, local models, and the proposed personal Life Center.
+workloads, local models, the proposed personal Life Center, the connected
+portable/fixed multi-camera capture program, the Open Design dev-lane creative
+tool, and the one-command bootstrap that brings the open-source portfolio up
+reproducibly.
 
 This document reconciles two earlier proposals that disagreed about the laptop
 and about where the always-on control plane should live. It records verified
@@ -12,7 +16,7 @@ facts separately from reported-but-unverified facts and future design choices.
 
 ## Decision
 
-Use three distinct roles:
+Use three primary roles plus one optional recovery/utility tier:
 
 ```text
 Desktop "vengeance" — always-on compute and current control plane
@@ -40,6 +44,23 @@ Old laptops — deferred optional recovery/utility tier
 ├── future restore test, replaceable cache, or bounded worker only when separately admitted
 ├── no initial backup, storage, or network dependency
 └── never a distributed filesystem or production dependency
+```
+
+Operate the CV program as two connected capture systems rather than one large
+rig:
+
+```text
+Portable phone-first system
+├── starts with three existing phones for local acceptance
+├── standardizes on four active cameras plus one spare for partner sessions
+├── produces ordinary phone-domain footage for deployment-model evaluation
+└── hands validated, consent-classified sessions to desktop processing
+
+Fixed calibrated truth lab
+├── targets four synchronized coverage cameras plus one movable 120-fps truth camera
+├── produces calibration evidence, multiview labels, and benchmark sessions
+├── expands to six/eight full-court cameras only after measured need
+└── improves phone-deployed models; it does not replace the phone domain
 ```
 
 The laptop must not be the only host or only data copy for household services.
@@ -362,24 +383,30 @@ hash manifests.
 
 ### CV and model retention defaults
 
-Permanently protect permitted irreplaceable source video, human annotations,
-gold evaluation assets, final structured outputs, important detected events,
-published derivative datasets, evaluation evidence, and hard-to-recreate
-fine-tunes. Reproducible bulk artifacts expire unless explicitly promoted:
+Permanently protect human annotations, gold evaluation assets, final structured
+outputs, important detected events, published derivative datasets, evaluation
+evidence, hard-to-recreate fine-tunes, and only those irreplaceable source clips
+that were explicitly promoted under the recorded permission and partner
+agreement. Reproducible bulk artifacts and unpromoted partner raw expire:
 
 | Artifact | Initial retention |
 | --- | ---: |
 | decoded frame caches | 3–7 days |
-| failed pipeline scratch | 7 days |
+| unusable/failed raw and pipeline scratch | 7–14 days |
 | temporary transcodes/crops | 14 days |
-| reproducible intermediates | 30 days |
-| selected review clips | retain only by explicit promotion |
+| analysis-only partner raw | 30 days unless the agreement is shorter |
+| training-approved raw | 60–90 days unless explicitly promoted |
+| proxies and reproducible intermediates | 90–180 days when they reduce review cost |
+| selected truth/review clips | retain only by explicit, consent-compatible promotion |
 | gold labels and irreplaceable sources | permanent, backed up by class |
 
 Incomplete model downloads, duplicate quantizations, unused base weights,
 optical-flow caches, and conversion scratch are disposable. Store retention in
 versioned policy—not hard-coded application defaults—and revise it from measured
-reuse and retained-growth evidence.
+reuse and retained-growth evidence. Every session must carry the organization,
+venue, participant/permission class, allowed purposes, deletion due date,
+publicity flag, and trained-weight treatment. Successful capture never implies
+permission for training, research, publication, or publicity.
 
 Data classes:
 
@@ -388,10 +415,114 @@ Data classes:
   local backup + encrypted off-site + restore tests.
 - **B — expensive to recreate:** annotations, curated datasets, fine-tuned
   adapters, embeddings, evaluation artifacts, website database/object exports,
-  and organized book metadata. Local backup and selective off-site protection.
+  organized book metadata, and Open Design `.od/` project files (design systems,
+  skills, and templates; the desktop/laptop holds the authoritative copy and the
+  Life Center the backup). Local backup and selective off-site protection.
 - **C — reproducible:** public base models, container images, generated
   thumbnails, caches, legally reacquirable media. Preserve catalog, license,
   source revision, and hashes; redownload where economical.
+
+### Multi-camera CV lab, field kit, and storage handoff
+
+The production target is a portable deployment-domain system connected to a
+fixed truth system. Keep the existing single-view pipeline authoritative while
+multiview is additive and under validation.
+
+| Use | Active cameras | Starting standard |
+| --- | ---: | --- |
+| Local acceptance | 3 | Existing phones; minimum viable overlap |
+| Portable adult/team pilot | 4 | Three overlapping coverage views plus one side/truth view |
+| Fixed half-court truth lab | 5 | Four fixed synchronized coverage views plus one movable 120-fps truth view |
+| Full court | 6 minimum; 8 preferred | Expand only after a proven partner/venue need |
+| Fast contact, seam, spin, or rolling-shutter study | 1 temporary specialist | Rent before purchase and retain a simultaneous ordinary-phone view |
+
+For the four-camera field layout, use opposing high diagonal views, one high or
+protected baseline view, and one side view. For the fixed half-court lab, use
+two high diagonals, two offset baseline/cross-baseline views, and a movable
+truth camera. Critical release/rim/paint cells should appear in at least two
+portable views and three fixed-lab views. Stands stay outside play and egress,
+with sandbags, cable ramps, and safety cables; permanent mounts require facility
+approval and secondary retention.
+
+Start with supported iPhone/Galaxy-class phones and the
+[Blackmagic Camera app](https://www.blackmagicdesign.com/products/blackmagiccamera)
+for locked manual controls, monitoring, multiview, coordinated start, and
+external timecode. A common trigger is an operating convenience, not proof of
+sensor-level synchronization. Use external timecode plus a visible sync strobe
+for portable work. Genlock plus timecode is the later fixed-lab target; rolling
+shutter still requires validation. The preferred fixed coverage candidate is
+four matched
+[Blackmagic Micro Studio Camera 4K G2](https://www.blackmagicdesign.com/products/blackmagicmicrostudiocamera)
+bodies/lenses with common timing, plus an FX30-class 4K120 truth rig. Rent a
+global-shutter/high-speed camera before buying an industrial or specialist
+array.
+
+Freeze a per-session camera preset: one frame-rate family across synchronized
+views, 4K where storage and thermal tests pass, locked focus/exposure/white
+balance, stabilization and digital zoom off, audio off, constant-frame-rate
+recording where supported, and a shutter selected from an on-site flicker/blur
+test. Every multiview product records sync mode/residual/drift, shutter type,
+intrinsic/extrinsic calibration versions, camera provenance, and uncertainty.
+If timing or geometry fails, fall back to independent-view 2D outputs and block
+precision 3D claims.
+
+The acceptance lane is:
+
+```text
+MC0 authorization, camera roster, cloud-sync disablement, and physical safety
+MC1 60–90 minute media/thermal/integrity test and hashes
+MC2 visible-strobe/timecode synchronization and drift measurement
+MC3 held-out intrinsic calibration with a rigid matte ChArUco board
+MC4 measured court/world coordinates and held-out extrinsic validation
+MC5 coverage, occlusion, flicker, blur, and one-camera-failure test
+MC6 uncertainty-bearing multiview association/3D validation
+MC7 manifest -> ingest -> processing -> archive -> restore -> delivery recovery
+```
+
+Initial internal thresholds may follow the source proposal—zero corrupt frames,
+portable/fixed held-out world-error targets of 15 cm/5 cm, and no unqualified
+triangulation—but they remain hypotheses until local evidence sets baselines.
+Record and tighten them; never loosen them merely to pass a camera.
+
+Purchase in evidence-gated layers:
+
+| When | Need | Planning posture |
+| --- | --- | --- |
+| Local proof | three heavy/protected phone rigs, continuous power, recording media, rigid ChArUco board, gray card, measured tape/rangefinder, sync strobe, cases, cable ramps, isolated travel router | Use existing phones; validate before buying dedicated devices |
+| Field ingest | one 4–8 TB fast NVMe shuttle plus a second shuttle or other verified independent copy | Do not erase camera media until hashes and two readable copies are verified |
+| After local acceptance | fourth phone rig, spare coverage phone, and external timecode only if measured drift requires it | Standard portable partner kit |
+| After adult pilots | FX30-class truth rig, flicker-free supplemental light, stronger calibration wand, and more field storage | Buy only if truth quality or annotation effort improves |
+| After a committed venue | four matched/genlocked fixed coverage cameras, protected power/SDI/network cabling, approved mounts, monitoring, and professional installation | Half-court first; defer full-court expansion |
+
+The data boundary is:
+
+```text
+camera media
+  -> encrypted field shuttle
+  -> hashes + media check + manifest + proxies
+  -> RTX 4090 desktop hot processing and human review
+  -> permission-aware promotion
+  -> Life Center quota/expiry staging
+     + calibration/validation evidence
+     + consent-approved source clips
+     + gold labels and structured outputs
+     + partner delivery packages and restore evidence
+```
+
+Multi-camera originals can exceed the starter mirror quickly: five cameras at
+200 Mb/s for two hours are about 900 GB before proxies and intermediates. The
+Life Center therefore holds curated authority and short raw staging, not every
+original forever. Measure actual bitrate, proxy size, promotion rate, processing
+time, and deletion completion across ten sessions before resizing storage or
+adding 10 GbE.
+
+The truth-system flywheel is: synchronized evidence -> candidate multiview
+labels -> human correction -> frozen gold truth -> projection into ordinary
+phone views -> phone-model training -> sealed phone-only evaluation. Split
+evaluation by organization, venue, and session rather than random frames. A
+camera purchase is justified by measured occlusion recovery, phone-model
+quality, calibration reliability, annotation-time reduction, or a newly
+validated measurement—not by image quality alone.
 
 ### Desktop Docker retention audit
 
@@ -564,7 +695,132 @@ automatic DNS mutation, original-file deletion, or public-exposure authority.
 - secrets references (never plaintext secrets);
 - backup, restore, retention, and disaster-recovery runbooks;
 - health probes and restore-test evidence;
-- the optional CasaOS decision.
+- the one-command `lc` bootstrap, the optional launcher (Dockge), and the
+  CasaOS decision.
+
+### One-command bootstrap and optional launcher
+
+The goal is a CasaOS-like experience — one command brings the selected
+open-source services up correctly — **without** ceding authority to a launcher
+that hides the real Compose, network, storage, and backup configuration. The
+mechanism was chosen by comparing how CasaOS performs its one-command setup
+against portable alternatives:
+
+| Option | One-command install | Compose stays source of truth | Host takeover | Fit |
+| --- | --- | --- | --- | --- |
+| CasaOS | `curl \| sudo bash` | No — opaque app-store format | Installs Docker + its own system services | Rejected as authority; optional launcher only |
+| Umbrel / Runtipi | OS image or installer | Partial — own app manifests/store | High / medium | App-store convenience, not Compose-transparent |
+| Cosmos Cloud | Docker container | Manages Compose plus reverse proxy/SSO/2FA | Low (container on existing OS) | Strong alternative only if built-in HTTPS/auth is wanted; redundant while Tailscale already fronts every service |
+| **Dockge** (MIT) | `docker compose up -d` | **Yes** — compose files stay on disk, editable by hand and via `docker compose` | Low (agentless, socket mount) | **Selected optional GUI** |
+| **Scripted `lc` bootstrap** | `lc up` / `lc first-boot` | **Yes** — it *is* the Compose | None (idempotent script) | **Selected source of truth** |
+
+**Decision.** The authoritative one-command installer is an idempotent **`lc`
+CLI bootstrap** that mirrors this repository's proven `cc` CLI plus `Makefile`
+composite-target idiom (`doctor -> setup -> bootstrap -> up -> health`). It
+provisions host prerequisites and then brings up Compose **profiles** for the
+selected, already-admitted service tier. **Dockge** is the sanctioned optional
+"pane of glass": it explicitly does not take ownership of the Compose files, so
+the `lc`-managed Compose, secrets, and backups remain the single source of
+truth and stay auditable. This is portable to any Docker host — a noncritical
+test profile on the desktop today, the Debian 13 Life Center later.
+
+`lc up --profile <tier>` reconciles "one command for everything" with the
+admit-one-application-at-a-time rule: the command is reproducible and
+idempotent, but each application tier is enabled only after it passes its
+admission gate, never all at once by default. The bootstrap, its Compose
+profiles, `.env.example` (references only, never secrets), runbooks, and the
+Open Design dev-lane bring-up are seeded in the `life-center-infra` skeleton for
+later extraction into the separate private repository.
+
+This decision does not change the CasaOS posture recorded in
+[`LIFE_CENTER_GATE0.md`](LIFE_CENTER_GATE0.md) (`CasaOS omitted`) or below: CasaOS
+remains omitted as an authority and may still be evaluated only as a disposable,
+non-authoritative launcher over noncritical test services. Dockge is preferred
+over CasaOS for that optional role precisely because it keeps the Compose files
+transparent.
+
+### Open-source application portfolio
+
+Adopt one authoritative application per category first. Alternatives remain
+replaceable candidates until a representative import, backup, clean restore,
+upgrade, rollback, client-access, and data-export test passes. Do not deploy
+overlapping applications simply because they are available.
+
+| Function | Initial default | Alternative or boundary | Admission gate |
+| --- | --- | --- | --- |
+| Files and sync | [Nextcloud](https://nextcloud.com/) | Ordinary folders and collaboration; not the records system or a backup | dummy-data sync and restore |
+| Photos | [Immich](https://immich.app/) | Keep originals independently recoverable | duplicate/import and full restore |
+| Notes/OneNote replacement | [Joplin](https://joplinapp.org/) clients with Nextcloud WebDAV | TriliumNext/Logseq for a separate knowledge-base use; Saber or Xournal++ only as handwriting/PDF companions; Nextcloud Notes only for scratch notes | representative OneNote migration, encrypted sync, JEX restore |
+| Scanned records | [Paperless-ngx](https://docs.paperless-ngx.com/) | Complements Nextcloud; it owns OCR metadata and archival retrieval | dummy originals plus exporter/importer restore |
+| Backups | [Restic](https://restic.net/) default candidate | [Kopia](https://kopia.io/) alternative when its GUI/policy model materially improves operation; choose one | encrypted restore from separate media and off-site target |
+| Tasks/projects | Nextcloud Deck first | [Vikunja](https://vikunja.io/) if Deck is measurably insufficient; do not run both initially | export/restore and notification test |
+| Bookmarks/research archive | [Linkwarden](https://github.com/linkwarden/linkwarden) | Preserve source URL, capture status, and export | archived-page and database restore |
+| Budgeting | [Actual Budget](https://actualbudget.org/) | Manual/dummy imports first; no financial detail in Command Center | mature secrets, authentication, encrypted export/restore |
+| Video | [Jellyfin](https://jellyfin.org/) | Legally held media; no duplicate media server initially | playback, metadata, and rebuild/restore |
+| Audiobooks/books | [Audiobookshelf](https://www.audiobookshelf.org/) and/or [Calibre-Web](https://github.com/janeczku/calibre-web) by distinct format need | Avoid duplicate authority for the same catalog metadata | sample library restore |
+| RSS/news | [FreshRSS](https://freshrss.org/) | External feeds remain untrusted input | OPML export/restore and feed-failure handling |
+| Recipes/meal planning | [Mealie](https://mealie.io/) | Optional Home Assistant integration after both sides are admitted | database/export restore |
+| Household inventory | [Homebox](https://homebox.software/) | Link warranties in Paperless instead of duplicating originals | export/restore |
+| PDF utilities | [Stirling-PDF](https://github.com/Stirling-Tools/Stirling-PDF) | Tailnet/LAN only; uploaded files may be sensitive | temporary-file deletion and deny tests |
+| Office work | [LibreOffice](https://www.libreoffice.org/) on clients | Nextcloud Office/Collabora only when browser collaboration justifies another service | representative format round-trip |
+| Email/calendar/contacts | [Thunderbird](https://www.thunderbird.net/) client plus reliable external mail | Nextcloud may provide CalDAV/CardDAV; do not self-host Internet email initially | client export/recovery |
+| Selected working-folder sync | [Syncthing](https://syncthing.net/) | Never point it at live databases, Docker volumes, or Nextcloud appdata; sync is not backup | bounded folder conflict/recovery test |
+| Smart home, DNS, passwords | Home Assistant OS, AdGuard Home, official Bitwarden/Bitwarden Lite | Password manager remains last; DNS requires tested bypass/fallback | service-specific security baseline gates |
+| Design / creative (dev lane) | [Open Design](https://opendesigner.io/) ([`nexu-io/open-design`](https://github.com/nexu-io/open-design)) | Runs in the desktop/laptop **dev lane**, not on the appliance; the Life Center holds only a backed-up copy of its `.od/` project files. It is never a household-service authority. | agent-detect + a BYOK generation smoke test; `.od/` export and clean-profile restore |
+
+**Open Design** is a local-first, Apache-2.0 design canvas (roughly 79k GitHub
+stars) — an open equivalent of the Claude design workflow that keeps model,
+usage pool, cost, and underlying system under owner control. Its canvas is
+driven by any of 21+ coding agents (Claude Code, Codex, Cursor, Gemini CLI, and
+others), and usage can come from an agent subscription already held, a
+bring-your-own API key, or a local model — so a session can draft with a cheaper
+model, switch to a stronger one for polish, move to Codex when a Claude
+allowance runs tight, or stay fully local for private work with no paid tokens.
+Projects, skills (`SKILL.md`), templates, and design systems (`DESIGN.md`) live
+locally under a `.od/` SQLite directory, so the whole workflow is editable and
+portable. It belongs in the **dev lane** rather than the Life Center appliance
+because it depends on the coding-agent CLIs and model access that live on the
+desktop/laptop, not on the Intel-iGPU storage host; the appliance's only role is
+to back up the `.od/` project data as Class B (expensive to recreate). Its
+dev-lane bring-up and `.od/` backup hook are seeded in `life-center-infra`
+(see [One-command bootstrap and optional launcher](#one-command-bootstrap-and-optional-launcher)).
+
+Notesnook self-hosting should be reconsidered only after its server is declared
+production-ready by its maintainers and passes the same migration/restore gates.
+Do not replace Joplin with it based on client polish alone.
+
+Use this notes recovery contract:
+
+```text
+authoritative working copy: Joplin clients
+sync transport: Nextcloud WebDAV with a dedicated app credential
+server protection: application-consistent Nextcloud backup
+portable recovery copy: scheduled JEX export protected by backup encryption
+historical migration copy: immutable OneNote export plus selected PDFs
+off-site protection: encrypted-at-rest JEX and original OneNote export
+```
+
+The Joplin sync directory is application-managed and must not be reorganized by
+hand. Export every OneNote notebook before migration, hash the untouched export,
+import one difficult representative notebook, verify hierarchy/links/tables/
+attachments/drawings/search/mobile offline behavior, enable Joplin end-to-end
+encryption from one device, and run OneNote read-only in parallel for about 30
+days. Retire the Microsoft copy only after a JEX restore succeeds in a clean
+profile and both local-separate and encrypted off-site copies of the original
+export are verified.
+
+Paperless-ngx has a split recovery unit:
+
+```text
+/srv/appdata/paperless    database, configuration, index, and queue state
+/tank/personal/paperless  originals, archived documents, and versioned exports
+```
+
+A database without the originals and originals without the metadata are partial
+recoveries. Pause ingestion, run the supported document exporter, protect the
+export with the selected backup engine, and prove import into a clean,
+version-matched instance before admitting real tax, medical, insurance,
+employment, contract, receipt, or warranty records.
 
 CasaOS may later be evaluated as a convenience launcher over noncritical test
 services. It is not the canonical deployment, backup system, secrets manager,
@@ -603,6 +859,13 @@ Initial boards:
   work. Never put passwords, recovery keys, personal file contents, or raw
   sensitive logs on a board.
 
+For the added applications, boards may show Joplin sync/export freshness,
+Paperless ingestion failures and backup age, Actual service/backup health,
+Linkwarden capture failures, and per-application storage use. They must not
+show note titles, document names, financial balances, account/merchant/
+transaction details, recipe contents, inventory descriptions, bookmarks,
+search text, or document thumbnails.
+
 The gateway is read-only first. It publishes typed, redacted health facts and
 accepts no arbitrary command, shell string, Docker argument, SQL, path, or URL.
 Later actions must be named, schema-validated, allowlisted workflows with a
@@ -630,15 +893,21 @@ This keeps the dashboard replaceable: CasaOS can coexist as an optional human
 launcher, while Compose, storage, backups, policy, and the gateway remain the
 source of truth in `life-center-infra`.
 
-Home services should be introduced in this order: host/storage/network/backup
-foundation; Nextcloud with dummy data; Immich with duplicate test photos;
-Jellyfin/books; AdGuard with fallback DNS; isolated Home Assistant OS;
-read-only Command Center boards; password manager last. Prefer the official
-Bitwarden service (including Bitwarden Lite for a supported lightweight option)
-or keep Bitwarden cloud until self-host recovery is mature. Vaultwarden is an
-optional community implementation, not the highest-assurance default: Bitwarden
-does not guarantee official-client compatibility with non-official servers.
-Each phase requires a working restore or recovery procedure before advancing.
+Home services should be introduced in this order: host/storage/network plus one
+selected backup engine; Nextcloud with dummy data; the Joplin migration pilot;
+Immich with duplicate test photos; Paperless with dummy records; one task
+system; Linkwarden/FreshRSS/Mealie/Homebox/Stirling-PDF as individually admitted
+optional services; Jellyfin/books; AdGuard with fallback DNS; isolated Home
+Assistant OS; Actual Budget after the sensitive-data gate; read-only Command
+Center boards; password manager last. Nextcloud Office/Collabora is deferred
+until browser collaboration justifies its operating cost.
+
+Prefer the official Bitwarden service (including Bitwarden Lite for a supported
+lightweight option) or keep Bitwarden cloud until self-host recovery is mature.
+Vaultwarden is an optional community implementation, not the highest-assurance
+default: Bitwarden does not guarantee official-client compatibility with
+non-official servers. Each phase requires a working restore or recovery
+procedure before advancing.
 
 ### Remote and fallback experience
 
@@ -677,6 +946,328 @@ full cockpit but does not remove personal services or basic visibility.
 - The laptop going offline must degrade optional capacity, not break a route or
   household service.
 
+## Consent-first video acquisition and partner outreach
+
+The initial offer is a performance-analysis pilot. Model-improvement use is a
+separate opt-in, not an implied payment or vague data trade. Teams and
+participants never receive direct Life Center access; they receive an approved
+export through an authenticated cloud portal or encrypted time-limited
+delivery. The portal exposes only that partner's authorized sessions,
+participants, clips, reports, data exports, limitations, and deletion/export
+request path.
+
+Record four separate permissions:
+
+| Tier | Permission | Default |
+| --- | --- | --- |
+| A | Capture and analyze for the partner | Required |
+| B | Use pseudonymous data for model improvement | Optional/off |
+| C | Research or publication | Off |
+| D | Public demo, marketing, or social media | Off |
+
+Only admit a crowded drill to training when every visible participant has Tier
+B permission. Otherwise it remains analysis-only. Agreements must state raw
+retention, deletion handling, whether approved derived labels may persist, and
+how trained weights are treated after source deletion. Do not promise model
+unlearning until it exists and has been validated.
+
+Start outreach from Sanford/Central Florida in this order:
+
+| Stage | Prospect | Entry condition and contact route |
+| --- | --- | --- |
+| 1 | Adult church/recreation leagues, private trainers, open adult gyms, former college/pro players, adult clubs | Direct adult consent; closed controlled drills; use the four-camera portable kit only after local MC0–MC7 proof |
+| 2 | Private skills/performance facilities and academies | Adult proof package, facility survey, equipment footprint, security/retention summary, insurance information |
+| 3 | AAU/travel programs | Organization director, coach, facility manager, parent liaison, and legal/insurance contact; one consented practice group |
+| 4 | High schools | Athletic director, district privacy/legal/technology, administration, coach, parent coordinator, and facilities; written institutional approval |
+| 5 | Colleges | Basketball operations/video/performance staff plus compliance, legal/privacy, information security, and research/IRB as applicable |
+
+Run three to five adult pilots before involving minors. Youth/institutional work
+requires Florida counsel and the institution's privacy/legal review; this is an
+operating plan, not legal advice. Photos/videos directly related to a student
+may be education records under
+[FERPA guidance](https://studentprivacy.ed.gov/faq/faqs-photos-and-videos-under-ferpa),
+and the FTC treats a child's image or voice as personal information in covered
+[COPPA](https://www.ftc.gov/business-guidance/resources/complying-coppa-frequently-asked-questions)
+contexts. Never contact minors directly. Require guardian consent and athlete
+assent, a coach/guardian present, a two-adult crew, pseudonymous IDs with the
+identity map stored separately, closed drills without spectators/opponents,
+background/child-safety requirements, insurance/COI, and an implemented
+deletion/incident process. Disable and strip audio by default; any exception
+requires written authorization and Florida legal review.
+
+Use this acquisition funnel:
+
+```text
+prospect
+  -> initial contact
+  -> discovery call
+  -> facility/camera/safety survey
+  -> privacy + legal + insurance review
+  -> approved pilot and participant consent
+  -> capture scheduled
+  -> media validated and permission-classified
+  -> analysis delivered
+  -> partner feedback
+  -> training-use audit
+  -> renew, close, export, or delete
+```
+
+The board record needs organization/program type, adult/youth status, primary/
+legal/privacy contacts, facility and mount options, insurance requirements,
+audio policy, participant count, permission tiers, raw-retention and deletion
+dates, training/publicity flags, delivery due date, and current status. Agents
+may draft outreach and summarize requirements; they may not approve consent,
+alter rights/retention, publish footage, or admit a session to training.
+
+The initial pilot offer is a no-cost 60–90 minute closed adult drill with four
+cameras, a two-person crew, audio off, no public posting, separate training
+opt-in, and delivery in 7–14 days. Provide a camera/quality report, approved
+annotated clips, only those metrics that pass that session's validation,
+confidence/missing-data indicators, methodology/limitations, secure exports,
+and the retention/deletion statement. Do not initially promise injury or
+medical predictions, fully solved 3D biomechanics, automated recruiting
+grades, perfect identity, or guaranteed improvement.
+
+Starter outreach:
+
+> **Subject: No-cost multi-camera basketball analysis pilot**
+>
+> I am building a privacy-first basketball computer-vision system for
+> controlled practice footage and am looking for a small number of local adult
+> teams or trainers for a no-cost pilot. We would place four protected cameras
+> outside the playing area, record an approved 60–90 minute closed drill, and
+> return annotated clips, a quality report, and only the performance metrics
+> that pass our validation checks. Audio is disabled, footage is not posted
+> publicly, and model-improvement use is a separate optional permission. I can
+> provide the equipment footprint, insurance information, security and
+> retention summary, consent forms, and a sample deliverable before scheduling.
+
+Before sending outreach, assemble a one-page offer, equipment/coverage diagram,
+sample report made from self/consenting-adult footage, privacy/retention
+summary, consent forms reviewed for the intended adult pilot, insurance/COI
+facts, and available dates. The first outreach KPI is not raw response volume:
+it is three to five safely completed adult sessions with measured setup time,
+media failure rate, captured bytes, delivery time, deletion completion, coach
+usefulness, and explicit permission outcomes.
+
+### Evidence-gated budget (2026-07-13 retail snapshot)
+
+Do not spend $20,000–$35,000 before contacting anyone. The sensible first
+authorization is about **$7,500, with a hard ceiling of $10,000**, to build and
+prove the portable phone-based kit and complete the first three adult pilots
+using three existing phones, the existing RTX desktop/laptop, and the
+already-built CV pipeline. Spend that money on capture reliability, venue
+access, safety, insurance, and agreements — not another software platform. The
+phone-first system plus a separate professional truth camera remains the
+correct architecture; the fixed/full-court tiers below are future purchases,
+not outreach prerequisites.
+
+| Program level | What it gets | Expected investment |
+| --- | --- | ---: |
+| Local technical proof | three existing phones, mounts, storage, power, calibration, safety gear, court tests | $2,500–$6,500 |
+| Adult-partner pilot ready | four-camera portable kit, basic business/legal/insurance readiness, three pilots | $5,000–$12,500 |
+| Portable professional system | above plus an FX30-class truth camera and large ingest storage | $9,000–$20,000 |
+| Youth/institution ready | dedicated sanitized devices, stronger insurance, counsel-reviewed agreements, background/venue requirements | $14,000–$32,000 |
+| Fixed five-camera half-court lab | four synchronized coverage cameras, one truth camera, lenses, install, genlock/control | $18,000–$35,000 (lab only) |
+| Combined mobile program + fixed lab | portable kit, fixed lab, business/compliance readiness | $30,000–$60,000 |
+| Six-to-eight-camera full court | permanent install, processing/storage expansion | $45,000–$100,000 |
+| Industrial global-shutter research lab | precision hardware trigger/PTP, dedicated capture server, specialist optics | $75,000–$150,000+ |
+
+Recommended first-$7,500 allocation:
+
+| First-wave item | Target allocation |
+| --- | ---: |
+| Three complete existing-phone rigs | $1,200–$2,000 |
+| External SSDs, power, and cables | $700–$1,100 |
+| Calibration boards, sync light, and measurement tools | $350–$750 |
+| Sandbags, safety cables, cable ramps, and cases | $500–$900 |
+| Court rentals and test-session expenses | $600–$1,000 |
+| Initial insurance, agreements, and business reserve | $1,500–$2,500 |
+| Assistant, mileage, and consumables | $400–$900 |
+| Contingency | $500–$900 |
+
+Price anchors: Seminole State's Raider Center court is
+[$100/hour with a four-hour minimum](https://s3.us-east-2.amazonaws.com/sidearm.nextgen.sites/seminolestateraiders.com/documents/2024/6/25/Facility_Use_Fees_2024-26.pdf),
+so a first validation booking costs about $400 and the minimum can span
+multiple dates. A [Sony FX30 body](https://www.bhphotovideo.com/c/product/1729317-REG/sony_ilme_fx30b_fx30_digital_cinema_camera.html)
+lists at $2,098 (UHD 4K up to 120 fps); a complete truth-camera rig with lens,
+media, power, cage, support, and tripod runs about $3,600–$4,900. A
+[Blackmagic Micro Studio Camera 4K G2](https://www.blackmagicdesign.com/products/blackmagicmicrostudiocamera)
+is $1,179 (2160p60, genlock via SDI); four bodies are $4,716 before lenses,
+cabling, mounts, media, monitoring, genlock distribution, or install.
+
+Per-pilot cash cost at a rented venue: $200–$400 court, $100–$250 one
+assistant, $50–$150 mileage/food/consumables, $0–$100 temporary storage —
+**$350–$900 cash per test plus about 8–20 hours of analysis/delivery time**.
+Once a partner supplies its own gym, direct cash cost falls to about
+$200–$700/session. The first three adult pilots may be free to the partner but
+are not free to run — budget $1,000–$2,500 for the full three-pilot sequence.
+These figures are a snapshot; re-verify seller, price, and availability before
+committing spend.
+
+### Outreach sequence and contacts (Central Florida, Sanford-anchored)
+
+**Stage 0 — prove the equipment before approaching a team.** Seminole State
+College Raider Center (H Building/Parking Lot 3, Sanford/Lake Mary campus) is
+the court and adult-recreation validation partner, not a varsity target —
+its current athletics listing does not show varsity basketball.
+Facility contact: Kurt Esser, [esserk@seminolestate.edu](mailto:esserk@seminolestate.edu).
+Recreation contact: Geoff Nelson, Coordinator of Intramural and Recreational
+Sports, 407-708-2926. Request the four-hour minimum split across two dates: a
+two-hour empty-court calibration session and a two-hour adult-volunteer
+movement session — never a full game first. Run, in order: empty-court
+geometry/lighting; a three-phone 60–90 minute continuous recording; a
+start/middle/end sync-light test; intrinsic/extrinsic calibration; a
+one-person court walk; five-position shooting; a two-person screen-and-drive;
+a four-to-six-adult occlusion test; and a full ingest → processing → report →
+restore rehearsal. Do not contact teams until: zero corrupted recordings,
+stable 60–90 minute operation, repeatable sync/calibration, safe camera
+placement, a sample annotated report, a verified delete/restore workflow, and
+a one-page description of what the metrics can and cannot claim.
+
+**Stage 1 — adult, low-complexity pilots.** Send only these three initial
+approaches, not a mass cold-email blast:
+
+| Prospect | Contact | Ask |
+| --- | --- | --- |
+| Seminole State intramural/recreation | Geoff Nelson, 407-708-2926 | one closed 60–90 min pilot with consenting adult students/staff/recreation participants, after Raider Center tests pass |
+| Rollins College intramural/club sports | Nate Arrowsmith (Director), 407-691-1275; then Clay Starrett (Assoc. AD Operations) 407-691-1735 and Margie Sullivan (Assoc. AD Compliance) 407-646-2531 once interest exists | adult recreational participants, low-stakes controlled drill — not the varsity head coach first |
+| Orlando Club Sport | [info@orlandoclubsport.com](mailto:info@orlandoclubsport.com), 877-820-2582 ext. 8 | introduction to adult captains/prospective players for one closed demo; men's 5-on-5 league was listed "coming soon," so confirm an active season exists first |
+
+Church leagues enter through a warm referral, not a cold approach: ask every
+adult pilot organizer to introduce one adult church, recreational, or
+community team. The first church-league pilot should come through a known
+captain, coach, or recreation director.
+
+Offer per adult pilot: 60–90 min closed practice, four camera positions, audio
+disabled, no livestream, no public posting, private annotated clips, a
+session-quality report, only validated metrics, a separate opt-in for
+model-improvement use, and raw-footage deletion after the agreed period. The
+service agreement and the model-training permission must stay separate
+documents/checkboxes.
+
+**Stage 2 — private training facilities and academies** (only after three
+adult pilots succeed).
+
+- DME Academy, 2441 Bellevue Avenue, Daytona Beach, FL 32114, 386-271-2865
+  (route through the site's virtual-meeting contact form, ask for basketball
+  operations or performance technology). 47,000+ sq ft fieldhouse with two
+  full NBA courts, five youth courts, and a performance center; Dan Panaggio
+  heads basketball operations, Matt Panaggio directs High School Basketball.
+  First ask is a coaches-only demo, an adult-staff/post-grad pilot, an
+  empty-court calibration demo, or a technical review of the adult-pilot
+  deliverable — not youth-team access.
+- Lake Mary Preparatory School, 650 Rantoul Lane, Lake Mary, FL 32746,
+  407-805-0095, [info@lakemaryprep.com](mailto:info@lakemaryprep.com). 24
+  sports teams including boys'/girls' basketball. Involves minors — contact
+  school administration/athletics, not an individual coach or athlete.
+  Request an administrative discovery meeting first, then (only after
+  approval) a six-to-eight-athlete closed drill with school-controlled
+  parent/guardian communication, no game capture, no spectators, no public
+  deliverables, and separate analysis/model-improvement permissions.
+
+**Stage 3 — AAU/travel programs.** Enter through DME's Team Hosting program
+(custom dates, training and competitive play for ages 14–19) and ask DME to
+identify one visiting team for a closed-practice pilot: one team, one closed
+practice, no tournament recording, no opponents/spectators, all permissions
+complete before arrival, training use limited to drills where every visible
+participant opted in, and a team report delivered before requesting another
+session. Lake Mary Prep's athletics/booster network is the second AAU
+introduction path — warm referrals over cold athlete outreach.
+
+**Stage 4 — public high schools** (Seminole County Public Schools), only
+after three adult pilots, one private-academy/institutional pilot,
+counsel-reviewed youth documents, general-liability insurance/COI capability,
+background-screening readiness, a written retention/deletion policy, a sample
+guardian communication, and a security/incident-response summary:
+
+| Priority | School | Main number |
+| ---: | --- | --- |
+| 1 | Seminole High School, 2701 Ridgewood Ave, Sanford | 407-320-5050 |
+| 2 | Lake Mary High School, 655 Longwood Lake Mary Rd, Lake Mary | 407-320-9550 |
+| 3 | Lyman High School, 865 S. Ronald Reagan Blvd, Longwood | 407-746-2050 |
+| 4 | Hagerty High School, 3225 Lockwood Blvd, Oviedo | 407-871-0750 |
+
+Process: call the main office and ask for the athletic director; send the
+one-page pilot brief; let the school route privacy/legal/technology/risk
+review; complete SCPS's vendor process (application, W-9, certificate of
+liability insurance) only after the school or district requests it — SCPS
+rejects unsolicited vendor applications without pending business. Ask for
+off-season/preseason, one closed skill-development session, eight or fewer
+approved athletes, no game footage, no spectators, no facial recognition, no
+injury/medical predictions, school-controlled parent communication, and
+institution-approved storage/deletion.
+
+**Stage 5 — colleges**, approached last and in this order:
+
+1. Stetson University (143 E. Pennsylvania Ave, DeLand, FL 32720; athletics
+   386-822-8100). Start with Jon Hansen (Assistant AD Sponsorship & Community
+   Outreach, 386-822-6698) or Jacob Gowan (Director of Broadcasting & Video
+   Services) or Jack Hudson (Director of Facilities and Operations); bring in
+   Brian Maxey (Assoc. AD Compliance, 386-822-7490) once interest exists.
+   Do not start with the head basketball coach. Offer a technical demo using
+   adult staff/graduate assistants, four-camera capture, one drill, a private
+   report — no recruiting or public claims, institution owns final athlete-access
+   decisions.
+2. Rollins College — reuse the Stage 1 contacts (Arrowsmith → Starrett →
+   Sullivan) before approaching varsity basketball.
+3. UCF — Jeff Chapman (Director of Men's Basketball Operations,
+   [jchapman@athletics.ucf.edu](mailto:jchapman@athletics.ucf.edu)) or Tyler
+   Kriminger (Video Coordinator) or Charles Stephenson (Director of Sports
+   Performance for Men's Basketball,
+   [cstephenson@athletics.ucf.edu](mailto:cstephenson@athletics.ucf.edu)); bring
+   in Brittney Anderson-Duzan (senior athletics compliance,
+   [banduzan@athletics.ucf.edu](mailto:banduzan@athletics.ucf.edu)) once there
+   is operational interest. UCF also has a formal Community Outreach path.
+   Approach UCF last, with validated adult pilots and a sample report already
+   in hand.
+
+### Outreach package (assemble before Stage 1 sends)
+
+1. One-page pilot brief: what the system does, four-camera footprint,
+   setup/teardown time, what the partner receives, what is not claimed,
+   audio-off policy, no-public-posting default, retention period, contact info.
+2. Two-page privacy/data summary separating four permissions: capture and
+   analyze; pseudonymous model-improvement use; research publication; public
+   demo/marketing — the last three optional and off by default.
+3. Physical setup diagram: four tripod locations, heights, safety boundaries,
+   cable-free or ramped cable paths, no blocked exits, no equipment inside the
+   playable area.
+4. Sample deliverable built from adult validation footage: two annotated
+   clips, a quality/confidence report, one movement/shot-form summary, a
+   missing-data/limitations section, a data dictionary, a deletion date.
+5. Operational proof: equipment checklist, calibration status, backup/restore
+   test date, encryption statement, incident contact, certificate of insurance
+   when available.
+
+### First 30 days
+
+- **Days 1–3:** email Kurt Esser about Raider Center rental; call Geoff Nelson
+  to confirm the initial request is adult-only technical validation; set the
+  project budget cap at $7,500; inventory existing phones/storage/tripods/
+  power; buy only the missing three-camera validation equipment.
+- **Days 4–10:** run continuous 90-minute recordings at home/outdoors; measure
+  heat and dropped frames; test storage cables; test synchronized start and
+  visual strobe; generate camera IDs/fixed presets; process a dummy capture
+  through the existing pipeline end to end.
+- **Days 11–17:** Raider Center session one (empty court) — lighting/flicker,
+  intrinsics, court coordinates, camera coverage, sync testing; no players
+  required.
+- **Days 18–23:** Raider Center session two — two to six consenting adults;
+  shooting, screens, drives, rebounds; a one-camera-failure test; end-to-end
+  ingest; restore test; sample partner report.
+- **Days 24–30:** send the adult pilot package in order — Seminole State
+  intramural/recreation, then Rollins intramural/club sports, then Orlando
+  Club Sport. Do not contact Lake Mary Prep, AAU teams, or SCPS during the
+  first 30 days unless they approach first; establish that equipment,
+  analysis, permissions, and delivery actually work before advancing stages.
+
+The single immediate next action is the Raider Center email to
+[esserk@seminolestate.edu](mailto:esserk@seminolestate.edu) requesting the
+four-hour minimum across two dates (one empty-court session, one
+adult-volunteer session) — that booking starts physical validation and
+produces the first sample report needed for every later outreach stage.
+
 ## Current, next, and deferred work
 
 ### Current operating posture
@@ -690,8 +1281,17 @@ full cockpit but does not remove personal services or basic visibility.
   the laptop.
 - The planned Life Center will archive selected website/project data while the
   public application remains at its cloud edge.
-- The existing cockpit will gain a narrow Life Center surface; CasaOS is
-  optional and non-authoritative.
+- The existing cockpit will gain a narrow Life Center surface; the one-command
+  mechanism is the `lc` bootstrap with Dockge as an optional pane, and CasaOS
+  stays optional and non-authoritative.
+- Joplin/Nextcloud, Paperless-ngx, Restic-or-Kopia selection, tasks, bookmarks,
+  and the other application candidates are planned but not yet authoritative.
+- Open Design is a dev-lane creative tool on the desktop/laptop; it is not an
+  appliance service, and only its `.od/` project files are backed up to the
+  Life Center.
+- Multi-camera partner capture is not yet admitted. Local work starts with
+  three existing phones and consenting adults/self-capture, then must pass
+  MC0–MC7 before the four-camera outreach pilot is scheduled.
 
 ### Next evidence to collect
 
@@ -709,6 +1309,13 @@ full cockpit but does not remove personal services or basic visibility.
   backup operating cost/downtime.
 - Physical: approve the upstairs-to-downstairs Cat6 route and verify that the
   Life Center's noise and heat are acceptable in the upstairs working office.
+- Applications: representative OneNote export/import inventory, Paperless
+  document classes, Deck-versus-Vikunja need, Restic-versus-Kopia restore
+  evidence, and per-service sensitivity/RPO/RTO/owner.
+- Capture: exact phone/device inventory, available storage and thermal behavior,
+  90-minute media integrity, sync drift, lens/intrinsic calibration, venue
+  coverage, measured bitrate/promotion rate, shuttle copy time, and sample
+  partner deliverable usefulness.
 
 ### Blocking unknowns before real personal data
 
@@ -718,30 +1325,37 @@ These are deployment gates, not optional polish:
 2. approved CV/video/model retention and promotion policy;
 3. exact serviceable tower, drive bays/controller/cooling, and Linux support;
 4. inter-floor Cat6 route plus UDR7 VLAN/firewall/rollback commissioning tests;
-5. separate local backup hardware plus selected/costed off-site destination;
+5. selected backup engine, separate local backup hardware, and a selected/
+   costed off-site destination;
 6. per-service RPO, RTO, data owner, and acceptable outage;
 7. implemented encrypted-secrets workflow and offline key recovery;
 8. UPS sizing and tested clean shutdown/restart;
 9. status gateway schemas, identity, redaction, and threat-test plan;
-10. tool-by-tool agent permissions plus allow/deny tests; and
-11. a complete dummy-data backup and restoration with evidence.
+10. tool-by-tool agent permissions plus allow/deny tests;
+11. a complete dummy-data backup and restoration with evidence; and
+12. before partner video: MC0–MC7 local evidence, approved adult consent/
+    retention/deletion materials, insurance/COI facts, and a facility-safe
+    capture plan.
 
 ### Ordered implementation
 
 | Gate | Work | Exit condition |
 | --- | --- | --- |
-| 0 — inventory/purchase | desktop baseline, daily growth task, Spectrum 600 Mb/s tier/router topology, two-office layout, recovery targets, and price procedure are captured in `LIFE_CENTER_GATE0.md`; finish cable/noise acceptance, 30-day growth, exact value-tier component SKUs, and purchase-day validation | three-year forecast and bill of materials approved; current default is an upstairs serviceable four-bay Intel-iGPU value-tier tower + `2 x 12 TB` CMR + 16 TB-class separate backup + BR1000MS + one UDR7 + direct Cat6 to downstairs desktop |
-| 1 — repository | create private `life-center-infra` with typed host/service/storage contracts, Compose, Tailscale/firewall policy, secret references, backup classes, risk tiers, tests, and runbooks | configuration validates with no real secrets or personal data |
-| 2 — foundation | install Debian, storage, Tailscale, firewall, Docker, SMART/scrub monitoring, UPS, backup tooling, encrypted secrets, and digest-pinned test images | security G0–G2 pass; reboot plus dummy backup/restore proven |
-| 3 — applications | pilot Nextcloud dummy files, Immich duplicate photos, Jellyfin, Audiobookshelf/Calibre-Web, AdGuard on one test client, then HA OS VM | each service passes its applicable hardening, backup, restore, upgrade, and rollback checks before the next critical admission |
-| 4 — archives | add read-only cloud exports, staging validation, versioned manifests, quotas, retention, and restore verification | site/CV/model dummy archive restores and integrity checks pass |
-| 5 — read-only experience | add boards, native-app deep links, redacted gateway, status MCP, alerts, and fallback page | security G5 plus schema/redaction/deny tests pass |
+| 0 — inventory/purchase | desktop baseline, daily growth task, Spectrum 600 Mb/s tier/router topology, two-office layout, recovery targets, backup-engine comparison, and price procedure are captured in `LIFE_CENTER_GATE0.md`; finish cable/noise acceptance, 30-day growth, exact value-tier component SKUs, and purchase-day validation | three-year forecast, Restic-or-Kopia decision, and bill of materials approved; current default is an upstairs serviceable four-bay Intel-iGPU value-tier tower + `2 x 12 TB` CMR + 16 TB-class separate backup + BR1000MS + one UDR7 + direct Cat6 to downstairs desktop |
+| 1 — repository | extract the `life-center-infra` seed into a private repo with typed host/service/storage contracts, the `lc` bootstrap, per-tier Compose profiles, Tailscale/firewall policy, secret references, backup classes, risk tiers, tests, and runbooks | `lc doctor` and `docker compose config` pass on every profile; configuration validates with no real secrets or personal data |
+| 2 — foundation | `lc first-boot`/`lc up --profile foundation` installs Debian, storage, Tailscale, firewall, Docker, SMART/scrub monitoring, UPS, backup tooling, encrypted secrets, and digest-pinned test images | security G0–G2 pass; reboot plus dummy backup/restore proven |
+| 3 — applications | admit tiers one at a time with `lc up --profile <tier>`: Nextcloud dummy files and Joplin migration/restore; then Immich, Paperless, one task system, Linkwarden and optional lifestyle tools; then Jellyfin/books, AdGuard, HA OS, and Actual after its sensitive-data gate. Open Design is a dev-lane bring-up on the desktop/laptop, not an appliance profile | each service passes its applicable hardening, backup, restore, export, upgrade, and rollback checks before the next critical admission |
+| 4 — archives | add read-only cloud exports, staging validation, versioned manifests, quotas, permission-aware retention, and restore verification | site/CV/model dummy archive restores and integrity checks pass |
+| 4A — local camera proof | use three existing phones and consenting adult/self-capture; run MC0–MC7, one-camera failure, two-copy ingest, desktop processing, Life Center dummy promotion, restore, and delivery rebuild | acceptance report passes without partner footage; actual bitrate, setup time, sync/calibration quality, processing time, and deletion are measured |
+| 4B — adult partner pilots | add the fourth rig only after 4A; assemble offer/consent/insurance/security package and complete three to five closed adult sessions | every session is permission-classified, delivered, retained/deleted on time, restored where sampled, and reviewed for partner usefulness before youth or fixed-lab work |
+| 5 — read-only experience | add boards, native-app deep links, redacted gateway, status MCP, alerts, and fallback page; optionally add Dockge as a non-authoritative Compose pane | security G5 plus schema/redaction/deny tests pass |
 | 6 — controlled maintenance | admit one fixed diagnostic/check/restart action at a time | security G6 passes per action; no generic action surface exists |
 | 7 — password manager | keep Bitwarden Cloud through earlier stabilization; evaluate official Bitwarden Lite | complete offline recovery and client-access test passes before migration |
 
-Hardware is provisionally selected but not purchased, no `life-center-infra`
-repository exists, and no gate above should be described as implemented merely
-because its design is documented here.
+Hardware is provisionally selected but not purchased, no private
+`life-center-infra` repository exists yet (only an in-tree design **seed**
+awaiting extraction), and no gate above should be described as implemented
+merely because its design is documented here.
 
 ### Deferred until evidence exists
 
@@ -754,7 +1368,17 @@ because its design is documented here.
   and same-day seller/warranty/price validation are complete;
 - any self-hosted password-vault migration;
 - CasaOS installation, unless a disposable noncritical evaluation has a written
-  purpose and exit criterion;
+  purpose and exit criterion; Dockge is the preferred optional pane because it
+  keeps the Compose files transparent, but it too remains non-authoritative;
+- extracting the `life-center-infra` seed into its private repository and any
+  live `lc` bring-up on a real host, until Gate 0/1 exits pass;
+- a fixed four-camera coverage array, FX30-class truth rig, full-court expansion,
+  global-shutter/industrial purchase, permanent venue mounts, automatic raw
+  cloud upload, or 10 GbE until the preceding measured gate justifies it;
+- youth, school, college, spectator, opponent, or game capture until counsel/
+  institution, guardian/assent, insurance, safety, deletion, and incident gates
+  pass;
+- any partner or public access to the private Life Center;
 - any automatic administrative action from the cockpit.
 
 ## Acceptance criteria for the final topology
@@ -773,12 +1397,28 @@ The architecture is complete only when:
   make the residential host a public production dependency;
 - the 70% capacity alert, 80% expansion/eviction trigger, per-dataset budgets,
   and retention jobs prevent CV scratch from crowding out irreplaceable data;
+- one selected backup engine restores each admitted application's complete
+  recovery unit, including Joplin portable export and Paperless metadata plus
+  originals;
+- each application category has one declared authority, a portable export, and
+  a clean restore/upgrade/rollback result before real sensitive data is admitted;
+- the three-phone local kit passes MC0–MC7 before outreach, and every partner
+  session has camera/media integrity, physical safety, consent, purpose,
+  retention/deletion, and delivery evidence;
+- camera originals flow through two-copy verified field ingest, bounded desktop
+  processing, and permission-aware Life Center promotion without making the
+  starter mirror an unlimited raw archive;
+- partner access is export-only and never exposes the Life Center, while
+  training, research, publicity, and youth capture remain separately gated;
 - DNS and Home Assistant have documented recovery paths;
 - desktop cockpit loss leaves Life Center services and read-only fallback status
   available;
 - no model or Command Center path has blanket household-admin authority;
 - every Life Center dashboard action is allowlisted, typed, audited, and subject
   to the security baseline's risk/approval policy;
+- every admitted service is brought up reproducibly and idempotently by the `lc`
+  bootstrap from version-controlled Compose, and any launcher (Dockge or CasaOS)
+  remains a non-authoritative pane over that source of truth;
 - the laptop remains responsive and presentation-ready for interviews and live
   demonstrations.
 

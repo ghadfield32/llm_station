@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "services" / "agent_kanban_ui" / "app.py"
+APP_TSX = ROOT / "services" / "agent_kanban_ui" / "web" / "src" / "App.tsx"
 
 
 def _load(monkeypatch, *, enabled=True, fake=False):
@@ -34,7 +35,9 @@ def _load(monkeypatch, *, enabled=True, fake=False):
 def test_disabled_returns_503_everywhere(monkeypatch):
     _mod, client = _load(monkeypatch, enabled=False)
     for path in ("/api/model-usage", "/api/model-limits", "/api/model-alerts",
-                 "/api/model-usage/collector-health"):
+                 "/api/model-usage/collector-health",
+                 "/api/model-usage/recent-activity?runtime_id=codex_agent",
+                 "/api/model-usage/portfolio"):
         r = client.get(path)
         assert r.status_code == 503, path
     assert client.post("/api/model-usage/refresh").status_code == 503
@@ -175,3 +178,117 @@ def test_top_drivers_bad_dimension_is_400(monkeypatch):
     bad = client.get("/api/model-usage/top-drivers",
                      params={"runtime_id": "fake_runtime", "dimension": "bogus"})
     assert bad.status_code == 400
+
+
+def test_recent_activity_route_returns_sanitized_kpis(monkeypatch):
+    _mod, client = _load(monkeypatch, enabled=True, fake=True)
+    client.post("/api/model-usage/refresh")
+    response = client.get(
+        "/api/model-usage/recent-activity",
+        params={"runtime_id": "fake_runtime"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runtime_id"] == "fake_runtime"
+    assert body["window"]["id"] == "week"
+    assert body["kpis"]["average_tokens_per_call"] == 1000.0
+    assert body["rows"][0]["purpose"] == "Agent session"
+
+
+def test_usage_routes_reject_unknown_windows(monkeypatch):
+    _mod, client = _load(monkeypatch, enabled=True, fake=True)
+    for path in (
+        "/api/model-usage",
+        "/api/model-usage/portfolio",
+        "/api/model-usage/recent-activity?runtime_id=fake_runtime",
+    ):
+        separator = "&" if "?" in path else "?"
+        response = client.get(path + separator + "window=quarter")
+        assert response.status_code == 400, path
+
+
+def test_jsonl_usage_rows_degrade_when_time_window_cannot_be_proven(
+        monkeypatch, tmp_path):
+    mod, _client = _load(monkeypatch, enabled=True)
+    ledger = tmp_path / "usage.jsonl"
+    ledger.write_text(
+        '{"model_id":"missing-time"}\n'
+        '{"model_id":"valid","ts":"2026-07-16T10:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    rows, source = mod._jsonl_usage_rows(
+        ledger, source_id="test", label="Test ledger",
+        after_iso="2026-07-15T00:00:00+00:00",
+    )
+    assert [row["model_id"] for row in rows] == ["valid"]
+    assert source["state"] == "degraded"
+    assert "excluded 1 rows without a valid timestamp" in source["detail"]
+
+
+def test_portfolio_combines_local_openrouter_and_local_frontier_usage(
+        monkeypatch, tmp_path):
+    mod, client = _load(monkeypatch, enabled=True)
+    monkeypatch.setattr(mod, "CONFIGS_DIR", ROOT / "configs")
+    monkeypatch.setattr(mod, "_litellm_usage_rows", lambda _after=None: ([
+        {"model": "ollama_chat/qwen3:30b", "model_group": "chat",
+         "prompt_tokens": 11, "completion_tokens": 4, "total_tokens": 15,
+         "request_duration_ms": 250, "status": "success",
+         "startTime": "2026-07-16T10:00:00Z"},
+    ], {"source_id": "litellm", "label": "Local model gateway",
+        "state": "ok", "row_count": 1, "detail": "Loaded 1 retained call"}))
+
+    frontier = tmp_path / "frontier.jsonl"
+    frontier.write_text(
+        '{"ts":"2026-07-10T10:00:00Z","provider":"openrouter",'
+        '"model_id":"glm-5.2","actual_input_tokens":7,'
+        '"actual_output_tokens":3,"actual_cost_usd":0.002}\n',
+        encoding="utf-8")
+    local_frontier = tmp_path / "local-frontier.jsonl"
+    local_frontier.write_text(
+        '{"ts":"2026-07-11T10:00:00Z","model_id":"glm-5.2-colibri",'
+        '"prompt_tokens":5,"completion_tokens":2,"elapsed_seconds":10}\n',
+        encoding="utf-8")
+    monkeypatch.setattr(mod, "FRONTIER_USAGE_LEDGER", frontier)
+    monkeypatch.setattr(mod, "LOCAL_FRONTIER_USAGE_LEDGER", local_frontier)
+
+    response = client.get("/api/model-usage/portfolio")
+    assert response.status_code == 200
+    body = response.json()
+    by_model = {row["model_id"]: row for row in body["models"]}
+    assert by_model["qwen3:30b"]["total_tokens"] == 15
+    assert by_model["glm-5.2"]["provider"] == "OpenRouter"
+    assert by_model["glm-5.2-colibri"]["provider"] == "Local frontier"
+    assert {source["state"] for source in body["sources"]} == {"ok"}
+
+
+def test_usage_frontend_distinguishes_loading_empty_and_error_states():
+    source = APP_TSX.read_text(encoding="utf-8")
+
+    assert "type AgentUsageDetailLoad =" in source
+    assert 'detailLoad.state === "loading"' in source
+    assert 'detailLoad.state === "error"' in source
+    assert 'detailLoad.state === "ready"' in source
+    assert "Recent usage unavailable: {detailLoad.error}" in source
+    assert "<RecentUsageList rows={detailLoad.detail.rows} />" in source
+    assert "detail?.rows ?? []" not in source
+
+
+def test_usage_frontend_exposes_truthful_live_filters_and_labels():
+    source = APP_TSX.read_text(encoding="utf-8")
+
+    for marker in (
+        "Reads live sources every 30 seconds",
+        "24 hours",
+        "7 days",
+        "30 days",
+        "All retained",
+        "Model, role, or purpose",
+        "Estimated OpenRouter cost",
+        "Model not recorded",
+        "Identified models active",
+        "Cached input share",
+        "hardware cost not measured",
+    ):
+        assert marker in source
+    assert "OpenRouter spend" not in source
+    assert "Cache utilization" not in source
+    assert "Healthy data sources" not in source

@@ -72,6 +72,29 @@ def test_capture_disabled_is_503(monkeypatch):
     assert client.get("/api/intake/inbox").status_code == 503
 
 
+def test_prepare_opens_stable_chat_without_creating_work(monkeypatch):
+    mod, client = _load(monkeypatch)
+    raw = "Keep every line\n\nincluding this one."
+    capture_id = client.post(
+        "/api/captures", json={"raw_content": raw}
+    ).json()["record"]["capture_id"]
+
+    first = client.post(f"/api/captures/{capture_id}/prepare")
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    first_view = client.get(f"/api/captures/{capture_id}").json()
+    repeated = client.post(f"/api/captures/{capture_id}/prepare").json()
+    second_view = client.get(f"/api/captures/{capture_id}").json()
+
+    assert repeated == first_body
+    assert first_body["conversation_id"] == f"capture:{capture_id}"
+    assert raw in first_body["chat_prompt"]
+    assert second_view["processing_status"] == "ready_to_route"
+    assert second_view["event_count"] == first_view["event_count"]
+    assert mod._workgraph_service is None
+    assert client.post("/api/captures/not-there/prepare").status_code == 404
+
+
 # --- frontend guardrail (source-level) -------------------------------------------
 
 APP_TSX = ROOT / "services" / "agent_kanban_ui" / "web" / "src" / "App.tsx"
@@ -85,4 +108,4 @@ def test_frontend_has_global_capture_and_inbox():
     assert '{ id: "inbox", label: "Inbox" }' in src  # Inbox nav item
     assert "createCaptureBatch(" in src             # bulk list support
     # capturing is framed as save-not-start (no silent work)
-    assert "Saved, not started" in src
+    assert "saved, not started" in src.lower()

@@ -1,0 +1,66 @@
+# Files tier — Nextcloud (files/sync + WebDAV transport for Joplin).
+# Admission gate: dummy-data sync and restore (see runbooks/app-admission.md).
+# Nextcloud is the files authority — NOT the records system and NOT a backup.
+#
+# nextcloud_html and nextcloud_db_data are NAMED volumes, not host bind mounts.
+# Nextcloud's first boot copies its full PHP application (tens of thousands of
+# small files) into /var/www/html, and Postgres needs reliable fsync semantics
+# for its data directory — both are slow/unsafe over a host bind mount (severely
+# so on Docker Desktop for Windows, where every file op crosses the WSL2/Windows
+# filesystem boundary). Only the user's actual files (LC_DATA/personal) are a
+# host bind mount, so they stay visible/recoverable outside the container.
+
+networks:
+  lc_core:
+    name: lc_core
+
+volumes:
+  nextcloud_html:
+  nextcloud_db_data:
+
+services:
+  nextcloud-db:
+    image: postgres:16.4-alpine  # pin: @sha256 before real data
+    container_name: lc-nextcloud-db
+    restart: unless-stopped
+    networks: [lc_core]
+    environment:
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=nextcloud
+      - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD:?set NEXTCLOUD_DB_PASSWORD in .env}
+    volumes:
+      - nextcloud_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nextcloud"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  nextcloud:
+    image: nextcloud:30-apache  # pin: @sha256 before real data
+    container_name: lc-nextcloud
+    restart: unless-stopped
+    networks: [lc_core]
+    depends_on:
+      nextcloud-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${NEXTCLOUD_PORT:-8085}:80"
+    environment:
+      - POSTGRES_HOST=nextcloud-db
+      - POSTGRES_DB=nextcloud
+      - POSTGRES_USER=nextcloud
+      - POSTGRES_PASSWORD=${NEXTCLOUD_DB_PASSWORD:?set NEXTCLOUD_DB_PASSWORD in .env}
+      - NEXTCLOUD_ADMIN_USER=admin
+      - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD:?set NEXTCLOUD_ADMIN_PASSWORD in .env}
+      # Tailnet-only; add your MagicDNS name here when serving:
+      - NEXTCLOUD_TRUSTED_DOMAINS=127.0.0.1
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - nextcloud_html:/var/www/html
+      - ${LC_DATA:-./testdata/data}/personal:/var/www/html/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/status.php || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

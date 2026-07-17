@@ -249,6 +249,7 @@ def test_story_lists_moments_in_linear_order(client, monkeypatch):
     tc.post("/api/domain/job_application/card/job-review-me/packet/request-changes",
             json={"notes": "tighten the summary"})
     body = tc.get("/api/domain/job_application/card/job-review-me/packet").json()
+    assert "story" in body, body
     story = body["story"]
     assert story, "story must not be empty after a review round"
     kinds = [s["kind"] for s in story]
@@ -279,21 +280,28 @@ def test_settings_menu_answers_categories_and_dag(client, monkeypatch):
 
     # standing answer: creating a new topic requires question text
     resp = tc.put("/api/job-search/profile-controls/standing-answer",
-                  json={"topic": "background_check", "answer": "Yes"})
+                  json={"topic": "salary_expectation", "answer": "$140k"})
     assert resp.status_code == 400
     resp = tc.put("/api/job-search/profile-controls/standing-answer",
-                  json={"topic": "background_check", "answer": "Yes",
-                        "question": "Willing to undergo a background check?",
-                        "covers": ["background check"]})
+                  json={"topic": "salary_expectation", "answer": "$140k",
+                        "question": "What is your salary expectation?",
+                        "covers": ["salary expectation"]})
     assert resp.status_code == 200, resp.json()
     rows = resp.json()["standing_answers"]["answers"]
-    assert rows[0]["covers"] == ["background check"]
+    assert rows[0]["covers"] == ["salary expectation"]
     # edit-in-place of the same topic keeps one entry
     tc.put("/api/job-search/profile-controls/standing-answer",
-           json={"topic": "background_check", "answer": "Yes, any time"})
+           json={"topic": "salary_expectation", "answer": "$145k"})
     body = tc.get("/api/job-search/profile-controls").json()
     assert [a["answer"] for a in body["standing_answers"]["answers"]] == [
-        "Yes, any time"]
+        "$145k"]
+    # protected topics never become reusable standing answers.
+    protected = tc.put(
+        "/api/job-search/profile-controls/standing-answer",
+        json={"topic": "background_check", "answer": "Yes",
+              "question": "Willing to undergo a background check?",
+              "covers": ["background check"]})
+    assert protected.status_code == 400
 
     # categories: create requires a known resume_variant, then remove works
     resp = tc.put("/api/job-search/profile-controls/category/quant_researcher",
@@ -311,6 +319,62 @@ def test_settings_menu_answers_categories_and_dag(client, monkeypatch):
     assert resp.status_code == 200
     body = tc.get("/api/job-search/profile-controls").json()
     assert "quant_researcher" not in {c["id"] for c in body["job_categories"]}
+
+
+def test_company_targets_and_retention_controls_reload_and_reject_unknowns(
+        client, monkeypatch):
+    mod, tc, tmp_path = client
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", True)
+    (tmp_path / "profile").mkdir(parents=True, exist_ok=True)
+
+    companies = {
+        "faang": ["Google", "Meta"],
+        "sports_teams_keywords": ["NBA", "MLB"],
+        "sports_tech_companies": ["Hudl"],
+        "major_other": ["Stripe"],
+    }
+    response = tc.put(
+        "/api/job-search/profile-controls/company-targets", json=companies)
+    assert response.status_code == 200, response.json()
+    assert response.json()["company_targets"] == companies
+
+    response = tc.put(
+        "/api/job-search/profile-controls/retention",
+        json={"rich_application_cache_days": 45})
+    assert response.status_code == 200, response.json()
+    assert response.json()["retention"]["rich_application_cache_days"] == 45
+
+    # A later GET re-validates from disk; the company update survives the
+    # retention read-modify-write and both values remain resolved.
+    controls = tc.get("/api/job-search/profile-controls").json()
+    assert controls["company_targets"] == companies
+    assert controls["retention"]["rich_application_cache_days"] == 45
+    assert tc.put(
+        "/api/job-search/profile-controls/retention",
+        json={"rich_application_cache_days": 30, "purge_rich_files": True},
+    ).status_code == 422
+    assert tc.put(
+        "/api/job-search/profile-controls/company-targets",
+        json={**companies, "unknown_bucket": []},
+    ).status_code == 422
+
+
+def test_job_chat_prompt_is_page_scoped_safe_and_provenance_complete(client):
+    _, tc, tmp_path = client
+    app_id = _prepared_card(tmp_path)
+    prompt = tc.get(
+        "/api/domain/job_application/card/job-review-me/progress"
+    ).json()["chat_prompt"]
+    assert "one currently visible portal page at a time" in prompt
+    assert "passwords, MFA codes" in prompt
+    assert "CAPTCHA responses" in prompt
+    assert "Stop before answering EEO" in prompt
+    assert "Never click" in prompt and "final submit" in prompt
+    assert "question library later" in prompt
+    assert "FULL CARD PROVENANCE" in prompt
+    assert "FULL APPLICATION PROVENANCE" in prompt
+    assert app_id in prompt
+    assert "Basketball AI Lab" in prompt
 
 
 def test_manual_action_detail_presents_answered_as_handled(client):

@@ -44,7 +44,6 @@ from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
 from ..store import SessionStoreProtocol
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_AUTONOMY_CONFIG = _REPO_ROOT / "configs" / "autonomy.yaml"
 _MODEL_PREFS_CONFIG = _REPO_ROOT / "configs" / "agent-session-models.yaml"
 
 _READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
@@ -88,20 +87,10 @@ def _claude_bin() -> str | None:
 
 
 def _resolve_repo_path(repo_id: str) -> Path:
-    from command_center.cli.repo_registry import load_autonomy_config, resolve_repo_local_path
-
-    if not _AUTONOMY_CONFIG.is_file():
-        raise RuntimeError(f"configs/autonomy.yaml not found at {_AUTONOMY_CONFIG}")
-    cfg = load_autonomy_config(_AUTONOMY_CONFIG)
-    manifest = next((m for m in cfg.repo_manifests if m.repo_id == repo_id), None)
-    if manifest is None:
-        raise RuntimeError(f"repo_id {repo_id!r} is not registered in configs/autonomy.yaml")
-    path = resolve_repo_local_path(manifest, _REPO_ROOT, dict(os.environ))
-    if path is None:
-        raise RuntimeError(
-            f"repo_id {repo_id!r} has no resolvable local_path_ref "
-            f"(got {manifest.local_path_ref!r})")
-    return path
+    """Delegate to the ONE shared context resolver (registered autonomy
+    manifests + the Home workspace special case)."""
+    from ..context_resolver import resolve_context_path
+    return resolve_context_path(repo_id)
 
 
 def _load_model_prefs() -> dict[str, Any]:
@@ -129,6 +118,19 @@ def _max_turns() -> int:
         return int(prefs.get("max_turns", _DEFAULT_MAX_TURNS))
     except (TypeError, ValueError):
         return _DEFAULT_MAX_TURNS
+
+
+# Surfaced in the probe detail -> cockpit assistant dropdown tooltip: this
+# lane carries the repo CLAUDE.md, which encodes the Claude<->Codex
+# AI-assistance protocol (see docs/engineering/
+# AI_ASSISTED_DEVELOPMENT_WORKFLOW.md). Sessions launch with cwd=repo, so the
+# CLI auto-loads that project context; the installed skill-codex plugin gives
+# DIRECT Claude Code sessions /codex handoffs, while cockpit sessions stay
+# read-only and hand off via the assistant switcher instead.
+_PROTOCOL_NOTE = (
+    "runs with the repo CLAUDE.md protocol — Claude plans/reviews, deep-code "
+    "work hands off to Codex (skill-codex plugin in direct sessions; the "
+    "assistant switcher here)")
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -236,6 +238,7 @@ class ClaudeCodeLocalHarness:
 
     async def probe(self) -> HarnessProbe:
         bin_path = _claude_bin()
+        # (see _PROTOCOL_NOTE below for the availability detail's second half)
         if bin_path is None:
             return HarnessProbe(
                 available=False,
@@ -263,7 +266,7 @@ class ClaudeCodeLocalHarness:
         return HarnessProbe(
             available=True,
             detail=f"authenticated via {method} ({sub}) — local Claude Code "
-                   f"subscription session, no API key")
+                   f"subscription session, no API key; {_PROTOCOL_NOTE}")
 
     def _build_args(self, bin_path: str, record: Any, prompt: str,
                     repo_path: Path) -> list[str]:
@@ -293,7 +296,12 @@ class ClaudeCodeLocalHarness:
         single seam the hermetic tests override — translation stays pure."""
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=str(cwd), env=env,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            # one stream-json line can carry an ENTIRE Read tool result;
+            # asyncio's default 64 KiB readline limit raised
+            # ValueError('Separator is found, but chunk is longer than
+            # limit') and killed a live session mid-answer (2026-07-17)
+            limit=16 * 1024 * 1024)
         self._active_procs[session_id] = proc
         try:
             assert proc.stdout is not None

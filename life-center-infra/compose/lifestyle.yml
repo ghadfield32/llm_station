@@ -1,0 +1,106 @@
+# Lifestyle tier — optional, non-sensitive convenience apps.
+# Not foundational: individually admit whichever of these you actually use
+# after the trial and leave the rest off. Grouped in one file for convenience
+# only, same as before, but Actual (sensitive) now lives in its own gated
+# finance.yml — see that file for why.
+#   Linkwarden (bookmarks/archive) · FreshRSS (news) · Mealie (recipes)
+#   Homebox (inventory) · Stirling-PDF (PDF utils)
+#
+# linkwarden_db_data is a NAMED volume (Postgres fsync reliability — see
+# files.yml for the full rationale).
+
+networks:
+  lc_core:
+    name: lc_core
+
+volumes:
+  linkwarden_db_data:
+
+services:
+  linkwarden-db:
+    image: postgres:16.4-alpine  # pin: @sha256 before real data
+    container_name: lc-linkwarden-db
+    restart: unless-stopped
+    networks: [lc_core]
+    environment:
+      - POSTGRES_DB=linkwarden
+      - POSTGRES_USER=linkwarden
+      - POSTGRES_PASSWORD=${LINKWARDEN_DB_PASSWORD:?set LINKWARDEN_DB_PASSWORD in .env}
+    volumes:
+      - linkwarden_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U linkwarden"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  linkwarden:
+    image: ghcr.io/linkwarden/linkwarden:v2.11.2  # pin: @sha256 before real data
+    container_name: lc-linkwarden
+    restart: unless-stopped
+    networks: [lc_core]
+    depends_on:
+      linkwarden-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LINKWARDEN_PORT:-3010}:3000"
+    environment:
+      - DATABASE_URL=postgresql://linkwarden:${LINKWARDEN_DB_PASSWORD:?set LINKWARDEN_DB_PASSWORD in .env}@linkwarden-db:5432/linkwarden
+      - NEXTAUTH_SECRET=${LINKWARDEN_NEXTAUTH_SECRET:?set LINKWARDEN_NEXTAUTH_SECRET in .env}
+      - NEXTAUTH_URL=http://127.0.0.1:${LINKWARDEN_PORT:-3010}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/linkwarden/data:/data/data
+
+  freshrss:
+    image: freshrss/freshrss:1.24.3  # pin: @sha256 before real data
+    container_name: lc-freshrss
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${FRESHRSS_PORT:-8082}:80"
+    environment:
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/freshrss/data:/var/www/FreshRSS/data
+      - ${LC_APPDATA:-./appdata}/freshrss/extensions:/var/www/FreshRSS/extensions
+
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v2.6.0  # pin: @sha256 before real data
+    container_name: lc-mealie
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${MEALIE_PORT:-9925}:9000"
+    environment:
+      - TZ=${LC_TZ:-UTC}
+      - BASE_URL=http://127.0.0.1:${MEALIE_PORT:-9925}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/mealie/data:/app/data
+
+  homebox:
+    image: ghcr.io/sysadminsmedia/homebox:0.18.0  # pin: @sha256 before real data
+    container_name: lc-homebox
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${HOMEBOX_PORT:-7745}:7745"
+    environment:
+      - HBOX_OPTIONS_ALLOW_REGISTRATION=false
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/homebox/data:/data
+
+  stirling-pdf:
+    image: docker.stirlingpdf.com/stirlingtools/stirling-pdf:0.44.3  # pin: @sha256 before real data
+    container_name: lc-stirling-pdf
+    restart: unless-stopped
+    networks: [lc_core]
+    ports:
+      - "127.0.0.1:${STIRLING_PDF_PORT:-8084}:8080"
+    environment:
+      # Tailnet/LAN only; uploaded files may be sensitive — deny external access.
+      - DISABLE_ADDITIONAL_FEATURES=false
+      - TZ=${LC_TZ:-UTC}
+    volumes:
+      - ${LC_APPDATA:-./appdata}/stirling/config:/configs
+      - ${LC_APPDATA:-./appdata}/stirling/tmp:/tmp/stirling-pdf

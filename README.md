@@ -97,10 +97,12 @@ it is `vengeance.taile6a055.ts.net`):
 https://<your-machine>.<your-tailnet>.ts.net:8787/
 ```
 
-Install it from the browser as a PWA named **Kanban**. The main nav is **All
-Boards** plus **Controls**: All Boards contains Jobs, Posts, Books, Papers,
-Repos, DAGs, Upkeep, Missions, and Tasks; Controls exposes runtime APIs, the
-board registry, editable All Boards schema, job-search daily limits/role-focus
+Install it from the browser as a PWA named **Kanban**. The main nav includes
+**Kanban Boards**, **Master TODO List**, and **Controls**. Kanban Boards contains
+Jobs, Posts, Books, Papers, Repos, DAGs, Self Improvement, Missions, **General Todos**, and
+the **Betts Grand TODO — Source Tracker**; Master TODO List is the comprehensive
+story ledger; Controls exposes runtime APIs, the
+board registry, editable Kanban Boards schema, job-search daily limits/role-focus
 overrides, and profile defaults. The Chat tab uses **GatewayCore + LiteLLM**
 as the active runtime and can reopen shared recent thread shortcuts by
 conversation id on desktop and phone. Phone layouts use contained top-scroll

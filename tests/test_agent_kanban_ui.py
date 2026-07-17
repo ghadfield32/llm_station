@@ -96,6 +96,122 @@ def test_health_and_config(client):
     assert cfg["chat_enabled"] is False and cfg["model_roles"] == []
 
 
+def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
+    client, monkeypatch, tmp_path,
+):
+    mod, tc = client
+    source = tmp_path / "GRAND_TODO_LIST.md"
+    blocks = []
+    for index in range(1, 149):
+        blocks.append(
+            f"#### GT-{index} · Durable task {index}\n"
+            f"{chr(96)}📋 PLANNED{chr(96)} · **Target:** _TBD_ · **Done:** _—_\n"
+            f"Keep task {index} forever.\n"
+            f"**Notes:** note {index}\n\n"
+        )
+    source.write_text(
+        "# GRAND TODO LIST — Master Tracker\n\n"
+        "## GT — Grand Tasks\n\n"
+        + "".join(blocks)
+        + "## Idea Bank\n\n- **Keep this exact idea.**\n\n"
+          "## Change log\n\n- Initial organization.\n",
+        encoding="utf-8",
+    )
+    spec = {
+        "domain_id": "betts_basketball_grand_todo",
+        "title": "Betts Grand TODO — Source Tracker",
+        "source": "board_store",
+        "board_id": "betts_basketball_grand_todo",
+        "columns": [
+            "Backlog", "Ready", "In Progress", "Blocked", "Done", "Archived",
+        ],
+        "column_actions": {
+            "Backlog": "add_mission_card",
+            "Ready": "stage_card",
+            "In Progress": "start_todo",
+            "Blocked": "block_card",
+            "Done": "finish_todo",
+            "Archived": "finish_todo",
+        },
+        "allowed_actions": [
+            "stage_card", "start_todo", "finish_todo", "block_card",
+        ],
+    }
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "GRAND_TODO_SOURCE", source)
+    monkeypatch.setattr(mod, "BOARD_STORE_DIR", tmp_path / "boards")
+    monkeypatch.setattr(mod, "KANBAN_EVENT_LOG", tmp_path / "events.jsonl")
+    monkeypatch.setattr(mod, "_domain_config", lambda: {"domains": [spec]})
+
+    initial = tc.get("/api/domain/betts_basketball_grand_todo/cards")
+    assert initial.status_code == 200
+    assert initial.json()["cards"] == []
+    assert initial.json()["source_sync"]["state"] == "not_imported"
+    synced = tc.post("/api/domain/betts_basketball_grand_todo/sync")
+    assert synced.status_code == 200
+    assert synced.json()["counts"]["create"] == 150
+    cards = tc.get(
+        "/api/domain/betts_basketball_grand_todo/cards"
+    ).json()["cards"]
+    assert len(cards) == 150
+    task = next(card for card in cards if card["card_id"] == "grand-todo-gt-1")
+
+    edited_markdown = task["description"].replace("note 1", "edited note 1")
+    edited = tc.put(
+        "/api/domain/betts_basketball_grand_todo/card/grand-todo-gt-1",
+        json={
+            "raw_markdown": edited_markdown,
+            "expected_source_sha256": task["source_sha256"],
+        },
+    )
+    assert edited.status_code == 200
+    assert "edited note 1" in source.read_text(encoding="utf-8")
+
+    source.write_text(
+        source.read_text(encoding="utf-8").replace(
+            "edited note 1", "externally updated note 1"),
+        encoding="utf-8",
+    )
+    stale = tc.get("/api/domain/betts_basketball_grand_todo/cards").json()
+    stale_task = next(
+        card for card in stale["cards"]
+        if card["card_id"] == "grand-todo-gt-1"
+    )
+    assert "edited note 1" in stale_task["description"]
+    assert stale["source_sync"]["state"] == "stale"
+    resynced = tc.post("/api/domain/betts_basketball_grand_todo/sync")
+    assert resynced.status_code == 200
+    reconciled = tc.get("/api/domain/betts_basketball_grand_todo/cards").json()
+    task = next(
+        card for card in reconciled["cards"]
+        if card["card_id"] == "grand-todo-gt-1"
+    )
+    assert "externally updated note 1" in task["description"]
+
+    archived = tc.post(
+        "/api/domain/betts_basketball_grand_todo/move",
+        json={"card_id": "grand-todo-gt-1", "status": "Archived"},
+    )
+    assert archived.status_code == 200
+    assert archived.json()["card"]["status"] == "Archived"
+    assert "📦 ARCHIVED" in source.read_text(encoding="utf-8")
+
+    restored = tc.post(
+        "/api/domain/betts_basketball_grand_todo/move",
+        json={"card_id": "grand-todo-gt-1", "status": "Backlog"},
+    )
+    assert restored.status_code == 200
+    assert restored.json()["card"]["status"] == "Backlog"
+
+    for read_only_id in ("grand-todo-idea-bank", "grand-todo-source"):
+        refused = tc.post(
+            "/api/domain/betts_basketball_grand_todo/move",
+            json={"card_id": read_only_id, "status": "Archived"},
+        )
+        assert refused.status_code == 409
+        assert "read-only" in refused.json()["detail"]
+
+
 def test_pwa_assets_cache_static_assets_only():
     index = (WEB / "index.html").read_text(encoding="utf-8")
     manifest = json.loads((WEB / "public" / "manifest.webmanifest").read_text(encoding="utf-8"))
@@ -131,6 +247,59 @@ def test_pwa_assets_cache_static_assets_only():
     assert 'request.method !== "GET"' in service_worker
     assert 'url.pathname.startsWith("/assets/")' in service_worker
     assert "/icons/apple-touch-icon.png" in service_worker
+
+
+def test_books_frontend_exposes_real_records_and_governed_editing_controls():
+    """Keep the book-only UI contract visible even without a React test runner."""
+    app_source = (WEB / "src" / "App.tsx").read_text(encoding="utf-8")
+    api_source = (WEB / "src" / "api.ts").read_text(encoding="utf-8")
+    styles = (WEB / "src" / "styles.css").read_text(encoding="utf-8")
+    book_library_source = (
+        WEB / "src" / "bookLibrary.ts").read_text(encoding="utf-8")
+
+    book_card = app_source.split("function BookCard", 1)[1].split(
+        "function parseBookNotes", 1)[0]
+    assert "valText(card.title)" in book_card
+    assert "Title missing - migration repair required" in book_card
+    assert "ProgressBar" not in book_card
+    assert 'className="book-reading-progress"' in book_card
+    assert "Object.prototype.hasOwnProperty.call(card, \"book_notes\")" in app_source
+    assert "seenIds.has(note.note_id)" in app_source
+    assert "Number.isFinite(Date.parse(note.created_at))" in app_source
+    assert 'const verbs = spec.domain_id === "book"' in app_source
+    assert "setSelected((current) =>" in app_source
+    assert "+ Add book" in app_source
+    assert "+ Add note" in app_source
+    assert '<details className="book-workbench"' in app_source
+    assert '<summary className="book-workbench-summary"' in app_source
+    assert "Title missing — ${cardId(card)}" in app_source
+    assert "Remove means archive" in app_source
+    assert "Add ordered note" in app_source
+    assert "function BookLibraryFilters" in app_source
+    assert "BOOK_GROUP_FIELDS" in app_source
+    assert "Search titles, authors, notes, chapters" in app_source
+    assert "any ${field.label.toLocaleLowerCase()}" in app_source
+    assert "Priority" in book_library_source
+    assert "Genre" in book_library_source
+    assert "Format / source label" in book_library_source
+    assert 'label: "Not set"' in book_library_source
+    assert 'type="range"' in app_source
+    assert "bookMatchesLibraryFilters" in app_source
+    move_source = app_source.split(
+        "async function moveDomainCardTo", 1)[1].split(
+        "async function drop", 1)[0]
+    assert "applyCommittedDomainCard(spec.domain_id, result.card)" in move_source
+    assert "await load()" not in move_source
+    assert "Save reading position" in app_source
+    assert "current_chapter" in app_source
+    assert "progress_percent" in app_source
+    assert "/api/domain/book/cards" in api_source
+    assert "/api/domain/book/card/${encodeURIComponent(cardId)}/notes" in api_source
+    assert "method: \"DELETE\"" in api_source
+    assert ".book-workbench" in styles
+    assert ".book-filter-shelf" in styles
+    assert ".book-position-panel" in styles
+    assert ".book-notes-section" in styles
 
 
 def test_chat_runtime_stays_behind_the_chat_wall(client):
@@ -415,6 +584,15 @@ def test_job_search_profile_controls_surface_question_policy(client):
     assert "search_settings" in body["source_paths"]
 
 
+def test_job_profile_controls_do_not_overstate_write_gate(client, monkeypatch):
+    mod, tc = client
+    monkeypatch.setattr(mod, "CHAT_ENABLED", True)
+    monkeypatch.setattr(mod, "DOMAIN_CONFIG_WRITES", False)
+    body = tc.get("/api/job-search/profile-controls").json()
+    assert body["writable"] is False
+    assert "enable both" in body["write_gate"]
+
+
 def test_board_registry_endpoint_lists_configured_boards(client, monkeypatch):
     mod, tc = client
     monkeypatch.setattr(mod, "CONFIGS_DIR", ROOT / "configs")
@@ -465,7 +643,7 @@ def test_domain_schema_update_writes_validated_config(client, monkeypatch, tmp_p
                 if row["domain_id"] == "linkedin_post")["title"] == "Content"
 
 
-def test_domain_schema_create_and_delete_board(client, monkeypatch, tmp_path):
+def test_domain_schema_create_archive_and_restore_board(client, monkeypatch, tmp_path):
     mod, tc = client
     configs = tmp_path / "configs"
     configs.mkdir()
@@ -494,7 +672,18 @@ def test_domain_schema_create_and_delete_board(client, monkeypatch, tmp_path):
 
     deleted = tc.delete("/api/domain-schema/test_board")
     assert deleted.status_code == 200, deleted.json()
-    assert all(row["domain_id"] != "test_board" for row in deleted.json()["domains"])
+    archived = next(row for row in deleted.json()["domains"]
+                    if row["domain_id"] == "test_board")
+    assert archived["archived"] is True
+    refused = tc.put("/api/domain-schema/test_board", json=new_domain)
+    assert refused.status_code == 409
+    assert "restore explicitly" in refused.json()["detail"]
+
+    restored = tc.post("/api/domain-schema/test_board/restore")
+    assert restored.status_code == 200, restored.json()
+    active = next(row for row in restored.json()["domains"]
+                  if row["domain_id"] == "test_board")
+    assert active["archived"] is False
 
 
 def test_domain_schema_rejects_wall_verbs(client, monkeypatch, tmp_path):
@@ -797,6 +986,21 @@ def _real_autonomy_configs(tmp_path):
         (configs / name).write_text(
             (ROOT / "configs" / name).read_text(encoding="utf-8"), encoding="utf-8")
     return configs
+
+
+def test_repository_catalog_is_available_without_chat(client, monkeypatch, tmp_path):
+    mod, tc = client
+    monkeypatch.setattr(mod, "CONFIGS_DIR", _real_autonomy_configs(tmp_path))
+    monkeypatch.setattr(mod, "CHAT_ENABLED", False)
+
+    response = tc.get("/api/repos")
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["source"].endswith("autonomy.yaml")
+    repos = {repo["repo_id"]: repo for repo in body["repositories"]}
+    assert set(repos) == {"llm_station", "betts_basketball"}
+    assert repos["llm_station"]["research_capabilities"]
+    assert "declared capabilities" in repos["llm_station"]["scan_reason"].lower()
 
 
 def test_repo_chat_context_endpoint(client, monkeypatch, tmp_path):

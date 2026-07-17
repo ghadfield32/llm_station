@@ -116,3 +116,39 @@ def test_revise_mints_revision_and_stale_review_is_409(monkeypatch):
     stale = client.post(f"/api/packets/{pid}/reviews/codex_agent",
                         json={"status": "approved", "expected_revision": 1})
     assert stale.status_code == 409, stale.text
+
+
+def test_request_reviews_records_advisory_never_unlocks_commit(monkeypatch):
+    """Phase 6 orchestration endpoint: running agent reviews fills the slots with
+    ADVISORY outcomes (never 'approved'), so the packet is NOT ready afterward —
+    a human approval is still required."""
+    _mod, client = _load(monkeypatch)
+    pid = client.post("/api/packets", json=_plan_body(
+        review_roles=["codex_agent", "judge"])).json()["packet_id"]
+
+    r = client.post(f"/api/packets/{pid}/request-reviews")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # advisory reviews recorded, judge synthesized, commit NOT unlocked
+    assert body["report"]["unlocked_commit"] is False
+    assert body["ready"] is False
+    assert body["report"]["synthesis"]["role"] == "judge"
+    # every slot is advisory (reviewed/changes_requested), never approved
+    pkt = client.get(f"/api/packets/{pid}").json()
+    statuses = {s["role"]: s["status"] for s in pkt["reviews"]}
+    assert all(v != "approved" for v in statuses.values())
+    assert all(s["reviewer_kind"] == "agent" for s in pkt["reviews"])
+
+    # a HUMAN still has to approve to unlock — orchestration didn't do it
+    for role in ("codex_agent", "judge"):
+        client.post(f"/api/packets/{pid}/reviews/{role}",
+                    json={"status": "approved", "summary": "ok", "reviewer_kind": "human"})
+    assert client.get(f"/api/packets/{pid}/readiness").json()["ready"] is True
+
+
+def test_request_reviews_on_packet_without_slots_is_noop(monkeypatch):
+    _mod, client = _load(monkeypatch)
+    pid = client.post("/api/packets", json=_plan_body()).json()["packet_id"]  # no review_roles
+    r = client.post(f"/api/packets/{pid}/request-reviews")
+    assert r.status_code == 200
+    assert r.json()["report"]["reviews"] == []

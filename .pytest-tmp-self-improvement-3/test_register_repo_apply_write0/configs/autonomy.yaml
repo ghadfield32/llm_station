@@ -1,0 +1,426 @@
+schema_version: command-center.autonomy.v1
+
+# Whole-system autonomy hardening source of truth. This file declares contracts
+# and blockers; it does not enable new autonomous writes by itself.
+completed_work:
+  - canonical_event_schemas
+  - repo_registration_manifest_schema
+  - desktop_target_rights_manifest_schema
+  - forecast_evidence_completion_verifier_contract
+  - system_validation_evidence_runner
+  - no_op_canaries_config_declared
+  - telemetry_decision_configured
+  - github_app_review_policy_recorded
+  - external_runtime_evaluation_policy_recorded
+  - repo_devcontainer_manifest_added_for_llm_station
+  - github_app_production_auth_review_completed
+  - staging_cockpit_card_selected_from_snapshot
+  - completion_verifier_integrated_into_ledger_runtime
+  - planner_live_smoke_empty_response_repaired
+  - github_app_created_selected_env_recorded
+  - github_app_private_key_secured_and_env_ref_recorded
+  - github_app_installed_on_selected_llm_station_repo
+  - github_app_installation_token_and_selected_repo_read_verified
+  - github_app_issues_read_policy_approved
+  - github_app_repository_permissions_verified
+  - agent_live_tool_memory_multiturn_validation_added
+  - desktop_target_snapshot_verifier_added
+  - staging_cockpit_card_presence_verified_from_live_snapshot
+  - branch_protection_owner_admin_verifier_added
+  - github_token_storage_rotation_policy_drafted
+  - staging_cockpit_card_state_in_progress_verified
+  - desktop_adapter_readiness_gate_added
+  - branch_protection_observer_token_supplied_and_repo_read_verified
+  - branch_protection_ruleset_diagnostics_added
+  - branch_protection_rerun_confirmed_main_unprotected
+  - branch_protection_active_ruleset_detected
+  - branch_protection_required_checks_and_core_rules_verified
+  - code_owner_reviews_verified_on_active_branch_ruleset
+  - branch_protection_verified_with_active_ruleset
+  - github_token_storage_rotation_policy_finalized
+  - github_app_auth_verified_after_branch_wall
+  - tiny_branch_only_repo_mission_passed
+  - pr_check_evidence_loop_verified
+  - desktop_timeout_and_human_takeover_policy_declared
+  - github_app_pr9_protected_merge_verified
+  - desktop_noop_canary_contract_and_runner_added
+  - desktop_noop_canary_read_only_sample_recorded
+  - desktop_timing_derivation_blocks_without_sample_plan
+  - desktop_timing_sample_plan_declared
+  - additional_noop_canary_samples_recorded
+  - desktop_ttl_action_timeout_candidates_proposed_from_noop_telemetry
+ordered_work:
+  - enable_desktop_target_only_after_timeout_takeover_and_canary_plan
+  - derive_loop_breaker_threshold_from_event_history_before_autonomous_gui
+  - enable_no_op_canaries_after_blockers_clear
+  - decide_opentelemetry_after_structured_event_gap_is_measured
+  - evaluate_external_runtime_only_after_measured_gap
+
+event_contract:
+  schema_version: command-center.events.v1
+  privacy_classes: [public, internal, confidential, secret_reference]
+  result_values: [planned, started, proposed, verified, blocked, failed, rolled_back, sent]
+  common_required_fields:
+    - event_id
+    - mission_id
+    - timestamp
+    - actor
+    - source_authority
+    - risk_tier
+    - privacy_classification
+    - result
+    - input_artifact_hashes
+    - output_artifact_hashes
+    - trace_id
+    - approval_id
+    - rollback_id
+  families:
+    - kind: mission.forecast
+      required_fields:
+        - expected_state_before
+        - expected_state_after
+        - expected_events
+        - expected_no_change
+        - privacy_boundary
+        - rollback_or_revert_plan
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: mission.action
+      required_fields: [command_or_tool, target_ref, observed_state_before]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: mission.verification
+      required_fields: [observed_state_after, evidence_refs, verifier_result]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: mission.completion_verdict
+      required_fields: [status, reasons, evidence_refs]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: mission.rollback
+      required_fields: [rollback_reason, rollback_ref, observed_state_after]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: route.decision
+      required_fields: [selected_route, rejected_routes, config_hashes, failure_class]
+      retained_artifact_policy: redacted_summary_only
+    - kind: repo.action
+      required_fields: [repo_id, branch, worktree_ref, command, exit_code]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: kanban.mutation
+      required_fields: [board, card_ref, field_changes, writeback_ref]
+      retained_artifact_policy: redacted_summary_only
+    - kind: desktop.observation
+      required_fields: [target_id, state_hash, evidence_refs]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: desktop.action
+      required_fields: [target_id, action, target_ref, verifier_ref]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: model.call
+      required_fields: [role, model_alias, prompt_template_id, usage_ref]
+      retained_artifact_policy: hashes_and_refs_only
+    - kind: notification.sent
+      required_fields: [channel, recipient_ref, message_ref, delivery_result]
+      retained_artifact_policy: redacted_summary_only
+
+repo_manifests:
+  - repo_id: llm_station
+    remote_url: https://github.com/ghadfield32/llm_station.git
+    default_branch: main
+    protected_branches: [main]
+    allowed_base_branches: [main]
+    branch_write_policy: feature_branch_only
+    auth_mode: github_app
+    execution_mode: devcontainer
+    devcontainer_path: .devcontainer/devcontainer.json
+    ci_commands:
+      - uv run cc validate
+      - uv run --extra dev --extra gateways pytest
+    secret_policy: no_runtime_secrets_inside_container
+    codeowners_required: true
+    codeowners_path: .github/CODEOWNERS
+    risk_ceiling: L2_local_edits
+    kanban_board_id: llm_station_command_center
+    local_path_ref: self
+    research_capabilities:
+    - local LLM serving and agent infrastructure
+    - LLM and agent model routing and evaluation
+    - governed automation and safety controls
+    - local research retrieval and knowledge boards
+    - Dockerized command-center operations
+    autonomous_edits_enabled: true
+    blockers: []
+
+  - repo_id: betts_basketball
+    remote_url: https://github.com/ghadfield32/betts_basketball.git
+    default_branch: main
+    protected_branches:
+    - main
+    allowed_base_branches:
+    - main
+    branch_write_policy: feature_branch_only
+    auth_mode: github_app
+    execution_mode: devcontainer
+    devcontainer_path: .devcontainer/devcontainer.json
+    ci_commands:
+    - uv run cc validate
+    - uv run pytest
+    secret_policy: no_runtime_secrets_inside_container
+    codeowners_required: true
+    codeowners_path: .github/CODEOWNERS
+    risk_ceiling: L2_local_edits
+    kanban_board_id: betts_basketball
+    local_path_ref: env:BETTS_BASKETBALL_LOCAL_PATH
+    research_capabilities:
+    - NBA and basketball forecasting
+    - Bayesian sports models and evaluation
+    - basketball player tracking computer vision
+    - NBA odds, basketball events, and sports data pipelines
+    - Airflow DAGs for basketball analytics
+    required_status_check_contexts:
+    - Unit Tests
+    merge_wall: local_pre_push_and_human_merge
+    autonomous_edits_enabled: true
+    blockers: []
+
+  - repo_id: totally-new-test-repo
+    remote_url: https://github.com/x/totally-new-test-repo
+    default_branch: main
+    protected_branches:
+    - main
+    allowed_base_branches:
+    - main
+    branch_write_policy: feature_branch_only
+    auth_mode: github_app_pending
+    execution_mode: devcontainer
+    devcontainer_path: .devcontainer/devcontainer.json
+    ci_commands:
+    - uv run cc validate
+    - uv run pytest
+    secret_policy: no_runtime_secrets_inside_container
+    codeowners_required: true
+    codeowners_path: .github/CODEOWNERS
+    risk_ceiling: L2_local_edits
+    kanban_board_id: llm_station_command_center
+    local_path_ref: env:TOTALLY_NEW_TEST_REPO_LOCAL_PATH
+    research_capabilities: []
+    required_status_check_contexts: []
+    merge_wall: github_branch_protection
+    autonomous_edits_enabled: false
+    blockers:
+    - repo_autonomy_not_yet_verified
+
+desktop_targets:
+  - target_id: cockpit_browser_staging
+    enabled: false
+    os_family: windows
+    surface: browser
+    board: mission_intake
+    card_ref: card-review q3 odds metrics
+    snapshot_evidence_ref: generated/board-snapshot.json
+    allowed_windows: [LLM Station Cockpit]
+    allowed_actions: [click, type, select, drag, keyboard_shortcut]
+    forbidden_actions:
+      - clipboard_read
+      - password_field_read
+      - system_settings_change
+      - file_delete
+    verifier:
+      type: ui_assertion
+      must_show: [In Progress]
+      evidence_event_family: desktop.observation
+    automation_order: [direct_api, browser, os_accessibility, screenshot]
+    human_takeover_hotkey: Ctrl+Alt+Pause
+    screenshot_artifact_policy: redacted_hashes_and_refs_only
+    blockers:
+      - desktop_live_actions_not_enabled
+
+completion_verifier:
+  enabled: true
+  done_requires_evidence_refs: true
+  required_event_families:
+    - mission.forecast
+    - mission.verification
+  repeated_action_policy: experiment_derived_threshold_required_before_autonomous_gui
+
+agent_validation:
+  model_alias: chat
+  max_tokens: 512
+  max_tokens_source: existing_live_smoke_generation_budget_required_for_qwen_visible_content
+  required_scenarios:
+    - chat_tool_call_parse
+    - memory_block_recall
+    - long_multi_turn_recall
+    - fresh_conversation_without_memory_abstains
+
+canaries:
+  - name: read-only repo scan
+    kind: read_only_repo_scan
+    enabled: false
+    risk_tier: L0_read_only
+    evidence_required: [event_contract, repo_manifest]
+    blocked_until: [canary_schedule_plan_not_approved]
+  - name: no-op kanban roundtrip
+    kind: noop_kanban_roundtrip
+    enabled: false
+    risk_tier: L1_plan_only
+    evidence_required: [event_contract, kanban_mutation_events]
+    blocked_until: [canary_schedule_plan_not_approved]
+  - name: browser staging board task
+    kind: browser_staging_task
+    enabled: false
+    risk_tier: L1_plan_only
+    evidence_required: [desktop_target_manifest, completion_verifier]
+    blocked_until:
+      - desktop_live_actions_not_enabled
+      - canary_schedule_plan_not_approved
+  - name: prompt judge suite
+    kind: prompt_judge_suite
+    enabled: false
+    risk_tier: L0_read_only
+    evidence_required: [event_contract, sealed_eval_policy]
+    blocked_until: [canary_schedule_plan_not_approved]
+  - name: model routing benchmark
+    kind: model_routing_benchmark
+    enabled: false
+    risk_tier: L0_read_only
+    evidence_required: [event_contract, model_benchmark_artifacts]
+    blocked_until:
+      - structured_output_role_repair
+      - canary_schedule_plan_not_approved
+  - name: notification dry run
+    kind: notification_dry_run
+    enabled: false
+    risk_tier: L0_read_only
+    evidence_required: [notification_events, redacted_digest]
+    blocked_until: [canary_schedule_plan_not_approved]
+  - name: privacy artifact scan
+    kind: privacy_artifact_scan
+    enabled: false
+    risk_tier: L0_read_only
+    evidence_required: [privacy_classes, artifact_paths]
+    blocked_until: [canary_schedule_plan_not_approved]
+
+desktop_noop_canaries:
+  - target_id: cockpit_browser_staging
+    target_type: browser
+    allowed_mode: read_only
+    allowed_apps_windows_domains: [LLM Station Cockpit]
+    allowed_actions:
+      - read_snapshot
+      - verify_target_identity
+      - measure_duration
+      - write_redacted_evidence
+    forbidden_actions:
+      - clipboard_read
+      - password_field_read
+      - system_settings_change
+      - file_delete
+      - click
+      - type
+      - select
+      - drag
+      - keyboard_shortcut
+      - submit_form
+      - move_card
+    evidence_policy: redacted_json_only
+    screenshot_policy: none
+    redaction_policy: no_raw_content_no_secrets_no_clipboard
+    human_takeover_policy_ref: docs/desktop/desktop-timeout-takeover-policy.md
+    measurement_fields:
+      - snapshot_load_ms
+      - target_verify_ms
+      - total_duration_ms
+    blockers: []
+
+desktop_timing_sample_plans:
+  - target_id: cockpit_browser_staging
+    status: declared
+    source_work_item: declare_desktop_timing_sample_plan_before_candidates
+    sample_plan_basis: explicit_read_only_noop_samples_for_current_staging_snapshot
+    required_evidence_refs:
+      - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary.json
+      - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-001.json
+      - evaluation/system-validation/20260616-autonomy-contracts/desktop-noop-canary-samples/post-pr10-sample-002.json
+    required_sample_count_source: configs/autonomy.yaml:desktop_timing_sample_plans[cockpit_browser_staging].required_evidence_refs
+    required_measurement_fields:
+      - snapshot_load_ms
+      - target_verify_ms
+      - total_duration_ms
+    candidate_derivation: max_observed_read_only_noop_timing_without_multiplier
+    evidence_policy: redacted_json_only
+    live_actions_allowed: false
+    production_enabling: false
+    blockers: []
+
+desktop_action_latency_canaries: []
+
+telemetry:
+  mode: structured_events_only
+  decision_basis:
+    - canonical_event_contract_added_first
+    - opentelemetry_deferred_until_cross_service_trace_gap_is_measured
+
+github_app_review:
+  status: approved
+  production_auth_policy: github_app_required
+  pilot_auth_policy: fine_grained_pat_pilot_only
+  requirements: []
+
+github_app_auth:
+  status: verified
+  app_name: llm-station-command-center
+  owner: ghadfield32
+  homepage_url: https://github.com/ghadfield32/llm_station
+  webhook_active: false
+  app_id_env: GITHUB_APP_ID
+  client_id_env: GITHUB_CLIENT_ID
+  installation_id_env: GITHUB_APP_INSTALLATION_ID
+  private_key_path_env: GITHUB_APP_PRIVATE_KEY_PATH
+  webhook_secret_env: GITHUB_WEBHOOK_SECRET
+  selected_repositories:
+    - ghadfield32/llm_station
+    - ghadfield32/betts_basketball
+  allowed_repository_permissions:
+    metadata: read
+    contents: read_write
+    pull_requests: read_write
+    checks: read
+    statuses: read
+    issues: read
+  forbidden_repository_permissions:
+    administration: any
+    secrets: any
+    variables: any
+    deployments: any
+    environments: any
+    workflows: any
+    actions: any
+  token_storage_policy: env_refs_only_private_key_outside_repo_short_lived_installation_tokens
+
+branch_protection_verification:
+  status: verified
+  owner_admin_token_env: GITHUB_OWNER_ADMIN_TOKEN
+  selected_repositories:
+    - ghadfield32/llm_station
+  required_status_check_contexts:
+    - validate
+    - lint-test
+  required_status_check_source_path: .github/workflows/contracts.yml
+  required_status_check_source: contracts workflow jobs
+  codeowners_path: .github/CODEOWNERS
+  required_approving_review_count: 1
+  required_review_count_source: .github/CODEOWNERS default_owner_policy
+  require_code_owner_reviews: true
+  require_force_pushes_disabled: true
+  require_deletions_disabled: true
+  require_linear_history: true
+  require_ruleset_bypass_actors_absent: true
+  ruleset_bypass_policy_source: GitHub wall requires no unverified bot/admin bypass around required checks and review gates
+  token_policy: env_ref_only_owner_admin_observer_no_settings_writes
+
+external_runtime_evaluation:
+  status: blocked_until_measured_gap
+  candidates: [LangGraph, OpenAI Agents SDK, AutoGen, OpenHands]
+  required_gates:
+    - measured_gap_against_current_control_plane
+    - no_second_ledger_or_gateway
+    - no_provider_key_fallback
+    - threat_privacy_authority_review
+    - rollback_plan
+    - independent_verification

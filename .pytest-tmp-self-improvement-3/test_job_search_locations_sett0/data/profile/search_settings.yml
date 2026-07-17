@@ -1,0 +1,9 @@
+locations:
+  mode: regions
+  remote_types_allowed:
+  - remote
+  - hybrid
+  employment_types_allowed: []
+  regions:
+  - Texas
+  - Seattle

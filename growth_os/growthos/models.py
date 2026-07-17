@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 Kind = Literal["paper", "repo", "signal"]
+RESEARCH_ANALYSIS_SCHEMA_VERSION = "growthos.research-analysis.v5"
 
 
 class CuratedItem(BaseModel):

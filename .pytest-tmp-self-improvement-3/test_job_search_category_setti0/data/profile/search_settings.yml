@@ -1,0 +1,7 @@
+job_categories:
+- id: analytics_engineer
+  role_focus: primary
+  keywords:
+  - data engineer
+  - analytics engineer
+  - dbt

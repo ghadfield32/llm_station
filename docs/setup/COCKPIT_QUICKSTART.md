@@ -2,7 +2,7 @@
 
 The first-party cockpit is the primary operator surface (decision:
 `docs/reviews/2026-07-08-cockpit-decision.md`). One FastAPI + React container:
-All Boards (Jobs, Posts, Books, Papers, Repos, DAGs, Upkeep, Missions, Tasks),
+Kanban Boards (Jobs, Posts, Books, Papers, Repos, DAGs, Self Improvement, Missions, General Todos),
 Controls (board registry, job-search settings, profile defaults, runtime APIs),
 Router (model lanes), Status, Metrics, Activity, and — when enabled — SSE Chat
 through the same GatewayCore every channel uses. It can never approve, merge,
@@ -36,7 +36,7 @@ Local URL: http://127.0.0.1:8787 (loopback-bound; `KANBAN_UI_PORT` overrides).
 - **Full console** (default compose config): chat + the governed action verbs.
   Every write goes through the action layer (Approved is structurally refused;
   L3/L4 approve/kill stay in the signed Ledger UI). Domain-board drag/drop and
-  in-app job question preset edits require this mode. Controls -> All Boards
+  in-app job question preset edits require this mode. Controls -> Kanban Boards
   can add/remove/update domain boards by writing `configs/domain_surfaces.yaml`
   only when `KANBAN_UI_DOMAIN_CONFIG_WRITES=1` and `./configs` is mounted
   writable; every save validates the full file with `DomainSurfacesConfig`.
@@ -73,8 +73,8 @@ drawers, larger touch targets, top horizontal scrollbars for board/tab lanes,
 and per-card `Move to...` menus. Drag/drop still works on desktop, but phone
 moves should use the menu; the same governed write endpoint is used either way.
 
-The normal mobile route is **All Boards -> Jobs**. Missions are also available
-inside All Boards; the old top-level Missions/Boards split is intentionally not
+The normal mobile route is **Kanban Boards -> Jobs**. Missions are also available
+inside Kanban Boards; the old top-level Missions/Boards split is intentionally not
 the primary phone navigation anymore.
 
 ## Chat specialists
@@ -114,7 +114,7 @@ behind GatewayCore, the action layer, and the Ledger wall.
   full-console mode.
 - `/api/boards/live` or chat → 503: this deployment is read-only
   (`KANBAN_UI_CHAT_ENABLED` unset) — that is a mode, not a bug.
-- Controls -> All Boards edits fail: confirm the full-console compose service
+- Controls -> Kanban Boards edits fail: confirm the full-console compose service
   has `KANBAN_UI_DOMAIN_CONFIG_WRITES=1` and `./configs:/app/configs` without
   `:ro`. The editor writes only `configs/domain_surfaces.yaml`; provider
   registry changes still belong in `configs/kanban_boards.yaml`.

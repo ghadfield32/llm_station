@@ -3,6 +3,7 @@ notes, finalize (validate → mark submitted → email record → evidence)."""
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -219,8 +220,42 @@ def test_finalize_blocks_then_succeeds_with_evidence(tmp_path, monkeypatch):
     assert "not_already_submitted" in exc2.value.validation["errors"]
 
 
+def test_concurrent_finalize_sends_and_records_exactly_once(tmp_path):
+    app_dir, app_id = _prepare(tmp_path)
+    sent: list[str] = []
+    env = {
+        "DISCOVERY_SMTP_HOST": "smtp.test",
+        "DISCOVERY_SMTP_USER": "user",
+        "DISCOVERY_SMTP_PASSWORD": "password",
+        "DISCOVERY_SMTP_FROM": "from@test",
+        "JOB_SEARCH_EMAIL_TO": "to@test",
+    }
+
+    def sender(_cfg, _message):
+        sent.append("sent")
+
+    def finalize_once() -> str:
+        try:
+            finalize_application(
+                app_id, root=tmp_path, sender_fn=sender, env=env)
+            return "finalized"
+        except FinalizeBlocked:
+            return "already_submitted"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _index: finalize_once(), range(2)))
+
+    assert sorted(outcomes) == ["already_submitted", "finalized"]
+    assert sent == ["sent"]
+    evidence = json.loads(
+        (app_dir / "submission_record.json").read_text(encoding="utf-8"))
+    assert evidence["email"]["status"] == "sent"
+    _, record = load_application(app_id, root=tmp_path)
+    assert record.applied_at
+
+
 def test_post_submission_recruiter_note_does_not_rearm_finalize(tmp_path, monkeypatch):
-    """append_note_text flips status to recruiter_contact, but applied_at is the
+    """A marked process-furthering note flips status, but applied_at is the
     durable submit marker — a recruiter reply must never enable a duplicate
     submission that overwrites the real applied_at and re-emails the record."""
     from command_center.job_search.application_memory import append_note_text
@@ -229,7 +264,7 @@ def test_post_submission_recruiter_note_does_not_rearm_finalize(tmp_path, monkey
     finalize_application(app_id, root=tmp_path, env={})
     append_note_text(
         app_id, "recruiter_email", "Thanks — can you interview Tuesday?",
-        root=tmp_path)
+        root=tmp_path, furthers_process=True)
     _, record = load_application(app_id, root=tmp_path)
     assert record.status == "recruiter_contact"   # status DID mutate
     with pytest.raises(FinalizeBlocked) as exc:
@@ -271,3 +306,70 @@ def test_regenerate_does_not_clobber_concurrent_note(tmp_path, monkeypatch):
     assert record.followup["next_action"] == "Review follow-up pack and reply draft."
     comms = (app_dir / "communications.jsonl").read_text(encoding="utf-8")
     assert "Portal asks for salary range." in comms
+
+
+def test_regenerate_discards_stale_draft_after_new_change_request(
+    tmp_path, monkeypatch,
+):
+    app_dir, app_id = _prepare(tmp_path)
+    request_changes(app_id, "tighten it", root=tmp_path)
+    resume_before = (app_dir / "generated_resume.md").read_text(encoding="utf-8")
+
+    def generate_while_request_changes(
+        inputs, bank, *, trace_path, trace_step, **kwargs,
+    ):
+        request_changes(
+            app_id, "new human request during generation", root=tmp_path)
+        return _fake_generated(["wms_founder_platform"])
+
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(
+        application_memory, "generate_materials",
+        generate_while_request_changes)
+    with pytest.raises(AgentWriterError, match="stale draft was not published"):
+        regenerate_materials(app_id, root=tmp_path)
+
+    _, record = load_application(app_id, root=tmp_path)
+    assert record.review_state == "changes_requested"
+    assert record.revision == 1
+    assert (app_dir / "generated_resume.md").read_text(
+        encoding="utf-8") == resume_before
+    assert "new human request during generation" in (
+        app_dir / "review_notes.md").read_text(encoding="utf-8")
+
+
+def test_regenerate_discards_stale_draft_after_manual_packet_edit(
+    tmp_path, monkeypatch,
+):
+    from command_center.write_locking import application_memory_write_lock
+
+    app_dir, app_id = _prepare(tmp_path)
+    request_changes(app_id, "tighten it", root=tmp_path)
+
+    def generate_while_manual_edit(
+        inputs, bank, *, trace_path, trace_step, **kwargs,
+    ):
+        with application_memory_write_lock(tmp_path, app_id):
+            current_dir, record = load_application(app_id, root=tmp_path)
+            application_memory.atomic_write_text(
+                current_dir / "generated_resume.md", "# Human edit wins\n")
+            generation = dict(record.generation)
+            edits = list(generation.get("manual_edits") or [])
+            edits.append({"file": "resume", "ts": "2026-07-15T00:00:00Z"})
+            generation["manual_edits"] = edits
+            record.generation = generation
+            application_memory.save_application(current_dir, record)
+        return _fake_generated(["wms_founder_platform"])
+
+    monkeypatch.setenv("JOB_SEARCH_AGENT_WRITER", "1")
+    monkeypatch.setattr(
+        application_memory, "generate_materials", generate_while_manual_edit)
+    with pytest.raises(AgentWriterError, match="stale draft was not published"):
+        regenerate_materials(app_id, root=tmp_path)
+
+    _, record = load_application(app_id, root=tmp_path)
+    assert record.review_state == "changes_requested"
+    assert record.revision == 1
+    assert (app_dir / "generated_resume.md").read_text(
+        encoding="utf-8") == "# Human edit wins\n"
+    assert record.generation["manual_edits"][-1]["file"] == "resume"

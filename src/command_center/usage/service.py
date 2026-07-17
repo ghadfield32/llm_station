@@ -18,6 +18,7 @@ from .schemas import (
     Attribution,
     AvailabilityState,
     CollectionState,
+    CostSource,
     RuntimeUsageStatus,
     SampleKind,
     UsageAlert,
@@ -106,13 +107,14 @@ class UsageService:
                         fired.append(recorded)
         return fired
 
-    def runtime_status(self, runtime_id: str) -> RuntimeUsageStatus:
+    def runtime_status(self, runtime_id: str,
+                       after_iso: str | None = None) -> RuntimeUsageStatus:
         """The composite the UI renders — availability + all live buckets
         (kept separate) + rolled usage + honest staleness. Never flattens
         buckets into one percentage; UNKNOWN availability stays UNKNOWN."""
         avail = self.store.latest_availability(runtime_id)
         limits = self.store.latest_limits(runtime_id)
-        rolled = self._roll_usage(runtime_id)
+        rolled = self._roll_usage(runtime_id, after_iso)
 
         # staleness = the freshest signal older than the bound. Availability
         # and limit snapshots are the "liveness" signals; if the newest of
@@ -131,8 +133,9 @@ class UsageService:
             availability_observed_at=avail.observed_at if avail else None,
             limits=limits, rolled_usage=rolled, stale=stale, generated_at=now_iso())
 
-    def all_statuses(self) -> list[RuntimeUsageStatus]:
-        return [self.runtime_status(rid) for rid in self.store.list_runtime_ids()]
+    def all_statuses(self, after_iso: str | None = None) -> list[RuntimeUsageStatus]:
+        return [self.runtime_status(rid, after_iso)
+                for rid in self.store.list_runtime_ids()]
 
     def _roll_usage(self, runtime_id: str, after_iso: str | None = None) -> UsageSample | None:
         """Cockpit-ATTRIBUTED roll-up — sums ONLY additive REQUEST_DELTA
@@ -150,10 +153,13 @@ class UsageService:
             source=UsageSource.PROVIDER_DERIVED, observed_at=additive[-1].observed_at,
             ingested_at=now_iso(), source_hash="",
             sample_kind=SampleKind.SESSION_TOTAL, attribution=Attribution())
+        from .agent_usage import effective_token_counts
+
         for s in additive:
-            agg.input_tokens += s.input_tokens
-            agg.cached_input_tokens += s.cached_input_tokens
-            agg.output_tokens += s.output_tokens
+            input_tokens, cached_tokens, output_tokens, _total = effective_token_counts(s)
+            agg.input_tokens += input_tokens
+            agg.cached_input_tokens += cached_tokens
+            agg.output_tokens += output_tokens
             agg.reasoning_tokens += s.reasoning_tokens
             agg.total_tokens += s.total_tokens
             agg.calls += s.calls
@@ -167,4 +173,9 @@ class UsageService:
             agg.worker_restarts += s.worker_restarts
             agg.session_resumes += s.session_resumes
         agg.cost_usd, agg.cost_source = summarize_cost(additive)
+        if runtime_id == "codex_agent" and agg.cost_usd is None:
+            # The Codex harness is subscription-authenticated; historical SDK
+            # rows predate the explicit cost_source marker but were never API
+            # billed per request.
+            agg.cost_source = CostSource.SUBSCRIPTION_NOT_METERED
         return agg
