@@ -2247,3 +2247,93 @@ export interface AssistantRoutingView {
 }
 export const fetchAssistantRouting = () =>
   getJSON<AssistantRoutingView>("/api/assistant-routing");
+
+// Life Center Launch — the read-only "portal" over the service catalog joined
+// with the three Life Center Kanban boards (admission/overview/operations).
+// Mirrors command_center.mcp.life_center_launch.LaunchView.to_dict(); nullable
+// fields are honestly nullable. See GET /api/life-center/launch.
+export type LifeCenterLinkKind =
+  "app" | "setup" | "docs" | "runbook" | "status" | "native";
+export type LifeCenterHealthStatus = "healthy" | "attention" | "down" | "unknown";
+export interface LifeCenterLink {
+  kind: LifeCenterLinkKind;
+  label: string;
+  href: string | null;
+}
+export interface LifeCenterAdmission {
+  lane: string;
+  owner: string;
+}
+export interface LifeCenterHealth {
+  status: LifeCenterHealthStatus;
+  last_check: string | null;
+  stale: boolean;
+}
+export interface LifeCenterSetup {
+  required: boolean;
+  completed: boolean;
+  operations_card_id: string | null;
+  evidence_refs: string;
+}
+export interface LifeCenterService {
+  service_id: string;
+  application: string;
+  category: string;
+  short_description: string;
+  lifecycle: string;
+  risk_tier: string;
+  sort_order: number;
+  primary_action_label: string;
+  admission: LifeCenterAdmission;
+  health: LifeCenterHealth;
+  setup: LifeCenterSetup;
+  links: LifeCenterLink[];
+  service_action_ids: string[];
+}
+export interface LifeCenterSummary {
+  total: number;
+  healthy: number;
+  attention: number;
+  setup_pending: number;
+  unknown: number;
+}
+export interface LifeCenterLaunch {
+  schema_version: string;
+  generated_at: string;
+  catalog_digest: string;
+  status_generated_at: string | null;
+  status_stale: boolean;
+  summary: LifeCenterSummary;
+  global_action_ids: string[];
+  services: LifeCenterService[];
+}
+export interface LifeCenterRunbook {
+  service_id: string;
+  runbook_path: string;
+  content: string;
+}
+// The dispatch result is rendered honestly: `status` may be "error"/"rejected"
+// (e.g. Docker-CLI-dependent actions in the containerized cockpit) — never
+// assume success. `result` is an opaque object, `error` a human-readable string.
+export interface LifeCenterDispatchResult {
+  action_id: string;
+  request_id: string;
+  status: "ok" | "error" | "rejected" | string;
+  result: Record<string, unknown>;
+  error: string | null;
+}
+export const fetchLifeCenterLaunch = () =>
+  getJSON<LifeCenterLaunch>("/api/life-center/launch");
+export const fetchLifeCenterService = (serviceId: string) =>
+  getJSON<LifeCenterService>(
+    `/api/life-center/services/${encodeURIComponent(serviceId)}`);
+export const fetchLifeCenterRunbook = (serviceId: string) =>
+  getJSON<LifeCenterRunbook>(
+    `/api/life-center/services/${encodeURIComponent(serviceId)}/runbook`);
+export const dispatchLifeCenterAction = (body: {
+  action_id: string;
+  service_id?: string;
+  idempotency_key?: string;
+  parameters?: Record<string, unknown>;
+}) => postJSON<LifeCenterDispatchResult>(
+  "/api/life-center/actions/dispatch", body);

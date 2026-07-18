@@ -68,15 +68,18 @@ import {
   WorkGraph, WorkEdge, ResourceLink,
   RoutingProposal, TaskCreationReceipt, WorkPlanItem,
   AssistantRoutingView, fetchAssistantRouting,
+  LifeCenterLaunch, LifeCenterService, LifeCenterLink, LifeCenterDispatchResult,
+  fetchLifeCenterLaunch, fetchLifeCenterRunbook, dispatchLifeCenterAction,
   DuplicateFinding, DuplicateReport, resolveCaptureDuplicate,
   addWorkPlacement, convertCaptureToWork,
   getWorkGraph, getWorkGraphNeighbourhood, getWorkItem, getWorkItemLinks,
   recordRoutingCorrection, routeCapture, routeWorkText,
 } from "./api";
 
-type View = "missions" | "boards" | "domains" | "todos" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox" | "work-map";
+type View = "missions" | "boards" | "domains" | "todos" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox" | "work-map" | "life-center";
 const NAV: { id: View; label: string }[] = [
   { id: "domains", label: "Kanban Boards" },
+  { id: "life-center", label: "Life Center" },
   { id: "todos", label: "Master TODO List" },
   { id: "work-map", label: "Work Map" },
   { id: "inbox", label: "Inbox" },
@@ -1713,6 +1716,417 @@ function InboxView({ refreshKey, onOpenChat }: {
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+// ── Life Center Launch ────────────────────────────────────────────────────
+// A read-only launcher tab over the service catalog joined with the three Life
+// Center Kanban boards (GET /api/life-center/launch). This replaces the old
+// temp-file HTML launcher with a real tab inside the SPA. Tiles + a details
+// drawer; dispatched actions render their raw status/error honestly (several
+// are Docker-CLI-dependent and intentionally return errors in-container).
+const LC_HEALTH_META: Record<string, { label: string; tone: string }> = {
+  healthy: { label: "Healthy", tone: "good" },
+  attention: { label: "Attention", tone: "warn" },
+  down: { label: "Down", tone: "bad" },
+  unknown: { label: "Unknown", tone: "" },
+};
+function lcHealthMeta(status: string): { label: string; tone: string } {
+  return LC_HEALTH_META[status] ?? { label: status || "Unknown", tone: "" };
+}
+function lcCapitalize(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+// Non-http hrefs (runbook / repo-relative doc paths) are resolved by the
+// backend, not the browser — only real URLs become <a href> "Open" buttons.
+function lcIsUrl(href: string | null): href is string {
+  return !!href && /^https?:\/\//i.test(href);
+}
+function lcNeedsSetup(svc: LifeCenterService): boolean {
+  return svc.setup.required && !svc.setup.completed;
+}
+function lcNeedsAttention(svc: LifeCenterService): boolean {
+  return svc.health.status === "attention" || svc.health.status === "down";
+}
+function lcActionLabel(id: string): string {
+  return lcCapitalize(id.replace(/^life_center\./, "").replace(/_/g, " "));
+}
+
+// One dispatch button that owns its own busy/result state. The returned status
+// (ok | error | rejected) and error string are shown verbatim — dispatch is
+// never assumed to succeed.
+function LifeCenterActionButton({ actionId, serviceId, label }: {
+  actionId: string; serviceId?: string; label: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<LifeCenterDispatchResult | null>(null);
+  const [err, setErr] = useState("");
+  const run = useCallback(async () => {
+    setBusy(true); setErr("");
+    try {
+      const r = await dispatchLifeCenterAction({
+        action_id: actionId, service_id: serviceId,
+        idempotency_key: `${actionId}:${serviceId ?? "global"}:${Date.now()}`,
+      });
+      setResult(r);
+    } catch (e) {
+      setErr((e as Error).message); setResult(null);
+    } finally {
+      setBusy(false);
+    }
+  }, [actionId, serviceId]);
+  const hasResultBody = !!result && Object.keys(result.result ?? {}).length > 0;
+  return (
+    <div className="lc-action">
+      <button className="actbtn" onClick={() => void run()} disabled={busy}>
+        {busy ? "Running…" : label}
+      </button>
+      {err && <div className="actmsg lc-status-error">request failed: {err}</div>}
+      {result && (
+        <div className={`actmsg lc-status-${result.status}`}>
+          <b>{result.status}</b>{result.error ? ` — ${result.error}` : ""}
+          {!result.error && hasResultBody && (
+            <pre className="lc-result-json">{JSON.stringify(result.result, null, 2)}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A runbook is a link kind whose href is a repo path, so it is fetched through
+// the backend runbook endpoint and rendered as markdown with the shared
+// MarkdownText component (no second renderer, no markdown dependency).
+function LifeCenterRunbookViewer({ serviceId }: { serviceId: string }) {
+  const [open, setOpen] = useState(false);
+  const [content, setContent] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const toggle = useCallback(async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (content !== null || busy) return;
+    setBusy(true); setErr("");
+    try {
+      setContent((await fetchLifeCenterRunbook(serviceId)).content);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [open, content, busy, serviceId]);
+  return (
+    <div className="lc-runbook">
+      <button className="actbtn" onClick={() => void toggle()}>
+        {open ? "Hide runbook" : "View runbook"}
+      </button>
+      {open && (
+        busy ? <div className="loading">…</div>
+          : err ? <div className="error">{err}</div>
+            : content !== null
+              ? <div className="lc-runbook-body"><MarkdownText value={content} /></div>
+              : null
+      )}
+    </div>
+  );
+}
+
+function LifeCenterLinkButton({ link, svc, onOpen }: {
+  link: LifeCenterLink; svc: LifeCenterService; onOpen: () => void;
+}) {
+  const label = link.kind === "app" ? svc.primary_action_label : lcCapitalize(link.kind);
+  if (lcIsUrl(link.href)) {
+    return <a className="actbtn" href={link.href} target="_blank" rel="noreferrer">{label}</a>;
+  }
+  // href is a backend-resolved path (e.g. a runbook) — open the drawer, which
+  // renders it inline, instead of pointing a browser at a non-URL.
+  return (
+    <button className="actbtn" onClick={onOpen} title="Opens in Details">{label}</button>
+  );
+}
+
+function LifeCenterTile({ svc, onOpen }: {
+  svc: LifeCenterService; onOpen: () => void;
+}) {
+  const health = lcHealthMeta(svc.health.status);
+  return (
+    <div className="lc-tile">
+      <div className="lc-tile-head">
+        <span className="lc-tile-title">{svc.application}</span>
+        <span className={`domain-badge ${health.tone}`}>{health.label}</span>
+      </div>
+      {svc.short_description
+        ? <p className="lc-tile-desc">{svc.short_description}</p>
+        : <p className="lc-tile-desc muted">No description provided.</p>}
+      <div className="domain-badges">
+        <span className="domain-badge">Risk: {svc.risk_tier || "unknown"}</span>
+        {lcNeedsSetup(svc) && <span className="domain-badge warn">Needs setup</span>}
+        {svc.health.stale && <span className="domain-badge">Status stale</span>}
+      </div>
+      <div className="lc-tile-actions">
+        {svc.links.map((link) => (
+          <LifeCenterLinkButton key={link.kind} link={link} svc={svc} onOpen={onOpen} />
+        ))}
+        <button className="actbtn lc-details-btn" onClick={onOpen}>Details</button>
+      </div>
+    </div>
+  );
+}
+
+function LifeCenterServiceDrawer({ svc, onClose }: {
+  svc: LifeCenterService; onClose: () => void;
+}) {
+  const health = lcHealthMeta(svc.health.status);
+  const runbookLink = svc.links.find((l) => l.kind === "runbook");
+  return (
+    <DrawerShell title={svc.application} onClose={onClose}>
+      <div className="lc-drawer">
+        <div className="domain-badges lc-drawer-badges">
+          <span className={`domain-badge ${health.tone}`}>{health.label}</span>
+          <span className="domain-badge">Risk: {svc.risk_tier || "unknown"}</span>
+          <span className="domain-badge">{svc.category || "uncategorized"}</span>
+          {lcNeedsSetup(svc) && <span className="domain-badge warn">Needs setup</span>}
+        </div>
+
+        <section className="lc-section">
+          <h3>Overview</h3>
+          {svc.short_description
+            ? <p>{svc.short_description}</p>
+            : <p className="muted">No description provided.</p>}
+          <div className="kv">Lifecycle: <b>{svc.lifecycle || "—"}</b></div>
+          <div className="kv">
+            Admission lane: <b>{svc.admission.lane || "—"}</b>
+            {svc.admission.owner ? <> · owner <b>{svc.admission.owner}</b></> : null}
+          </div>
+          <div className="kv">
+            Last health check: <b>{svc.health.last_check ? dateText(svc.health.last_check) : "never"}</b>
+            {svc.health.stale ? " (stale)" : ""}
+          </div>
+          <p className="muted small">
+            The launch API exposes no long-form description field (no
+            <code> long_description</code>) — showing the catalog short description only.
+          </p>
+        </section>
+
+        <section className="lc-section">
+          <h3>Setup</h3>
+          {svc.setup.required ? (
+            <>
+              <div className="kv">
+                Required: <b>Yes</b> · Completed: <b>{svc.setup.completed ? "Yes" : "No"}</b>
+              </div>
+              {svc.setup.evidence_refs && (
+                <div className="kv">Evidence: <b>{svc.setup.evidence_refs}</b></div>
+              )}
+              {svc.setup.operations_card_id
+                ? <div className="kv">
+                    Operations card: <code>{svc.setup.operations_card_id}</code>{" "}
+                    <span className="muted small">on the life_center_operations board</span>
+                  </div>
+                : <div className="muted">No operations card linked yet.</div>}
+            </>
+          ) : <div className="muted">No setup required for this service.</div>}
+        </section>
+
+        <section className="lc-section">
+          <h3>Access</h3>
+          {svc.links.length === 0 ? (
+            <div className="muted">No links registered.</div>
+          ) : (
+            <div className="lc-tile-actions">
+              {svc.links.map((link) => lcIsUrl(link.href)
+                ? <a key={link.kind} className="actbtn" href={link.href}
+                    target="_blank" rel="noreferrer">
+                    {link.kind === "app" ? svc.primary_action_label : lcCapitalize(link.kind)}
+                  </a>
+                : <span key={link.kind} className="lc-link-path">
+                    <b>{lcCapitalize(link.kind)}:</b> <code>{link.href ?? "—"}</code>
+                  </span>)}
+            </div>
+          )}
+          {runbookLink && <LifeCenterRunbookViewer serviceId={svc.service_id} />}
+        </section>
+
+        <section className="lc-section">
+          <h3>Recovery</h3>
+          <div className="muted">
+            Structured recovery data is not yet surfaced by the launch API.
+            {runbookLink ? " See the service runbook above (under Access) for operational recovery steps." : ""}
+          </div>
+        </section>
+
+        <section className="lc-section">
+          <h3>Automation</h3>
+          {svc.service_action_ids.length === 0 ? (
+            <div className="muted">No service actions.</div>
+          ) : (
+            <div className="lc-actions-col">
+              {svc.service_action_ids.map((id) => (
+                <LifeCenterActionButton key={id} actionId={id}
+                  serviceId={svc.service_id} label={lcActionLabel(id)} />
+              ))}
+            </div>
+          )}
+          <p className="muted small">
+            Some actions require Docker CLI access the containerized cockpit
+            intentionally does not have and will return an error — the raw
+            result is shown exactly as returned.
+          </p>
+        </section>
+
+        <section className="lc-section">
+          <h3>History</h3>
+          <div className="muted">No receipt history is recorded for Life Center actions yet.</div>
+        </section>
+      </div>
+    </DrawerShell>
+  );
+}
+
+function LifeCenterView() {
+  const [launch, setLaunch] = useState<LifeCenterLaunch | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState("all");
+  const [onlySetup, setOnlySetup] = useState(false);
+  const [onlyAttention, setOnlyAttention] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      setLaunch(await fetchLifeCenterLaunch());
+    } catch (e) {
+      setError((e as Error).message); setLaunch(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const services = launch?.services ?? [];
+  const categories = useMemo(
+    () => Array.from(new Set(services.map((s) => s.category).filter(Boolean))).sort(),
+    [services]);
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => services.filter((svc) => {
+    if (category !== "all" && svc.category !== category) return false;
+    if (onlySetup && !lcNeedsSetup(svc)) return false;
+    if (onlyAttention && !lcNeedsAttention(svc)) return false;
+    if (q && !`${svc.application} ${svc.short_description}`.toLowerCase().includes(q)) return false;
+    return true;
+  }), [services, category, onlySetup, onlyAttention, q]);
+
+  // Group by category, sort within each by sort_order then application name.
+  // (The backend already sorts services this way, but grouping re-partitions
+  // them, so we re-sort defensively rather than assume order survives.)
+  const groups = useMemo(() => {
+    const m = new Map<string, LifeCenterService[]>();
+    for (const svc of filtered) {
+      const key = svc.category || "uncategorized";
+      const list = m.get(key);
+      if (list) list.push(svc); else m.set(key, [svc]);
+    }
+    return Array.from(m.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([cat, list]) => [cat, list.slice().sort(
+        (x, y) => x.sort_order - y.sort_order || x.application.localeCompare(y.application),
+      )] as const);
+  }, [filtered]);
+
+  const selected = selectedId
+    ? services.find((s) => s.service_id === selectedId) ?? null
+    : null;
+
+  if (loading && !launch) return <div className="loading">Loading Life Center…</div>;
+  if (error && !launch) {
+    return (
+      <div className="lc-view">
+        <div className="error">Life Center unavailable: {error}</div>
+        <button className="actbtn" onClick={() => void load()}>Retry</button>
+      </div>
+    );
+  }
+  if (!launch) return <div className="empty">No Life Center data.</div>;
+
+  const s = launch.summary;
+  const summaryCells: { label: string; value: number; tone: string }[] = [
+    { label: "Total", value: s.total, tone: "" },
+    { label: "Healthy", value: s.healthy, tone: "good" },
+    { label: "Attention", value: s.attention, tone: "warn" },
+    { label: "Setup pending", value: s.setup_pending, tone: "warn" },
+    { label: "Unknown", value: s.unknown, tone: "" },
+  ];
+
+  return (
+    <div className="lc-view">
+      <div className="lc-header">
+        <div className="lc-summary">
+          {summaryCells.map((cell) => (
+            <div className={`lc-summary-cell ${cell.tone}`} key={cell.label}>
+              <span className="lc-summary-value">{cell.value}</span>
+              <span className="lc-summary-label">{cell.label}</span>
+            </div>
+          ))}
+        </div>
+        <div className="lc-global">
+          <div className="lc-global-actions">
+            {launch.global_action_ids.map((id) => (
+              <LifeCenterActionButton key={id} actionId={id} label={lcActionLabel(id)} />
+            ))}
+            <button className="actbtn" onClick={() => void load()}>Reload</button>
+          </div>
+          <div className="obs-foot">
+            status {launch.status_stale ? "stale" : "current"}
+            {launch.status_generated_at ? ` · updated ${dateText(launch.status_generated_at)}` : ""}
+          </div>
+        </div>
+      </div>
+
+      <div className="filterbar">
+        <input className="search" placeholder="Filter by name or description…"
+          value={query} onChange={(e) => setQuery(e.target.value)} />
+        <select className="select" value={category}
+          onChange={(e) => setCategory(e.target.value)}>
+          <option value="all">All categories</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <button className={`chip-check ${onlySetup ? "chip-on" : ""}`}
+          aria-pressed={onlySetup} onClick={() => setOnlySetup((v) => !v)}>
+          Setup pending
+        </button>
+        <button className={`chip-check ${onlyAttention ? "chip-on" : ""}`}
+          aria-pressed={onlyAttention} onClick={() => setOnlyAttention((v) => !v)}>
+          Needs attention
+        </button>
+        {(query || category !== "all" || onlySetup || onlyAttention) && (
+          <button className="clear" onClick={() => {
+            setQuery(""); setCategory("all"); setOnlySetup(false); setOnlyAttention(false);
+          }}>clear</button>
+        )}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="empty">No services match the current filters.</div>
+      ) : (
+        groups.map(([cat, list]) => (
+          <section className="lc-group" key={cat}>
+            <h3>{cat} <span className="muted">({list.length})</span></h3>
+            <div className="lc-grid">
+              {list.map((svc) => (
+                <LifeCenterTile key={svc.service_id} svc={svc}
+                  onOpen={() => setSelectedId(svc.service_id)} />
+              ))}
+            </div>
+          </section>
+        ))
+      )}
+
+      {selected && (
+        <LifeCenterServiceDrawer svc={selected} onClose={() => setSelectedId(null)} />
+      )}
     </div>
   );
 }
@@ -11293,6 +11707,7 @@ export function App() {
             registeredRepos={registeredRepos}
             onDomainResult={recordDomainResults} />
         )}
+        {view === "life-center" && <LifeCenterView />}
         {view === "todos" && <AllTodosView />}
         {view === "settings" && <SettingsView status={status} runtime={chatRuntime} />}
         {view === "router" && (lanes

@@ -521,12 +521,32 @@ h1 { margin-bottom: 0.2rem; }
 
 
 def c_launch(args) -> int:
+    """Open the Life Center tab in the Command Center cockpit (default) — the
+    real, formatted, integrated tile view backed by the catalog + Kanban
+    boards. `--standalone` falls back to generating a local HTML page instead
+    (the original implementation, kept for when the cockpit is unavailable —
+    no React, no container, works even if the cockpit is down).
+    """
+    import webbrowser
+
+    if getattr(args, "standalone", False):
+        return _c_launch_standalone(args)
+
+    port = os.environ.get("KANBAN_UI_PORT", "8787")
+    url = f"http://127.0.0.1:{port}/?view=life-center"
+    _print(f"opening cockpit Life Center tab: {url}")
+    _print("cockpit unreachable? `lc launch --standalone` opens a local fallback page instead.")
+    webbrowser.open(url)
+    return 0
+
+
+def _c_launch_standalone(args) -> int:
     """Generate + open ONE local app-tile portal — every admitted service,
     grouped by category, with Open/Setup/Docs/Runbook/Status links.
 
-    No React, no new container mount, no backend server: this reuses the same
-    proven local-HTML pattern as `lc setup-session`, on purpose. Deliberate
-    choice, not a shortcut — see README.md's "Launch" section for why.
+    No React, no container, no backend server: this reuses the same proven
+    local-HTML pattern as `lc setup-session`. Fallback only — see
+    README.md's "Launch" section for why the cockpit tab is now the default.
     """
     import tempfile
     import webbrowser
@@ -840,8 +860,10 @@ def main(argv: list[str] | None = None) -> int:
                            help="app | setup | docs | runbook | status (default: app)")
             p.add_argument("--dry-run", action="store_true", help="print the URL, don't open a browser")
         if name == "launch":
+            p.add_argument("--standalone", action="store_true",
+                           help="generate a local HTML fallback page instead of opening the cockpit")
             p.add_argument("--no-health", action="store_true",
-                           help="skip the verify pass (faster, no health badges)")
+                           help="--standalone only: skip the verify pass (faster, no health badges)")
     args = parser.parse_args(argv)
     if not args.cmd:
         parser.print_help()
