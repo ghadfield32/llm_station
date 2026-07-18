@@ -1,11 +1,15 @@
-"""Life Center service catalog (schema v2) — typed, version-controlled, stable
+"""Life Center service catalog (schema v3) — typed, version-controlled, stable
 facts only.
 
 Backs `lc catalog`/`lc links`/`lc link-check`/`lc open` (never prints secret
-values, only credential *reference* names) and is the intended future source
-of truth for a Kanban "Service Catalog" projection. Changing facts (health,
-backup age, restore-test age) belong in `lc verify` / a future status
-exporter, not here — this file is stable facts, not a status feed.
+values, only credential *reference* names) and the Kanban "Service Catalog"
+projection (life_center_services board) + the Launch tile view. Changing facts
+(health, backup age, restore-test age) belong in `lc verify` / the status
+collector, not here — this file is stable facts, not a status feed.
+
+v3 adds `display` (short/long description, icon key, sort order, whether a
+service gets a Launch tile) — purely additive over v2; nothing in v2 changes
+shape, so existing consumers reading known fields are unaffected.
 
 Stdlib only (dataclasses/hashlib/json), matching lc.py's own constraint.
 
@@ -18,9 +22,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
-SCHEMA_VERSION = "life-center.catalog.v2"
+SCHEMA_VERSION = "life-center.catalog.v3"
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,16 @@ class Automation:
 
 
 @dataclass(frozen=True)
+class Display:
+    short_description: str = ""    # plain-language benefit, not implementation terms
+    long_description: str = ""     # one or two sentences for the drawer's Overview tab
+    icon_key: str = ""              # frontend-resolved icon identifier, not a URL
+    sort_order: int = 999
+    show_in_launch: bool = True     # False for entries with no clickable app (e.g. the Kanban itself)
+    primary_action_label: str = "Open"
+
+
+@dataclass(frozen=True)
 class ServiceEntry:
     service_id: str
     application: str
@@ -83,6 +97,7 @@ class ServiceEntry:
     automation: Automation
     dependencies: tuple[str, ...] = ()
     risk_tier: str = "low"    # low | moderate | sensitive | privileged
+    display: Display = field(default_factory=Display)
 
 
 SERVICES: tuple[ServiceEntry, ...] = (
@@ -100,6 +115,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="Settings > Backup (JSON export)",
                            restoration_proof="import JSON into a clean instance"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="See whether your Life Center applications are reachable and healthy.",
+            long_description="Uptime Kuma probes every admitted service and reports status here and "
+                              "on the Overview board.",
+            icon_key="uptime-kuma", sort_order=0, primary_action_label="Open Uptime Kuma"),
     ),
     ServiceEntry(
         service_id="restic", application="Restic", category="foundation",
@@ -113,19 +133,29 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="n/a — restic IS the export/backup mechanism",
                            restoration_proof="`lc restore-test` clean-instance restore drill, dated"),
         automation=Automation(), risk_tier="privileged",
+        display=Display(
+            short_description="Protect Life Center data with encrypted, versioned backups.",
+            long_description="Restic runs the 3-2-1 backup job against appdata and personal data, "
+                              "with a separate off-site copy.",
+            icon_key="restic", sort_order=1),
     ),
     ServiceEntry(
         service_id="tailscale", application="Tailscale", category="foundation",
         authority="private network transport for every loopback-bound service",
         lifecycle="host-level", profile="host",
         links=Links(docs="https://tailscale.com/kb/",
-                     runbook="docs/operations/HARDWARE_AND_LIFE_CENTER_PLAN.md"),
+                     runbook="../docs/operations/HARDWARE_AND_LIFE_CENTER_PLAN.md"),
         auth=Auth(mode="host-level"),
         setup=Setup(note="host-level daemon; not part of this compose stack"),
         recovery=Recovery(canonical_data_location="host tailscale state (not in this repo)",
                            complete_backup_unit="n/a (re-authenticates)", export_method="n/a",
                            restoration_proof="re-join tailnet on a fresh host"),
         automation=Automation(), risk_tier="moderate",
+        display=Display(
+            short_description="Reach the private Life Center from approved devices.",
+            long_description="Tailscale is the private network every service is reached through — "
+                              "nothing here is exposed to the public internet.",
+            icon_key="tailscale", sort_order=2),
     ),
     ServiceEntry(
         service_id="nextcloud", application="Nextcloud", category="core",
@@ -142,6 +172,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="occ export / raw file copy + pg_dump",
                            restoration_proof="clean-instance restore + WebDAV client re-sync"),
         automation=Automation(), dependencies=("nextcloud-db",), risk_tier="moderate",
+        display=Display(
+            short_description="Sync private files, calendars, contacts and supported client data.",
+            long_description="Nextcloud syncs your files, calendars, and contacts across devices, "
+                              "and transports Joplin's encrypted note sync.",
+            icon_key="nextcloud", sort_order=10, primary_action_label="Open Nextcloud"),
     ),
     ServiceEntry(
         service_id="immich", application="Immich", category="core",
@@ -156,7 +191,17 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="LC_DATA/photos + immich_db_data volume",
                            export_method="bulk download / immich-go",
                            restoration_proof="clean-instance restore + duplicate/import drill"),
-        automation=Automation(), dependencies=("immich-db", "immich-redis"), risk_tier="moderate",
+        # health_probe_id: `lc verify`'s container/HTTP checks key by the
+        # actual Docker Compose service name, which differs from this
+        # catalog's more readable service_id — found live, not assumed,
+        # while joining Overview health onto the Launch view.
+        automation=Automation(health_probe_id="immich-server"),
+        dependencies=("immich-db", "immich-redis"), risk_tier="moderate",
+        display=Display(
+            short_description="Back up, browse and search your personal photo library.",
+            long_description="Immich is the sole mobile photo-upload destination and organizes "
+                              "your photo and video library.",
+            icon_key="immich", sort_order=11, primary_action_label="Open Immich"),
     ),
     ServiceEntry(
         service_id="paperless-ngx", application="Paperless-ngx", category="core",
@@ -173,7 +218,13 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="above + paperless_db_data + paperless_data volumes",
                            export_method="document_exporter (supported clean-restore path)",
                            restoration_proof="document_importer into a clean, version-matched instance"),
-        automation=Automation(), dependencies=("paperless-db", "paperless-redis"), risk_tier="sensitive",
+        automation=Automation(health_probe_id="paperless"),  # compose service name != service_id
+        dependencies=("paperless-db", "paperless-redis"), risk_tier="sensitive",
+        display=Display(
+            short_description="Scan, OCR, organize and retrieve important documents.",
+            long_description="Paperless-ngx OCRs and classifies scanned documents so records are "
+                              "searchable and retrievable later.",
+            icon_key="paperless-ngx", sort_order=12, primary_action_label="Open Paperless-ngx"),
     ),
     ServiceEntry(
         service_id="joplin", application="Joplin", category="core",
@@ -186,6 +237,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="scheduled JEX export", export_method="File > Export > JEX",
                            restoration_proof="import JEX into a clean profile"),
         automation=Automation(), dependencies=("nextcloud",), risk_tier="moderate",
+        display=Display(
+            short_description="Take notes that sync privately across your devices.",
+            long_description="Joplin is a notes client; Nextcloud only transports its encrypted "
+                              "sync and never opens the notes themselves.",
+            icon_key="joplin", sort_order=13, primary_action_label="See setup"),
     ),
     ServiceEntry(
         service_id="jellyfin", application="Jellyfin", category="media", authority="movies and television",
@@ -199,6 +255,10 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="n/a — config export via Dashboard",
                            restoration_proof="rebuild library from config + sample media restore"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="Stream your personal movie and television library.",
+            long_description="Jellyfin plays back your movie and TV library on any device.",
+            icon_key="jellyfin", sort_order=20, primary_action_label="Open Jellyfin"),
     ),
     ServiceEntry(
         service_id="audiobookshelf", application="Audiobookshelf", category="media",
@@ -212,6 +272,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="appdata/audiobookshelf (config+metadata)",
                            export_method="Settings > Backups", restoration_proof="restore backup into a clean instance"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="Listen to audiobooks and podcasts with synchronized progress.",
+            long_description="Audiobookshelf plays audiobooks and podcasts and keeps your listening "
+                              "progress in sync across devices.",
+            icon_key="audiobookshelf", sort_order=21, primary_action_label="Open Audiobookshelf"),
     ),
     ServiceEntry(
         service_id="calibre-web", application="Calibre-Web", category="ebooks",
@@ -228,6 +293,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="raw file copy of the Calibre library",
                            restoration_proof="clean-instance restore + OPDS/reader re-check"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="Browse and read your ebook library, with metadata and conversion tools.",
+            long_description="Calibre-Web serves a Calibre ebook library with OPDS, metadata "
+                              "editing, and conversion — off by default, on only if you need it.",
+            icon_key="calibre-web", sort_order=30, primary_action_label="Open Calibre-Web"),
     ),
     ServiceEntry(
         service_id="linkwarden", application="Linkwarden", category="lifestyle",
@@ -242,6 +312,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="appdata/linkwarden + linkwarden_db_data volume",
                            export_method="built-in export", restoration_proof="clean-instance restore"),
         automation=Automation(), dependencies=("linkwarden-db",), risk_tier="low",
+        display=Display(
+            short_description="Preserve bookmarks and important web pages for the long term.",
+            long_description="Linkwarden archives pages you want to keep — promote worth-keeping "
+                              "material here from FreshRSS.",
+            icon_key="linkwarden", sort_order=40, primary_action_label="Open Linkwarden"),
     ),
     ServiceEntry(
         service_id="freshrss", application="FreshRSS", category="lifestyle",
@@ -253,6 +328,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
         recovery=Recovery(canonical_data_location="${LC_APPDATA}/freshrss", complete_backup_unit="appdata/freshrss",
                            export_method="OPML export", restoration_proof="import OPML into a clean instance"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="Read all your RSS feeds in one private inbox.",
+            long_description="FreshRSS is a temporary reading inbox — not a durable archive; "
+                              "promote what's worth keeping to Linkwarden.",
+            icon_key="freshrss", sort_order=41, primary_action_label="Open FreshRSS"),
     ),
     ServiceEntry(
         service_id="mealie", application="Mealie", category="lifestyle",
@@ -265,6 +345,10 @@ SERVICES: tuple[ServiceEntry, ...] = (
         recovery=Recovery(canonical_data_location="${LC_APPDATA}/mealie/data", complete_backup_unit="appdata/mealie/data",
                            export_method="built-in backup export", restoration_proof="clean-instance restore"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="Save recipes and organize meal planning.",
+            long_description="Mealie is the household's one recipe database and meal planner.",
+            icon_key="mealie", sort_order=42, primary_action_label="Open Mealie"),
     ),
     ServiceEntry(
         service_id="homebox", application="Homebox", category="lifestyle",
@@ -280,6 +364,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="appdata/homebox/data (sqlite)",
                            export_method="built-in CSV export", restoration_proof="clean-instance restore"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="Track household items, locations, models and warranties.",
+            long_description="Homebox is the household inventory — item, location, model, and "
+                              "replacement info in one place.",
+            icon_key="homebox", sort_order=43, primary_action_label="Open Homebox"),
     ),
     ServiceEntry(
         service_id="stirling-pdf", application="Stirling-PDF", category="lifestyle",
@@ -291,6 +380,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
         recovery=Recovery(canonical_data_location="none canonical — save finals to Nextcloud/Paperless",
                            complete_backup_unit="n/a", export_method="n/a", restoration_proof="n/a (stateless)"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="Combine, split, convert and clean up PDFs.",
+            long_description="Stirling-PDF is an on-demand PDF utility — it keeps no canonical "
+                              "data of its own; save finished files to Nextcloud or Paperless.",
+            icon_key="stirling-pdf", sort_order=44, primary_action_label="Open Stirling-PDF"),
     ),
     ServiceEntry(
         service_id="actual", application="Actual Budget", category="finance",
@@ -304,6 +398,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="Settings > Export data (portable, optional E2E encryption)",
                            restoration_proof="export -> restore into a clean instance, proven before real finance data"),
         automation=Automation(), risk_tier="sensitive",
+        display=Display(
+            short_description="Manage a private budget; the cockpit sees only health and recovery.",
+            long_description="Actual Budget is personal finance software — Command Center never "
+                              "sees balances or transactions, only whether it's healthy and backed up.",
+            icon_key="actual", sort_order=60, primary_action_label="Open Actual Budget"),
     ),
     ServiceEntry(
         service_id="adguard", application="AdGuard Home", category="network",
@@ -317,6 +416,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="built-in config export",
                            restoration_proof="tested bypass/fallback resolver proven before household DNS cutover"),
         automation=Automation(), risk_tier="sensitive",
+        display=Display(
+            short_description="Filter ads and trackers for every device on your network.",
+            long_description="AdGuard Home is the household's one DNS filter — evaluation only "
+                              "until a tested fallback resolver is proven.",
+            icon_key="adguard", sort_order=61, primary_action_label="Open AdGuard Home"),
     ),
     ServiceEntry(
         service_id="home-assistant", application="Home Assistant", category="smart-home",
@@ -331,7 +435,13 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="appdata/homeassistant/config",
                            export_method="Settings > System > Backups",
                            restoration_proof="restore into HA OS on a VM/dedicated device before real automations"),
-        automation=Automation(), risk_tier="sensitive",
+        automation=Automation(health_probe_id="homeassistant"),  # compose service name != service_id
+        risk_tier="sensitive",
+        display=Display(
+            short_description="Control and automate smart-home devices from one dashboard.",
+            long_description="Home Assistant is evaluated here as a convenience container only — "
+                              "the production target is Home Assistant OS on its own device.",
+            icon_key="home-assistant", sort_order=62, primary_action_label="Open Home Assistant"),
     ),
     ServiceEntry(
         service_id="vaultwarden", application="Vaultwarden", category="vault",
@@ -346,6 +456,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="client-side vault export (encrypted json)",
                            restoration_proof="offline recovery + every client proven before migrating a real vault"),
         automation=Automation(), risk_tier="privileged",
+        display=Display(
+            short_description="Store and autofill passwords across your devices — evaluation only for now.",
+            long_description="Vaultwarden is a password manager under dummy-data evaluation; "
+                              "Bitwarden Lite is the real deployment target.",
+            icon_key="vaultwarden", sort_order=63, primary_action_label="Open Vaultwarden"),
     ),
     ServiceEntry(
         service_id="dockge", application="Dockge", category="admin-gui",
@@ -359,6 +474,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="n/a (Compose files on disk are the source of truth)",
                            export_method="n/a", restoration_proof="n/a — start on demand, stop after use"),
         automation=Automation(), risk_tier="privileged",
+        display=Display(
+            short_description="Human-only Compose administration; privileged and normally off.",
+            long_description="Dockge has Docker socket access — root-equivalent host control. "
+                              "Start it only to administer manually, then stop it.",
+            icon_key="dockge", sort_order=80, primary_action_label="Open Dockge"),
     ),
     ServiceEntry(
         service_id="open-design", application="Open Design", category="dev-lane",
@@ -372,6 +492,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            export_method="`.od/` backup hook (see dev-lane script)",
                            restoration_proof="restore .od/ into a fresh clone"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="AI-assisted design canvas for mockups and prototypes on your desktop.",
+            long_description="Open Design runs on the desktop/laptop dev lane — not a household "
+                              "appliance service.",
+            icon_key="open-design", sort_order=90, primary_action_label="See setup"),
     ),
     ServiceEntry(
         service_id="command-center-work-graph", application="Command Center Work Graph/Kanban", category="tasks",
@@ -384,6 +509,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
                            complete_backup_unit="see llm_station Ledger backup policy",
                            export_method="see Ledger", restoration_proof="see Ledger"),
         automation=Automation(), risk_tier="low",
+        display=Display(
+            short_description="The task board that tracks all Life Center work — not a home app.",
+            long_description="Command Center's Work Graph/Kanban is the sole task authority; it "
+                              "is cross-referenced here, not something to open as a Life Center tile.",
+            icon_key="command-center", sort_order=999, show_in_launch=False),
     ),
 )
 

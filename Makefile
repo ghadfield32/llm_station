@@ -19,7 +19,7 @@ LITELLM_DIGEST ?= ghcr.io/berriai/litellm@sha256:7c311546c25e7bb6e8cafede9fcd3d0
         improvement-canary improvement-promote improvement-rollback improvement-post-watch \
         improvement-board improvement-propose improvement-scan improvement-scan-validate \
         knowledge-generate knowledge-validate judge-calibration attention-digest \
-        kanban-digest kanban-surface-validate kanban-board-snapshot
+        kanban-digest kanban-surface-validate kanban-board-snapshot life-center-sync
 
 help:  ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -297,6 +297,8 @@ improvement-scan:  ## Observer-only self-improvement scan -> Proposed cards + re
 	@$(PY) -m command_center.cli.improvement scan $(if $(APPLY),--apply,) $(if $(FEEDS),--feeds $(FEEDS),) $(if $(METHOD),--method $(METHOD),) $(if $(SHOW),--show-report,)
 improvement-scan-validate:  ## Blocking validation gate for the discovery scan (N/N PASS)
 	@$(PY) -m command_center.cli.improvement scan-validate
+life-center-sync:  ## Sync life-center-infra catalog+verify -> Life Center Kanban boards (scheduler entrypoint, NOT Airflow). PROFILE=everything
+	@$(PY) -m command_center.cli.life_center_sync $(if $(PROFILE),--profile $(PROFILE),)
 knowledge-generate:  ## Generate the observer-only OKF knowledge/ bundle from authoritative sources
 	@$(PY) -m command_center.cli.knowledge generate
 knowledge-validate:  ## Blocking validation gate for the knowledge/ bundle (N/N PASS)

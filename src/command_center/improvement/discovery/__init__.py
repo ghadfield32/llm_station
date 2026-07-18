@@ -40,6 +40,11 @@ from .manifest import ReportManifest, build_manifest, write_manifest
 from .kanban import (
     command_center_card_drafter, draft_self_improvement_cards, growthos_card_drafter,
 )
+from .life_center import (
+    command_center_operations_binder, command_center_overview_binder,
+    command_center_services_binder, run_lc, seed_operations_from_setup,
+    sync_overview_from_verification, sync_services_from_catalog,
+)
 from .dag_support import (
     SOURCE_REGISTRY, build_scanner, finish, offline_specs, registered_repository_specs,
     scan_one, scheduled_source_registry, DEFAULT_REPORT_PATH,
@@ -63,4 +68,7 @@ __all__ = [
     "train_acceptance",
     "ReportManifest", "build_manifest", "write_manifest",
     "command_center_card_drafter", "draft_self_improvement_cards", "growthos_card_drafter",
+    "run_lc", "sync_services_from_catalog", "seed_operations_from_setup",
+    "sync_overview_from_verification", "command_center_services_binder",
+    "command_center_operations_binder", "command_center_overview_binder",
 ]
