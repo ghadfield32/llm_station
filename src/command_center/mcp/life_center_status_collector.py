@@ -37,17 +37,27 @@ DEFAULT_SNAPSHOT_PATH = "generated/life-center-status-snapshot.json"
 _STATUS_MAP = {"pass": "healthy", "warn": "attention", "fail": "down"}
 
 
-def run_lc(*args: str) -> dict:
+def run_lc(*args: str, allowed_returncodes: tuple[int, ...] = (0,)) -> dict:
     """Subprocess boundary into life-center-infra/lc.py — never a Python import
     (see life-center-infra/README.md: it is a self-contained seed meant to be
     extracted into its own private repo; importing its modules here would
-    couple the two repos at exactly the boundary that's meant to stay clean)."""
+    couple the two repos at exactly the boundary that's meant to stay clean).
+
+    ``lc verify`` legitimately exits 1 when ``overall == "fail"`` — a real
+    "some service is down" verdict, not a crash — while still printing a
+    valid report. Without tolerating that exit code, this collector would
+    treat the routine down-service case as a hard failure and skip updating
+    the snapshot, silently going stale exactly when freshness matters most.
+    """
     if not _LC_PY.exists():
         raise FileNotFoundError(f"lc.py not found at {_LC_PY}")
     proc = subprocess.run(
         [sys.executable, str(_LC_PY), *args],
-        capture_output=True, encoding="utf-8", errors="replace", check=True,
+        capture_output=True, encoding="utf-8", errors="replace", check=False,
     )
+    if proc.returncode not in allowed_returncodes:
+        raise subprocess.CalledProcessError(
+            proc.returncode, proc.args, output=proc.stdout, stderr=proc.stderr)
     return json.loads(proc.stdout)
 
 
@@ -118,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         out_path = _REPO_ROOT / out_path
 
     try:
-        report = run_lc("verify", "--profile", args.profile, "--json")
+        report = run_lc("verify", "--profile", args.profile, "--json",
+                        allowed_returncodes=(0, 1))
     except Exception as exc:  # noqa: BLE001 - a failed run must not corrupt a good snapshot
         print(f"[life-center-status-collector] run failed, leaving prior snapshot "
               f"in place: {exc}", file=sys.stderr)

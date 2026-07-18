@@ -231,6 +231,13 @@ services:
       # domain-surface editor in Controls. For a read-only board deployment,
       # change this back to :ro and remove KANBAN_UI_DOMAIN_CONFIG_WRITES.
       - ./configs:/app/configs
+      # Life Center Launch tab: read-only. `command_center.mcp.life_center_launch`
+      # shells out to life-center-infra/lc.py for catalog facts (never imports
+      # it — see that repo's README on why it stays a separate boundary); the
+      # runbook route resolves a handful of `../docs/...` links too. RO always
+      # — this container must never write into either tree.
+      - ./life-center-infra:/app/life-center-infra:ro
+      - ./docs:/app/docs:ro
       # job-search application memory and profile controls. The cockpit needs
       # this mount to show generated packets/follow-ups and edit question presets.
       - ./data/job_search:/app/data/job_search

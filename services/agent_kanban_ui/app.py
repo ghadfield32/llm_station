@@ -6296,6 +6296,111 @@ def domain_card(domain_id: str, card_id: str) -> dict:
                         detail=f"card {card_id!r} not in domain {domain_id!r}")
 
 
+# ── Life Center: catalog-joined Launch view + read-only action dispatch ────
+# GETs need no gate (matches domain_cards/domain_card above — pure reads over
+# the catalog + the three existing Life Center boards). The dispatch POST
+# requires _require_chat(), same as every other write-shaped route in this
+# file, even though every action life_center_actions.py registers is itself
+# read-only — see that module's docstring for why nothing beyond that tier
+# is ever added here.
+
+class LifeCenterActionDispatchIn(BaseModel):
+    action_id: str
+    service_id: str | None = None
+    idempotency_key: str | None = None
+    parameters: dict = {}
+
+
+def _life_center_view():
+    from command_center.mcp.life_center_launch import live_launch_view
+    try:
+        return live_launch_view()
+    except Exception as exc:  # noqa: BLE001 - a clear 503, never a raw stack trace to the SPA
+        raise HTTPException(
+            status_code=503,
+            detail=f"Life Center view unavailable: {exc}") from exc
+
+
+@app.get("/api/life-center/launch")
+def life_center_launch() -> dict:
+    from dataclasses import asdict
+    return asdict(_life_center_view())
+
+
+@app.get("/api/life-center/services/{service_id}")
+def life_center_service(service_id: str) -> dict:
+    from dataclasses import asdict
+    view = _life_center_view()
+    for svc in view.services:
+        if svc.service_id == service_id:
+            return asdict(svc)
+    raise HTTPException(status_code=404, detail=f"unknown service_id: {service_id!r}")
+
+
+def _life_center_infra_root() -> Path:
+    """The container mount path if present, else the host-relative path when
+    running this file outside a container (e.g. local dev). A tuple literal
+    of both candidates would evaluate the host fallback unconditionally —
+    `Path(__file__).resolve().parents[2]` only has 2 parents when __file__ is
+    the container's /app/app.py, raising IndexError before the first (working)
+    candidate was ever checked. Lazy per-candidate evaluation, found live."""
+    container_path = Path("/app/life-center-infra")
+    if container_path.is_dir():
+        return container_path.resolve()
+    parents = Path(__file__).resolve().parents
+    if len(parents) > 2:
+        host_path = parents[2] / "life-center-infra"
+        if host_path.is_dir():
+            return host_path.resolve()
+    raise HTTPException(status_code=503, detail="life-center-infra is not mounted in this deployment")
+
+
+@app.get("/api/life-center/services/{service_id}/runbook")
+def life_center_service_runbook(service_id: str) -> dict:
+    """Resolve and return ONLY the registered runbook for this service — never
+    an arbitrary path. Most runbooks live under life-center-infra/runbooks/;
+    a few reference ../docs/... one level up (also mounted, read-only) — both
+    are legitimate, so the boundary is "inside this repository", not "inside
+    life-center-infra". Anything resolving outside that fails closed."""
+    view = _life_center_view()
+    svc = next((s for s in view.services if s.service_id == service_id), None)
+    if svc is None:
+        raise HTTPException(status_code=404, detail=f"unknown service_id: {service_id!r}")
+    runbook_link = next((link for link in svc.links if link.kind == "runbook"), None)
+    if not runbook_link or not runbook_link.href:
+        raise HTTPException(status_code=404, detail=f"{service_id} has no registered runbook")
+
+    lc_root = _life_center_infra_root()
+    repo_root = lc_root.parent
+    candidate = (lc_root / runbook_link.href).resolve()
+    if not candidate.is_relative_to(repo_root):
+        raise HTTPException(status_code=400,
+                            detail="runbook path resolves outside the repository")
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="runbook file not found on this host")
+
+    return {
+        "service_id": service_id,
+        "runbook_path": runbook_link.href,
+        "content": candidate.read_text(encoding="utf-8"),
+    }
+
+
+@app.post("/api/life-center/actions/dispatch")
+def life_center_dispatch_action(body: LifeCenterActionDispatchIn) -> dict:
+    _require_chat()
+    from command_center.mcp.life_center_actions import ActionResult, dispatch
+
+    result: ActionResult = dispatch(
+        body.action_id, service_id=body.service_id,
+        idempotency_key=body.idempotency_key, parameters=body.parameters,
+    )
+    return {
+        "action_id": result.action_id, "request_id": result.request_id,
+        "status": result.status, "result": result.result, "error": result.error,
+    }
+
+
 @app.get("/api/domain/{domain_id}/card/{card_id}/progress")
 def domain_card_progress(domain_id: str, card_id: str) -> dict:
     spec = _domain_spec(domain_id)

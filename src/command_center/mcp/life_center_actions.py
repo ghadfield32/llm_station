@@ -23,6 +23,19 @@ exposure, DNS mutation, vault-content access, credential rotation/disclosure,
 real Actual Budget reads/writes, unrestricted Home Assistant control, Dockge
 use.
 
+DEPLOYMENT CONSTRAINT, found live: every action here shells out to
+life-center-infra/lc.py, and `lc verify` itself shells out to `docker compose
+ps` — so these actions only fully succeed where BOTH Docker CLI and real
+host-network reachability to the admitted services' loopback ports exist.
+That's true for a host-side process (a terminal, a host-side agent session,
+this module's own MCP server run directly on the host) — it is NOT true
+inside the `agent_kanban_ui` container, which correctly has neither (giving
+it either would be exactly the Dockge-style privilege risk this file's own
+"NEVER add" list exists to prevent). Dispatched from there, `verify_service`/
+`verify_links`/`refresh_status`/`refresh_catalog_projection`'s Overview leg
+fail with a clear, typed `status: "error"` (see `_run_lc`'s FileNotFoundError
+handling below) — never a raw traceback, and never a false "healthy" reading.
+
 Run (once ``mcp`` is available in the runtime env):
 
     python -m command_center.mcp.life_center_actions            # stdio
@@ -69,16 +82,37 @@ class ActionResult:
     error: str | None = None
 
 
-def _run_lc(*args: str) -> dict:
+def _run_lc(*args: str, allowed_returncodes: tuple[int, ...] = (0,)) -> dict:
     """Subprocess boundary into life-center-infra/lc.py — never a Python
     import (life-center-infra is a self-contained seed meant to be extracted
-    into its own private repo; see its README)."""
+    into its own private repo; see its README).
+
+    ``lc verify`` legitimately exits 1 when ``overall == "fail"`` (a routine
+    unhealthy-service case, not a crash) while still printing a valid report —
+    callers that need to act on that pass ``allowed_returncodes=(0, 1)``, same
+    convention as ``command_center.improvement.discovery.life_center.run_lc``.
+    """
     if not _LC_PY.exists():
         raise FileNotFoundError(f"lc.py not found at {_LC_PY}")
     proc = subprocess.run(
         [sys.executable, str(_LC_PY), *args],
-        capture_output=True, encoding="utf-8", errors="replace", check=True,
+        capture_output=True, encoding="utf-8", errors="replace", check=False,
     )
+    # Check the crash signature BEFORE the allowed-returncode gate: exit 1 can
+    # mean EITHER lc.py's legitimate overall=="fail" (valid JSON on stdout) OR
+    # an uncaught crash (empty stdout) — allowing both through to json.loads()
+    # for the crash case just trades a clear message for a confusing
+    # JSONDecodeError. Found live: this exact bug, on the first attempt to fix it.
+    if "No such file or directory: 'docker'" in (proc.stderr or ""):
+        raise RuntimeError(
+            "this action needs Docker CLI + host-network access, which the "
+            "containerized cockpit correctly does not have (giving it that "
+            "would be the exact privilege risk this module's docstring "
+            "warns against) — run it from a host-side terminal or agent "
+            "session instead, or via `lc verify`/`lc.py`.")
+    if proc.returncode not in allowed_returncodes:
+        raise subprocess.CalledProcessError(
+            proc.returncode, proc.args, output=proc.stdout, stderr=proc.stderr)
     return json.loads(proc.stdout)
 
 
@@ -96,7 +130,8 @@ def _refresh_status(_req: ActionRequest) -> dict:
 def _verify_service(req: ActionRequest) -> dict:
     if not req.service_id:
         raise ValueError("verify_service requires service_id")
-    report = _run_lc("verify", "--profile", "everything", "--json")
+    report = _run_lc("verify", "--profile", "everything", "--json",
+                     allowed_returncodes=(0, 1))
     checks = [c for c in report["checks"] if c.get("service_id") == req.service_id]
     if not checks:
         raise ValueError(f"no checks found for service_id {req.service_id!r} "
@@ -110,11 +145,19 @@ def _verify_links(req: ActionRequest) -> dict:
 
 
 def _refresh_catalog_projection(_req: ActionRequest) -> dict:
-    """Re-run the Kanban catalog-sync entrypoint (services/operations boards)."""
+    """Re-run the Kanban catalog-sync entrypoint (services/operations/overview
+    boards). Same Docker-CLI constraint as the other actions — see this
+    module's docstring — since the entrypoint's Overview leg calls `lc verify`."""
     proc = subprocess.run(
         [sys.executable, "-m", "command_center.cli.life_center_sync"],
         capture_output=True, encoding="utf-8", errors="replace",
     )
+    if "No such file or directory: 'docker'" in (proc.stderr or ""):
+        raise RuntimeError(
+            "this action needs Docker CLI + host-network access, which the "
+            "containerized cockpit correctly does not have — run "
+            "`python -m command_center.cli.life_center_sync` from a host-side "
+            "terminal or agent session instead.")
     return {"exit_code": proc.returncode, "stdout": (proc.stdout or "")[-4000:],
             "stderr": (proc.stderr or "")[-2000:]}
 
