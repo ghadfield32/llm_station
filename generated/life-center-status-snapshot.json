@@ -1,0 +1,182 @@
+{
+  "schema_version": "life-center.status-snapshot.v1",
+  "generated_at": "2026-07-17T23:13:55.666521+00:00",
+  "source_verify_schema_version": "life-center.verify.v1",
+  "catalog_digest": "sha256:e22fe4a89402ed9ea5ca5f8cc14796e70316eb366cfe32db25d2dd4647a67b87",
+  "overview": {
+    "generated_at": "2026-07-17T23:13:55.666521+00:00",
+    "services_total": 33,
+    "services_healthy": 22,
+    "services_attention": 11,
+    "oldest_backup_age_hours": 0.0,
+    "pool_used_pct": 0.0,
+    "open_security_findings": 0
+  },
+  "services": [
+    {
+      "service": "actual",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "adguard",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "admin-gui",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "audiobookshelf",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "calibre-web",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "dockge",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "docs",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "ebooks",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "files",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "finance",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "freshrss",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "homeassistant",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "homebox",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "immich-db",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "immich-redis",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "immich-server",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "jellyfin",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "lifestyle",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "linkwarden",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "linkwarden-db",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "mealie",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "media",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "network",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "nextcloud",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "nextcloud-db",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "paperless",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "paperless-db",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "paperless-redis",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "photos",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "smart-home",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "stirling-pdf",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "vault",
+      "status": "attention",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    },
+    {
+      "service": "vaultwarden",
+      "status": "healthy",
+      "last_check": "2026-07-17T23:13:55.666521+00:00"
+    }
+  ]
+}

@@ -470,6 +470,145 @@ def c_setup_session(_args) -> int:
     return 0
 
 
+# category -> catalog profile values grouped into it, in display order.
+_LAUNCH_GROUPS = [
+    ("Foundation", ["foundation"]),
+    ("Core", ["files", "photos", "docs"]),
+    ("Media", ["media"]),
+    ("Ebooks", ["ebooks"]),
+    ("Lifestyle", ["lifestyle"]),
+    ("Sensitive and gated", ["finance", "network", "smart-home", "vault"]),
+    ("Administration", ["admin-gui"]),
+    ("Desktop / dev lane", ["client", "desktop", "host"]),
+]
+
+_LAUNCH_PAGE_SCRIPT = """
+function lcFilter() {
+  var q = document.getElementById('lc-search').value.toLowerCase();
+  var cat = document.getElementById('lc-category').value;
+  var tiles = document.querySelectorAll('.lc-tile');
+  for (var i = 0; i < tiles.length; i++) {
+    var t = tiles[i];
+    var matchesQ = !q || t.dataset.name.indexOf(q) !== -1;
+    var matchesCat = !cat || t.dataset.category === cat;
+    t.style.display = (matchesQ && matchesCat) ? '' : 'none';
+  }
+}
+"""
+
+_LAUNCH_PAGE_STYLE = """
+body { font-family: system-ui, sans-serif; margin: 2rem; background: #f7f7f8; color: #1a1a1a; }
+h1 { margin-bottom: 0.2rem; }
+.lc-controls { margin: 1rem 0; display: flex; gap: 0.5rem; }
+.lc-controls input, .lc-controls select { padding: 0.4rem; font-size: 1rem; }
+.lc-group { margin-top: 1.5rem; }
+.lc-group h2 { font-size: 1.1rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+.lc-tiles { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.lc-tile { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 0.75rem; width: 220px; }
+.lc-tile .lc-title { font-weight: 600; }
+.lc-badge { display: inline-block; font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 4px;
+  margin-right: 0.25rem; color: #fff; }
+.lc-badge-healthy, .lc-badge-pass { background: #2e7d32; }
+.lc-badge-attention, .lc-badge-warn, .lc-badge-unknown { background: #b8860b; }
+.lc-badge-down, .lc-badge-fail { background: #c62828; }
+.lc-badge-risk-low { background: #6b7280; }
+.lc-badge-risk-moderate { background: #6b7280; }
+.lc-badge-risk-sensitive { background: #b8860b; }
+.lc-badge-risk-privileged { background: #c62828; }
+.lc-authority { font-size: 0.85rem; color: #444; margin: 0.4rem 0; }
+.lc-links a { display: inline-block; margin: 0.15rem 0.3rem 0 0; font-size: 0.85rem; }
+"""
+
+
+def c_launch(args) -> int:
+    """Generate + open ONE local app-tile portal — every admitted service,
+    grouped by category, with Open/Setup/Docs/Runbook/Status links.
+
+    No React, no new container mount, no backend server: this reuses the same
+    proven local-HTML pattern as `lc setup-session`, on purpose. Deliberate
+    choice, not a shortcut — see README.md's "Launch" section for why.
+    """
+    import tempfile
+    import webbrowser
+
+    env = _read_env_file()
+    include_health = not getattr(args, "no_health", False)
+    health_by_service: dict[str, str] = {}
+    if include_health:
+        _print("running a health check first (skip with --no-health)...")
+        report = _build_verification_report("everything")
+        by_service: dict[str, list[dict]] = {}
+        for c in report["checks"]:
+            sid = c.get("service_id")
+            if sid:
+                by_service.setdefault(sid, []).append(c)
+        for sid, checks in by_service.items():
+            statuses = {c["status"] for c in checks}
+            overall = "fail" if "fail" in statuses else "warn" if statuses - {"pass"} else "pass"
+            health_by_service[sid] = {"pass": "healthy", "warn": "attention", "fail": "down"}[overall]
+
+    by_profile: dict[str, list] = {}
+    for s in catalog.SERVICES:
+        by_profile.setdefault(s.profile, []).append(s)
+
+    group_html = []
+    for group_name, profiles in _LAUNCH_GROUPS:
+        services = [s for p in profiles for s in by_profile.get(p, [])]
+        if not services:
+            continue
+        tiles = []
+        for s in services:
+            links = dict(_resolved_links(s, env))
+            # The generated page opens from a temp directory via file://, so a
+            # bare repo-relative runbook path (e.g. "runbooks/app-admission.md")
+            # would resolve under Temp/, not this repo — same bug class `lc
+            # open --target runbook` already had to fix with .as_uri().
+            if links.get("runbook"):
+                links["runbook"] = (ROOT / links["runbook"]).resolve().as_uri()
+            health = health_by_service.get(s.service_id)
+            health_badge = (f'<span class="lc-badge lc-badge-{health}">{health}</span>'
+                             if health else "")
+            risk_badge = f'<span class="lc-badge lc-badge-risk-{s.risk_tier}">{s.risk_tier}</span>'
+            link_buttons = []
+            for kind in ("app", "setup", "docs", "runbook", "status"):
+                url = links.get(kind)
+                if url:
+                    label = kind.capitalize() if kind != "app" else "Open app"
+                    link_buttons.append(f'<a href="{url}" target="_blank">{label}</a>')
+            tiles.append(
+                f'<div class="lc-tile" data-name="{s.application.lower()}" '
+                f'data-category="{group_name}">'
+                f'<div class="lc-title">{s.application}</div>'
+                f'<div>{risk_badge}{health_badge}</div>'
+                f'<div class="lc-authority">{s.authority}</div>'
+                f'<div class="lc-links">{"".join(link_buttons)}</div>'
+                f'</div>'
+            )
+        group_html.append(
+            f'<div class="lc-group"><h2>{group_name}</h2><div class="lc-tiles">'
+            + "".join(tiles) + "</div></div>"
+        )
+
+    categories = "".join(f'<option value="{g}">{g}</option>' for g, _ in _LAUNCH_GROUPS)
+    html = (
+        "<html><head><title>Life Center — Launch</title>"
+        f"<style>{_LAUNCH_PAGE_STYLE}</style></head><body>"
+        "<h1>Life Center — Launch</h1>"
+        "<p>Every admitted app in one place. Not another authority — just links.</p>"
+        '<div class="lc-controls">'
+        '<input id="lc-search" placeholder="Search apps..." oninput="lcFilter()">'
+        f'<select id="lc-category" onchange="lcFilter()"><option value="">All categories</option>'
+        f'{categories}</select></div>'
+        + "".join(group_html) +
+        f"<script>{_LAUNCH_PAGE_SCRIPT}</script></body></html>"
+    )
+    path = Path(tempfile.gettempdir()) / "lc-launch.html"
+    path.write_text(html, encoding="utf-8")
+    _print(f"wrote {path}")
+    webbrowser.open(path.resolve().as_uri())
+    return 0
+
+
 def _exposure_checks(tiers: list[str]) -> list[dict]:
     """Every host port-binding line found, each judged loopback-only or not."""
     checks = []
@@ -668,11 +807,12 @@ COMMANDS = {
     "link-check": (c_link_check, "HTTP-reachability check only, for a profile"),
     "open": (c_open, "open one service's link in the default browser (local action only)"),
     "setup-session": (c_setup_session, "write + open ONE local setup-checklist page for pending first-run steps"),
+    "launch": (c_launch, "write + open ONE local app-tile portal for every admitted service"),
 }
 
-# Commands that take --profile (most do; `catalog`/`open`/`setup-session` operate
-# on a single service or the whole catalog, not a compose tier).
-_NO_PROFILE_COMMANDS = {"catalog", "open", "setup-session"}
+# Commands that take --profile (most do; `catalog`/`open`/`setup-session`/
+# `launch` operate on a single service or the whole catalog, not a compose tier).
+_NO_PROFILE_COMMANDS = {"catalog", "open", "setup-session", "launch"}
 _JSON_COMMANDS = {"links", "link-check", "verify"}
 
 
@@ -699,6 +839,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--target", default="app",
                            help="app | setup | docs | runbook | status (default: app)")
             p.add_argument("--dry-run", action="store_true", help="print the URL, don't open a browser")
+        if name == "launch":
+            p.add_argument("--no-health", action="store_true",
+                           help="skip the verify pass (faster, no health badges)")
     args = parser.parse_args(argv)
     if not args.cmd:
         parser.print_help()

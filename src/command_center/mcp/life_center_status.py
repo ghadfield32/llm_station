@@ -9,10 +9,18 @@ note/document titles, financial detail, or a filesystem browser. There is
 deliberately **no** ``life-center-actions`` surface here (mutations are admitted
 one at a time later, under the security baseline).
 
-STUB STATUS: the real Life Center host does not exist yet (Gate 5). Every
-function returns typed **fixture** data so the shape, the redaction contract, and
-the board projection can be exercised now. Wire these to the real host's probes
-when the appliance is built.
+PARTIALLY WIRED (this trial): the appliance itself does not exist yet (Gate 5),
+but the desktop proof-of-concept trial does — ``get_overview``/``get_service_health``
+now read a real, periodically-refreshed snapshot written by
+``life_center_status_collector.py`` (itself a thin subprocess wrapper around
+``life-center-infra/lc.py verify --json``), and ``get_pending_maintenance``
+reads the real ``life_center_operations`` board. ``get_backup_status``,
+``get_storage_capacity``, ``get_model_inventory``, ``get_archive_freshness``,
+and ``get_security_findings`` remain typed **fixture** stubs (empty lists) —
+there is genuinely no automated backup-age/storage/model-inventory/security
+probe yet (``lc verify`` itself reports those as ``unknown``, not measured;
+returning fabricated numbers here would be worse than returning nothing). Wire
+each one for real only once its underlying probe exists.
 
 Design mirrors ``growth_os/agent/growthos_mcp.py``: a thin FastMCP registration
 layer over pre-verified functions. FastMCP is imported lazily inside
@@ -26,12 +34,36 @@ Run (once ``mcp`` is available in the runtime env):
 """
 from __future__ import annotations
 
+import json
+import os
 import sys
+from pathlib import Path
 from typing import Callable, TypedDict
 
 SERVER_NAME = "life-center-status"
 HTTP_HOST = "127.0.0.1"        # loopback only; share via `tailscale serve`, never Funnel
 HTTP_PORT = 8799
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DEFAULT_SNAPSHOT_PATH = "generated/life-center-status-snapshot.json"
+
+
+def _snapshot_path() -> Path:
+    raw = os.environ.get("LIFE_CENTER_STATUS_SNAPSHOT", _DEFAULT_SNAPSHOT_PATH)
+    p = Path(raw)
+    return p if p.is_absolute() else _REPO_ROOT / p
+
+
+def _load_snapshot() -> dict | None:
+    """None if the collector has never run (or its output is unreadable) — the
+    caller must treat that as "unknown/stale", never as "everything healthy"."""
+    path = _snapshot_path()
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
 
 
 # ── typed return shapes (redacted health facts only) ─────────────────────────
@@ -98,21 +130,46 @@ class MaintenanceItem(TypedDict):
 
 # ── the eight allowlisted read-only tools (no free-form args) ────────────────
 def get_overview() -> Overview:
-    """One-glance Life Center health summary (redacted)."""
+    """One-glance Life Center health summary (redacted).
+
+    Reads the collector's snapshot when one exists; a missing/unreadable
+    snapshot means "never collected", reported as zeroed with generated_at
+    pinned to the epoch — never presented as a real, current all-healthy read.
+    """
+    snap = _load_snapshot()
+    if not snap:
+        return Overview(
+            generated_at="1970-01-01T00:00:00Z",
+            services_total=0, services_healthy=0, services_attention=0,
+            oldest_backup_age_hours=0.0, pool_used_pct=0.0, open_security_findings=0,
+        )
+    ov = snap["overview"]
     return Overview(
-        generated_at="1970-01-01T00:00:00Z",
-        services_total=0,
-        services_healthy=0,
-        services_attention=0,
-        oldest_backup_age_hours=0.0,
-        pool_used_pct=0.0,
-        open_security_findings=0,
+        generated_at=ov["generated_at"],
+        services_total=ov["services_total"],
+        services_healthy=ov["services_healthy"],
+        services_attention=ov["services_attention"],
+        oldest_backup_age_hours=ov["oldest_backup_age_hours"],
+        pool_used_pct=ov["pool_used_pct"],
+        open_security_findings=ov["open_security_findings"],
     )
 
 
 def get_service_health() -> list[ServiceHealth]:
-    """Per-service status + native deep links (no contents)."""
-    return []
+    """Per-service status + native deep links (no contents).
+
+    deep_link stays empty for now: the collector's snapshot carries status
+    only, not resolved URLs — wiring that is a small follow-up, not something
+    to fabricate here.
+    """
+    snap = _load_snapshot()
+    if not snap:
+        return []
+    return [
+        ServiceHealth(service=s["service"], status=s["status"],
+                      last_check=s["last_check"], deep_link="")
+        for s in snap.get("services", [])
+    ]
 
 
 def get_backup_status() -> list[BackupStatus]:
@@ -140,9 +197,41 @@ def get_security_findings() -> list[SecurityFinding]:
     return []
 
 
+# life-center-infra/catalog.py risk_tier (low/moderate/sensitive/privileged) ->
+# this codebase's L0-L4 risk codes (see kanban.py's _VALID_RISK). A judgment
+# call, not a fact: "sensitive"/"privileged" data doesn't automatically mean
+# an L3/L4-risk ACTION, but absent a per-action risk assessment, defaulting to
+# the data's own sensitivity is the conservative (never under-stated) choice.
+_CATALOG_RISK_TO_L_CODE = {"low": "L1", "moderate": "L2", "sensitive": "L3", "privileged": "L4"}
+
+
 def get_pending_maintenance() -> list[MaintenanceItem]:
-    """Human-authored / proposed maintenance items with risk tier."""
-    return []
+    """Human-authored / proposed maintenance items with risk tier.
+
+    Reads real cards from the life_center_operations board (read-only —
+    list_cards() has no side effect on the event log). Every card is honestly
+    marked proposed=True: this MCP surface has no action broker behind it, so
+    nothing here has ever actually been executed.
+    """
+    from command_center.boards.command_center_provider import CommandCenterBoardProvider
+    from command_center.kanban_sync.events import EventLog
+
+    event_path = os.environ.get("KANBAN_EVENT_LOG", "generated/kanban-events.jsonl")
+    store_path = os.environ.get("KANBAN_BOARD_STORE", "generated/boards")
+    provider = CommandCenterBoardProvider(
+        board_id="life_center_operations",
+        event_log=EventLog(event_path),
+        store_dir=Path(store_path),
+    )
+    items = []
+    for card in provider.list_cards():
+        risk = _CATALOG_RISK_TO_L_CODE.get(str(card.get("risk_tier", "")).lower(), "L1")
+        items.append(MaintenanceItem(
+            id=str(card.get("card_id", "")),
+            title=f"{card.get('service_id', '?')}: {card.get('operation_type', 'operation')}",
+            risk_tier=risk, proposed=True,
+        ))
+    return items
 
 
 # The complete, fixed allowlist. No other function is exposed. Nothing here
