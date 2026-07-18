@@ -90,6 +90,32 @@ evaluation. For time-ordered learning work, use past-only features and temporal
 splits. Use `uv` for dependency changes, update every consuming
 `pyproject.toml`, prove `uv sync`, and include dependency metadata with code.
 
+Goal-driven KPI leaderboard loop (run every non-trivial improvement/evaluation
+task as a champion-challenger loop, not a one-shot):
+1. Frame — define KPI(s) + goal (target + stop condition) from data, never an
+   invented threshold; record the current champion as baseline (none -> first
+   validated attempt becomes it); keep quality-eval KPIs distinct from
+   serving-eval KPIs.
+2. Attempt (loop body) — one challenger via the full workflow: bounded packet
+   -> Sol implementation (effort by risk) -> deterministic verification (make
+   validate/test, uv run cc doctor) -> fresh independent review. No fake/default
+   values; past-only inputs + temporal splits for time-ordered work.
+3. Evidence gate — a challenger scores ONLY with reproducible runtime evidence
+   from real data (historical where time-ordered, plus a current run) and
+   passing validations/tests. Unproven attempts do not enter the leaderboard.
+4. Leaderboard — append each validated challenger's KPIs with provenance
+   (commit, config/contract version, exact command, exit status) to the ranked
+   leaderboard artifact; promote to champion ONLY when it beats the incumbent
+   on the agreed metric AND clears the same gates. Do not bypass the Ledger or
+   kanban/mission approval flow to record or promote a result.
+5. Goal check, then keep improving — when the goal is met and validated, report
+   it with the leaderboard, then keep looping challenger attempts to push past
+   it until diminishing returns, budget exhaustion, or the user's stop.
+6. Stop honestly — a metric gain alone never promotes: require baselines,
+   coverage, calibration/uncertainty where applicable, and out-of-time
+   behavior. Report regressions and dropped coverage; never silently truncate
+   the search or the leaderboard.
+
 Run all relevant verification. Config changes require `make validate`; code
 changes require appropriate tests and normally `make lint`/`make test`; runtime
 changes require proportionate health or smoke evidence. Record exact commands,
