@@ -11707,7 +11707,11 @@ export function App() {
             registeredRepos={registeredRepos}
             onDomainResult={recordDomainResults} />
         )}
-        {view === "life-center" && <LifeCenterView />}
+        {view === "life-center" && (
+          <PanelErrorBoundary label="Life Center">
+            <LifeCenterView />
+          </PanelErrorBoundary>
+        )}
         {view === "todos" && <AllTodosView />}
         {view === "settings" && <SettingsView status={status} runtime={chatRuntime} />}
         {view === "router" && (lanes
