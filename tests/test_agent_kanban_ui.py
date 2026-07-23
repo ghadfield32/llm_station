@@ -1006,7 +1006,16 @@ def test_repository_catalog_is_available_without_chat(client, monkeypatch, tmp_p
     body = response.json()
     assert body["source"].endswith("autonomy.yaml")
     repos = {repo["repo_id"]: repo for repo in body["repositories"]}
-    assert set(repos) == {"llm_station", "betts_basketball"}
+    # Expected set derived from the same real autonomy.yaml this endpoint
+    # reads: the catalog must return exactly the registered repositories,
+    # whatever the operator has legitimately registered.
+    import yaml as _yaml
+    manifests = _yaml.safe_load(
+        (ROOT / "configs" / "autonomy.yaml").read_text(encoding="utf-8"),
+    )["repo_manifests"]
+    registered = {m["repo_id"] for m in manifests}
+    assert "llm_station" in registered   # anchor: never a degenerate registry
+    assert set(repos) == registered
     assert repos["llm_station"]["research_capabilities"]
     assert "declared capabilities" in repos["llm_station"]["scan_reason"].lower()
 

@@ -63,18 +63,18 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Notes:** "The job boards should be all based on the steps they are in so it's not over cluttered. We should organize it so the main docs are easily adjusted via a link at the top and then the steps would just be there to show the overall and if we want we can click into those steps and see the actions taken for each so we can have this broken down linearly and easily adjusted."
 
 #### KAN-2 · Repo-scoped agent workspaces — registered folders are the whole search space
-`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+`🚀 SHIP-TAIL` · **Target:** 2026-07-24 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L2 (2026-07-23 migration)
-**Notes:** Kanban agent search scope is far too wide. The designated/registered folders must be all an agent can work with, and newly added repositories must be registered with the kanban so agents instantly know them. Goal: never again see "Those timed out — the home directory tree is too large… Directory traversal keeps timing out (the tree is huge)." Includes registering `bball_homography_pipeline` (currently unregistered — only `llm_station` and `betts_basketball` are in `configs/autonomy.yaml` `repo_manifests`).
+**Notes:** Kanban agent search scope is far too wide. The designated/registered folders must be all an agent can work with, and newly added repositories must be registered with the kanban so agents instantly know them. Goal: never again see "Those timed out — the home directory tree is too large… Directory traversal keeps timing out (the tree is huge)." STEP A DONE 2026-07-23: `bball_homography_pipeline` REGISTERED (disabled manifest — github_app_pending, autonomy off, blocker recorded; board personal_todos; validate+cross-refs PASS). OPERATOR TAIL: add `BBALL_HOMOGRAPHY_PIPELINE_LOCAL_PATH=c:\Users\ghadf\vscode_projects\docker_projects\bball_homography_pipeline` to .env (agents never edit .env). STEP B SHIPPED 2026-07-23 (**PR #79** @ 65ba063): workspace_scope.py first-turn bounds contract in BOTH native adapters (root = only search space; secret_paths off-limits; home_workspace = targeted reads never full-tree traversal); Claude CLI deny-args runtime-verified (current CLI documents none — zero flags emitted, limitation recorded); 107 tests exit 0 + ruff clean on host after Codex failed closed on sandbox; Fable security review APPROVED. Run-doc: [docs/projects/kan-2-repo-scoped-workspaces/RUNDOC.md](../projects/kan-2-repo-scoped-workspaces/RUNDOC.md). Tail: operator merges #77 (carries step A manifest + tracker) and #79, restarts the agent worker to load the new adapters, adds the .env line.
 
 #### KAN-3 · Load performance + zero "Load failed" (boards, notes, router, app-switch)
 `🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L9 (2026-07-23 migration)
-**Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant. **Run-doc:** [docs/projects/kan-3-load-performance/RUNDOC.md](../projects/kan-3-load-performance/RUNDOC.md). **PACKET 1 SHIPPED 2026-07-23** (PR #76, stacked on #74): Codex gpt-5.6-sol implemented keep-last-good on six surfaces + pure transient classifier + 2-consecutive banner debounce + stale chip + visibilitychange quiet refresh; host verification npm build exit 0 + 104 backend tests exit 0; Fable review APPROVED. Tail: merge #74→#76 + cockpit rebuild. **Packet 2 remaining:** latency measurement then optimization (board-switch, notes→books).
+**Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant. **Run-doc:** [docs/projects/kan-3-load-performance/RUNDOC.md](../projects/kan-3-load-performance/RUNDOC.md). **PACKET 1 LIVE 2026-07-23**: implemented (Codex gpt-5.6-sol), verified (npm build + 104 backend tests exit 0), Fable-review APPROVED, and **deployed — the running cockpit serves the resilience bundle (index-D5_TBO2n.js)**. Code reaches main via PR #77 (the #74 squash was cut before #76 landed on the branch). **Packet 2 remaining:** latency measurement then optimization (board-switch, notes→books).
 
 #### KAN-4 · Fit-to-screen layout everywhere (mobile + desktop)
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -217,18 +217,25 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Notes:** Add timeline reminders to the kanban and complete the mobile-app portion for easy signup.
 
 #### KAN-24 · Master grand-todo board: full cockpit parity (sync UI, source editor, write-through moves)
-`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** 2026-07-23 migration follow-up (this file)
 **Notes:** Implemented 2026-07-23 by Codex gpt-5.6-sol in an isolated worktree (branch `feat/kan-24-grand-todo-ui-parity`, commit 3e54a24) per [docs/projects/kan-24-grand-todo-ui-parity/RUNDOC.md](../projects/kan-24-grand-todo-ui-parity/RUNDOC.md): parameterized sync/edit endpoints + all cockpit gates over both boards; 174 tests green, build green, literal KPI met; independent Fable review APPROVED. Tail: operator merges the branch and rebuilds the cockpit to ship the new bundle. First feature todo through the full TODO_PROCESS loop (with PROC-1).
 
-#### KAN-25 · Restore main CI to green (12 pre-existing lint-test failures)
+#### KAN-26 · Chat redesign to the DESIGN.md contract (runtime-agnostic, fits every screen)
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
+**Source:** operator direction 2026-07-23 ("utilize Open Design so our chats look better and work better across different agents") + L9 chat-width complaint
+**Notes:** Rebuild the cockpit chat surfaces to the [services/agent_kanban_ui/DESIGN.md](../../services/agent_kanban_ui/DESIGN.md) chat contract: runtime-agnostic message chrome (Claude/Codex/GatewayCore/future Copilot differ only by a small badge, never bubble style); assistant/model pickers as compact viewport-fitting selects (kills the too-wide chat dropdown — the chat half of KAN-4); tool calls/evidence as collapsed monospace insets, never raw JSON; a single context-chip row above the composer (registered repo — where KAN-13's dropdown lands — plus linked board/card); streaming state via `--run` accent; in-thread `.error` blocks with runtime badge instead of toast-only failures. Bundle with KAN-8 (Open-in-chat-only + model dropdown) as one Codex UI packet under the DESIGN.md workflow rules (build + 390px fit check + no hardcoded colors).
+
+#### KAN-25 · Restore main CI to green (12 pre-existing lint-test failures)
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
+**Repo:** `llm_station`
+**Priority:** P1
 **Source:** discovered 2026-07-23 while shipping PR #74
-**Notes:** main's `contracts` workflow has been red since 2026-07-17 (4 consecutive runs). 12 failures in 4 families, none from the grand-todo work (PR #74 fixes one, adds zero): (1) `test_agent_kanban_ui_capture_convert` ×5 — capture-convert's private-history sub-request resolves container-default paths (`/app/generated/.locks`, `PermissionError: /app`) on the Linux runner; (2) `test_agent_kanban_ui_usage` — `KeyError: 'glm-5.2'` fixture drift; (3) `test_agent_pickers` — `_build_args()` signature drift vs the stdin chat fix; (4) `test_agent_session_service` ×5 — approval/event-order assertions. A red main gate undermines every verification loop — fix before further merges. Evidence: runs 30032453677 (PR) vs main run same-day; failure sets identical minus the domain-pin fix.
+**Notes:** main's `contracts` workflow red since 2026-07-17; **5 families**: (1-4) 12 test failures — capture-convert container-path reliance ×5, usage fixture time-drift, pickers stdin-signature drift, session-service durable user_message drift ×5 — all FIXED test-side at root cause (Codex gpt-5.6-sol xhigh, failed closed on sandbox; reviewer host-verified: 48 family tests + regression guard exit 0; Fable APPROVED); (5) discovered on PR #78's first run: `ruff>=0.6` unbounded → ruff **0.16.0 released 2026-07-23** flags 597 pre-existing findings on any branch — FIXED by bounding `ruff>=0.6,<0.16` (0.15.21 passes the whole tree; range-resolution proven). **PR #78** @ 71d29bb. Run-doc: [docs/projects/kan-25-ci-green/RUNDOC.md](../projects/kan-25-ci-green/RUNDOC.md). PROVEN: PR #78 CI green (run 30037894573) AND — after #78 merged — main's OWN run 30039910759 concluded SUCCESS 2026-07-23: first green main since 07-17. DONE. Follow-ups: deliberate ruff 0.16 adoption (597 findings, 279 auto-fixable); delete stray `C:\app` (artifact of the Windows-masked path bug).
 
 ## AGT — Agents, Models & Evaluation
 
@@ -324,7 +331,7 @@ Repo default: `llm_station`. The consistent pipeline every todo goes through.
 Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 
 #### PROC-1 · Prove one todo end-to-end through the full loop
-`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L13 (2026-07-23 migration)
@@ -345,7 +352,7 @@ Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 **Notes:** "For todos becoming projects (most of them), they should have a template that sets up the docs folder if it's not already within the registered folder and with the organization and then set up a doc completely up to standards that we can continue to add onto and adjust and update as we do more about the project and add more todos relating to that project, every time we add something it should have a full review to ensure it's helpful/organized and added correctly and up to standard/and a plan we can add a link to into the card for the todo as well as a link to the doc so we can continue and keep up with this and go and chat with the doc and update it myself anytime within the chat. Once we have this set, continue to ensure that we are up to standards, have the best ones for continued success and reiteration to ensure we are always doing this the best possible based on our successes and fails, ensure it can be done in one area so it's easy and we can do it ourselves in the todo list also."
 
 #### PROC-4 · Grand-todo migration — master list in llm_station, Betts list stays in Betts
-`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L83 (2026-07-23 migration)
