@@ -339,11 +339,11 @@ export interface DomainIntakeResponse {
 export const fetchDomainIntake = (domainId: string) =>
   getJSON<DomainIntakeResponse>(
     `/api/domain/${encodeURIComponent(domainId)}/intake`);
-export const syncGrandTodoSource = () =>
+export const syncGrandTodoSource = (domainId: string) =>
   postJSON<{
     status: string; domain_id: string; source_sha256: string;
     counts: Record<string, number>;
-  }>("/api/domain/betts_basketball_grand_todo/sync", {});
+  }>(`/api/domain/${encodeURIComponent(domainId)}/sync`, {});
 export const updateDomainIntake = (
   domainId: string, intake: DomainIntake, expectedRevision: string,
 ) => postJSON<DomainIntakeResponse>(
@@ -734,10 +734,11 @@ export interface GrandTodoEditResult {
   sync: Record<string, number>;
 }
 export const updateGrandTodoCard = (
-  cardId: string, rawMarkdown: string, expectedSourceSha256: string,
+  domainId: string, cardId: string, rawMarkdown: string,
+  expectedSourceSha256: string,
 ) =>
   postJSON<GrandTodoEditResult>(
-    `/api/domain/betts_basketball_grand_todo/card/${encodeURIComponent(cardId)}`,
+    `/api/domain/${encodeURIComponent(domainId)}/card/${encodeURIComponent(cardId)}`,
     { raw_markdown: rawMarkdown, expected_source_sha256: expectedSourceSha256 },
     "PUT",
   );
