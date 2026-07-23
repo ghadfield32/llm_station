@@ -134,6 +134,41 @@ boards:
   - delete_card
   - delete_board
   blockers: []
+- board_id: grand_todo
+  provider: command_center_ui
+  workspace_ref: self
+  board_ref: grand_todo
+  execution_scope: hybrid
+  repo_ids:
+  - llm_station
+  - betts_basketball
+  status_mapping:
+    backlog: Backlog
+    ready: Ready
+    in_progress: In Progress
+    done: Done
+    blocked: Blocked
+    rejected: Archived
+    awaiting_approval: Ready
+  required_fields:
+  - item_id
+  - title
+  - category
+  - source_ref
+  - source_sha256
+  allowed_agent_verbs:
+  - add_mission_card
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  forbidden_agent_verbs:
+  - approve_card
+  - merge
+  - deploy
+  - delete_card
+  - delete_board
+  blockers: []
 - board_id: job_search_pipeline_internal
   provider: command_center_ui
   workspace_ref: self

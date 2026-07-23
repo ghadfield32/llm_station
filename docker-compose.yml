@@ -170,6 +170,7 @@ services:
       - KANBAN_EVENT_LOG=/snapshot/kanban-events.jsonl
       - KANBAN_BOARD_STORE=/snapshot/boards
       - BETTS_GRAND_TODO_SOURCE=/workspace/betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md
+      - MASTER_GRAND_TODO_SOURCE=/app/docs/todos/GRAND_TODO_LIST.md
       - LEDGER_UI_URL=${LEDGER_UI_URL:-}
       # Chat + governed writes turn the UI into a channel. 1 here = full console;
       # remove it for a read-only
@@ -238,6 +239,11 @@ services:
       # — this container must never write into either tree.
       - ./life-center-infra:/app/life-center-infra:ro
       - ./docs:/app/docs:ro
+      # Master GRAND TODO (docs/todos) overrides the ro docs mount with RW for
+      # the same reason as the Betts mount below: governed card moves/edits
+      # atomically update the canonical Markdown before refreshing the
+      # projection. Everything else under /app/docs stays read-only.
+      - ./docs/todos:/app/docs/todos
       # job-search application memory and profile controls. The cockpit needs
       # this mount to show generated packets/follow-ups and edit question presets.
       - ./data/job_search:/app/data/job_search

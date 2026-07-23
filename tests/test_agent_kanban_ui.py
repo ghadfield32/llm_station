@@ -96,8 +96,16 @@ def test_health_and_config(client):
     assert cfg["chat_enabled"] is False and cfg["model_roles"] == []
 
 
+@pytest.mark.parametrize(
+    ("domain_id", "source_attr"),
+    [
+        pytest.param(
+            "betts_basketball_grand_todo", "GRAND_TODO_SOURCE", id="betts"),
+        pytest.param("grand_todo", "MASTER_GRAND_TODO_SOURCE", id="master"),
+    ],
+)
 def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
-    client, monkeypatch, tmp_path,
+    client, monkeypatch, tmp_path, domain_id, source_attr,
 ):
     mod, tc = client
     source = tmp_path / "GRAND_TODO_LIST.md"
@@ -118,10 +126,10 @@ def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
         encoding="utf-8",
     )
     spec = {
-        "domain_id": "betts_basketball_grand_todo",
-        "title": "Betts Grand TODO — Source Tracker",
+        "domain_id": domain_id,
+        "title": "Grand TODO — Source Tracker",
         "source": "board_store",
-        "board_id": "betts_basketball_grand_todo",
+        "board_id": domain_id,
         "columns": [
             "Backlog", "Ready", "In Progress", "Blocked", "Done", "Archived",
         ],
@@ -138,27 +146,27 @@ def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
         ],
     }
     monkeypatch.setattr(mod, "CHAT_ENABLED", True)
-    monkeypatch.setattr(mod, "GRAND_TODO_SOURCE", source)
+    monkeypatch.setattr(mod, source_attr, source)
     monkeypatch.setattr(mod, "BOARD_STORE_DIR", tmp_path / "boards")
     monkeypatch.setattr(mod, "KANBAN_EVENT_LOG", tmp_path / "events.jsonl")
     monkeypatch.setattr(mod, "_domain_config", lambda: {"domains": [spec]})
+    domain_url = f"/api/domain/{domain_id}"
 
-    initial = tc.get("/api/domain/betts_basketball_grand_todo/cards")
+    initial = tc.get(f"{domain_url}/cards")
     assert initial.status_code == 200
     assert initial.json()["cards"] == []
     assert initial.json()["source_sync"]["state"] == "not_imported"
-    synced = tc.post("/api/domain/betts_basketball_grand_todo/sync")
+    synced = tc.post(f"{domain_url}/sync")
     assert synced.status_code == 200
+    assert synced.json()["domain_id"] == domain_id
     assert synced.json()["counts"]["create"] == 150
-    cards = tc.get(
-        "/api/domain/betts_basketball_grand_todo/cards"
-    ).json()["cards"]
+    cards = tc.get(f"{domain_url}/cards").json()["cards"]
     assert len(cards) == 150
     task = next(card for card in cards if card["card_id"] == "grand-todo-gt-1")
 
     edited_markdown = task["description"].replace("note 1", "edited note 1")
     edited = tc.put(
-        "/api/domain/betts_basketball_grand_todo/card/grand-todo-gt-1",
+        f"{domain_url}/card/grand-todo-gt-1",
         json={
             "raw_markdown": edited_markdown,
             "expected_source_sha256": task["source_sha256"],
@@ -172,16 +180,16 @@ def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
             "edited note 1", "externally updated note 1"),
         encoding="utf-8",
     )
-    stale = tc.get("/api/domain/betts_basketball_grand_todo/cards").json()
+    stale = tc.get(f"{domain_url}/cards").json()
     stale_task = next(
         card for card in stale["cards"]
         if card["card_id"] == "grand-todo-gt-1"
     )
     assert "edited note 1" in stale_task["description"]
     assert stale["source_sync"]["state"] == "stale"
-    resynced = tc.post("/api/domain/betts_basketball_grand_todo/sync")
+    resynced = tc.post(f"{domain_url}/sync")
     assert resynced.status_code == 200
-    reconciled = tc.get("/api/domain/betts_basketball_grand_todo/cards").json()
+    reconciled = tc.get(f"{domain_url}/cards").json()
     task = next(
         card for card in reconciled["cards"]
         if card["card_id"] == "grand-todo-gt-1"
@@ -189,7 +197,7 @@ def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
     assert "externally updated note 1" in task["description"]
 
     archived = tc.post(
-        "/api/domain/betts_basketball_grand_todo/move",
+        f"{domain_url}/move",
         json={"card_id": "grand-todo-gt-1", "status": "Archived"},
     )
     assert archived.status_code == 200
@@ -197,7 +205,7 @@ def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
     assert "📦 ARCHIVED" in source.read_text(encoding="utf-8")
 
     restored = tc.post(
-        "/api/domain/betts_basketball_grand_todo/move",
+        f"{domain_url}/move",
         json={"card_id": "grand-todo-gt-1", "status": "Backlog"},
     )
     assert restored.status_code == 200
@@ -205,7 +213,7 @@ def test_grand_todo_api_explicitly_syncs_edits_archives_and_restores(
 
     for read_only_id in ("grand-todo-idea-bank", "grand-todo-source"):
         refused = tc.post(
-            "/api/domain/betts_basketball_grand_todo/move",
+            f"{domain_url}/move",
             json={"card_id": read_only_id, "status": "Archived"},
         )
         assert refused.status_code == 409

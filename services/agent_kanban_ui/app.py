@@ -578,6 +578,28 @@ GRAND_TODO_SOURCE = _env_path(
     "BETTS_GRAND_TODO_SOURCE",
     "/workspace/betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md",
 )
+# Container-path default like BETTS_GRAND_TODO_SOURCE above; host runs and
+# tests set the env var (the image flattens app.py to /app/app.py, so no
+# repo-relative default is derivable from __file__ here).
+MASTER_GRAND_TODO_SOURCE = _env_path(
+    "MASTER_GRAND_TODO_SOURCE", "/app/docs/todos/GRAND_TODO_LIST.md",
+)
+# Source-projected grand-todo boards: canonical Markdown per domain. Both are
+# merge-only projections of their file; generic todo routing must never place
+# cards on them.
+GRAND_TODO_DOMAIN_IDS = frozenset({"betts_basketball_grand_todo", "grand_todo"})
+
+
+def _grand_todo_source(domain_id: str) -> Path:
+    # Read the module attribute at call time so tests and operators can
+    # repoint a single source without rebuilding any lookup table.
+    if domain_id == "betts_basketball_grand_todo":
+        return GRAND_TODO_SOURCE
+    if domain_id == "grand_todo":
+        return MASTER_GRAND_TODO_SOURCE
+    raise HTTPException(
+        status_code=400,
+        detail=f"domain {domain_id!r} has no canonical grand-todo source")
 
 
 @app.get("/api/upkeep/status")
@@ -954,7 +976,7 @@ def _routable_work_boards() -> list[dict[str, Any]]:
             or
             domain.get("source") != "board_store"
             or domain.get("card_component") != "generic_task"
-            or domain.get("domain_id") == "betts_basketball_grand_todo"
+            or domain.get("domain_id") in GRAND_TODO_DOMAIN_IDS
             or not board
             or board.get("provider") != "command_center_ui"
         ):
@@ -1226,15 +1248,16 @@ def _domain_cards(spec: dict) -> dict:
                     "source cells were available."
                 ),
             }
-        if spec.get("domain_id") == "betts_basketball_grand_todo":
+        if spec.get("domain_id") in GRAND_TODO_DOMAIN_IDS:
+            source_file = _grand_todo_source(str(spec.get("domain_id")))
             projected_sha = next((
                 str(card.get("source_sha256"))
                 for card in cards
                 if card.get("source_kind") == "source_document"
                 and card.get("source_sha256")
             ), "")
-            if GRAND_TODO_SOURCE.is_file():
-                source_sha = hashlib.sha256(GRAND_TODO_SOURCE.read_bytes()).hexdigest()
+            if source_file.is_file():
+                source_sha = hashlib.sha256(source_file.read_bytes()).hexdigest()
                 sync_state = (
                     "current" if projected_sha == source_sha
                     else "stale" if projected_sha else "not_imported")
@@ -1350,7 +1373,7 @@ def _allowed_transitions(spec: dict, from_status: str | None) -> list[str]:
     map; other board domains use column adjacency."""
     if spec.get("domain_id") == "job_application":
         return list(_JOB_TRANSITIONS.get(str(from_status), []))
-    if spec.get("domain_id") == "betts_basketball_grand_todo":
+    if spec.get("domain_id") in GRAND_TODO_DOMAIN_IDS:
         return list(_GRAND_TODO_TRANSITIONS.get(str(from_status), []))
     if spec.get("domain_id") == "book":
         return list(_BOOK_TRANSITIONS.get(str(from_status), []))
@@ -3933,7 +3956,7 @@ def _todo_source_card(domain_id: str, card_id: str) -> tuple[dict, dict]:
 def _todo_audit_fields(
     spec: dict, card: dict, errors: list[dict[str, str]],
 ) -> dict[str, Any]:
-    if spec.get("domain_id") != "betts_basketball_grand_todo":
+    if spec.get("domain_id") not in GRAND_TODO_DOMAIN_IDS:
         return {}
     audit: dict[str, Any] = {}
     for field in ("source_revisions", "sync_conflicts"):
@@ -6254,26 +6277,34 @@ def domain_cards(domain_id: str) -> dict:
     return out
 
 
-@app.post("/api/domain/betts_basketball_grand_todo/sync")
-def sync_grand_todo_source() -> dict:
+@app.post("/api/domain/{domain_id}/sync")
+def sync_grand_todo_source(domain_id: str) -> dict:
     """Explicitly reconcile the canonical tracker; domain GETs stay read-only."""
+    if domain_id not in GRAND_TODO_DOMAIN_IDS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"domain {domain_id!r} has no canonical grand-todo sync",
+        )
     _require_chat()
-    spec = _domain_spec("betts_basketball_grand_todo")
+    spec = _domain_spec(domain_id)
     _require_domain_writable(spec)
-    if not GRAND_TODO_SOURCE.is_file():
+    source_path = _grand_todo_source(domain_id)
+    if not source_path.is_file():
         raise HTTPException(
             status_code=503,
             detail="canonical GRAND TODO source is unavailable; no sync was run")
     from command_center.cli.grand_todo_import import (
+        PROFILES,
         GrandTodoImportError,
         run_import,
     )
     try:
         result = run_import(
-            source_path=GRAND_TODO_SOURCE,
+            source_path=source_path,
             store_dir=BOARD_STORE_DIR,
             event_log_path=KANBAN_EVENT_LOG,
             apply=True,
+            profile=PROFILES[domain_id],
         )
     except GrandTodoImportError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -8023,19 +8054,21 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
             detail=f"cards move one step at a time: from {previous!r} the "
                    f"next steps are {allowed or ['(terminal)']}, "
                    f"not {body.status!r}")
-    if domain_id == "betts_basketball_grand_todo":
+    if domain_id in GRAND_TODO_DOMAIN_IDS:
         from command_center.cli.grand_todo_import import (
+            PROFILES,
             GrandTodoImportError,
             move_grand_todo_card,
         )
         try:
             result = move_grand_todo_card(
-                source_path=GRAND_TODO_SOURCE,
+                source_path=_grand_todo_source(domain_id),
                 store_dir=BOARD_STORE_DIR,
                 event_log_path=KANBAN_EVENT_LOG,
                 card_id=body.card_id,
                 status=body.status,
                 expected_source_sha256=str(card.get("source_sha256") or "") or None,
+                profile=PROFILES[domain_id],
             )
         except GrandTodoImportError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -8082,24 +8115,33 @@ def domain_move(domain_id: str, body: DomainMoveIn) -> dict:
     }
 
 
-@app.put("/api/domain/betts_basketball_grand_todo/card/{card_id}")
-def edit_grand_todo(card_id: str, body: GrandTodoEditIn) -> dict:
+@app.put("/api/domain/{domain_id}/card/{card_id}")
+def edit_grand_todo(
+    domain_id: str, card_id: str, body: GrandTodoEditIn,
+) -> dict:
     """Edit one stable task block; source Markdown remains canonical."""
+    if domain_id not in GRAND_TODO_DOMAIN_IDS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"domain {domain_id!r} has no canonical grand-todo editor",
+        )
     _require_chat()
-    spec = _domain_spec("betts_basketball_grand_todo")
+    spec = _domain_spec(domain_id)
     _require_domain_writable(spec)
     from command_center.cli.grand_todo_import import (
+        PROFILES,
         GrandTodoImportError,
         edit_grand_todo_card,
     )
     try:
         return edit_grand_todo_card(
-            source_path=GRAND_TODO_SOURCE,
+            source_path=_grand_todo_source(domain_id),
             store_dir=BOARD_STORE_DIR,
             event_log_path=KANBAN_EVENT_LOG,
             card_id=card_id,
             raw_markdown=body.raw_markdown,
             expected_source_sha256=body.expected_source_sha256,
+            profile=PROFILES[domain_id],
         )
     except GrandTodoImportError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -1,4 +1,11 @@
-"""Import the Betts Basketball GRAND TODO into a governed first-party board.
+"""Import a canonical GRAND TODO Markdown tracker into a governed board.
+
+Two board profiles share this importer: the Betts Basketball tracker
+(``betts_basketball_grand_todo``, canonical file in the betts_basketball repo)
+and the life-wide master tracker (``grand_todo``, canonical file at
+``docs/todos/GRAND_TODO_LIST.md`` in this repo).  Master items may carry a
+per-item ``**Repo:**`` designation naming the repository the work belongs to;
+items without one inherit the board profile's default repo.
 
 The Markdown file remains canonical.  This importer is a merge-only projection:
 
@@ -41,6 +48,9 @@ ROOT = Path(__file__).resolve().parents[3]
 BOARD_ID = "betts_basketball_grand_todo"
 SOURCE_REF = "betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md"
 IMPORTER_ID = "betts-grand-todo.v1"
+MASTER_BOARD_ID = "grand_todo"
+MASTER_SOURCE_REF = "llm_station/docs/todos/GRAND_TODO_LIST.md"
+MASTER_IMPORTER_ID = "master-grand-todo.v1"
 
 _ITEM_HEADER_RE = re.compile(
     r"^####\s+(?P<item_id>[A-Z][A-Z0-9]*-\d+)\s+·\s+(?P<title>.+?)\s*$"
@@ -79,6 +89,34 @@ class GrandTodoImportError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class BoardProfile:
+    """One canonical tracker file projected onto one governed board."""
+
+    board_id: str
+    importer_id: str
+    source_ref: str
+    default_repo_id: str
+
+    def default_source(self) -> Path:
+        if self.board_id == MASTER_BOARD_ID:
+            return ROOT / "docs/todos/GRAND_TODO_LIST.md"
+        return _betts_default_source()
+
+
+BETTS_PROFILE = BoardProfile(
+    board_id=BOARD_ID, importer_id=IMPORTER_ID, source_ref=SOURCE_REF,
+    default_repo_id="betts_basketball",
+)
+MASTER_PROFILE = BoardProfile(
+    board_id=MASTER_BOARD_ID, importer_id=MASTER_IMPORTER_ID,
+    source_ref=MASTER_SOURCE_REF, default_repo_id="llm_station",
+)
+PROFILES = {profile.board_id: profile for profile in (BETTS_PROFILE, MASTER_PROFILE)}
+
+_REPO_LINE_RE = re.compile(r"^\*\*Repo:\*\*\s+`?(?P<repo>[A-Za-z0-9_.-]+)`?\s*$")
+
+
+@dataclass(frozen=True)
 class SourceCard:
     card_id: str
     item_id: str
@@ -93,6 +131,7 @@ class SourceCard:
     initial_status: str
     start_char: int
     end_char: int
+    repo_id: str | None = None
 
     @property
     def source_sha256(self) -> str:
@@ -191,6 +230,9 @@ def parse_grand_todo_bytes(raw: bytes, *, expected_items: int | None = None) -> 
         status = tracking.group("status")
         notes_match = _NOTES_RE.search(raw_block)
         item_id = header.group("item_id")
+        repo_match = next(
+            (_REPO_LINE_RE.match(line) for line in block_lines[1:]
+             if _REPO_LINE_RE.match(line)), None)
         cards.append(SourceCard(
             card_id=_card_id(item_id),
             item_id=item_id,
@@ -204,6 +246,7 @@ def parse_grand_todo_bytes(raw: bytes, *, expected_items: int | None = None) -> 
             source_kind="tracked_item",
             initial_status=_initial_status(status),
             start_char=char_offsets[start], end_char=char_offsets[end],
+            repo_id=repo_match.group("repo") if repo_match else None,
         ))
 
     idea_start = next((i for i, line in enumerate(lines)
@@ -253,7 +296,8 @@ def _revision(card: SourceCard, captured_at: str) -> dict[str, Any]:
 
 
 def _source_fields(card: SourceCard, existing: dict[str, Any] | None,
-                   captured_at: str) -> dict[str, Any]:
+                   captured_at: str,
+                   profile: BoardProfile = BETTS_PROFILE) -> dict[str, Any]:
     prior = dict(existing or {})
     revisions = prior.get("source_revisions", [])
     if not isinstance(revisions, list):
@@ -281,13 +325,13 @@ def _source_fields(card: SourceCard, existing: dict[str, Any] | None,
         "source_notes": card.source_notes,
         "description": card.raw_markdown,
         "source_kind": card.source_kind,
-        "source_ref": SOURCE_REF,
+        "source_ref": profile.source_ref,
         "source_anchor": card.item_id.casefold(),
         "source_sha256": card.source_sha256,
         "source_revision_count": len(revisions),
         "source_revisions": revisions,
-        "source_importer": IMPORTER_ID,
-        "repo_id": "betts_basketball",
+        "source_importer": profile.importer_id,
+        "repo_id": card.repo_id or profile.default_repo_id,
     }
 
 
@@ -390,7 +434,8 @@ def _conflict_fields(
 
 
 def plan_import(parsed: ParsedGrandTodo, provider: CommandCenterBoardProvider, *,
-                captured_at: str) -> dict[str, Any]:
+                captured_at: str,
+                profile: BoardProfile = BETTS_PROFILE) -> dict[str, Any]:
     existing = {str(card["card_id"]): card for card in provider.list_cards()}
     _assert_complete_projection(parsed, existing)
     operations: list[dict[str, Any]] = []
@@ -398,10 +443,10 @@ def plan_import(parsed: ParsedGrandTodo, provider: CommandCenterBoardProvider, *
     for card in parsed.cards:
         incoming_ids.add(card.card_id)
         current = existing.get(card.card_id)
-        if current is not None and current.get("source_importer") != IMPORTER_ID:
+        if current is not None and current.get("source_importer") != profile.importer_id:
             raise GrandTodoImportError(
                 f"card id collision at {card.card_id!r}: existing card is not owned "
-                f"by {IMPORTER_ID}; refusing to adopt or overwrite it"
+                f"by {profile.importer_id}; refusing to adopt or overwrite it"
             )
         desired_status = card.initial_status
         conflict = False
@@ -424,7 +469,7 @@ def plan_import(parsed: ParsedGrandTodo, provider: CommandCenterBoardProvider, *
             assert current is not None
             fields = _conflict_fields(card, current, captured_at=captured_at)
         else:
-            fields = _source_fields(card, current, captured_at)
+            fields = _source_fields(card, current, captured_at, profile)
             if card.source_kind == "tracked_item":
                 fields.update({
                     "sync_source_sha256": card.source_sha256,
@@ -454,7 +499,8 @@ def plan_import(parsed: ParsedGrandTodo, provider: CommandCenterBoardProvider, *
 
     preserved_missing = sorted(
         card_id for card_id, card in existing.items()
-        if card.get("source_importer") == IMPORTER_ID and card_id not in incoming_ids
+        if card.get("source_importer") == profile.importer_id
+        and card_id not in incoming_ids
     )
     counts = {
         name: sum(op["action"] == name for op in operations)
@@ -463,7 +509,7 @@ def plan_import(parsed: ParsedGrandTodo, provider: CommandCenterBoardProvider, *
     counts["creation_events"] = sum(op["needs_creation_event"] for op in operations)
     counts["preserved_missing"] = len(preserved_missing)
     return {
-        "board_id": BOARD_ID,
+        "board_id": profile.board_id,
         "tracked_items": parsed.tracked_count,
         "source_cards": len(parsed.cards),
         "source_sha256": parsed.source_sha256,
@@ -501,6 +547,7 @@ def _board_only_status_updates(
 def _apply_locked(
     *, source_path: Path, provider: CommandCenterBoardProvider,
     expected_items: int | None, captured_at: str, now: datetime,
+    profile: BoardProfile = BETTS_PROFILE,
 ) -> dict[str, Any]:
     parsed = parse_grand_todo(source_path, expected_items=expected_items)
     _assert_complete_projection(
@@ -517,8 +564,11 @@ def _apply_locked(
             source_path, _replace_card_status(parsed, card, status, at=now))
         parsed = parse_grand_todo(source_path, expected_items=expected_items)
 
-    result = plan_import(parsed, provider, captured_at=captured_at)
+    result = plan_import(parsed, provider, captured_at=captured_at, profile=profile)
     for operation in result["operations"]:
+        event_repo = (
+            operation["fields"].get("repo_id") or profile.default_repo_id
+        )
         status_after = operation.get("status_after")
         if status_after:
             # For an existing card, advance the governed status before updating
@@ -531,20 +581,21 @@ def _apply_locked(
                 else "start_todo" if status_after == "In Progress"
                 else "stage_card" if status_after == "Ready"
                 else "add_mission_card",
-                board_id=BOARD_ID, card_id=operation["card_id"],
+                board_id=profile.board_id, card_id=operation["card_id"],
                 source_surface="reconciler", actor_type="system",
-                repo_id="betts_basketball",
+                repo_id=event_repo,
                 status_before=operation.get("current_status"),
-                status_after=status_after, evidence_ref=SOURCE_REF,
+                status_after=status_after, evidence_ref=profile.source_ref,
             )
         if operation["action"] not in {"noop", "recover_status"}:
             provider.upsert_card(operation["card_id"], operation["fields"])
         if operation["needs_creation_event"]:
             emit_event(
-                provider.log, action="add_mission_card", board_id=BOARD_ID,
+                provider.log, action="add_mission_card", board_id=profile.board_id,
                 card_id=operation["card_id"], source_surface="reconciler",
-                actor_type="system", repo_id="betts_basketball",
-                status_after=operation["initial_status"], evidence_ref=SOURCE_REF,
+                actor_type="system", repo_id=event_repo,
+                status_after=operation["initial_status"],
+                evidence_ref=profile.source_ref,
             )
     result.update({"status": "applied", "writes_performed": True})
     return result
@@ -552,36 +603,40 @@ def _apply_locked(
 
 def run_import(*, source_path: Path, store_dir: Path, event_log_path: Path,
                apply: bool, expected_items: int | None = None,
-               now: datetime | None = None) -> dict[str, Any]:
+               now: datetime | None = None,
+               profile: BoardProfile = BETTS_PROFILE) -> dict[str, Any]:
     effective_now = now or datetime.now(timezone.utc)
     captured_at = effective_now.isoformat()
     provider = CommandCenterBoardProvider(
-        board_id=BOARD_ID, event_log=EventLog(event_log_path), store_dir=store_dir)
+        board_id=profile.board_id, event_log=EventLog(event_log_path),
+        store_dir=store_dir)
 
     if not apply:
         parsed = parse_grand_todo(source_path, expected_items=expected_items)
-        result = plan_import(parsed, provider, captured_at=captured_at)
+        result = plan_import(
+            parsed, provider, captured_at=captured_at, profile=profile)
         result.update({"status": "dry_run", "writes_performed": False})
         return result
 
     with source_write_lock(source_path):
-        with board_write_lock(store_dir, BOARD_ID):
+        with board_write_lock(store_dir, profile.board_id):
             return _apply_locked(
                 source_path=source_path, provider=provider,
                 expected_items=expected_items, captured_at=captured_at,
-                now=effective_now)
+                now=effective_now, profile=profile)
 
 
 def move_grand_todo_card(
     *, source_path: Path, store_dir: Path, event_log_path: Path,
     card_id: str, status: str, expected_source_sha256: str | None = None,
-    now: datetime | None = None,
+    now: datetime | None = None, profile: BoardProfile = BETTS_PROFILE,
 ) -> dict[str, Any]:
     effective_now = now or datetime.now(timezone.utc)
     provider = CommandCenterBoardProvider(
-        board_id=BOARD_ID, event_log=EventLog(event_log_path), store_dir=store_dir)
+        board_id=profile.board_id, event_log=EventLog(event_log_path),
+        store_dir=store_dir)
     with source_write_lock(source_path):
-        with board_write_lock(store_dir, BOARD_ID):
+        with board_write_lock(store_dir, profile.board_id):
             parsed = parse_grand_todo(source_path)
             card = next((c for c in parsed.cards if c.card_id == card_id), None)
             if card is None:
@@ -606,13 +661,15 @@ def move_grand_todo_card(
                 else "start_todo" if status == "In Progress"
                 else "stage_card" if status == "Ready"
                 else "add_mission_card",
-                board_id=BOARD_ID, card_id=card_id, source_surface="internal_ui",
+                board_id=profile.board_id, card_id=card_id,
+                source_surface="internal_ui",
                 actor_type="human", status_before=previous, status_after=status,
-                evidence_ref=SOURCE_REF,
+                evidence_ref=profile.source_ref,
             )
             _apply_locked(
                 source_path=source_path, provider=provider, expected_items=None,
-                captured_at=effective_now.isoformat(), now=effective_now)
+                captured_at=effective_now.isoformat(), now=effective_now,
+                profile=profile)
             moved = next(c for c in provider.list_cards() if c.get("card_id") == card_id)
             return {
                 "status": "moved", "card_id": card_id,
@@ -624,13 +681,14 @@ def move_grand_todo_card(
 def edit_grand_todo_card(
     *, source_path: Path, store_dir: Path, event_log_path: Path,
     card_id: str, raw_markdown: str, expected_source_sha256: str,
-    now: datetime | None = None,
+    now: datetime | None = None, profile: BoardProfile = BETTS_PROFILE,
 ) -> dict[str, Any]:
     effective_now = now or datetime.now(timezone.utc)
     provider = CommandCenterBoardProvider(
-        board_id=BOARD_ID, event_log=EventLog(event_log_path), store_dir=store_dir)
+        board_id=profile.board_id, event_log=EventLog(event_log_path),
+        store_dir=store_dir)
     with source_write_lock(source_path):
-        with board_write_lock(store_dir, BOARD_ID):
+        with board_write_lock(store_dir, profile.board_id):
             parsed = parse_grand_todo(source_path)
             card = next((c for c in parsed.cards if c.card_id == card_id), None)
             if card is None or card.source_kind != "tracked_item":
@@ -653,12 +711,13 @@ def edit_grand_todo_card(
             _atomic_write_source(source_path, candidate)
             result = _apply_locked(
                 source_path=source_path, provider=provider, expected_items=None,
-                captured_at=effective_now.isoformat(), now=effective_now)
+                captured_at=effective_now.isoformat(), now=effective_now,
+                profile=profile)
             updated = next(c for c in provider.list_cards() if c.get("card_id") == card_id)
             return {"status": "edited", "card": updated, "sync": result["counts"]}
 
 
-def _default_source() -> Path:
+def _betts_default_source() -> Path:
     configured = os.environ.get("BETTS_BASKETBALL_LOCAL_PATH", "").strip()
     if configured:
         return Path(configured) / "docs/backend/projects/GRAND_TODO_LIST.md"
@@ -677,6 +736,10 @@ def main() -> int:
     if hasattr(sys.stderr, "reconfigure"):
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(prog="grand-todo-import")
+    parser.add_argument(
+        "--board", default=BOARD_ID, choices=sorted(PROFILES),
+        help="which canonical tracker/board pair to project "
+             f"(default: {BOARD_ID})")
     parser.add_argument("--source", default="")
     parser.add_argument("--store-dir", default="generated/boards")
     parser.add_argument("--event-log", default="generated/kanban-events.jsonl")
@@ -686,8 +749,9 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    profile = PROFILES[args.board]
     try:
-        source = Path(args.source).resolve() if args.source else _default_source()
+        source = Path(args.source).resolve() if args.source else profile.default_source()
         store = (ROOT / args.store_dir).resolve() if not Path(args.store_dir).is_absolute() \
             else Path(args.store_dir)
         event_log = (ROOT / args.event_log).resolve() if not Path(args.event_log).is_absolute() \
@@ -695,6 +759,7 @@ def main() -> int:
         result = run_import(
             source_path=source, store_dir=store, event_log_path=event_log,
             apply=args.apply, expected_items=args.expected_items,
+            profile=profile,
         )
     except (GrandTodoImportError, BoardWriteLocked) as exc:
         print(f"grand-todo-import: BLOCKED\n  {exc}")

@@ -108,6 +108,12 @@ const RISK_CLASS: Record<string, string> = {
   L0: "risk-l0", L1: "risk-l1", L2: "risk-l2", L3: "risk-l3", L4: "risk-l4",
 };
 const POLL_MS = 5000;
+export const GRAND_TODO_DOMAIN_IDS: ReadonlySet<string> = new Set([
+  "betts_basketball_grand_todo",
+  "grand_todo",
+]);
+const isGrandTodoDomain = (domainId: string) =>
+  GRAND_TODO_DOMAIN_IDS.has(domainId);
 
 const pct = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(0)}%`);
 const matches = (q: string, ...parts: (string | undefined)[]) =>
@@ -7456,7 +7462,7 @@ function DomainDrawer({
   const incomingGrandTodoSha = valText(card.source_sha256);
   useEffect(() => {
     if (
-      spec.domain_id !== "betts_basketball_grand_todo"
+      !isGrandTodoDomain(spec.domain_id)
       || editingGrandTodo
     ) return;
     if (grandTodoIgnoredBaseSha && incomingGrandTodoSha === grandTodoIgnoredBaseSha) {
@@ -7510,7 +7516,7 @@ function DomainDrawer({
   const researchAnalysisStatus = valText(activeCard.analysis_status)
     || "not_analyzed";
   const canEditGrandTodo = (
-    spec.domain_id === "betts_basketball_grand_todo"
+    isGrandTodoDomain(spec.domain_id)
     && activeCard.source_kind === "tracked_item"
     && actions?.dispatch_enabled
   );
@@ -7518,6 +7524,7 @@ function DomainDrawer({
     setBusy(true); setMsg(null);
     try {
       const result = await updateGrandTodoCard(
+        spec.domain_id,
         id,
         grandTodoText,
         grandTodoEditBaseSha,
@@ -7788,10 +7795,6 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
       }));
     }
   }, [domains, onDomainResult]);
-  const refreshGrandTodo = useCallback(
-    () => refreshDomain("betts_basketball_grand_todo"),
-    [refreshDomain],
-  );
   const applyCommittedDomainCard = useCallback((
     domainId: string,
     committedCard: DomainCard,
@@ -7826,11 +7829,11 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
 
   useEffect(() => { load(); }, [load, refreshKey]);
   useEffect(() => {
-    if (activeDomain !== "betts_basketball_grand_todo") return;
+    if (!isGrandTodoDomain(activeDomain)) return;
     let cancelled = false;
     let timer: number | undefined;
     const poll = async () => {
-      await refreshGrandTodo();
+      await refreshDomain(activeDomain);
       if (!cancelled) timer = window.setTimeout(() => { void poll(); }, 15000);
     };
     timer = window.setTimeout(() => { void poll(); }, 15000);
@@ -7838,12 +7841,12 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [activeDomain, refreshGrandTodo]);
+  }, [activeDomain, refreshDomain]);
   useEffect(() => {
     const active = domains.find((domain) => domain.domain_id === activeDomain);
     if (
       !active
-      || active.domain_id === "betts_basketball_grand_todo"
+      || isGrandTodoDomain(active.domain_id)
       || active.source !== "board_store"
       || active.card_component !== "generic_task"
     ) return;
@@ -7973,7 +7976,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   const moveTargetsFor = (card: DomainCard) => {
     if (!canMove) return [];
     if (
-      spec.domain_id === "betts_basketball_grand_todo"
+      isGrandTodoDomain(spec.domain_id)
       && card.source_kind !== "tracked_item"
     ) return [];
     const status = valText(card.status);
@@ -8057,9 +8060,9 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   async function syncGrandTodo() {
     setToast("synchronizing canonical GRAND TODO...");
     try {
-      const result = await syncGrandTodoSource();
+      const result = await syncGrandTodoSource(spec.domain_id);
       setToast(`GRAND TODO synchronized · ${result.counts.update ?? 0} updated · ${result.counts.conflict ?? 0} conflicts`);
-      await refreshGrandTodo();
+      await refreshDomain(spec.domain_id);
     } catch (e) { setToast("ERR " + (e as Error).message); }
   }
 
@@ -8084,7 +8087,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
             Search &amp; answers settings
           </button>
         )}
-        {spec.domain_id === "betts_basketball_grand_todo" && (
+        {isGrandTodoDomain(spec.domain_id) && (
           <button className="actbtn" disabled={!domainActions?.dispatch_enabled}
             title={domainActions?.dispatch_enabled
               ? "Explicitly reconcile the canonical source into the board"
@@ -8413,8 +8416,8 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
           actions={actions[selected.spec.domain_id]}
           moveTargets={selected.spec.domain_id === spec.domain_id ? moveTargetsFor(selected.card) : []}
           onMove={(target) => void moveDomainCardTo(selected.card, target)}
-          onChanged={selected.spec.domain_id === "betts_basketball_grand_todo"
-            ? () => { void refreshGrandTodo(); }
+          onChanged={isGrandTodoDomain(selected.spec.domain_id)
+            ? () => { void refreshDomain(selected.spec.domain_id); }
             : (committedCard) => {
               if (committedCard) {
                 applyCommittedDomainCard(selected.spec.domain_id, committedCard);

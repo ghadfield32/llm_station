@@ -90,11 +90,14 @@ def test_domain_registry_lists_all_domains(client):
     body = response.json()
     ids = {d["domain_id"] for d in body["domains"]}
     assert ids == {
-        "betts_basketball_grand_todo", "job_application", "linkedin_post",
+        "betts_basketball_grand_todo", "grand_todo", "job_application",
+        "linkedin_post",
         "book", "paper", "repo", "dag", "self_improvement", "mission",
         "generic_task", "home_house", "movies_shows", "site_basketball",
         "station_improvements", "kanban_improvements", "business",
         "tech_hardware_setup",
+        "life_center_overview", "life_center_services",
+        "life_center_operations",
     }
     # every domain ships a designed empty state, not a blank screen
     assert all(d["empty_state"]["title"] for d in body["domains"])
@@ -137,13 +140,24 @@ def test_upkeep_status_is_explicit_before_and_after_first_cycle(client, monkeypa
     assert tc.get("/api/upkeep/status").json() == value
 
 
-def test_grand_todo_card_reads_never_reconcile_or_write(client, monkeypatch):
+@pytest.mark.parametrize(
+    ("domain_id", "source_attr"),
+    [
+        pytest.param(
+            "betts_basketball_grand_todo", "GRAND_TODO_SOURCE", id="betts"),
+        pytest.param("grand_todo", "MASTER_GRAND_TODO_SOURCE", id="master"),
+    ],
+)
+def test_grand_todo_card_reads_never_reconcile_or_write(
+    client, monkeypatch, domain_id, source_attr,
+):
     mod, tc, tmp_path = client
     source = tmp_path / "GRAND_TODO_LIST.md"
     source.write_text("# Canonical tracker\n\nRead-only probe.\n", encoding="utf-8")
-    monkeypatch.setattr(mod, "GRAND_TODO_SOURCE", source)
+    monkeypatch.setattr(mod, source_attr, source)
+    domain_url = f"/api/domain/{domain_id}"
 
-    response = tc.get("/api/domain/betts_basketball_grand_todo/cards")
+    response = tc.get(f"{domain_url}/cards")
 
     assert response.status_code == 200, response.json()
     assert response.json()["cards"] == []
@@ -151,7 +165,7 @@ def test_grand_todo_card_reads_never_reconcile_or_write(client, monkeypatch):
     assert response.json()["source_sync"]["write_on_read"] is False
     assert not (tmp_path / "boards").exists()
     assert not (tmp_path / "events.jsonl").exists()
-    sync = tc.post("/api/domain/betts_basketball_grand_todo/sync")
+    sync = tc.post(f"{domain_url}/sync")
     assert sync.status_code == 503
     assert not (tmp_path / "boards").exists()
     assert not (tmp_path / "events.jsonl").exists()

@@ -520,6 +520,7 @@ def default_sources() -> list[BackupSource]:
         BackupSource("growth_memory", path("KANBAN_BACKUP_GROWTH_MEMORY", "growth_os/_state/memory.db"), "sqlite", required=False),
         BackupSource("growth_export", path("KANBAN_BACKUP_GROWTH_EXPORT", "growth_os/_export"), "tree"),
         BackupSource("grand_todo", path("KANBAN_BACKUP_GRAND_TODO", "../betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md"), "file"),
+        BackupSource("grand_todo_master", path("KANBAN_BACKUP_GRAND_TODO_MASTER", "docs/todos/GRAND_TODO_LIST.md"), "file"),
         BackupSource("chat_threads", path("KANBAN_BACKUP_CHAT_THREADS", "generated/chat-threads.json"), "file", required=False),
         BackupSource("chat_transcripts", path("KANBAN_BACKUP_CHAT_TRANSCRIPTS", "generated/chat-transcripts"), "tree", required=False),
         BackupSource("memory", path("KANBAN_BACKUP_MEMORY", "generated/memory"), "tree", required=False),
