@@ -5678,7 +5678,7 @@ function RuntimeControlsPanel({ status, runtime }: {
           <span className="status-pill pill-run">active</span>
         </div>
         <div className="settings-row">
-          <span>OxyGent / ORCA / Omnigent</span>
+          <span>OxyGent / ORCA / OmniAgent</span>
           <span className="status-pill pill-warn">watch-list</span>
         </div>
       </div>

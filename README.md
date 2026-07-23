@@ -107,11 +107,15 @@ overrides, and profile defaults. The Chat tab uses **GatewayCore + LiteLLM**
 as the active runtime and can reopen shared recent thread shortcuts by
 conversation id on desktop and phone. Phone layouts use contained top-scroll
 strips with momentum scrolling for wide tabs, lanes, and chat shortcuts.
-Optional specialist handoff links can be configured with
-`ORCA_CHAT_URL`, `OMNIAGENT_CHAT_URL`/`OMNIGENT_CHAT_URL`, and
-`OXYGENT_CHAT_URL`; ORCA is the best first pilot for document/PDF job
-materials, OmniAgent is a later video/audio specialist, and OxyGent remains a
-framework watch-list item rather than a dependency. Details:
+External specialists are **watch-list handoffs only**: ORCA is the best
+first pilot for document/PDF job materials, OmniAgent (Om-AI-Lab —
+historically also written "Omnigent" here; unrelated to the
+omnigent-ai/omnigent meta-harness) is a later video/audio specialist, and
+OxyGent remains a framework watch-list item rather than a dependency. The
+former `*_CHAT_URL` specialist links were removed from the chat runtime
+payload (the API test asserts their absence), so `ORCA_CHAT_URL`,
+`OMNIAGENT_CHAT_URL`/`OMNIGENT_CHAT_URL`, and `OXYGENT_CHAT_URL` are
+currently inert. Details:
 [`docs/setup/COCKPIT_QUICKSTART.md`](docs/setup/COCKPIT_QUICKSTART.md).
 
 ---
