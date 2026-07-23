@@ -68,17 +68,22 @@ of code-shaped defaults.
   adding Claude/Codex to any LiteLLM/chat-model surface.
 - Validation: `make validate`, targeted pytest, `make lint`.
 
-## 5. Open questions (Stage-4 gate)
+## 5. Open questions — ANSWERED (Stage-4 gate passed 2026-07-23)
 
-1. Spec location: `configs/agent_sessions/*.yaml` (validated set) or
-   per-board attachments in the board store?
-2. Should the spec carry model *slugs* ever, or capability profiles only
-   with resolution always live? (Recommendation: profiles only.)
-3. Is the KAN-15 flagged boot-path consumer in scope for packet 1, or does
-   packet 1 stop at schema + registry bridge?
-4. Sequencing: AGT-16 before AGT-14 (policy refs need somewhere to live) or
-   AGT-14 first (spec references existing policy docs)? Recommendation:
-   AGT-16 schema first with a placeholder policy-ref field.
+Operator decisions, recorded verbatim; scope locked:
+
+1. Spec location: **`configs/agent_sessions/*.yaml`** — a validated set
+   under `make validate` like every other contract; boards reference specs
+   by name.
+2. Model field: **capability profiles only** (strategic_steward /
+   generalist / deep_code / throughput + effort), resolution always live at
+   session start. No slug field exists — remembered-slug drift is impossible
+   by construction.
+3. Packet-1 scope: **includes the flagged KAN-15 boot-path consumer**
+   (defaults-off flag), so the DoD's "one seam consumer proven" lands in
+   this packet.
+4. Sequencing: **AGT-16 first** with a placeholder policy-ref field;
+   AGT-14's policy documents will be what those refs resolve to.
 
 ## 6. Model allocation
 
