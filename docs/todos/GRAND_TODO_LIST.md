@@ -74,7 +74,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L9 (2026-07-23 migration)
-**Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant. **Run-doc:** [docs/projects/kan-3-load-performance/RUNDOC.md](../projects/kan-3-load-performance/RUNDOC.md). **PACKET 1 SHIPPED 2026-07-23** (PR #76, stacked on #74): Codex gpt-5.6-sol implemented keep-last-good on six surfaces + pure transient classifier + 2-consecutive banner debounce + stale chip + visibilitychange quiet refresh; host verification npm build exit 0 + 104 backend tests exit 0; Fable review APPROVED. Tail: merge #74→#76 + cockpit rebuild. **Packet 2 remaining:** latency measurement then optimization (board-switch, notes→books).
+**Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant. **Run-doc:** [docs/projects/kan-3-load-performance/RUNDOC.md](../projects/kan-3-load-performance/RUNDOC.md). **PACKET 1 LIVE 2026-07-23**: implemented (Codex gpt-5.6-sol), verified (npm build + 104 backend tests exit 0), Fable-review APPROVED, and **deployed — the running cockpit serves the resilience bundle (index-D5_TBO2n.js)**. Code reaches main via PR #77 (the #74 squash was cut before #76 landed on the branch). **Packet 2 remaining:** latency measurement then optimization (board-switch, notes→books).
 
 #### KAN-4 · Fit-to-screen layout everywhere (mobile + desktop)
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -217,7 +217,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Notes:** Add timeline reminders to the kanban and complete the mobile-app portion for easy signup.
 
 #### KAN-24 · Master grand-todo board: full cockpit parity (sync UI, source editor, write-through moves)
-`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** 2026-07-23 migration follow-up (this file)
@@ -331,7 +331,7 @@ Repo default: `llm_station`. The consistent pipeline every todo goes through.
 Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 
 #### PROC-1 · Prove one todo end-to-end through the full loop
-`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L13 (2026-07-23 migration)
@@ -352,7 +352,7 @@ Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 **Notes:** "For todos becoming projects (most of them), they should have a template that sets up the docs folder if it's not already within the registered folder and with the organization and then set up a doc completely up to standards that we can continue to add onto and adjust and update as we do more about the project and add more todos relating to that project, every time we add something it should have a full review to ensure it's helpful/organized and added correctly and up to standard/and a plan we can add a link to into the card for the todo as well as a link to the doc so we can continue and keep up with this and go and chat with the doc and update it myself anytime within the chat. Once we have this set, continue to ensure that we are up to standards, have the best ones for continued success and reiteration to ensure we are always doing this the best possible based on our successes and fails, ensure it can be done in one area so it's easy and we can do it ourselves in the todo list also."
 
 #### PROC-4 · Grand-todo migration — master list in llm_station, Betts list stays in Betts
-`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L83 (2026-07-23 migration)
