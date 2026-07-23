@@ -312,13 +312,43 @@ def c_gui(args) -> int:
     return rc
 
 
+_LOOPBACK_URL_RE = re.compile(r"^http://127\.0\.0\.1:(\d+)((?:/.*)?)$")
+
+
+def _tailnetify(url: str | None, env: dict[str, str]) -> str | None:
+    """Rewrite a resolved http://127.0.0.1:<port> link to the tailnet HTTPS
+    proxy when LC_TAILNET_HOST is set, so the same link works from the phone
+    AND the desktop (both reach the tailnet) instead of loopback-only.
+
+    Requires a matching `tailscale serve --https=<port> http://127.0.0.1:<port>`
+    (same port both sides) — this only rewrites the link, it never creates the
+    proxy mapping itself.
+    """
+    if not url:
+        return url
+    host = env.get("LC_TAILNET_HOST")
+    if not host:
+        return url
+    m = _LOOPBACK_URL_RE.match(url)
+    if not m:
+        return url
+    port, path = m.group(1), m.group(2)
+    return f"https://{host}:{port}{path}"
+
+
+def _resolve_and_tailnetify(template: str | None, env: dict[str, str]) -> str | None:
+    if not template:
+        return None
+    return _tailnetify(_resolve_template(template, env), env)
+
+
 def _resolved_links(s: "catalog.ServiceEntry", env: dict[str, str]) -> dict[str, str | None]:
     return {
-        "app": _resolve_template(s.links.app, env) if s.links.app else None,
-        "setup": _resolve_template(s.links.setup, env) if s.links.setup else None,
+        "app": _resolve_and_tailnetify(s.links.app, env),
+        "setup": _resolve_and_tailnetify(s.links.setup, env),
         "docs": s.links.docs,
         "runbook": s.links.runbook,
-        "status": _resolve_template(s.links.status, env) if s.links.status else None,
+        "status": _resolve_and_tailnetify(s.links.status, env),
         "native": s.links.native,
     }
 
