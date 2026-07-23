@@ -94,6 +94,18 @@ in the execution log.
 ## 8. Execution log
 
 - 2026-07-23 — Run-doc created; packet launching.
+- 2026-07-23 — **Family 5 discovered post-packet** (PR #78's first CI run
+  failed in 19s at `ruff check src`, before pytest): `pyproject.toml` dev
+  extra pinned `ruff>=0.6` with no upper bound; ruff **0.16.0 released
+  2026-07-23** adds rules flagging **597 existing findings** across src on
+  ANY branch (verified locally with `uvx ruff@0.16.0 check src`; the
+  previously-installed 0.15.21 passes the whole tree: `All checks passed!`).
+  Both post-merge main runs (18:49) fail identically → branch-independent.
+  Fix: bound the range `ruff>=0.6,<0.16` (repo standard: pin compatible
+  ranges; adopt 0.16 deliberately later). Range resolution proof:
+  `uv run --with "ruff>=0.6,<0.16" ruff --version` → 0.15.21. Follow-up
+  queued in the KAN-25 item notes: deliberate ruff 0.16 adoption (fix or
+  configure the 597, 279 auto-fixable).
 - 2026-07-23 — Family 3: aligned the stale `_build_args` test with commit
   `13bc15b`'s stdin contract. The prompt is no longer passed positionally and
   the test now explicitly asserts it is absent from argv; effort propagation
