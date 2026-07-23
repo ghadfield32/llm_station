@@ -223,6 +223,13 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Source:** 2026-07-23 migration follow-up (this file)
 **Notes:** Implemented 2026-07-23 by Codex gpt-5.6-sol in an isolated worktree (branch `feat/kan-24-grand-todo-ui-parity`, commit 3e54a24) per [docs/projects/kan-24-grand-todo-ui-parity/RUNDOC.md](../projects/kan-24-grand-todo-ui-parity/RUNDOC.md): parameterized sync/edit endpoints + all cockpit gates over both boards; 174 tests green, build green, literal KPI met; independent Fable review APPROVED. Tail: operator merges the branch and rebuilds the cockpit to ship the new bundle. First feature todo through the full TODO_PROCESS loop (with PROC-1).
 
+#### KAN-26 · Chat redesign to the DESIGN.md contract (runtime-agnostic, fits every screen)
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P1
+**Source:** operator direction 2026-07-23 ("utilize Open Design so our chats look better and work better across different agents") + L9 chat-width complaint
+**Notes:** Rebuild the cockpit chat surfaces to the [services/agent_kanban_ui/DESIGN.md](../../services/agent_kanban_ui/DESIGN.md) chat contract: runtime-agnostic message chrome (Claude/Codex/GatewayCore/future Copilot differ only by a small badge, never bubble style); assistant/model pickers as compact viewport-fitting selects (kills the too-wide chat dropdown — the chat half of KAN-4); tool calls/evidence as collapsed monospace insets, never raw JSON; a single context-chip row above the composer (registered repo — where KAN-13's dropdown lands — plus linked board/card); streaming state via `--run` accent; in-thread `.error` blocks with runtime badge instead of toast-only failures. Bundle with KAN-8 (Open-in-chat-only + model dropdown) as one Codex UI packet under the DESIGN.md workflow rules (build + 390px fit check + no hardcoded colors).
+
 #### KAN-25 · Restore main CI to green (12 pre-existing lint-test failures)
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `llm_station`
