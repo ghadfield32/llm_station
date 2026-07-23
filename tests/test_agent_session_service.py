@@ -86,7 +86,8 @@ def test_full_lifecycle_through_the_service(service):
     assert record.status == "idle"
 
     events = asyncio.run(_drain(service.send_message(record.session_id, "hello")))
-    assert [e.type for e in events] == ["assistant_message", "session_idle"]
+    assert [e.type for e in events] == [
+        "user_message", "assistant_message", "session_idle"]
 
     all_events = service.get_events(record.session_id)
     sequences = [e.sequence for e in all_events]
@@ -113,7 +114,8 @@ def test_approval_lifecycle_through_the_service(service):
     record = asyncio.run(service.start_session(SessionStart(
         conversation_id="c1", repo_id="r", mode="workspace", harness_id="fake")))
     events = asyncio.run(_drain(service.send_message(record.session_id, "write x")))
-    approval_id = events[0].payload["approval_id"]
+    assert [e.type for e in events] == ["user_message", "approval_required"]
+    approval_id = events[1].payload["approval_id"]
 
     asyncio.run(service.resolve_approval(
         record.session_id, ApprovalDecision(approval_id=approval_id, approved=True)))
@@ -157,13 +159,14 @@ def test_service_survives_a_fresh_instance_pointed_at_the_same_ledger(tmp_path):
     recovered = service2.get_session(record.session_id)
     assert recovered.conversation_id == "c1"
     events = service2.get_events(record.session_id)
-    assert [e.type for e in events] == ["session_started", "assistant_message",
-                                        "session_idle"]
+    assert [e.type for e in events] == [
+        "session_started", "user_message", "assistant_message", "session_idle"]
 
     # and it's still a live, usable session — not just readable history
     more = asyncio.run(_drain(service2.send_message(record.session_id, "again")))
-    assert [e.type for e in more] == ["assistant_message", "session_idle"]
-    assert more[0].sequence == 4   # continues, does not reset
+    assert [e.type for e in more] == [
+        "user_message", "assistant_message", "session_idle"]
+    assert more[0].sequence == 5   # continues, does not reset
 
 
 def test_gateway_core_cannot_satisfy_the_agent_harness_protocol():

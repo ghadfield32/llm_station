@@ -31,7 +31,9 @@ gateways = [
   "uvicorn[standard]>=0.34",
 ]
 dev = [
-  "ruff>=0.6",
+  # <0.16: ruff 0.16.0 (released 2026-07-23) adds rules that flag 597
+  # existing findings across src; adopt it deliberately, not via CI drift.
+  "ruff>=0.6,<0.16",
   "mypy>=1.11",
   "pytest>=8.0",
   "fastapi>=0.115",

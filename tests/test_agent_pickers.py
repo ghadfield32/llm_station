@@ -59,7 +59,9 @@ def test_claude_local_effort_reaches_build_args_and_event(monkeypatch):
     sid = asyncio.run(h.start_session(_start("claude_code_local", model="opus",
                                              effort="high")))
     rec = h.store.get(sid)
-    args = h._build_args("/usr/bin/claude", rec, "hi", Path("/repo"))
+    prompt = "prompt-must-travel-on-stdin"
+    args = h._build_args("/usr/bin/claude", rec, Path("/repo"))
+    assert prompt not in args
     assert args[args.index("--effort") + 1] == "high"
     ev = h.store.events_since(sid)[0]
     assert ev.payload["requested_effort"] == "high"

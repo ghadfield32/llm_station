@@ -75,6 +75,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L9 (2026-07-23 migration)
 **Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant. **Run-doc:** [docs/projects/kan-3-load-performance/RUNDOC.md](../projects/kan-3-load-performance/RUNDOC.md). **PACKET 1 LIVE 2026-07-23**: implemented (Codex gpt-5.6-sol), verified (npm build + 104 backend tests exit 0), Fable-review APPROVED, and **deployed — the running cockpit serves the resilience bundle (index-D5_TBO2n.js)**. Code reaches main via PR #77 (the #74 squash was cut before #76 landed on the branch). **Packet 2 remaining:** latency measurement then optimization (board-switch, notes→books).
+**Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant. **Run-doc:** [docs/projects/kan-3-load-performance/RUNDOC.md](../projects/kan-3-load-performance/RUNDOC.md). **PACKET 1 SHIPPED 2026-07-23** (PR #76, stacked on #74): Codex gpt-5.6-sol implemented keep-last-good on six surfaces + pure transient classifier + 2-consecutive banner debounce + stale chip + visibilitychange quiet refresh; host verification npm build exit 0 + 104 backend tests exit 0; Fable review APPROVED. Tail: merge #74→#76 + cockpit rebuild. **Packet 2 remaining:** latency measurement then optimization (board-switch, notes→books).
 
 #### KAN-4 · Fit-to-screen layout everywhere (mobile + desktop)
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -218,6 +219,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 
 #### KAN-24 · Master grand-todo board: full cockpit parity (sync UI, source editor, write-through moves)
 `✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
+`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** 2026-07-23 migration follow-up (this file)
@@ -236,6 +238,12 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Priority:** P1
 **Source:** discovered 2026-07-23 while shipping PR #74
 **Notes:** main's `contracts` workflow red since 2026-07-17; **5 families**: (1-4) 12 test failures — capture-convert container-path reliance ×5, usage fixture time-drift, pickers stdin-signature drift, session-service durable user_message drift ×5 — all FIXED test-side at root cause (Codex gpt-5.6-sol xhigh, failed closed on sandbox; reviewer host-verified: 48 family tests + regression guard exit 0; Fable APPROVED); (5) discovered on PR #78's first run: `ruff>=0.6` unbounded → ruff **0.16.0 released 2026-07-23** flags 597 pre-existing findings on any branch — FIXED by bounding `ruff>=0.6,<0.16` (0.15.21 passes the whole tree; range-resolution proven). **PR #78** @ 71d29bb. Run-doc: [docs/projects/kan-25-ci-green/RUNDOC.md](../projects/kan-25-ci-green/RUNDOC.md). PROVEN: PR #78 CI fully green 2026-07-23 (lint-test pass 5m22s — first green since 07-17; run 30037894573). Tail: operator merges #77 then #78. Follow-ups: deliberate ruff 0.16 adoption (597 findings, 279 auto-fixable); delete stray `C:\app` (artifact of the Windows-masked path bug).
+#### KAN-25 · Restore main CI to green (12 pre-existing lint-test failures)
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P1
+**Source:** discovered 2026-07-23 while shipping PR #74
+**Notes:** main's `contracts` workflow has been red since 2026-07-17 (4 consecutive runs). 12 failures in 4 families, none from the grand-todo work (PR #74 fixes one, adds zero): (1) `test_agent_kanban_ui_capture_convert` ×5 — capture-convert's private-history sub-request resolves container-default paths (`/app/generated/.locks`, `PermissionError: /app`) on the Linux runner; (2) `test_agent_kanban_ui_usage` — `KeyError: 'glm-5.2'` fixture drift; (3) `test_agent_pickers` — `_build_args()` signature drift vs the stdin chat fix; (4) `test_agent_session_service` ×5 — approval/event-order assertions. A red main gate undermines every verification loop — fix before further merges. Evidence: runs 30032453677 (PR) vs main run same-day; failure sets identical minus the domain-pin fix.
 
 ## AGT — Agents, Models & Evaluation
 
@@ -332,6 +340,7 @@ Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 
 #### PROC-1 · Prove one todo end-to-end through the full loop
 `✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
+`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L13 (2026-07-23 migration)
@@ -353,6 +362,7 @@ Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 
 #### PROC-4 · Grand-todo migration — master list in llm_station, Betts list stays in Betts
 `✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
+`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L83 (2026-07-23 migration)
