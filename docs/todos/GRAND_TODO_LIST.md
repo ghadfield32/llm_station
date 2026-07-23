@@ -217,11 +217,11 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Notes:** Add timeline reminders to the kanban and complete the mobile-app portion for easy signup.
 
 #### KAN-24 · Master grand-todo board: full cockpit parity (sync UI, source editor, write-through moves)
-`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** 2026-07-23 migration follow-up (this file)
-**Notes:** The `grand_todo` board created by this migration syncs via `uv run cc grand-todo-import --board grand_todo` (CLI). Cockpit special-casing (source-sync status chip, in-UI canonical editor, write-through card moves, per-board sync endpoint) is still hardcoded to `betts_basketball_grand_todo` in `services/agent_kanban_ui/app.py` and `web/src/App.tsx` / `api.ts`. Parameterize those seams so both boards get identical treatment. Bounded, mechanical fan-out — good Codex (`throughput`) packet.
+**Notes:** Implemented 2026-07-23 by Codex gpt-5.6-sol in an isolated worktree (branch `feat/kan-24-grand-todo-ui-parity`, commit 3e54a24) per [docs/projects/kan-24-grand-todo-ui-parity/RUNDOC.md](../projects/kan-24-grand-todo-ui-parity/RUNDOC.md): parameterized sync/edit endpoints + all cockpit gates over both boards; 174 tests green, build green, literal KPI met; independent Fable review APPROVED. Tail: operator merges the branch and rebuilds the cockpit to ship the new bundle. First feature todo through the full TODO_PROCESS loop (with PROC-1).
 
 ## AGT — Agents, Models & Evaluation
 
@@ -317,11 +317,11 @@ Repo default: `llm_station`. The consistent pipeline every todo goes through.
 Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 
 #### PROC-1 · Prove one todo end-to-end through the full loop
-`🚧 WIP` · **Target:** _TBD_ · **Done:** _—_
+`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L13 (2026-07-23 migration)
-**Notes:** Ensure we can add todos and work one through so it goes through correctly: todo → run-doc → questions → mission → panel review → done, with evidence at each gate. The 2026-07-23 grand-todo migration (PROC-4) is the first live run; the first *feature* todo through the loop should be a P1 KAN item (suggest KAN-3 or KAN-2).
+**Notes:** PROVEN 2026-07-23 with KAN-24 as the first feature todo through every stage: capture → repo designation → run-doc → KPI-meeting questions (operator-approved packet) → mission (Codex gpt-5.6-sol write-mode, isolated worktree) → monitored execution (mid-flight on-plan check; hung-pipe incident recovered) → deterministic verification (174 tests, build) → independent panel review (Fable, non-author, APPROVED) → evidence-gated close. Tail: operator merge = the final "done" gate, by design. Process lesson logged in the KAN-24 RUNDOC (no wrapper timeout shorter than the verify phase). Next through the loop: KAN-3.
 
 #### PROC-2 · Every new todo gets its own up-to-standards doc
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -338,7 +338,7 @@ Contract: [`TODO_PROCESS.md`](TODO_PROCESS.md).
 **Notes:** "For todos becoming projects (most of them), they should have a template that sets up the docs folder if it's not already within the registered folder and with the organization and then set up a doc completely up to standards that we can continue to add onto and adjust and update as we do more about the project and add more todos relating to that project, every time we add something it should have a full review to ensure it's helpful/organized and added correctly and up to standard/and a plan we can add a link to into the card for the todo as well as a link to the doc so we can continue and keep up with this and go and chat with the doc and update it myself anytime within the chat. Once we have this set, continue to ensure that we are up to standards, have the best ones for continued success and reiteration to ensure we are always doing this the best possible based on our successes and fails, ensure it can be done in one area so it's easy and we can do it ourselves in the todo list also."
 
 #### PROC-4 · Grand-todo migration — master list in llm_station, Betts list stays in Betts
-`🚧 WIP` · **Target:** 2026-07-23 · **Done:** _—_
+`🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L83 (2026-07-23 migration)
@@ -577,3 +577,9 @@ of the migrated file, verbatim, with a triage map).
   `soon_to_be_deleted_todos.md` + designation split from the Betts tracker).
   65 tracked items seeded across KAN/AGT/PROC/JOBS/SCL/BB/CVP/LIFE with
   per-item Repo designations; bulk lists moved to `reference/`.
+- 2026-07-23 — KAN-24 implemented (Codex gpt-5.6-sol, worktree branch
+  `feat/kan-24-grand-todo-ui-parity` @ 3e54a24, Fable review approved) and
+  PROC-1 loop proven end-to-end with it; both moved to SHIP-TAIL pending
+  operator merge. Migration committed on `feat/grand-todo-master`
+  (adab21a, f94ac5f, 996e0f6); cockpit rebuilt with the grand_todo board
+  live; source-file deletion left to the operator (classifier-blocked).
