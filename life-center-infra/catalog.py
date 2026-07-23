@@ -185,8 +185,12 @@ SERVICES: tuple[ServiceEntry, ...] = (
         links=Links(app="http://127.0.0.1:${IMMICH_PORT:-2283}",
                      docs="https://immich.app/docs/overview/introduction", runbook="runbooks/app-admission.md"),
         auth=Auth(mode="local", credential_ref="IMMICH_DB_PASSWORD", supports_scoped_token=True),
-        setup=Setup(wizard_required=True, registration_must_close=True,
-                     note="claim the first admin account, then close public registration"),
+        setup=Setup(wizard_required=False, registration_must_close=False,
+                     note="admin account created via POST /api/auth/admin-sign-up (Immich's own "
+                          "documented API); verified live there is no separate public "
+                          "self-registration endpoint (POST /api/auth/sign-up and /api/users both "
+                          "404) — admin-sign-up is itself one-time and now permanently closed "
+                          "('The server already has an admin'). Nothing further to close."),
         recovery=Recovery(canonical_data_location="${LC_DATA}/photos",
                            complete_backup_unit="LC_DATA/photos + immich_db_data volume",
                            export_method="bulk download / immich-go",
@@ -306,8 +310,12 @@ SERVICES: tuple[ServiceEntry, ...] = (
         links=Links(app="http://127.0.0.1:${LINKWARDEN_PORT:-3010}",
                      docs="https://docs.linkwarden.app/", runbook="runbooks/app-admission.md"),
         auth=Auth(mode="local", credential_ref="LINKWARDEN_NEXTAUTH_SECRET"),
-        setup=Setup(wizard_required=True, registration_must_close=True,
-                     note="create the owner account, then close open registration"),
+        setup=Setup(wizard_required=False, registration_must_close=True,
+                     note="owner account created via POST /api/v1/users (Linkwarden's own "
+                          "documented API); registration is open by default. Checked live for a "
+                          "non-interactive way to close it (env var, settings API) and found "
+                          "none — this genuinely needs your own check in the Linkwarden admin "
+                          "UI, not something to guess at via more API calls."),
         recovery=Recovery(canonical_data_location="${LC_APPDATA}/linkwarden/data",
                            complete_backup_unit="appdata/linkwarden + linkwarden_db_data volume",
                            export_method="built-in export", restoration_proof="clean-instance restore"),
@@ -340,8 +348,10 @@ SERVICES: tuple[ServiceEntry, ...] = (
         links=Links(app="http://127.0.0.1:${MEALIE_PORT:-9925}",
                      docs="https://docs.mealie.io/", runbook="runbooks/app-admission.md"),
         auth=Auth(mode="local", username_ref="changeme@example.com", supports_scoped_token=True),
-        setup=Setup(default_credentials_must_rotate=True,
-                     note="default changeme@example.com / MyPassword — rotate via user profile"),
+        setup=Setup(default_credentials_must_rotate=False,
+                     note="default password rotated via Mealie's own PUT /api/users/password API "
+                          "(same account, changeme@example.com — new password shared with the "
+                          "operator directly, never committed here)"),
         recovery=Recovery(canonical_data_location="${LC_APPDATA}/mealie/data", complete_backup_unit="appdata/mealie/data",
                            export_method="built-in backup export", restoration_proof="clean-instance restore"),
         automation=Automation(), risk_tier="low",
@@ -357,9 +367,12 @@ SERVICES: tuple[ServiceEntry, ...] = (
         links=Links(app="http://127.0.0.1:${HOMEBOX_PORT:-7745}",
                      docs="https://homebox.software/en/", runbook="runbooks/app-admission.md"),
         auth=Auth(mode="local"),
-        setup=Setup(wizard_required=True, registration_must_close=True,
-                     note="HBOX_OPTIONS_ALLOW_REGISTRATION=false is already set; if that blocks the very "
-                          "first signup, temporarily flip it true, create your account, then set back to false"),
+        setup=Setup(wizard_required=False, registration_must_close=False,
+                     note="owner account created by temporarily flipping "
+                          "HBOX_OPTIONS_ALLOW_REGISTRATION to true, registering via "
+                          "POST /api/v1/users/register, then setting it back to false — "
+                          "verified live: registration now correctly rejects new signups "
+                          "(403) and the created account still logs in"),
         recovery=Recovery(canonical_data_location="${LC_APPDATA}/homebox/data",
                            complete_backup_unit="appdata/homebox/data (sqlite)",
                            export_method="built-in CSV export", restoration_proof="clean-instance restore"),

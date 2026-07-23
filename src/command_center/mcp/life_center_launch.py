@@ -164,8 +164,16 @@ def build_launch_view(
         setup_info = svc.get("setup") or {}
         op_cards = operations_by_service.get(sid, [])
         setup_card = next((c for c in op_cards if c.get("operation_type") == "setup"), None)
+        # `registration_must_close` is its own trigger, not folded into wizard_
+        # required — a service whose account is already created (wizard done)
+        # but whose public registration is still open is genuinely still
+        # pending. Found live: Immich's wizard_required flipped to False after
+        # its admin account was created via API, which silently dropped its
+        # still-open "close registration" step from setup_pending until this
+        # was corrected to check all three flags.
         setup_required = bool(setup_info.get("wizard_required")
-                               or setup_info.get("default_credentials_must_rotate"))
+                               or setup_info.get("default_credentials_must_rotate")
+                               or setup_info.get("registration_must_close"))
         setup_lane = str(setup_card.get("status", "")).strip().lower() if setup_card else ""
         setup_completed = setup_required and setup_lane == "done"
         setup = LaunchSetup(
