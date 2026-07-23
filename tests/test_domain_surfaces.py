@@ -90,11 +90,14 @@ def test_domain_registry_lists_all_domains(client):
     body = response.json()
     ids = {d["domain_id"] for d in body["domains"]}
     assert ids == {
-        "betts_basketball_grand_todo", "job_application", "linkedin_post",
+        "betts_basketball_grand_todo", "grand_todo", "job_application",
+        "linkedin_post",
         "book", "paper", "repo", "dag", "self_improvement", "mission",
         "generic_task", "home_house", "movies_shows", "site_basketball",
         "station_improvements", "kanban_improvements", "business",
         "tech_hardware_setup",
+        "life_center_overview", "life_center_services",
+        "life_center_operations",
     }
     # every domain ships a designed empty state, not a blank screen
     assert all(d["empty_state"]["title"] for d in body["domains"])
