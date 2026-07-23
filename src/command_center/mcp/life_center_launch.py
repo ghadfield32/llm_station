@@ -232,6 +232,15 @@ def live_launch_view() -> LaunchView:
             board_id=board_id, event_log=EventLog(event_path), store_dir=Path(store_path))
 
     catalog = run_lc("catalog")
+    # `lc catalog`'s links are raw templates (e.g. "${NEXTCLOUD_PORT:-8085}")
+    # — only `lc links --json` applies .env-based ${VAR:-default} resolution.
+    # Found live: without this, every "Open app" href in this API was the
+    # literal unresolved template string, not a working URL.
+    resolved_links = {s["service_id"]: s["links"] for s in run_lc("links", "--json")["services"]}
+    catalog_services = [
+        {**svc, "links": resolved_links.get(svc["service_id"], svc.get("links", {}))}
+        for svc in catalog["services"]
+    ]
     services_cards = _provider(BOARD_SERVICES).list_cards()
     overview_cards = _provider(BOARD_OVERVIEW).list_cards()
     operations_cards = _provider(BOARD_OPERATIONS).list_cards()
@@ -240,7 +249,7 @@ def live_launch_view() -> LaunchView:
     status_generated_at = max(checks) if checks else None
 
     return build_launch_view(
-        catalog_services=catalog["services"], catalog_digest=catalog["catalog_digest"],
+        catalog_services=catalog_services, catalog_digest=catalog["catalog_digest"],
         services_cards=services_cards, overview_cards=overview_cards,
         operations_cards=operations_cards,
         generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
