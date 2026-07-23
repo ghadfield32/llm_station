@@ -578,9 +578,11 @@ GRAND_TODO_SOURCE = _env_path(
     "BETTS_GRAND_TODO_SOURCE",
     "/workspace/betts_basketball/docs/backend/projects/GRAND_TODO_LIST.md",
 )
+# Container-path default like BETTS_GRAND_TODO_SOURCE above; host runs and
+# tests set the env var (the image flattens app.py to /app/app.py, so no
+# repo-relative default is derivable from __file__ here).
 MASTER_GRAND_TODO_SOURCE = _env_path(
-    "MASTER_GRAND_TODO_SOURCE",
-    str(Path(__file__).resolve().parents[2] / "docs/todos/GRAND_TODO_LIST.md"),
+    "MASTER_GRAND_TODO_SOURCE", "/app/docs/todos/GRAND_TODO_LIST.md",
 )
 # Source-projected grand-todo boards: canonical Markdown per domain. Both are
 # merge-only projections of their file; generic todo routing must never place
