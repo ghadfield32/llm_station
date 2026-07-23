@@ -235,53 +235,53 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 Repo default: `llm_station`. Model allocation, agent quality, evaluation.
 
 #### AGT-1 · Agents CLI for kanban metrics
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
-**Repo:** `llm_station`
-**Priority:** P2
-**Source:** soon_to_be_deleted_todos.md L3 (2026-07-23 migration)
-**Notes:** Check out the agents CLI for the kanban and ensure we use it for the metrics that help us better answer. Link: https://fff97757.click.kit-mail3.com/mvu2e6knk0b5hq4039vtmhrenrgz8c3h5ed66/9qhzhnhdoxq835a9h3/aHR0cHM6Ly9mYW5kZi5jby8zUjVsVzB0
-
-#### AGT-2 · Evaluate "Aiden" (open-source AI operating system) for the kanban
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
-**Repo:** `llm_station`
-**Priority:** P3
-**Source:** soon_to_be_deleted_todos.md L4 (2026-07-23 migration)
-**Notes:** https://www.linkedin.com/posts/alvaro-cintas_theres-a-new-full-open-sourced-ai-operating-share-7483599852195622913-fUW5/
-
-#### AGT-3 · Harness score — grade our LLM systems on the kanban
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P2
+**Source:** soon_to_be_deleted_todos.md L3 (2026-07-23 migration)
+**Notes:** Check out the agents CLI for the kanban and ensure we use it for the metrics that help us better answer. Link: https://fff97757.click.kit-mail3.com/mvu2e6knk0b5hq4039vtmhrenrgz8c3h5ed66/9qhzhnhdoxq835a9h3/aHR0cHM6Ly9mYW5kZi5jby8zUjVsVzB0 **Research verdict (2026-07-23):** the link is an influencer-agency shortlink (unpinnable); best candidate = **AgentsView** (kenn-io/agentsview, MIT, mature) — TRIAL read-only as a validator for our usage.v1 numbers; pattern-mine caut's `caut.v1` quota schema. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
+
+#### AGT-2 · Evaluate "Aiden" (open-source AI operating system) for the kanban
+`✅ DONE` · **Target:** _TBD_ · **Done:** 2026-07-23
+**Repo:** `llm_station`
+**Priority:** P3
+**Source:** soon_to_be_deleted_todos.md L4 (2026-07-23 migration)
+**Notes:** https://www.linkedin.com/posts/alvaro-cintas_theres-a-new-full-open-sourced-ai-operating-share-7483599852195622913-fUW5/ **Research verdict (2026-07-23): SKIP adoption** (taracodlabs/aiden — AGPL-3.0 core, single maintainer, heavy overlap with Command Center). Pattern-mine 4 ideas: tiered approval risk levels; failure-classification + verify-outcome loop; memory distillation/graduation; trigger bus. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
+
+#### AGT-3 · Harness score — grade our LLM systems on the kanban
+`🚧 WIP` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L7 (2026-07-23 migration)
-**Notes:** Use harness score to grade our LLM systems on the kanban. https://www.linkedin.com/posts/fernandopaladini_harnessengineering-aicoding-cursor-ugcPost-7483472351603503104-Lzen/ — feeds the AGT-12 completion-KPI leaderboard.
+**Notes:** Use harness score to grade our LLM systems on the kanban. https://www.linkedin.com/posts/fernandopaladini_harnessengineering-aicoding-cursor-ugcPost-7483472351603503104-Lzen/ — feeds the AGT-12 completion-KPI leaderboard. **Research + BASELINE (2026-07-23):** it's paladini/harness-score (MIT) — a repo-readiness scanner (NOT task quality). Baseline run: **63/108 (58%), L1 "Documented"** — Sensors 20/20, Hygiene 23/23, CI 11/14, Context 9/20, **Skills 0/17, Hooks 0/14**; next-level gaps: context ≥60%, skills or hooks ≥30%. Evidence: [baseline JSON](../projects/agt-3-harness-score/baseline-2026-07-23.json). Task-quality grading belongs to AGT-12 via METR-style task standards. Advisory only, never a gate.
 
 #### AGT-4 · Copilot as a kanban agent option
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P3
 **Source:** soon_to_be_deleted_todos.md L10 (2026-07-23 migration)
-**Notes:** https://www.linkedin.com/posts/rorypreddy_msft-ai-microsoft-share-7483794621219721216-znuA/
+**Notes:** https://www.linkedin.com/posts/rorypreddy_msft-ai-microsoft-share-7483794621219721216-znuA/ **Research verdict (2026-07-23): TRIAL.** Copilot CLI is GA (2026-02) with a true headless mode (`copilot -p "..." -s --no-ask-user --allow-tool=...`), PAT auth (`COPILOT_GITHUB_TOKEN`, "Copilot Requests" permission), multi-model. Viable third agent runtime beside Claude Code + Codex. Caveats: proprietary, per-prompt billing, flag churn (pin CLI versions). First step: read-only adapter behind the same wall as the Codex adapter + rerun the 14-case acceptance. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
 
 #### AGT-5 · STORM researcher add-on — pre-research todos and fill in details
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L11 (2026-07-23 migration)
-**Notes:** Check out STORM as a researcher add-on so it does the research ahead of time for any todo and fills in details, making everything as easy as possible. Natural engine for the PROC-3 run-doc research stage.
+**Notes:** Check out STORM as a researcher add-on so it does the research ahead of time for any todo and fills in details, making everything as easy as possible. Natural engine for the PROC-3 run-doc research stage. **Research verdict (2026-07-23): TRIAL.** stanford-oval/storm — MIT, ~30.3k★, LiteLLM-native since v1.1.0 (points at our own gateway/Ollama); pre-writing output (cited refs + outline) ≈ a run-doc skeleton. Risks: local-model quality unproven, release cadence stalled, needs a retrieval backend (DuckDuckGo/SearXNG keyless). First step: scratch-venv trial on ONE real board todo. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
 
 #### AGT-6 · Audit our kanban agentic pipeline against the 2026 AI-agents guide
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P3
 **Source:** soon_to_be_deleted_todos.md L22 (2026-07-23 migration)
-**Notes:** https://www.linkedin.com/posts/how-to-build-ai-agents-updated-2026-guide-share-7483626518561308672-OQ0B/ — ensure the pipeline is the best it can be.
+**Notes:** https://www.linkedin.com/posts/how-to-build-ai-agents-updated-2026-guide-share-7483626518561308672-OQ0B/ — ensure the pipeline is the best it can be. **Research verdict (2026-07-23): ADOPT as audit rubric.** Best-substantiated source: Perrone "The AI Agents Stack (2026 Edition)" (O'Reilly Radar 2026-06). 5-practice audit: three-tier evals per surface; authorize-before-action at the tool layer; observability≠evals gap hunt; history-first memory audit; right-sized orchestration. Next: one-session gap audit → gap list on the board. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
 
 #### AGT-7 · Add open-sourced "Claude design" to the open-source setup
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
+`✅ DONE` · **Target:** _TBD_ · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P3
 **Source:** soon_to_be_deleted_todos.md L23 (2026-07-23 migration)
-**Notes:** https://www.linkedin.com/posts/ole-lehmann-918a6094_lol-someone-already-open-sourced-claude-design-share-7482938344658587648-Ivzr/
+**Notes:** https://www.linkedin.com/posts/ole-lehmann-918a6094_lol-someone-already-open-sourced-claude-design-share-7482938344658587648-Ivzr/ **Research verdict (2026-07-23): SKIP as dependency** — the project is **Open Design** (nexu-io/open-design, Apache-2.0, ~81k★): a design-generation product driven by your existing coding agent, NOT a Claude-style component library; license clean. Pattern-mine: daemon-spawns-agent-CLI/session-resume architecture + the portable DESIGN.md design-system convention for cockpit visual language. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
 
 #### AGT-8 · Set up jlnsrk/GLM-5.2-colibri-int4 (Hugging Face)
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -413,7 +413,7 @@ Repo default: `llm_station` (LinkedIn content engine, publishers).
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L9 (2026-07-23 migration)
-**Notes:** Add the ability to keep up with any and all socials via this app; easy to use; keeps up with notifications in all of them and responds or posts accordingly. Research open-source projects that already do multi-social management before building.
+**Notes:** Add the ability to keep up with any and all socials via this app; easy to use; keeps up with notifications in all of them and responds or posts accordingly. Research open-source projects that already do multi-social management before building. **Research verdict (2026-07-23): TRIAL Postiz** (gitroomhq/postiz-app, AGPL, 33.7k★) as the multi-network **publishing** arm behind our approval gate — real REST API, but NO inbound/notifications API. **Hard constraint from LinkedIn itself:** comment/engagement reading needs the Community Management API, granted only to registered legal entities (ties to SCL-4 business registration). Mixpost Pro ($299 one-time) has the only shipped unified inbox — conditional later. Brightbean too young; Ayrshare closed. First step: docker-compose Postiz + publish ONE approved draft via API vs `cc linkedin-publish`. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
 
 #### SCL-2 · Post enterer (LinkedIn-style) for the post board
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -468,36 +468,37 @@ Betts tracker — never tracked in two canonical places at once.
 
 ## CVP — Court CV / Homography Pipeline
 
-Repo: `bball_homography_pipeline` (not yet registered with the Command
-Center — KAN-2 covers registration; until then agents must not assume access).
+Repo: `bball_homography_pipeline`. **Category ARCHIVED 2026-07-23 by
+operator instruction ("forget about topic 1 and anything else that includes
+CV")** — items retained for the record, no effort until un-archived.
 
 #### CVP-1 · Try Outlet for real-time ARKit streaming on iPhone
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
+`📦 ARCHIVED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `bball_homography_pipeline`
 **Priority:** P3
 **Source:** soon_to_be_deleted_todos.md L20 (2026-07-23 migration)
-**Notes:** https://www.linkedin.com/posts/pablo-vela_i-got-real-time-streaming-of-arkit-outputs-ugcPost-7483941558690455552-3Xzu/
+**Notes:** https://www.linkedin.com/posts/pablo-vela_i-got-real-time-streaming-of-arkit-outputs-ugcPost-7483941558690455552-3Xzu/ De-scoped by operator 2026-07-23. Research was completed first and is preserved in [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md): "Outlet" doesn't exist — the tool is ARFlow (Apache-2.0) + Rerun; iPhone depth is useless at court distance; if ever revived, start with Record3D + rerun-sdk.
 
 #### CVP-2 · SAM real-time monitoring upgrade
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
+`📦 ARCHIVED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `bball_homography_pipeline`
 **Priority:** P3
 **Source:** soon_to_be_deleted_todos.md L54 (2026-07-23 migration)
-**Notes:** Upgrade our SAM real-time monitoring: https://www.linkedin.com/posts/ahsaanraazaa_ai-computervision-segmentanything-ugcPost-7483128324744073217-BtTP/
+**Notes:** Upgrade our SAM real-time monitoring: https://www.linkedin.com/posts/ahsaanraazaa_ai-computervision-segmentanything-ugcPost-7483128324744073217-BtTP/ De-scoped by operator 2026-07-23.
 
 #### CVP-3 · Modal-for-rerun decision + ground-truth review frontend + live-on-phone path
-`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+`📦 ARCHIVED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `bball_homography_pipeline`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L73 (2026-07-23 migration)
-**Notes:** Check whether Modal is needed for CV when rerunning the pipeline with updated data; finish the frontend for reviewing how ground truth did (full pipeline speed for ground truth vs upload-and-expect-results); understand how to get it live with video on the phone.
+**Notes:** Check whether Modal is needed for CV when rerunning the pipeline with updated data; finish the frontend for reviewing how ground truth did (full pipeline speed for ground truth vs upload-and-expect-results); understand how to get it live with video on the phone. De-scoped by operator 2026-07-23.
 
 #### CVP-4 · Multi-camera capture rig research (~10 cameras, iPhone-level, cheap)
-`💡 IDEA` · **Target:** _TBD_ · **Done:** _—_
+`📦 ARCHIVED` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `bball_homography_pipeline`
 **Priority:** P3
 **Source:** soon_to_be_deleted_todos.md L72 (2026-07-23 migration)
-**Notes:** Find the best ~10-camera setup (or however many is needed) to buy and start using; iPhone-level camera quality, cheap and easy to set up.
+**Notes:** Find the best ~10-camera setup (or however many is needed) to buy and start using; iPhone-level camera quality, cheap and easy to set up. De-scoped by operator 2026-07-23.
 
 ## LIFE — Personal, Home & Errands
 
