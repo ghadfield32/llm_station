@@ -195,6 +195,29 @@ pattern. Adding a component-test runner is out of scope here (own packet).
     research-handoff entry point still hardcodes `agent:codex_agent`
     (different feature), and `EventRow` still serializes mission payloads
     (missions view, not chat).
+- 2026-07-23 — **CI caught a real verification gap in MY process** (PR #81
+  `lint-test` red): `tests/test_card_chat_context.py` is a **backend pytest
+  that reads `App.tsx` as source text** and pinned the old three-button
+  design (`"Ask Claude" in src`, `chatAboutCard("agent:claude_code_local")`).
+  I had verified this frontend packet with `npm run build` + `npm test` only.
+  **Lesson (now standing): a frontend-only packet still requires the full
+  backend suite, because backend guardrail tests assert over frontend
+  source.** Recorded in WORKLOG.
+  Resolution — contract moved, not deleted (the invariant "every card can
+  open chat on the lane the user picks" is still valuable): the two obsolete
+  assertions were rewritten to pin the NEW, stricter contract —
+  `test_every_card_has_one_open_in_chat_action_plus_a_runtime_picker`
+  (one action + `card-runtime-select`, and the old button labels must be
+  ABSENT), `test_card_runtime_picker_is_built_from_the_live_harness_list`
+  (picker enumerates fetched harnesses, unavailable ones disabled, GatewayCore
+  always offered), and a new
+  `test_card_actions_never_hardcode_an_agent_harness_id` that scopes to the
+  `DomainCardTile` function body so a literal harness id in a card action is
+  itself a failure. The two tests that still held (chat_prompt seeding,
+  draft-target honoring) were left untouched and still pass.
+- 2026-07-23 — Full re-verification after the fix: **entire backend suite
+  `pytest tests/` exit 0**, `ruff check src` clean, `npm run build` exit 0,
+  `npm test` exit 0 (41 passing).
 - 2026-07-23 — Implemented Sections 4.1–4.5 in the five allowed files. No
   DESIGN.md deviation was required. GatewayCore and native-agent messages now
   share one bubble shell/runtime badge; tool, result, and unknown events use
