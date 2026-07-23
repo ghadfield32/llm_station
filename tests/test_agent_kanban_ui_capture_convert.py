@@ -13,13 +13,15 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "services" / "agent_kanban_ui" / "app.py"
 
 
-def _load(monkeypatch, *, capture=True, workgraph=True):
+def _load(monkeypatch, tmp_path, *, capture=True, workgraph=True):
     from fastapi.testclient import TestClient
     spec = importlib.util.spec_from_file_location("akui_capture_convert_test", APP)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["akui_capture_convert_test"] = mod
     spec.loader.exec_module(mod)
     monkeypatch.setattr(mod, "CONFIGS_DIR", ROOT / "configs")
+    monkeypatch.setattr(mod, "KANBAN_EVENT_LOG", tmp_path / "events.jsonl")
+    monkeypatch.setattr(mod, "BOARD_STORE_DIR", tmp_path / "boards")
     monkeypatch.setattr(mod, "CAPTURE_ENABLED", capture)
     monkeypatch.setattr(mod, "WORKGRAPH_ENABLED", workgraph)
     mod._capture_service = None
@@ -41,8 +43,8 @@ def _plan():
         "edges": []}
 
 
-def test_convert_creates_work_with_capture_provenance_and_routes_capture(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_convert_creates_work_with_capture_provenance_and_routes_capture(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     cid = _capture(client, conversation_id="chat-5")
     r = client.post(f"/api/captures/{cid}/convert", json=_plan())
     assert r.status_code == 201, r.text
@@ -57,8 +59,8 @@ def test_convert_creates_work_with_capture_provenance_and_routes_capture(monkeyp
     assert client.get(f"/api/captures/{cid}").json()["processing_status"] == "routed"
 
 
-def test_convert_preview_is_side_effect_free(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_convert_preview_is_side_effect_free(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     cid = _capture(client)
     r = client.post(f"/api/captures/{cid}/work-preview", json=_plan())
     assert r.status_code == 200, r.text
@@ -68,8 +70,8 @@ def test_convert_preview_is_side_effect_free(monkeypatch):
     assert client.get(f"/api/captures/{cid}").json()["processing_status"] == "captured"
 
 
-def test_prepared_capture_chat_id_survives_route_and_conversion(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_prepared_capture_chat_id_survives_route_and_conversion(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     cid = _capture(client, requested_mode="prepare_now")
     prepared = client.post(f"/api/captures/{cid}/prepare").json()
     expected = f"capture:{cid}"
@@ -81,16 +83,16 @@ def test_prepared_capture_chat_id_survives_route_and_conversion(monkeypatch):
     assert client.get("/api/work-items").json()[0]["conversation_id"] == expected
 
 
-def test_convert_unknown_capture_is_404(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_convert_unknown_capture_is_404(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     assert client.post("/api/captures/nope/convert",
                        json=_plan()).status_code == 404
     assert client.post("/api/captures/nope/work-preview",
                        json=_plan()).status_code == 404
 
 
-def test_convert_requires_one_item_and_preview_still_checks_cycles(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_convert_requires_one_item_and_preview_still_checks_cycles(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     cid = _capture(client)
     bad = {"items": [{"ref": "a", "title": "A"}, {"ref": "b", "title": "B"}],
            "edges": [{"from_ref": "a", "to_ref": "b", "relation": "blocks"},
@@ -102,8 +104,8 @@ def test_convert_requires_one_item_and_preview_still_checks_cycles(monkeypatch):
     assert client.get(f"/api/captures/{cid}").json()["processing_status"] == "captured"
 
 
-def test_convert_disabled_when_graph_off(monkeypatch):
-    _mod, client = _load(monkeypatch, workgraph=False)
+def test_convert_disabled_when_graph_off(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path, workgraph=False)
     # with the graph off, conversion is 503 (checked before touching the capture)
     assert client.post("/api/captures/whatever/convert",
                        json=_plan()).status_code == 503
@@ -113,8 +115,8 @@ def test_convert_disabled_when_graph_off(monkeypatch):
 
 # ── routing (Phase G): free text / capture → a proposal, committing nothing ───
 
-def test_route_free_text_proposes_without_committing(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_route_free_text_proposes_without_committing(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     r = client.post("/api/work-items/route",
                     json={"text": "- research feasibility\n- write a post"})
     assert r.status_code == 200, r.text
@@ -128,8 +130,8 @@ def test_route_free_text_proposes_without_committing(monkeypatch):
                for q in prop["needs_confirmation"])
 
 
-def test_route_capture_carries_provenance_and_leaves_capture(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_route_capture_carries_provenance_and_leaves_capture(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     cid = _capture(client, conversation_id="chat-3")
     r = client.post(f"/api/captures/{cid}/route")
     assert r.status_code == 200, r.text
@@ -140,9 +142,9 @@ def test_route_capture_carries_provenance_and_leaves_capture(monkeypatch):
     assert client.get(f"/api/captures/{cid}").json()["processing_status"] == "captured"
 
 
-def test_route_unknown_capture_404_and_graph_off_503(monkeypatch):
-    _mod, client = _load(monkeypatch)
+def test_route_unknown_capture_404_and_graph_off_503(monkeypatch, tmp_path):
+    _mod, client = _load(monkeypatch, tmp_path)
     assert client.post("/api/captures/nope/route").status_code == 404
-    _mod2, off = _load(monkeypatch, workgraph=False)
+    _mod2, off = _load(monkeypatch, tmp_path, workgraph=False)
     assert off.post("/api/work-items/route",
                     json={"text": "x"}).status_code == 503
