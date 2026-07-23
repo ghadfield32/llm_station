@@ -63,11 +63,11 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Notes:** "The job boards should be all based on the steps they are in so it's not over cluttered. We should organize it so the main docs are easily adjusted via a link at the top and then the steps would just be there to show the overall and if we want we can click into those steps and see the actions taken for each so we can have this broken down linearly and easily adjusted."
 
 #### KAN-2 · Repo-scoped agent workspaces — registered folders are the whole search space
-`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+`🚧 WIP` · **Target:** 2026-07-24 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L2 (2026-07-23 migration)
-**Notes:** Kanban agent search scope is far too wide. The designated/registered folders must be all an agent can work with, and newly added repositories must be registered with the kanban so agents instantly know them. Goal: never again see "Those timed out — the home directory tree is too large… Directory traversal keeps timing out (the tree is huge)." Includes registering `bball_homography_pipeline` (currently unregistered — only `llm_station` and `betts_basketball` are in `configs/autonomy.yaml` `repo_manifests`).
+**Notes:** Kanban agent search scope is far too wide. The designated/registered folders must be all an agent can work with, and newly added repositories must be registered with the kanban so agents instantly know them. Goal: never again see "Those timed out — the home directory tree is too large… Directory traversal keeps timing out (the tree is huge)." STEP A DONE 2026-07-23: `bball_homography_pipeline` REGISTERED (disabled manifest — github_app_pending, autonomy off, blocker recorded; board personal_todos; validate+cross-refs PASS). OPERATOR TAIL: add `BBALL_HOMOGRAPHY_PIPELINE_LOCAL_PATH=c:\Users\ghadf\vscode_projects\docker_projects\bball_homography_pipeline` to .env (agents never edit .env). STEP B (adapter scoping — secret_paths denylist wiring + workspace-bounds contract in both native adapters) in flight per [docs/projects/kan-2-repo-scoped-workspaces/RUNDOC.md](../projects/kan-2-repo-scoped-workspaces/RUNDOC.md).
 
 #### KAN-3 · Load performance + zero "Load failed" (boards, notes, router, app-switch)
 `🚀 SHIP-TAIL` · **Target:** 2026-07-23 · **Done:** _—_
