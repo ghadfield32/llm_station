@@ -158,7 +158,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L56 (2026-07-23 migration)
-**Notes:** Fix `KANBAN_UI_AGENT_SESSIONS_ENABLED=1` in `.env` for Codex and Claude; have them normally set up in the chat and auto-engage when selected. Complete the LLM setup entirely so tasks run with the combination of models (feeds AGT-10).
+**Notes:** Fix `KANBAN_UI_AGENT_SESSIONS_ENABLED=1` in `.env` for Codex and Claude; have them normally set up in the chat and auto-engage when selected. Complete the LLM setup entirely so tasks run with the combination of models (feeds AGT-10). AGT-16's typed session spec is the auto-engage config seam.
 
 #### KAN-16 · Idea intake router — ideas auto-land on the right board with a full packet
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -172,7 +172,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L66 (2026-07-23 migration)
-**Notes:** Top-level security (and local keeping, with upgrade available to cheapest space) for the LLM-station documents and boards so it all feels secure.
+**Notes:** Top-level security (and local keeping, with upgrade available to cheapest space) for the LLM-station documents and boards so it all feels secure. AGT-14's declarative session policy stack (ALLOW/DENY/ASK, stricter-first) is the enforcement half of this.
 
 #### KAN-18 · LLM leaderboard as a board — reviewable any time, always current
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -228,7 +228,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** operator direction 2026-07-23 ("utilize Open Design so our chats look better and work better across different agents") + L9 chat-width complaint
-**Notes:** Rebuild the cockpit chat surfaces to the [services/agent_kanban_ui/DESIGN.md](../../services/agent_kanban_ui/DESIGN.md) chat contract: runtime-agnostic message chrome (Claude/Codex/GatewayCore/future Copilot differ only by a small badge, never bubble style); assistant/model pickers as compact viewport-fitting selects (kills the too-wide chat dropdown — the chat half of KAN-4); tool calls/evidence as collapsed monospace insets, never raw JSON; a single context-chip row above the composer (registered repo — where KAN-13's dropdown lands — plus linked board/card); streaming state via `--run` accent; in-thread `.error` blocks with runtime badge instead of toast-only failures. Bundle with KAN-8 (Open-in-chat-only + model dropdown) as one Codex UI packet under the DESIGN.md workflow rules (build + 390px fit check + no hardcoded colors).
+**Notes:** Rebuild the cockpit chat surfaces to the [services/agent_kanban_ui/DESIGN.md](../../services/agent_kanban_ui/DESIGN.md) chat contract: runtime-agnostic message chrome (Claude/Codex/GatewayCore/future Copilot differ only by a small badge, never bubble style); assistant/model pickers as compact viewport-fitting selects (kills the too-wide chat dropdown — the chat half of KAN-4); tool calls/evidence as collapsed monospace insets, never raw JSON; a single context-chip row above the composer (registered repo — where KAN-13's dropdown lands — plus linked board/card); streaming state via `--run` accent; in-thread `.error` blocks with runtime badge instead of toast-only failures. Bundle with KAN-8 (Open-in-chat-only + model dropdown) as one Codex UI packet under the DESIGN.md workflow rules (build + 390px fit check + no hardcoded colors). AGT-16's typed session spec supplies the runtime-agnostic seam the chrome renders from.
 
 #### KAN-25 · Restore main CI to green (12 pre-existing lint-test failures)
 `✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
@@ -260,7 +260,7 @@ Repo default: `llm_station`. Model allocation, agent quality, evaluation.
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L7 (2026-07-23 migration)
-**Notes:** Use harness score to grade our LLM systems on the kanban. https://www.linkedin.com/posts/fernandopaladini_harnessengineering-aicoding-cursor-ugcPost-7483472351603503104-Lzen/ — feeds the AGT-12 completion-KPI leaderboard. **Research + BASELINE (2026-07-23):** it's paladini/harness-score (MIT) — a repo-readiness scanner (NOT task quality). Baseline run: **63/108 (58%), L1 "Documented"** — Sensors 20/20, Hygiene 23/23, CI 11/14, Context 9/20, **Skills 0/17, Hooks 0/14**; next-level gaps: context ≥60%, skills or hooks ≥30%. Evidence: [baseline JSON](../projects/agt-3-harness-score/baseline-2026-07-23.json). Task-quality grading belongs to AGT-12 via METR-style task standards. Advisory only, never a gate.
+**Notes:** Use harness score to grade our LLM systems on the kanban. https://www.linkedin.com/posts/fernandopaladini_harnessengineering-aicoding-cursor-ugcPost-7483472351603503104-Lzen/ — feeds the AGT-12 completion-KPI leaderboard. **Research + BASELINE (2026-07-23):** it's paladini/harness-score (MIT) — a repo-readiness scanner (NOT task quality). Baseline run: **63/108 (58%), L1 "Documented"** — Sensors 20/20, Hygiene 23/23, CI 11/14, Context 9/20, **Skills 0/17, Hooks 0/14**; next-level gaps: context ≥60%, skills or hooks ≥30%. Evidence: [baseline JSON](../projects/agt-3-harness-score/baseline-2026-07-23.json). Task-quality grading belongs to AGT-12 via METR-style task standards. Advisory only, never a gate. AGT-15 applies the same declared-vs-observed idea to runtimes (adapter capability bench).
 
 #### AGT-4 · Copilot as a kanban agent option
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -309,7 +309,7 @@ Repo default: `llm_station`. Model allocation, agent quality, evaluation.
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L57 (2026-07-23 migration)
-**Notes:** The best combination of models gets the best answers in the best roles for each task, fitted to the user's hardware, continuously accounting for usage, usage end dates, and available models — always the best combination for any kanban task, watching itself as we move forward. Auto-adjust to people's systems and subscriptions (fill env variables or login to Claude/GPT etc.); quick and auto-adjusting to the goaled tasks. Builds on the unified usage/limits layer (PR #34 workstream).
+**Notes:** The best combination of models gets the best answers in the best roles for each task, fitted to the user's hardware, continuously accounting for usage, usage end dates, and available models — always the best combination for any kanban task, watching itself as we move forward. Auto-adjust to people's systems and subscriptions (fill env variables or login to Claude/GPT etc.); quick and auto-adjusting to the goaled tasks. Builds on the unified usage/limits layer (PR #34 workstream). AGT-16's typed session spec is the artifact the allocator emits.
 
 #### AGT-11 · Daily Codex cross-review ritual in the workflow
 `🔁 RITUAL` · **Target:** _ongoing_ · **Done:** _—_
@@ -323,7 +323,35 @@ Repo default: `llm_station`. Model allocation, agent quality, evaluation.
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** soon_to_be_deleted_todos.md L82 (2026-07-23 migration)
-**Notes:** New task-completion metrics for the kanban (actual completion, defensive coding added along the way, ecosystem strengthening, extra real issues tackled vs created, abstraction level, efficiency, steps taken, …) to benchmark our OpenRouter loop against Claude Code and Codex on full-loop project scores. Build the leaderboard, improve until it beats Codex, then track how long until small open-source models do the same. Runs as the standard KPI leaderboard loop; AGT-3's harness score is a candidate KPI.
+**Notes:** New task-completion metrics for the kanban (actual completion, defensive coding added along the way, ecosystem strengthening, extra real issues tackled vs created, abstraction level, efficiency, steps taken, …) to benchmark our OpenRouter loop against Claude Code and Codex on full-loop project scores. Build the leaderboard, improve until it beats Codex, then track how long until small open-source models do the same. Runs as the standard KPI leaderboard loop; AGT-3's harness score is a candidate KPI. AGT-15's adapter-bench drift count is another candidate KPI.
+
+#### AGT-13 · Omnigent meta-harness — borrow_pattern_only research
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
+**Repo:** `llm_station`
+**Priority:** P2
+**Source:** operator question 2026-07-23 ("continue with our own chat, or include omnigent-ai/omnigent as a kanban link that can adjust the kanban?") + pre-decided verdict in docs/cockpit-mission-prompt.md mission B (never executed until now)
+**Notes:** **Verdict: keep our chat; NO write-capable kanban MCP registered or exposed to external runtimes (`.mcp.json` registers zero servers; the internal life_center_actions server stays unregistered); borrow three patterns.** Live-verified 2026-07-23 (`gh api`): 7,679★, Apache-2.0, v0.6.0 (07-21), alpha, 686 open issues+PRs; primary sources `docs/POLICIES.md`, `docs/harness-bench-design.md`, `docs/AGENT_YAML_SPEC.md` read raw @ main commit c8828ed. Full review: [2026-07-23-omnigent-borrow-patterns.md](../reviews/2026-07-23-omnigent-borrow-patterns.md); catalog row `omnigent-meta-harness` (verdict build). Patterns → bounded packets **AGT-14** (policy stack), **AGT-15** (adapter bench), **AGT-16** (agent-YAML spec). ⚠️ `OMNIGENT_CHAT_URL` means OmniAgent (Om-AI-Lab), a different project — never point it at omnigent-ai/omnigent; disambiguation rides the next deliberate MASTER.md pass (digest re-record friction).
+
+#### AGT-14 · Declarative session policy stack (server/agent/session, ALLOW/DENY/ASK)
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P2
+**Source:** AGT-13 pattern 1 (omnigent docs/POLICIES.md), 2026-07-23
+**Notes:** Typed, `extra="forbid"` policy documents for agent sessions at three stricter-first levels (session → agent → server) returning ALLOW/DENY/ASK; ASK maps onto our existing approval-wall idiom. First builtins: ask-on-os-tools, max-tool-calls-per-session, cost-budget with soft ask-thresholds (wired to the usage layer's budget concept, PR #34 workstream). Policies may only tighten the hard floors (human-only resolutions, read-only cockpit, destructive double-agreement) — never loosen. Feeds KAN-17. Run-doc: [docs/projects/agt-14-declarative-policies/RUNDOC.md](../projects/agt-14-declarative-policies/RUNDOC.md).
+
+#### AGT-15 · Adapter capability bench — declared vs observed, DRIFT verdicts
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P2
+**Source:** AGT-13 pattern 2 (omnigent docs/harness-bench-design.md), 2026-07-23
+**Notes:** Turn the hand-known capability matrix of the agent-session adapters (claude_agent, claude_code_local, codex_agent, openrouter_agent — Copilot when AGT-4 lands) into an executable conformance suite: each capability cell (streaming, resume, write-mode wall, attachments, model switch) is earned by a probe and reconciled against the adapter's declared profile; declared ✓ but observed ✗ = DRIFT failure. Per-adapter facts live on a self-declared profile object, never in probe code; offline/live probe split so CI runs the cheap subset. AGT-3-for-runtimes; drift count feeds AGT-12's KPI leaderboard. Run-doc: [docs/projects/agt-15-adapter-capability-bench/RUNDOC.md](../projects/agt-15-adapter-capability-bench/RUNDOC.md).
+
+#### AGT-16 · Typed agent-session spec — runtime-agnostic YAML with a harness enum
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P2
+**Source:** AGT-13 pattern 3 (omnigent docs/AGENT_YAML_SPEC.md), 2026-07-23
+**Notes:** A Pydantic `extra="forbid"` session-spec (name, instructions, `harness` enum over our adapters, model-by-capability-profile, limits, policy refs) so the runtime is one swappable field: gives KAN-26 its runtime-agnostic chat chrome seam, KAN-15 its auto-engage config, and AGT-10's allocator a typed artifact to emit instead of code edits. Not borrowed: omnigent's auth plumbing or harness breadth — our adapter set stays deliberate. Run-doc: [docs/projects/agt-16-agent-yaml-spec/RUNDOC.md](../projects/agt-16-agent-yaml-spec/RUNDOC.md).
 
 ## PROC — Todo→Project Process & Standards
 
