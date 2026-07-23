@@ -223,6 +223,13 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Source:** 2026-07-23 migration follow-up (this file)
 **Notes:** Implemented 2026-07-23 by Codex gpt-5.6-sol in an isolated worktree (branch `feat/kan-24-grand-todo-ui-parity`, commit 3e54a24) per [docs/projects/kan-24-grand-todo-ui-parity/RUNDOC.md](../projects/kan-24-grand-todo-ui-parity/RUNDOC.md): parameterized sync/edit endpoints + all cockpit gates over both boards; 174 tests green, build green, literal KPI met; independent Fable review APPROVED. Tail: operator merges the branch and rebuilds the cockpit to ship the new bundle. First feature todo through the full TODO_PROCESS loop (with PROC-1).
 
+#### KAN-25 · Restore main CI to green (12 pre-existing lint-test failures)
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P1
+**Source:** discovered 2026-07-23 while shipping PR #74
+**Notes:** main's `contracts` workflow has been red since 2026-07-17 (4 consecutive runs). 12 failures in 4 families, none from the grand-todo work (PR #74 fixes one, adds zero): (1) `test_agent_kanban_ui_capture_convert` ×5 — capture-convert's private-history sub-request resolves container-default paths (`/app/generated/.locks`, `PermissionError: /app`) on the Linux runner; (2) `test_agent_kanban_ui_usage` — `KeyError: 'glm-5.2'` fixture drift; (3) `test_agent_pickers` — `_build_args()` signature drift vs the stdin chat fix; (4) `test_agent_session_service` ×5 — approval/event-order assertions. A red main gate undermines every verification loop — fix before further merges. Evidence: runs 30032453677 (PR) vs main run same-day; failure sets identical minus the domain-pin fix.
+
 ## AGT — Agents, Models & Evaluation
 
 Repo default: `llm_station`. Model allocation, agent quality, evaluation.

@@ -62,15 +62,16 @@ error strings cannot appear for transient causes.
 Allowed files (draft): `web/src/App.tsx`, `web/src/api.ts`, new small
 frontend test file; backend timing probes if §5 Q2 lands backend-side.
 
-## 5. Open questions (KPI meeting — answer before execution)
+## 5. Open questions — RESOLVED 2026-07-23 (best-practice defaults per
+operator's "research and implement best practices" directive; adjust anytime)
 
-1. When the backend is genuinely down, how loud should the cockpit be —
-   banner after N=2 consecutive failed polls, or a quieter status-dot only?
-2. Priority split: is "Load failed" elimination alone a shippable first
-   packet, with latency (board-switch + notes→books measurement/optimization)
-   as a second packet? (Recommended: yes — smaller reviewable diffs.)
-3. Any devices beyond iPhone Safari + desktop Chrome to include in the
-   manual repro matrix?
+1. Real outages stay loud but debounced: banner only after **2 consecutive**
+   failed polls; a subtle "stale since HH:MM" chip appears immediately on the
+   first failure. Transient background-kill errors never count.
+2. **Yes — split.** Packet 1 (this run): resilience / zero-transient-error.
+   Packet 2 (separate): latency measurement then optimization of the top
+   offender (board-switch, notes→books).
+3. Repro matrix: iPhone Safari (PWA) + desktop Chrome.
 
 ## 6. Model allocation (resolve live at execution)
 
