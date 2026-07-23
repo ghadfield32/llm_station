@@ -216,8 +216,11 @@ SERVICES: tuple[ServiceEntry, ...] = (
         auth=Auth(mode="local", username_ref="admin", credential_ref="PAPERLESS_SECRET_KEY",
                    supports_scoped_token=True),
         setup=Setup(default_credentials_must_rotate=True,
-                     note="trial superuser created via non-interactive CLI with a KNOWN throwaway "
-                          "password (PaperlessTrial123!) — rotate before any real data"),
+                     note="trial superuser created via non-interactive CLI with a known throwaway "
+                          "password — rotate before any real data. (The value itself was shared "
+                          "with the operator directly in chat, never committed to this file — "
+                          "an earlier version of this note embedded the plaintext password, which "
+                          "would have surfaced through the Launch tab's Setup evidence text; fixed.)"),
         recovery=Recovery(canonical_data_location="${LC_DATA}/personal/paperless/{media,consume,export}",
                            complete_backup_unit="above + paperless_db_data + paperless_data volumes",
                            export_method="document_exporter (supported clean-restore path)",
