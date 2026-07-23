@@ -11,9 +11,9 @@ corresponding [`GRAND_TODO_LIST.md`](../GRAND_TODO_LIST.md) item's Notes.
 | AGT-3 | Harness score | **Trial (narrow)** | Real MIT tool (repo-readiness scanner, NOT task quality); baseline recorded 63/108 L1 |
 | AGT-6 | 2026 agents guide | **Adopt as audit rubric** | Best-substantiated source: Perrone "AI Agents Stack (2026)" (O'Reilly); 5-practice audit checklist below |
 | AGT-2 | Aiden AI OS | **Skip; pattern-mine** | AGPL-3.0 core, bus-factor 1, heavy overlap with what we built; 4 borrowable ideas |
-| AGT-1 | agents CLI (metrics) | **Trial AgentsView** | fandf.co = ad-agency shortlink; best candidates AgentsView (MIT, mature) + caut (quota schema) |
+| AGT-1 | agents CLI (metrics) | **Trial (narrow)** | RESOLVED by operator: **google/agents-cli** — mine its eval generate/grade + LLM-as-judge rubrics for AGT-12; AgentsView stays secondary |
 | AGT-4 | Copilot option | **Trial** | Copilot CLI GA 2026-02; true headless analogue of `codex exec`; PAT auth; flags unstable — pin versions |
-| AGT-7 | "Claude design" OSS | **Skip dep; pattern-mine** | = Open Design (nexu-io, Apache-2.0, ~81k stars); not a component library; DESIGN.md convention is the useful bit |
+| AGT-7 | "Claude design" OSS | **Skip dep; convention ADOPTED** | = Open Design (nexu-io, Apache-2.0); DESIGN.md convention adopted 2026-07-23 → `services/agent_kanban_ui/DESIGN.md` governs all agent UI work incl. chat |
 | CVP-1 | ARKit realtime iPhone | **Archived** (operator de-scoped CV 2026-07-23) | Research preserved: "Outlet" doesn't exist — tool is **ARFlow** (Apache-2.0) + Rerun; depth dead at court distance; Record3D if revived |
 | SCL-1 | Social managers OSS | **Trial Postiz** (publish arm) | Best OSS publisher; NO inbound API. LinkedIn inbound = walled by LinkedIn CMA (entity required). Mixpost Pro inbox = conditional later |
 
@@ -87,17 +87,25 @@ corresponding [`GRAND_TODO_LIST.md`](../GRAND_TODO_LIST.md) item's Notes.
 
 ## AGT-1 — "agents CLI" for metrics
 
-- **Finding**: the fandf.co link is a Freeman & Forrest (influencer agency)
-  paid-placement shortlink — exact target unpinnable. Best candidates:
-  1. **AgentsView** (kenn-io/agentsview, MIT, ~4.5k★, v0.38.1 2026-07):
-     single-binary local session browser + token/cost/tool-usage metrics
-     across 40+ agents incl. Claude Code, Codex CLI, Copilot CLI.
-  2. **caut** (Dicklesworthstone/coding_agent_usage_tracker): quota %/rate-
-     window/credits polling with a versioned `caut.v1` JSON — immature (76★)
-     but its schema matches our usage layer's "provider" source tier.
-- **Verdict: TRIAL AgentsView read-only** as a validator for our usage.v1
-  estimates (diff its per-session numbers against ours for a week);
-  pattern-mine caut's quota schema. Neither replaces the Ledger-backed layer.
+- **RESOLVED by operator (2026-07-23): the target is `google/agents-cli`** —
+  Google's Apache-2.0 CLI + skill suite (5.3k★, v1.2.0 released 2026-07-23,
+  Google-backed) that turns coding agents (Claude Code, Codex, Antigravity
+  explicitly supported) into experts at building/evaluating/deploying ADK
+  agents on Gemini Enterprise Agent Platform.
+- **The metrics-relevant core for our kanban**: `agents-cli eval generate`
+  (agent runs over an eval dataset → traces) + `agents-cli eval grade`
+  (grading over traces) and the `google-agents-cli-eval` skill (metrics,
+  datasets, **LLM-as-judge, adaptive rubrics**). The trace→grade separation
+  with rubric-based judging is exactly the shape AGT-12's task-completion
+  KPI leaderboard needs.
+- **Honest limits**: scaffold/deploy/publish are ADK + Google-Cloud-centric
+  (cloud routes stay operator-gated here); local eval assumes Gemini via an
+  AI Studio key — the judge methodology is the portable part, not the stack.
+- **Verdict: TRIAL (narrow)** — install the skills in a scratch context and
+  mine the eval skill's rubric/judge structure for AGT-12; skip
+  scaffold/deploy/publish. Secondary (earlier candidate, still useful for
+  raw session metrics): **AgentsView** (kenn-io/agentsview, MIT) as a
+  usage.v1 validator; pattern-mine caut's `caut.v1` quota schema.
 
 ## AGT-4 — GitHub Copilot as a third agent runtime
 
