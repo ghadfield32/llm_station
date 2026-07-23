@@ -79,6 +79,9 @@ import {
   createLoadResilienceState, recordLoadFailure, recordLoadSuccess,
   type LoadResilienceState,
 } from "./loadResilience";
+import {
+  describeChatEvent, optionLabel, runtimeLabel, type RuntimeTarget,
+} from "./chatPresentation";
 
 type View = "missions" | "boards" | "domains" | "todos" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox" | "work-map" | "life-center";
 const NAV: { id: View; label: string }[] = [
@@ -4559,7 +4562,7 @@ function GenericTaskCard({ card }: { card: DomainCard }) {
 }
 function DomainCardTile({
   spec, card, onOpen, canDrag = false, onDragStart, moveTargets = [], onMove, onOpenPacket,
-  onOpenChat, researchProjects = [],
+  onOpenChat, chatHarnesses = null, researchProjects = [],
 }: {
   spec: DomainSpec; card: DomainCard; onOpen: () => void;
   canDrag?: boolean; onDragStart?: () => void;
@@ -4567,19 +4570,33 @@ function DomainCardTile({
   onOpenPacket?: () => void;
   // (prompt, target) — target undefined = GatewayCore, "agent:<harness>" = Claude/Codex
   onOpenChat?: (prompt: string, target?: string) => void;
+  chatHarnesses?: AgentHarnessOption[] | null;
   researchProjects?: string[];
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [chatTarget, setChatTarget] = useState("GatewayCore");
+  const [chatPending, setChatPending] = useState(false);
   // Seed the chat with this card's full context (the same authoritative
   // chat_prompt the drawer uses), then open on the chosen assistant lane.
   async function chatAboutCard(target?: string) {
+    if (chatPending) return;
+    setChatPending(true);
     const cid = card.card_id;
     const fallback = `About ${spec.title}${cid != null ? ` card ${cid}` : ""}:`;
-    if (cid == null) { onOpenChat?.(fallback, target); return; }
     try {
-      const prog = await fetchDomainCardProgress(spec.domain_id, String(cid));
-      onOpenChat?.(prog.chat_prompt || fallback, target);
-    } catch { onOpenChat?.(fallback, target); }
+      if (cid == null) {
+        onOpenChat?.(fallback, target);
+        return;
+      }
+      try {
+        const prog = await fetchDomainCardProgress(spec.domain_id, String(cid));
+        onOpenChat?.(prog.chat_prompt || fallback, target);
+      } catch {
+        onOpenChat?.(fallback, target);
+      }
+    } finally {
+      setChatPending(false);
+    }
   }
   let body: ReactNode;
   switch (spec.card_component) {
@@ -4616,17 +4633,25 @@ function DomainCardTile({
         {onOpenChat && (
           <div className="card-chat-actions">
             <button className="actbtn" title="Open this card in chat with its full context"
-              onClick={() => void chatAboutCard()}>
-              Open in chat
+              disabled={chatPending}
+              onClick={() => void chatAboutCard(chatTarget)}>
+              {chatPending ? "Opening…" : "Open in chat"}
             </button>
-            <button className="actbtn" title="Investigate this card with Claude Code (read-only agent)"
-              onClick={() => void chatAboutCard("agent:claude_code_local")}>
-              Ask Claude
-            </button>
-            <button className="actbtn" title="Investigate this card with Codex (read-only agent)"
-              onClick={() => void chatAboutCard("agent:codex_agent")}>
-              Ask Codex
-            </button>
+            <select className="select card-runtime-select" value={chatTarget}
+              disabled={chatPending} aria-label="Chat runtime"
+              onChange={(event) => setChatTarget(event.target.value)}>
+              <option value="GatewayCore">GatewayCore</option>
+              {chatHarnesses?.map((harness) => {
+                const runtime = runtimeLabel(harness);
+                return (
+                  <option key={harness.harness_id}
+                    value={`agent:${harness.harness_id}`}
+                    disabled={!harness.available} title={harness.detail}>
+                    {runtime.label}
+                  </option>
+                );
+              })}
+            </select>
           </div>
         )}
         {onOpenPacket && (
@@ -7719,7 +7744,7 @@ function DomainDrawer({
   );
 }
 function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenChat,
-  registeredRepos = [], onDomainResult }: {
+  chatHarnesses = null, registeredRepos = [], onDomainResult }: {
   refreshKey: string;
   activeDomain: string;
   onActiveDomainChange: (domainId: string) => void;
@@ -7727,6 +7752,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
     prompt: string, conversationId?: string, storyTs?: string,
     target?: string, repoId?: string,
   ) => void;
+  chatHarnesses?: AgentHarnessOption[] | null;
   registeredRepos?: RegisteredRepository[];
   onDomainResult?: (
     specs: DomainSpec[], packs: Record<string, DomainCards>, errors: Record<string, string>,
@@ -8393,6 +8419,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
                             {colCards.map((card) => (
                               <DomainCardTile key={cardId(card)} spec={spec} card={card}
                                 researchProjects={registeredProjectIds}
+                                chatHarnesses={chatHarnesses}
                                 canDrag={canMove} onDragStart={() => setDragged({ spec, card })}
                                 moveTargets={moveTargetsFor(card)}
                                 onMove={(target) => void moveDomainCardTo(card, target)}
@@ -8419,6 +8446,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
             {shown.map((card) => (
               <DomainCardTile key={cardId(card)} spec={spec} card={card}
                 researchProjects={registeredProjectIds}
+                chatHarnesses={chatHarnesses}
                 canDrag={canMove} onDragStart={() => setDragged({ spec, card })}
                 moveTargets={moveTargetsFor(card)}
                 onMove={(target) => void moveDomainCardTo(card, target)}
@@ -8919,38 +8947,60 @@ function fmtThreadTime(value: string) {
   return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function ChatBubbleShell({ role, text, runtime, streaming = false, error = false,
+  onRoute }: {
+  role: "user" | "assistant";
+  text: string;
+  runtime: RuntimeTarget;
+  streaming?: boolean;
+  error?: boolean;
+  onRoute?: (text: string) => void;
+}) {
+  const runtimeInfo = runtimeLabel(runtime);
+  return (
+    <div className={`chat-bubble chat-bubble-${role}${error ? " error chat-bubble-error" : ""}`}>
+      <div className="chat-bubble-meta"><Badge value={runtimeInfo.label} /></div>
+      <div>{error ? "⚠ " : ""}{text}
+        {streaming ? <span className="agent-cursor">▌</span> : null}
+      </div>
+      {onRoute && text.trim() && (
+        <button className="route-todos-link" onClick={() => onRoute(text)}>
+          Route as TODOs
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ChatActivity({ text, collapsedDetail, runtime }: {
+  text: string;
+  collapsedDetail?: string;
+  runtime: RuntimeTarget;
+}) {
+  const runtimeInfo = runtimeLabel(runtime);
+  return (
+    <details className="agent-activity">
+      <summary><Badge value={runtimeInfo.label} /> {text}</summary>
+      {collapsedDetail && (
+        <pre className="agent-activity-out">{collapsedDetail}</pre>
+      )}
+    </details>
+  );
+}
+
 function ChatLine({ ev, onRoute }: {
   ev: ChatEvent;
   onRoute?: (text: string) => void;
 }) {
-  switch (ev.type) {
-    case "history": return <div className="cl round">{String(ev.content)}</div>;
-    case "you":
-    case "final": {
-      const content = String(ev.content);
-      return (
-        <div className={"cl " + (ev.type === "you" ? "you" : "final")}>
-          <div>{content}</div>
-          {onRoute && content.trim() && (
-            <button className="route-todos-link" onClick={() => onRoute(content)}>
-              Route as TODOs
-            </button>
-          )}
-        </div>
-      );
-    }
-    case "error": return <div className="cl err">⚠ {String(ev.message ?? ev.detail)}</div>;
-    case "round": return <div className="cl round">— round {String(ev.n)} —</div>;
-    case "tool": {
-      let a = String(ev.args ?? "");
-      try { a = Object.values(JSON.parse(a)).map(String).join(", "); }
-      catch { /* not JSON — show the raw arg string as-is */ }
-      return <div className="cl tool">▸ <b>{String(ev.name)}</b> {a}</div>;
-    }
-    case "tool_result":
-      return <div className="cl res">← {String(ev.result)}</div>;
-    default: return <div className="cl">{JSON.stringify(ev)}</div>;
+  const described = describeChatEvent(ev);
+  if (described.kind === "activity") {
+    return <ChatActivity runtime="GatewayCore" text={described.text}
+      collapsedDetail={described.collapsedDetail} />;
   }
+  return <ChatBubbleShell runtime="GatewayCore" role={described.role}
+    text={described.text} error={described.kind === "error"}
+    onRoute={described.kind === "message" && described.role === "assistant"
+      ? onRoute : undefined} />;
 }
 
 // ---- agent sessions (Claude Agent / Codex Agent / Fake) --------------------
@@ -9111,32 +9161,40 @@ function buildAgentTranscript(events: AgentEvent[]):
       case "approval_required":
       case "approval_resolved":
         break;                       // rendered by the approval strip below
-      default:
-        blocks.push({ kind: "marker", tone: "info",
-                      text: `${ev.type}`, key });
+      default: {
+        const described = describeChatEvent({ type: ev.type });
+        blocks.push({
+          kind: "activity", label: described.text,
+          output: described.collapsedDetail ? [described.collapsedDetail] : [],
+          exit: null, done: true, key,
+        });
+      }
     }
   });
   return { blocks, usage };
 }
 
-function AgentTranscript({ events }: { events: AgentEvent[] }) {
+function AgentTranscript({ events, runtime }: {
+  events: AgentEvent[];
+  runtime: RuntimeTarget;
+}) {
   const { blocks } = buildAgentTranscript(events);
   return (
     <>
       {blocks.map((b) => {
         if (b.kind === "user") {
-          return <div className="agent-bubble agent-user" key={b.key}>
-            {b.text}</div>;
+          return <ChatBubbleShell role="user" text={b.text} runtime={runtime}
+            key={b.key} />;
         }
         if (b.kind === "agent") {
-          return <div className="agent-bubble agent-answer" key={b.key}>
-            {b.text}{b.streaming ? <span className="agent-cursor">▌</span> : null}
-          </div>;
+          return <ChatBubbleShell role="assistant" text={b.text} runtime={runtime}
+            streaming={b.streaming} key={b.key} />;
         }
         if (b.kind === "activity") {
           return (
             <details className="agent-activity" key={b.key}>
               <summary>
+                <Badge value={runtimeLabel(runtime).label} />{" "}
                 {b.label}
                 {b.exit !== null && ` · exit ${b.exit}`}
                 {!b.done && " · running…"}
@@ -9147,7 +9205,11 @@ function AgentTranscript({ events }: { events: AgentEvent[] }) {
             </details>
           );
         }
-        return <div className={`agent-marker ${b.tone === "err" ? "cl err" : "muted small"}`}
+        if (b.tone === "err") {
+          return <ChatBubbleShell role="assistant" text={b.text} runtime={runtime}
+            error key={b.key} />;
+        }
+        return <div className="agent-marker muted small"
           key={b.key}>{b.text}</div>;
       })}
     </>
@@ -9432,7 +9494,7 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
   repos: { repo_id: string; remote_url: string }[];
   thread: ChatThread | undefined;
   onThreadChange: (patch: Partial<ChatThread>) => void;
-  initialPrompt?: string;   // e.g. a card's context, seeded from "Ask Claude/Codex"
+  initialPrompt?: string;   // e.g. a card's context, seeded from its runtime picker
   initialRepoId?: string;   // selected by a source-backed research handoff
   // Claude<->Codex protocol: an explicit HUMAN-clicked handoff to the other
   // agent runtime, same conversation (per-harness session slots resume each
@@ -9812,7 +9874,9 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
                 </button>
               )}
               {catalogError && (
-                <div className="cl err">model catalog failed: {catalogError}</div>
+                <ChatBubbleShell role="assistant"
+                  text={`model catalog failed: ${catalogError}`}
+                  runtime={harness ?? `agent:${harnessId}`} error />
               )}
               <details className="dup-more agent-register-details" open={repos.length === 0}>
                 <summary>
@@ -9874,7 +9938,8 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
               </details>
             </>
           )}
-          {error && <div className="cl err">⚠ {error}</div>}
+          {error && <ChatBubbleShell role="assistant" text={error}
+            runtime={harness ?? `agent:${harnessId}`} error />}
         </div>
       </div>
     );
@@ -10048,13 +10113,14 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
             </div>
           </div>
         )}
-        <AgentTranscript events={events} />
+        <AgentTranscript events={events} runtime={harness ?? `agent:${harnessId}`} />
         {settingsNotes.map((note, i) => (
           <div className="agent-marker muted small" key={`sn-${i}`}>
             ⚙ settings updated: {note} — binds to the next session in this chat
           </div>
         ))}
-        {error && <div className="cl err">⚠ {error}</div>}
+        {error && <ChatBubbleShell role="assistant" text={error}
+          runtime={harness ?? `agent:${harnessId}`} error />}
         <div ref={endRef} />
       </div>
       {pending.map((ev) => (
@@ -10544,28 +10610,16 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll,
               )}
               {turn.user_text && <pre className="packet-doc story-user">{turn.user_text}</pre>}
               {turnEvents.map((ev, j) => {
-                if (ev.type === "round") {
-                  return <div className="muted small story-round" key={j}>— round {ev.n} —</div>;
+                const described = describeChatEvent(ev);
+                const timestamp = fmtThreadTime(ev.ts ?? "");
+                if (described.kind === "activity") {
+                  return <ChatActivity key={j} runtime="GatewayCore"
+                    text={`${timestamp ? `${timestamp} · ` : ""}${described.text}`}
+                    collapsedDetail={described.collapsedDetail} />;
                 }
-                if (ev.type === "tool" || ev.type === "tool_result") {
-                  const payload = ev.type === "tool" ? ev.args : ev.result;
-                  return (
-                    <details className="story-ev" key={j}>
-                      <summary>
-                        <span className="story-time">{fmtThreadTime(ev.ts ?? "")}</span>
-                        <Badge value={ev.type === "tool" ? "call" : "result"} />
-                        <code>{ev.name}</code>
-                      </summary>
-                      <pre>{payload || "(empty)"}</pre>
-                    </details>
-                  );
-                }
-                return (
-                  <details className="story-ev" key={j}>
-                    <summary><Badge value={ev.type} /></summary>
-                    <pre>{JSON.stringify(ev, null, 2)}</pre>
-                  </details>
-                );
+                return <ChatBubbleShell key={j} runtime="GatewayCore"
+                  role={described.role} text={described.text}
+                  error={described.kind === "error"} />;
               })}
               <div className="story-row story-final">
                 <b>final</b>
@@ -10579,9 +10633,12 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll,
   );
 }
 
-function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
+function ChatView({ roles, runtime, agentHarnesses, agentHarnessesError,
+  draft, onBack, onWorkCreated }: {
   roles: string[];
   runtime: ChatRuntime | null;
+  agentHarnesses: AgentHarnessOption[] | null;
+  agentHarnessesError: string | null;
   draft?: { text: string; nonce: number; conversationId?: string;
             storyTs?: string; target?: string; repoId?: string } | null;
   onBack?: () => void;
@@ -10604,8 +10661,6 @@ function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
   // union everything else below switches on.
   const [targetRaw, setTargetRaw] = useState(initialActive.target);
   const chatTarget = decodeChatTarget(targetRaw);
-  const [agentHarnesses, setAgentHarnesses] = useState<AgentHarnessOption[] | null>(null);
-  const [agentHarnessesError, setAgentHarnessesError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads());
@@ -10631,11 +10686,6 @@ function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
   useEffect(() => {
     saveActiveThreadPointer(conversationId, targetRaw);
   }, [conversationId, targetRaw]);
-  useEffect(() => {
-    fetchAgentHarnesses()
-      .then((list) => { setAgentHarnesses(list); setAgentHarnessesError(null); })
-      .catch((e) => { setAgentHarnesses(null); setAgentHarnessesError((e as Error).message); });
-  }, []);
   const currentThread = threads.find((t) => t.id === conversationId);
   // Agent-session metadata lives on the local ChatThread cache only — never
   // routed through persistThread/saveChatThread (GatewayCore's flight
@@ -10697,7 +10747,7 @@ function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
-    // a card's "Ask Claude / Ask Codex" preselects the assistant lane
+    // a card's runtime picker preselects the assistant lane
     if (draft?.target) setTargetRaw(draft.target);
     if (draft?.text) setInput(draft.text);
     if (!draft?.conversationId) return;
@@ -11021,12 +11071,16 @@ function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
                         Agent sessions unavailable — {agentHarnessesError}
                       </option>
                     )}
-                    {agentHarnesses?.map((h) => (
-                      <option key={h.harness_id} value={`agent:${h.harness_id}`}
-                        disabled={!h.available} title={h.detail}>
-                        {h.label}{h.available ? harnessBadgeText(h) : ` — ${h.detail}`}
-                      </option>
-                    ))}
+                    {agentHarnesses?.map((h) => {
+                      const display = optionLabel(
+                        `${h.label} — ${h.detail}${h.available ? harnessBadgeText(h) : ""}`);
+                      return (
+                        <option key={h.harness_id} value={`agent:${h.harness_id}`}
+                          disabled={!h.available} title={display.title}>
+                          {display.label}
+                        </option>
+                      );
+                    })}
                   </optgroup>
                 </select>
               </label>
@@ -11043,7 +11097,9 @@ function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
                     <optgroup label="Local (free)">
                       {roles.map((r) => {
                         const backing = runtime?.roles?.find((x) => x.role === r)?.candidates?.[0]?.model;
-                        return <option key={r} value={r}>{backing ? `${r} — ${backing}` : r}</option>;
+                        const display = optionLabel(backing ? `${r} — ${backing}` : r);
+                        return <option key={r} value={r} title={display.title}>
+                          {display.label}</option>;
                       })}
                     </optgroup>
                     {(runtime?.frontier_models ?? []).length > 0 && (
@@ -11058,12 +11114,14 @@ function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
                             if (m.median_latency_ms != null) resultsBits.push(`${(m.median_latency_ms / 1000).toFixed(1)}s median`);
                             if (m.pass_rate != null) resultsBits.push(`${Math.round(m.pass_rate * 100)}% suite pass`);
                           }
+                          const availability = f.selectable ? ""
+                            : !f.lane_enabled ? " (lane disabled)" : " (no key)";
+                          const display = optionLabel(
+                            `${f.model_id}${resultsBits.length ? ` — ${resultsBits.join(" · ")}` : ""}${availability}`);
                           return (
                             <option key={f.model_id} value={`frontier:${f.model_id}`}
-                              disabled={!f.selectable}>
-                              {f.model_id}
-                              {resultsBits.length ? ` — ${resultsBits.join(" · ")}` : ""}
-                              {f.selectable ? "" : !f.lane_enabled ? " (lane disabled)" : " (no key)"}
+                              disabled={!f.selectable} title={display.title}>
+                              {display.label}
                             </option>
                           );
                         })}
@@ -11081,12 +11139,14 @@ function ChatView({ roles, runtime, draft, onBack, onWorkCreated }: {
                               `${f.expected_tokens_per_second.low}-${f.expected_tokens_per_second.high} tok/s (unverified)`);
                           }
                           if (m?.pass_rate != null) resultsBits.push(`${Math.round(m.pass_rate * 100)}% suite pass`);
+                          const availability = f.selectable ? ""
+                            : !f.lane_enabled ? " (lane disabled)" : ` (${f.health})`;
+                          const display = optionLabel(
+                            `${f.model_id}${resultsBits.length ? ` — ${resultsBits.join(" · ")}` : ""}${availability}`);
                           return (
                             <option key={f.model_id} value={`local-frontier:${f.model_id}`}
-                              disabled={!f.selectable}>
-                              {f.model_id}
-                              {resultsBits.length ? ` — ${resultsBits.join(" · ")}` : ""}
-                              {f.selectable ? "" : !f.lane_enabled ? " (lane disabled)" : ` (${f.health})`}
+                              disabled={!f.selectable} title={display.title}>
+                              {display.label}
                             </option>
                           );
                         })}
@@ -11476,6 +11536,8 @@ export function App() {
   const [status, setStatus] = useState<Status | null>(null);
   const [runtimeDebug, setRuntimeDebug] = useState<RuntimeDebug | null>(null);
   const [chatRuntime, setChatRuntime] = useState<ChatRuntime | null>(null);
+  const [agentHarnesses, setAgentHarnesses] = useState<AgentHarnessOption[] | null>(null);
+  const [agentHarnessesError, setAgentHarnessesError] = useState<string | null>(null);
   const [registeredRepos, setRegisteredRepos] = useState<RegisteredRepository[]>([]);
   const [chatDraft, setChatDraft] =
     useState<{ text: string; nonce: number; conversationId?: string;
@@ -11625,6 +11687,22 @@ export function App() {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [refreshGlobal, reloadDomainNav]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAgentHarnesses()
+      .then((list) => {
+        if (cancelled) return;
+        setAgentHarnesses(list);
+        setAgentHarnessesError(null);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setAgentHarnesses(null);
+        setAgentHarnessesError((error as Error).message);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -11790,6 +11868,7 @@ export function App() {
         {view === "domains" && (
           <DomainsView refreshKey={updated} activeDomain={activeDomain}
             onActiveDomainChange={setActiveDomain} onOpenChat={openChatWithPrompt}
+            chatHarnesses={agentHarnesses}
             registeredRepos={registeredRepos}
             onDomainResult={recordDomainResults} />
         )}
@@ -11828,7 +11907,9 @@ export function App() {
         {/* chat stays MOUNTED so the conversation persists across view switches */}
         {chatOn && (
           <div style={{ display: view === "chat" ? "block" : "none" }}>
-            <ChatView roles={cfg?.model_roles ?? []} runtime={chatRuntime} draft={chatDraft}
+            <ChatView roles={cfg?.model_roles ?? []} runtime={chatRuntime}
+              agentHarnesses={agentHarnesses} agentHarnessesError={agentHarnessesError}
+              draft={chatDraft}
               onBack={() => setView(chatReturnView)}
               onWorkCreated={() => setUpdated(new Date().toISOString())} />
           </div>
