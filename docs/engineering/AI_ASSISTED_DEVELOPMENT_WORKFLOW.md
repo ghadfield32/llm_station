@@ -266,6 +266,69 @@ LLM Station model work must distinguish quality evaluation from serving
 evaluation. Any time-ordered learning work needs past-only inputs and temporal
 splits; do not claim evidence that has not been produced from real data.
 
+### Sol write-mode implementation and reviewer independence
+
+`deep_code` and `throughput` work is implemented by **Sol writing code
+directly**, not by Claude or Opus implementing on Sol's behalf. The write-mode
+invocation is `codex exec --sandbox workspace-write --full-auto -C
+<isolated-worktree>`, with these invariants:
+
+- **Isolated worktree only.** Sol writes in a dedicated worktree or clone, never
+  the shared checkout — this contains the blast radius of an approvals-off
+  (`--full-auto`) agent, which holds no other session's uncommitted work and is
+  discarded after the branch is pushed. Never use `--sandbox
+  danger-full-access`, and never point write-mode at the shared working tree.
+- **Every gate and wall still applies.** Sol's output goes through the same
+  deterministic verification (`make validate`/`make test`, `uv run cc doctor`),
+  fresh independent review, Ledger and kanban/mission approval, and
+  operator-controlled merge. Sol writing changes only who holds the pen.
+- **A blocked write is a blocker, not a fallback.** If the harness policy
+  classifier blocks `codex exec --sandbox workspace-write` (it treats an
+  approvals-off write-and-execute agent as unsafe by default), surface it to the
+  operator, who can allow the pattern with a scoped `Bash(codex exec --sandbox
+  workspace-write:*)` permission rule. Do not silently transfer the
+  implementation to Claude or Opus and log it as a routine substitution
+  exception — when the exception fires every session it has become the default
+  and the allocation contract is hollow.
+
+Reviewer independence is assigned by authorship — no model or session reviews
+its own output: Claude or Opus implemented → **Sol** reviews (fresh, read-only);
+Sol implemented → **Fable, Opus, or a fresh Sol session** reviews, never the
+implementing or a resumed session.
+
+### Goal-driven KPI leaderboard loop
+
+Run every non-trivial improvement or evaluation task as a champion-challenger
+loop against a persistent KPI leaderboard, not a one-shot.
+
+1. **Frame.** Define the KPI(s) and the goal (target plus stop condition) from
+   data, never an invented threshold. Record the current champion (the best
+   existing result) as the baseline; with no champion, the first validated
+   attempt becomes it. Keep quality-evaluation KPIs distinct from
+   serving-evaluation KPIs.
+2. **Attempt (loop body).** Produce one challenger through the full workflow:
+   bounded packet, Sol implementation at the effort tier matching the risk,
+   deterministic verification (`make validate` / `make test` / `uv run cc
+   doctor` as applicable), and a fresh independent review. No fake or default
+   values; for time-ordered work use past-only inputs and temporal splits.
+3. **Evidence gate.** A challenger reaches the leaderboard only with
+   reproducible runtime evidence from real data — historical where the task is
+   time-ordered, plus a current run — and passing validations and tests. An
+   unproven attempt does not score.
+4. **Leaderboard.** Append each validated challenger's KPIs with provenance
+   (commit, config/contract version, exact command, exit status) to the ranked
+   leaderboard artifact. Promote to champion only when it beats the incumbent
+   on the agreed metric and clears the same gates. Do not bypass the Ledger or
+   the kanban/mission approval flow to record or promote a result.
+5. **Goal check, then keep improving.** When the goal is met and validated,
+   report it with the leaderboard, then keep looping challenger attempts to
+   push past it until diminishing returns, budget exhaustion, or the user's
+   stop.
+6. **Stop honestly.** A metric gain alone never promotes: require baselines,
+   coverage, calibration/uncertainty where applicable, and out-of-time
+   behavior. Report regressions and dropped coverage; never silently truncate
+   the search or the leaderboard.
+
 ## A6 — Deterministic verification
 
 Run every check the change affects. Typical checks are:

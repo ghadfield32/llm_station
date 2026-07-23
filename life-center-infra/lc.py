@@ -312,13 +312,50 @@ def c_gui(args) -> int:
     return rc
 
 
+_LOOPBACK_URL_RE = re.compile(r"^http://127\.0\.0\.1:(\d+)((?:/.*)?)$")
+
+
+def _tailnetify(url: str | None, env: dict[str, str]) -> str | None:
+    """Rewrite a resolved http://127.0.0.1:<port> link to the tailnet HTTPS
+    proxy when LC_TAILNET_HOST is set, so the same link works from the phone
+    AND the desktop (both reach the tailnet) instead of loopback-only.
+
+    Requires a matching `tailscale serve --https=<port> http://127.0.0.1:<port>`
+    (same port both sides) — this only rewrites the link, it never creates the
+    proxy mapping itself.
+    """
+    if not url:
+        return url
+    host = env.get("LC_TAILNET_HOST")
+    if not host:
+        return url
+    m = _LOOPBACK_URL_RE.match(url)
+    if not m:
+        return url
+    port, path = m.group(1), m.group(2)
+    return f"https://{host}:{port}{path}"
+
+
+def _resolve_and_tailnetify(template: str | None, env: dict[str, str], *, tailnetify: bool) -> str | None:
+    if not template:
+        return None
+    resolved = _resolve_template(template, env)
+    return _tailnetify(resolved, env) if tailnetify else resolved
+
+
 def _resolved_links(s: "catalog.ServiceEntry", env: dict[str, str]) -> dict[str, str | None]:
+    # admin-gui (Dockge) is human-only, on-demand, Docker-socket-privileged host
+    # administration — its own catalog note says "start on demand, stop after
+    # use". It never gets a `tailscale serve` mapping (unlike every other
+    # service), so rewriting its link would silently point at a dead tailnet
+    # URL — found live: exactly this broke Dockge's "Open app" link on mobile.
+    tailnetify = s.profile != "admin-gui"
     return {
-        "app": _resolve_template(s.links.app, env) if s.links.app else None,
-        "setup": _resolve_template(s.links.setup, env) if s.links.setup else None,
+        "app": _resolve_and_tailnetify(s.links.app, env, tailnetify=tailnetify),
+        "setup": _resolve_and_tailnetify(s.links.setup, env, tailnetify=tailnetify),
         "docs": s.links.docs,
         "runbook": s.links.runbook,
-        "status": _resolve_template(s.links.status, env) if s.links.status else None,
+        "status": _resolve_and_tailnetify(s.links.status, env, tailnetify=tailnetify),
         "native": s.links.native,
     }
 
@@ -521,12 +558,32 @@ h1 { margin-bottom: 0.2rem; }
 
 
 def c_launch(args) -> int:
+    """Open the Life Center tab in the Command Center cockpit (default) — the
+    real, formatted, integrated tile view backed by the catalog + Kanban
+    boards. `--standalone` falls back to generating a local HTML page instead
+    (the original implementation, kept for when the cockpit is unavailable —
+    no React, no container, works even if the cockpit is down).
+    """
+    import webbrowser
+
+    if getattr(args, "standalone", False):
+        return _c_launch_standalone(args)
+
+    port = os.environ.get("KANBAN_UI_PORT", "8787")
+    url = f"http://127.0.0.1:{port}/?view=life-center"
+    _print(f"opening cockpit Life Center tab: {url}")
+    _print("cockpit unreachable? `lc launch --standalone` opens a local fallback page instead.")
+    webbrowser.open(url)
+    return 0
+
+
+def _c_launch_standalone(args) -> int:
     """Generate + open ONE local app-tile portal — every admitted service,
     grouped by category, with Open/Setup/Docs/Runbook/Status links.
 
-    No React, no new container mount, no backend server: this reuses the same
-    proven local-HTML pattern as `lc setup-session`, on purpose. Deliberate
-    choice, not a shortcut — see README.md's "Launch" section for why.
+    No React, no container, no backend server: this reuses the same proven
+    local-HTML pattern as `lc setup-session`. Fallback only — see
+    README.md's "Launch" section for why the cockpit tab is now the default.
     """
     import tempfile
     import webbrowser
@@ -840,8 +897,10 @@ def main(argv: list[str] | None = None) -> int:
                            help="app | setup | docs | runbook | status (default: app)")
             p.add_argument("--dry-run", action="store_true", help="print the URL, don't open a browser")
         if name == "launch":
+            p.add_argument("--standalone", action="store_true",
+                           help="generate a local HTML fallback page instead of opening the cockpit")
             p.add_argument("--no-health", action="store_true",
-                           help="skip the verify pass (faster, no health badges)")
+                           help="--standalone only: skip the verify pass (faster, no health badges)")
     args = parser.parse_args(argv)
     if not args.cmd:
         parser.print_help()

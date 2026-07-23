@@ -159,7 +159,13 @@ def seed_operations_from_setup(
     out: list[dict] = []
     for svc in services:
         setup = svc.get("setup") or {}
-        if not (setup.get("wizard_required") or setup.get("default_credentials_must_rotate")):
+        # registration_must_close is its own trigger — a service whose account
+        # is already created (wizard_required now False) but whose public
+        # registration is still open genuinely still needs a setup card. Found
+        # live: Immich's card silently stopped refreshing once its API-created
+        # account flipped wizard_required to False, without this check too.
+        if not (setup.get("wizard_required") or setup.get("default_credentials_must_rotate")
+                or setup.get("registration_must_close")):
             continue
         service_id = str(svc["service_id"])
         card_id = f"{service_id}:setup:initial"
