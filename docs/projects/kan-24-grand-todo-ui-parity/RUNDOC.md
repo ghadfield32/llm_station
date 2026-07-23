@@ -119,5 +119,27 @@ dropdown — follow-up under KAN-13, not this packet.
 ## 8. Execution log
 
 - 2026-07-23 — Run-doc created; packet approved by operator; worktree +
-  Codex execution starting. (Append results, review verdict, and evidence
-  here as they land.)
+  Codex execution starting.
+- 2026-07-23 — Implementation by Codex gpt-5.6-sol (effort high,
+  `codex exec --sandbox workspace-write --full-auto`, isolated worktree).
+  Code complete across the 5 allowed files. Incident: the launch wrapper's
+  10-minute cap killed its stdout pipe mid-run; Codex hung blocked on the
+  dead pipe (CPU frozen ~1h) before finishing its own verification — process
+  stopped, edits intact on disk. Lesson recorded: launch write-mode Codex
+  with no wrapper timeout shorter than the packet's verify phase.
+- 2026-07-23 — Verification (run by the reviewer session, deterministic
+  commands from §4): pytest test_agent_kanban_ui + test_domain_surfaces +
+  test_grand_todo_import + test_todo_routing_workflow with
+  PYTHONPATH=worktree/src → 174 passed, exit 0 (includes new parameterized
+  betts+master variants of the sync/edit/move and read-never-writes tests).
+  `npm ci` exit 0; `npm run build` exit 0 (built in ~1s). Literal-count KPI:
+  App.tsx = 1 (the shared GRAND_TODO_DOMAIN_IDS constant), api.ts = 0.
+- 2026-07-23 — Independent review (Fable, non-author, full-diff read):
+  **APPROVED.** Both routes parameterized with membership guards raised
+  before side effects; PROFILES[domain_id] + call-time _grand_todo_source
+  keep test monkeypatching working; PUT route mirrors the existing dynamic
+  GET card route (no shadowing); sync response domain_id comes from spec
+  (parameterized); App.tsx gates all converted to one helper;
+  refreshGrandTodo correctly replaced by refreshDomain(activeDomain) with
+  hook deps updated. No betts behavior change. Remaining for operator:
+  merge + cockpit rebuild to ship the new bundle.
