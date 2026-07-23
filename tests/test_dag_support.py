@@ -197,13 +197,23 @@ def test_scheduled_registry_expands_every_registered_repository(monkeypatch, tmp
     specs = registered_repository_specs(
         "configs/autonomy.yaml", self_root=tmp_path / "llm_station")
     by_name = {spec["name"]: spec for spec in specs}
-    assert set(by_name) == {"code_health_llm_station", "code_health_betts_basketball"}
+    # The contract is a BIJECTION with the live registry (one code_health task
+    # per registered repo, named code_health_<repo_id>) — derived from the same
+    # config the code reads, so a legitimate repo registration never breaks
+    # this test while a dropped/duplicated expansion still fails loudly.
+    import yaml
+    manifests = yaml.safe_load(
+        Path("configs/autonomy.yaml").read_text(encoding="utf-8"))["repo_manifests"]
+    registered = {m["repo_id"] for m in manifests}
+    assert "llm_station" in registered   # anchor: never a degenerate registry
+    assert set(by_name) == {f"code_health_{rid}" for rid in registered}
+    for rid in registered:
+        assert by_name[f"code_health_{rid}"]["config"]["repo_ids"] == [rid]
     assert by_name["code_health_llm_station"]["config"]["root"] == str(
         tmp_path / "llm_station")
     betts = by_name["code_health_betts_basketball"]["config"]
     assert Path(betts["root"]).parts[-2:] == (
         "__missing_registered_repo_path__", "betts_basketball")
-    assert betts["repo_ids"] == ["betts_basketball"]
     assert "declared capabilities" in betts["repository_reason"]
 
 
@@ -213,8 +223,15 @@ def test_scheduled_registry_replaces_single_static_code_scan(monkeypatch, tmp_pa
     monkeypatch.delenv("BETTS_BASKETBALL_LOCAL_PATH", raising=False)
     specs = scheduled_source_registry()
     code_specs = [spec for spec in specs if spec["kind"] == "code_health"]
-    assert {spec["config"]["repo_ids"][0] for spec in code_specs} == {
-        "llm_station", "betts_basketball"}
+    # Derived from the live registry (see the bijection test above): the
+    # static single "code_health" scan must be replaced by exactly one
+    # per-repo task for every registered repository.
+    import yaml
+    manifests = yaml.safe_load(
+        Path("configs/autonomy.yaml").read_text(encoding="utf-8"))["repo_manifests"]
+    registered = {m["repo_id"] for m in manifests}
+    assert "llm_station" in registered
+    assert {spec["config"]["repo_ids"][0] for spec in code_specs} == registered
     assert all(spec["name"] != "code_health" for spec in code_specs)
 
 

@@ -3,9 +3,36 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "growth_os"))
+import growthos.internal_board as internal_board
+from growthos.config import ResearchProjectCfg
 from growthos.internal_board import FIELD_MAP, InternalBoardClient, analysis_cells
 from growthos.models import CuratedItem
 from command_center.write_locking import BoardWriteLocked
+
+# The strict completeness contract requires per-project coverage for the
+# CURRENT repo registry (autonomy.yaml repo_manifests) — registering a new
+# repo legitimately invalidates every stored "complete" analysis so it gets
+# re-scored for the new project. These unit tests therefore pin the registry
+# to the exact two projects the fixtures cover; reading the live config here
+# would make every future repo registration break unrelated assertions.
+_FIXTURE_PROJECTS = [
+    ResearchProjectCfg(
+        name="llm_station", location_ref="self",
+        remote_url="https://github.com/example/llm_station.git",
+        research_capabilities=["LLM and agent model routing and evaluation"],
+    ),
+    ResearchProjectCfg(
+        name="betts_basketball", location_ref="env:BETTS_BASKETBALL_LOCAL_PATH",
+        remote_url="https://github.com/example/betts_basketball.git",
+        research_capabilities=["Bayesian sports models and evaluation"],
+    ),
+]
+
+
+def _pin_registry(monkeypatch, projects=None):
+    monkeypatch.setattr(
+        internal_board, "load_research_projects",
+        lambda *a, **k: list(projects or _FIXTURE_PROJECTS))
 
 
 def _complete_analysis() -> dict:
@@ -156,7 +183,10 @@ def test_research_projection_keeps_titles_analysis_and_source_links(tmp_path: Pa
     assert len(card["project_fits"]) == 2
 
 
-def test_analysis_backfill_candidates_are_bounded_stable_and_incomplete(tmp_path: Path):
+def test_analysis_backfill_candidates_are_bounded_stable_and_incomplete(
+    monkeypatch, tmp_path: Path,
+):
+    _pin_registry(monkeypatch)
     client = InternalBoardClient(
         store_dir=tmp_path / "boards",
         event_log=tmp_path / "events.jsonl",
@@ -196,8 +226,9 @@ def test_analysis_backfill_candidates_are_bounded_stable_and_incomplete(tmp_path
 
 
 def test_analysis_backfill_requeues_any_malformed_schema_or_provenance(
-    tmp_path: Path,
+    monkeypatch, tmp_path: Path,
 ):
+    _pin_registry(monkeypatch)
     client = InternalBoardClient(
         store_dir=tmp_path / "boards",
         event_log=tmp_path / "events.jsonl",
@@ -235,6 +266,39 @@ def test_analysis_backfill_requeues_any_malformed_schema_or_provenance(
     assert {row["card_id"] for row in candidates} == {
         f"paper-{name}" for name in variants
     }
+
+
+def test_new_registered_project_invalidates_previously_complete_analysis(
+    monkeypatch, tmp_path: Path,
+):
+    """Registering a repo MUST requeue stored analyses for re-scoring.
+
+    This is the intended system behavior discovered live on 2026-07-23 when
+    registering bball_homography_pipeline: completeness is judged against the
+    current registry (load_research_projects docstring: analysis "must cover
+    that exact set"), so a new project makes yesterday's complete analysis
+    incomplete — by design, never silently.
+    """
+    client = InternalBoardClient(
+        store_dir=tmp_path / "boards",
+        event_log=tmp_path / "events.jsonl",
+        dry_run=False,
+    )
+    client._provider("papers").upsert_card(
+        "paper-complete", {"title": "Done", **_complete_analysis()})
+
+    _pin_registry(monkeypatch)
+    assert client.analysis_candidates("papers", 10) == []
+
+    grown = [*_FIXTURE_PROJECTS, ResearchProjectCfg(
+        name="bball_homography_pipeline",
+        location_ref="env:BBALL_HOMOGRAPHY_PIPELINE_LOCAL_PATH",
+        remote_url="https://github.com/example/bball_homography_pipeline.git",
+        research_capabilities=[],
+    )]
+    _pin_registry(monkeypatch, grown)
+    assert [row["card_id"] for row in client.analysis_candidates("papers", 10)] == [
+        "paper-complete"]
 
 
 def test_reanalysis_early_failure_does_not_blank_unattempted_cards(
