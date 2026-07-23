@@ -42,6 +42,7 @@ from typing import Any, AsyncIterator
 from ..events import AgentEvent
 from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
 from ..store import SessionStoreProtocol
+from ..workspace_scope import claude_cli_read_deny_args, prepend_workspace_bounds
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _MODEL_PREFS_CONFIG = _REPO_ROOT / "configs" / "agent-session-models.yaml"
@@ -285,6 +286,10 @@ class ClaudeCodeLocalHarness:
             "--disallowedTools", *_DISALLOWED_TOOLS,
             "--add-dir", str(repo_path),
         ]
+        # Only additions supported by THIS installed CLI's live --help belong
+        # here. The shared helper deliberately returns no args when the help
+        # lacks a documented read-path deny grammar.
+        args += claude_cli_read_deny_args(bin_path, repo_path)
         if record.model:
             args += ["--model", record.model]
         effort = self._effort.get(record.session_id)
@@ -392,8 +397,12 @@ class ClaudeCodeLocalHarness:
         record = self.store.get(session_id)
         repo_path = _resolve_repo_path(record.repo_id)
         args = self._build_args(bin_path, record, repo_path)
+        session_prompt = prompt
+        if not record.external_session_id:
+            session_prompt = prepend_workspace_bounds(
+                prompt, repo_path, record.repo_id)
         async for obj in self._stream_cli(
-                session_id, args, repo_path, _subprocess_env(), prompt):
+                session_id, args, repo_path, _subprocess_env(), session_prompt):
             sid = obj.get("session_id")
             if sid and not self.store.get(session_id).external_session_id:
                 self.store.update_session(session_id, external_session_id=sid)

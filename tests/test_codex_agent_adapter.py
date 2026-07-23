@@ -270,7 +270,9 @@ def test_send_reuses_same_thread_across_follow_ups(harness):
         return client, thread
 
     client, thread = asyncio.run(_impl())
-    assert thread.turn_calls == ["first", "second"]
+    assert thread.turn_calls[0].endswith("first")
+    assert "[WORKSPACE BOUNDS" in thread.turn_calls[0]
+    assert thread.turn_calls[1] == "second"
     assert len(client.start_calls) == 1   # thread_start only ever called once
 
 
