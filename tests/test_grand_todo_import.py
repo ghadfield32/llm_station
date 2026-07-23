@@ -13,6 +13,7 @@ from command_center.boards.command_center_provider import CommandCenterBoardProv
 from command_center.write_locking import board_write_lock
 from command_center.cli.grand_todo_import import (
     BOARD_ID,
+    MASTER_PROFILE,
     GrandTodoImportError,
     edit_grand_todo_card,
     move_grand_todo_card,
@@ -362,3 +363,35 @@ def test_import_fails_closed_when_another_process_holds_board_lock(tmp_path):
     assert result.returncode == 1
     assert "another writer currently owns" in result.stdout
     assert not (store / BOARD_ID).exists()
+
+
+def test_master_profile_projects_per_item_repo_designations(tmp_path):
+    text = _source().replace(
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_",
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_\n"
+        "**Repo:** `betts_basketball`",
+    )
+    source, store, log = _paths(tmp_path)
+    source.write_bytes(text.encode("utf-8"))
+
+    result = run_import(
+        source_path=source, store_dir=store, event_log_path=log,
+        apply=True, expected_items=3, now=NOW, profile=MASTER_PROFILE)
+
+    assert result["board_id"] == "grand_todo"
+    assert (store / "grand_todo").is_dir()
+    assert not (store / BOARD_ID).exists()
+    provider = CommandCenterBoardProvider(
+        board_id="grand_todo", event_log=EventLog(log), store_dir=store)
+    cards = {c["card_id"]: c for c in provider.list_cards()}
+    # Explicit per-item designation wins; undesignated items inherit the
+    # master profile default; provenance names the master importer/source.
+    assert cards["grand-todo-de-1"]["repo_id"] == "betts_basketball"
+    assert cards["grand-todo-de-2"]["repo_id"] == "llm_station"
+    assert cards["grand-todo-de-1"]["source_importer"] == "master-grand-todo.v1"
+    assert (cards["grand-todo-de-1"]["source_ref"]
+            == "llm_station/docs/todos/GRAND_TODO_LIST.md")
+    events = EventLog(log).read()
+    assert {event.board_id for event in events} == {"grand_todo"}
+    assert {event.repo_id for event in events} == {
+        "betts_basketball", "llm_station"}

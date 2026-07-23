@@ -17,7 +17,7 @@ from command_center.write_locking import exclusive_write_lock
 
 SCHEMA_VERSION = "command-center.kanban-maintenance.v1"
 PROTECTED_BOARDS = frozenset({
-    "personal_todos", "betts_basketball_grand_todo",
+    "personal_todos", "betts_basketball_grand_todo", "grand_todo",
 })
 
 
@@ -63,7 +63,7 @@ def analyze(
         and board.get("board_id")
         and board.get("card_component") == "generic_task"
         and board.get("board_id") not in PROTECTED_BOARDS
-        and board.get("domain_id") != "betts_basketball_grand_todo"
+        and board.get("domain_id") not in PROTECTED_BOARDS
     ]
     work_by_board: dict[str, set[str]] = {
         str(board["board_id"]): set() for board in active

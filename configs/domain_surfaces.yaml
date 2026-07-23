@@ -63,6 +63,76 @@ domains:
     title: GRAND TODO not imported yet
     hint: Preview the canonical Betts tracker, then apply its merge-only projection.
     command: uv run cc grand-todo-import --apply
+- domain_id: grand_todo
+  title: Grand TODO — Master Tracker
+  card_component: generic_task
+  source: board_store
+  board_id: grand_todo
+  columns:
+  - Backlog
+  - Ready
+  - In Progress
+  - Blocked
+  - Done
+  - Archived
+  column_actions:
+    Backlog: add_mission_card
+    Ready: stage_card
+    In Progress: start_todo
+    Blocked: block_card
+    Done: finish_todo
+    Archived: finish_todo
+  summary_fields:
+  - name: item_id
+    label: Item
+  - name: category
+    label: Category
+    kind: badge
+  - name: repo_id
+    label: Repo
+    kind: badge
+  - name: source_status
+    label: Source status
+    kind: badge
+  - name: target
+    label: Target
+  drawer_fields:
+  - name: description
+    label: Canonical tracker entry
+    kind: markdown
+  - name: source_notes
+    label: Source notes
+    kind: markdown
+  - name: repo_id
+    label: Designated repo
+  - name: completed
+    label: Completed
+  - name: source_ref
+    label: Canonical source
+  - name: source_sha256
+    label: Source SHA-256
+  - name: source_revision_count
+    label: Preserved revisions
+  allowed_actions:
+  - stage_card
+  - start_todo
+  - finish_todo
+  - block_card
+  intake:
+    producer: grand_todo_import
+    mode: projection
+    summary: Canonical life-wide GRAND TODO Markdown (docs/todos/GRAND_TODO_LIST.md)
+      with per-item repo designations; reconciled only by an explicit sync or a
+      governed card mutation; board reads are read-only.
+    schedule: explicit sync; board view polls the stored projection
+    source_refs:
+    - llm_station/docs/todos/GRAND_TODO_LIST.md
+    parameters: {}
+    editable: false
+  empty_state:
+    title: Master GRAND TODO not imported yet
+    hint: Preview the canonical master tracker, then apply its merge-only projection.
+    command: uv run cc grand-todo-import --board grand_todo --apply
 - domain_id: job_application
   title: Jobs
   card_component: job_application
