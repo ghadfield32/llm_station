@@ -75,6 +75,10 @@ import {
   getWorkGraph, getWorkGraphNeighbourhood, getWorkItem, getWorkItemLinks,
   recordRoutingCorrection, routeCapture, routeWorkText,
 } from "./api";
+import {
+  createLoadResilienceState, recordLoadFailure, recordLoadSuccess,
+  type LoadResilienceState,
+} from "./loadResilience";
 
 type View = "missions" | "boards" | "domains" | "todos" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox" | "work-map" | "life-center";
 const NAV: { id: View; label: string }[] = [
@@ -104,6 +108,23 @@ type DomainNavItem = {
   error?: string;
 };
 type JobBoardMode = "bot" | "manual" | "all";
+type ResilientSurface =
+  "missions" | "boards" | "router" | "observability" | "activity" | "repositories";
+const RESILIENT_SURFACES: ResilientSurface[] = [
+  "missions", "boards", "router", "observability", "activity", "repositories",
+];
+const createSurfaceLoadStates = (): Record<ResilientSurface, LoadResilienceState> => ({
+  missions: createLoadResilienceState(),
+  boards: createLoadResilienceState(),
+  router: createLoadResilienceState(),
+  observability: createLoadResilienceState(),
+  activity: createLoadResilienceState(),
+  repositories: createLoadResilienceState(),
+});
+const formatStaleTime = (timestamp: number) =>
+  new Date(timestamp).toLocaleTimeString([], {
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
 const RISK_CLASS: Record<string, string> = {
   L0: "risk-l0", L1: "risk-l1", L2: "risk-l2", L3: "risk-l3", L4: "risk-l4",
 };
@@ -11449,10 +11470,8 @@ export function App() {
   const [board, setBoard] = useState<BoardData | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [boards, setBoards] = useState<BoardSnapshot | null>(null);
-  const [boardsNote, setBoardsNote] = useState<string | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [lanes, setLanes] = useState<ModelLanes | null>(null);
-  const [lanesNote, setLanesNote] = useState<string | null>(null);
   const [cfg, setCfg] = useState<UIConfig | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [runtimeDebug, setRuntimeDebug] = useState<RuntimeDebug | null>(null);
@@ -11475,17 +11494,36 @@ export function App() {
   const [selMission, setSelMission] = useState<string | null>(null);
   const [selCard, setSelCard] =
     useState<{ board: string; card: BoardCard; statuses: string[] } | null>(null);
-  const [surfaceErrors, setSurfaceErrors] = useState<Record<string, string>>({});
+  const [surfaceLoads, setSurfaceLoads] =
+    useState<Record<ResilientSurface, LoadResilienceState>>(createSurfaceLoadStates);
   const chatRef = useRef(false);   // so reloadBoards can pick live vs snapshot
+
+  const markSurfaceSuccess = useCallback((surface: ResilientSurface) => {
+    setSurfaceLoads((current) => ({
+      ...current,
+      [surface]: recordLoadSuccess(),
+    }));
+  }, []);
+
+  const markSurfaceFailure = useCallback((
+    surface: ResilientSurface, error: unknown, quiet = false,
+  ) => {
+    setSurfaceLoads((current) => ({
+      ...current,
+      [surface]: recordLoadFailure(current[surface], error, { quiet }),
+    }));
+  }, []);
 
   // Console: read boards from the LIVE local store (a write reflects at once); read-only:
   // the worker snapshot. Explicit capability switch, not a silent fallback.
-  const reloadBoards = useCallback(async () => {
+  const reloadBoards = useCallback(async (quiet = false) => {
     try {
       setBoards(await (chatRef.current ? fetchBoardsLive() : fetchBoards()));
-      setBoardsNote(null);
-    } catch (e) { setBoards(null); setBoardsNote((e as Error).message); }
-  }, []);
+      markSurfaceSuccess("boards");
+    } catch (e) {
+      markSurfaceFailure("boards", e, quiet);
+    }
+  }, [markSurfaceFailure, markSurfaceSuccess]);
 
   const reloadDomainNav = useCallback(async () => {
     try {
@@ -11526,17 +11564,32 @@ export function App() {
     }));
   }, []);
 
-  const refreshGlobal = useCallback(async () => {
-    const errs: Record<string, string> = {};
-    try { setBoard(await fetchMissions()); }
-    catch (e) { setBoard(null); errs.missions = (e as Error).message; }
-    try { setMetrics(await fetchMetrics()); }
-    catch (e) { setMetrics(null); errs.observability = (e as Error).message; }
-    try { setActivity(await fetchActivity()); }
-    catch (e) { setActivity(null); errs.activity = (e as Error).message; }
-    await reloadBoards();
-    try { setLanes(await fetchModels()); setLanesNote(null); }
-    catch (e) { setLanes(null); setLanesNote((e as Error).message); }
+  const refreshGlobal = useCallback(async (quiet = false) => {
+    try {
+      setBoard(await fetchMissions());
+      markSurfaceSuccess("missions");
+    } catch (e) {
+      markSurfaceFailure("missions", e, quiet);
+    }
+    try {
+      setMetrics(await fetchMetrics());
+      markSurfaceSuccess("observability");
+    } catch (e) {
+      markSurfaceFailure("observability", e, quiet);
+    }
+    try {
+      setActivity(await fetchActivity());
+      markSurfaceSuccess("activity");
+    } catch (e) {
+      markSurfaceFailure("activity", e, quiet);
+    }
+    await reloadBoards(quiet);
+    try {
+      setLanes(await fetchModels());
+      markSurfaceSuccess("router");
+    } catch (e) {
+      markSurfaceFailure("router", e, quiet);
+    }
     // status drives the topbar dots; if the probe endpoint itself is unreachable,
     // clear the dots (their absence is the signal) rather than show stale health.
     try { setStatus(await fetchStatus()); } catch { setStatus(null); }
@@ -11545,12 +11598,11 @@ export function App() {
     try {
       const catalog = await fetchRegisteredRepositories();
       setRegisteredRepos(catalog.repositories);
+      markSurfaceSuccess("repositories");
     } catch (e) {
-      setRegisteredRepos([]);
-      errs.repositories = (e as Error).message;
+      markSurfaceFailure("repositories", e, quiet);
     }
-    setSurfaceErrors(errs);
-  }, [reloadBoards]);
+  }, [markSurfaceFailure, markSurfaceSuccess, reloadBoards]);
 
   const refresh = useCallback(async () => {
     await Promise.all([refreshGlobal(), reloadDomainNav()]);
@@ -11573,6 +11625,14 @@ export function App() {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [refreshGlobal, reloadDomainNav]);
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void refreshGlobal(true);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
+  }, [refreshGlobal]);
 
   useEffect(() => {   // Escape closes whichever drawer is open
     const h = (e: KeyboardEvent) => {
@@ -11631,8 +11691,25 @@ export function App() {
     router: lanes?.roles.length, activity: activity?.calls.length,
   };
   if (domainNavCount > 0) counts.domains = domainNavCount;
-  const surfaceFailureCount = Object.keys(surfaceErrors).length +
-    (boardsNote ? 1 : 0) + (lanesNote ? 1 : 0);
+  const boardsNote = surfaceLoads.boards.lastError;
+  const lanesNote = surfaceLoads.router.lastError;
+  const surfaceErrors = Object.fromEntries(
+    RESILIENT_SURFACES
+      .filter((surface) => surface !== "boards" && surface !== "router")
+      .flatMap((surface) => (
+        surfaceLoads[surface].lastError
+          ? [[surface, surfaceLoads[surface].lastError as string]]
+          : []
+      )),
+  );
+  const bannerErrors = RESILIENT_SURFACES.flatMap((surface) => (
+    surfaceLoads[surface].bannerError
+      ? [[surface, surfaceLoads[surface].bannerError] as const]
+      : []
+  ));
+  const staleSurfaces = RESILIENT_SURFACES.filter(
+    (surface) => surfaceLoads[surface].stale,
+  );
 
   return (
     <div className="shell">
@@ -11673,6 +11750,12 @@ export function App() {
             ))}
           </div>
           <div className="topright">
+            {staleSurfaces.map((surface) => (
+              <span className="chip muted small" key={surface}
+                title={`${surfaceLoads[surface].consecutiveFailures} consecutive failed load(s)`}>
+                {surface} stale since {formatStaleTime(surfaceLoads[surface].staleSince!)}
+              </span>
+            ))}
             <button className="actbtn" onClick={() => setCaptureOpen(true)}
               title="Capture an idea, todo, or note — from anywhere. It's saved, not started.">
               + Capture
@@ -11688,13 +11771,11 @@ export function App() {
             onCaptured={() => setCaptureNonce((n) => n + 1)}
             onOpenChat={chatOn ? openChatWithPrompt : undefined} />
         )}
-        {surfaceFailureCount > 0 && (
+        {bannerErrors.length > 0 && (
           <div className="surface-errors">
-            {Object.entries(surfaceErrors).map(([name, msg]) => (
+            {bannerErrors.map(([name, msg]) => (
               <div className="error" key={name}>{name}: {msg}</div>
             ))}
-            {boardsNote && <div className="error">boards: {boardsNote}</div>}
-            {lanesNote && <div className="error">router: {lanesNote}</div>}
           </div>
         )}
         {view === "missions" && (board
@@ -11703,7 +11784,9 @@ export function App() {
         {view === "boards" && (boards
           ? <BoardsView snap={boards} canAct={chatOn} onMoved={reloadBoards}
               onOpenCard={(b, c, st) => setSelCard({ board: b, card: c, statuses: st })} />
-          : <div className="empty">{boardsNote ?? "…"}</div>)}
+          : <div className="empty">
+              {surfaceLoads.boards.consecutiveFailures ? "Boards unavailable; retrying…" : "…"}
+            </div>)}
         {view === "domains" && (
           <DomainsView refreshKey={updated} activeDomain={activeDomain}
             onActiveDomainChange={setActiveDomain} onOpenChat={openChatWithPrompt}
@@ -11719,7 +11802,9 @@ export function App() {
         {view === "settings" && <SettingsView status={status} runtime={chatRuntime} />}
         {view === "router" && (lanes
           ? <RouterView lanes={lanes} />
-          : <div className="empty">{lanesNote ?? "…"}</div>)}
+          : <div className="empty">
+              {surfaceLoads.router.consecutiveFailures ? "Router unavailable; retrying…" : "…"}
+            </div>)}
         {view === "diagnostics" &&
           <DiagnosticsView debug={runtimeDebug} surfaceErrors={surfaceErrors}
             boardsNote={boardsNote} lanesNote={lanesNote} />}
