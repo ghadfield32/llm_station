@@ -74,7 +74,7 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L9 (2026-07-23 migration)
-**Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant.
+**Notes:** Notes-to-books loads take forever; switching between boards takes forever; boards fail when leaving the app (must be smooth across app switches — PWA lifecycle); switching back and forth shows "boards: Load failed"; "router: load failed" seen entering the Life Center. Definition of done: those errors never surface and board/notes navigation feels instant. **Run-doc (2026-07-23, root cause verified):** [docs/projects/kan-3-load-performance/RUNDOC.md](../projects/kan-3-load-performance/RUNDOC.md) — `reloadBoards`/lanes null out last-good data on any transient fetch rejection and print the raw WebKit "Load failed" message; fix = keep-last-good + error classification + visibilitychange refetch; latency measured before optimized. Awaiting §5 KPI-meeting answers to start execution.
 
 #### KAN-4 · Fit-to-screen layout everywhere (mobile + desktop)
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
