@@ -231,7 +231,8 @@ def test_long_prompt_goes_to_stdin_not_argv(harness, monkeypatch):
     monkeypatch.setattr(ccl.ClaudeCodeLocalHarness, "_stream_cli",
                         _fake_stream([_RESULT_OK], captured))
     asyncio.run(_drain(h.send(sid, big)))
-    assert captured["prompt"] == big                       # full prompt via stdin
+    assert captured["prompt"].endswith(big)                # full prompt via stdin
+    assert "[WORKSPACE BOUNDS" in captured["prompt"]      # first-turn contract
     joined = "\x00".join(captured["args"])
     assert big not in joined                                # never in argv
     assert len("\x00".join(captured["args"])) < 4096        # argv stays small
