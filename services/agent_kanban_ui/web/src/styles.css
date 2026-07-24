@@ -2341,6 +2341,28 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 .capture-hint { line-height: 1.5; padding: 9px 11px; border-radius: 8px;
   background: color-mix(in srgb, var(--accent) 8%, var(--col));
   border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); }
+.grand-todo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.intake-composer { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.intake-title { font-weight: 600; overflow-wrap: anywhere; }
+.intake-progress { display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; }
+.intake-progress > span { display: flex; gap: 5px; flex: 0 0 auto; }
+.intake-progress i { width: 9px; height: 9px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--col); }
+.intake-progress i.complete { border-color: var(--ok); background: var(--ok); }
+.intake-progress i.current { border-color: var(--accent); background: var(--accent); }
+.intake-step { display: flex; flex-direction: column; gap: 10px; }
+.intake-step h3, .intake-step p { margin: 0; }
+.intake-step label { line-height: 1.5; }
+.intake-answer { min-height: 180px; line-height: 1.5; }
+.intake-review { width: 100%; max-height: min(48vh, 440px); margin: 0;
+  overflow: auto; overscroll-behavior-x: contain; white-space: pre-wrap;
+  overflow-wrap: anywhere; background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  font: 12px/1.5 ui-monospace, monospace; }
+.intake-actions { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 8px; }
+.intake-actions .capture-primary { min-width: 0; }
 .todo-router { display: flex; flex-direction: column; gap: 12px; }
 .todo-route-list { display: flex; flex-direction: column; gap: 12px; }
 .todo-route-item { border: 1px solid var(--border); border-radius: 10px;
@@ -2453,6 +2475,9 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
 @media (max-width: 680px) {
   .capture-overlay { padding: 8px; place-items: end center; }
   .capture-composer { max-height: calc(100vh - 16px); }
+  .intake-composer { padding: 12px; }
+  .intake-answer { min-height: 150px; }
+  .intake-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
   .company-target-grid { grid-template-columns: 1fr; }
   .relationship-grid, .question-answer-grid { grid-template-columns: 1fr; }
   .book-workbench-summary { padding: 13px 13px 13px 17px; }

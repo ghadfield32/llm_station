@@ -82,6 +82,7 @@ import {
 import {
   describeChatEvent, optionLabel, runtimeLabel, type RuntimeTarget,
 } from "./chatPresentation";
+import { buildRunDocDraft, type IntakeAnswers } from "./intakeDraft";
 
 type View = "missions" | "boards" | "domains" | "todos" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox" | "work-map" | "life-center";
 const NAV: { id: View; label: string }[] = [
@@ -1532,6 +1533,149 @@ function TodoRoutingWizard({ text, capture, conversationId, onClose, onCommitted
             {busy ? "creating one at a time…" : receipts.length || error
               ? "Repair / create remaining" : "Confirm & create"}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type IntakeAnswerKey = keyof IntakeAnswers;
+
+const INTAKE_STEPS: {
+  key: IntakeAnswerKey;
+  title: string;
+  question: string;
+  placeholder: string;
+  hint?: string;
+}[] = [
+  {
+    key: "objective",
+    title: "Objective & definition of done",
+    question: "What outcome are we trying to create, and what exact conditions make it done?",
+    placeholder: "State the objective, scope, and checkable definition-of-done conditions…",
+  },
+  {
+    key: "research",
+    title: "Research pointers",
+    question: "What verified context, files, links, prior work, or test anchors should guide this project?",
+    placeholder: "Add known seams, source links, prior decisions, constraints, and test anchors…",
+  },
+  {
+    key: "kpis",
+    title: "KPIs & baseline",
+    question: "Which metrics define success, what is the current baseline, and what target or stop condition applies?",
+    placeholder: "List each KPI with its measured baseline, target, and stop condition…",
+    hint: "If the baseline is unmeasured, say so explicitly — measuring it becomes step 1.",
+  },
+  {
+    key: "plan",
+    title: "Plan sketch",
+    question: "What is the smallest bounded, independently verifiable plan?",
+    placeholder: "Sketch numbered steps, the allowed write surface, and what stays out of scope…",
+  },
+  {
+    key: "openQuestions",
+    title: "Open questions / decisions",
+    question: "What still needs a decision, or which defaults are we taking and why?",
+    placeholder: "Record blocking questions or explicit decisions with their rationale…",
+  },
+];
+
+const EMPTY_INTAKE_ANSWERS: IntakeAnswers = {
+  objective: "",
+  research: "",
+  kpis: "",
+  plan: "",
+  openQuestions: "",
+};
+
+function IntakeWizard({ card, seedTitle, onClose, onOpenChat }: {
+  card?: DomainCard;
+  seedTitle?: string;
+  onClose: () => void;
+  onOpenChat: (prompt: string, conversationId?: string) => void;
+}) {
+  const [answers, setAnswers] = useState<IntakeAnswers>(EMPTY_INTAKE_ANSWERS);
+  const [step, setStep] = useState(0);
+  const itemId = card ? cardId(card) : "";
+  const title = seedTitle?.trim()
+    || (card ? valText(card.title || card.task || card.action || card.role_title) : "")
+    || "Untitled project";
+  const reviewing = step === INTAKE_STEPS.length;
+  const current = INTAKE_STEPS[step];
+  const assembledDraft = buildRunDocDraft(answers, title, itemId);
+
+  function startInChat() {
+    onOpenChat(assembledDraft);
+    onClose();
+  }
+
+  return (
+    <div className="capture-overlay intake-overlay" role="presentation"
+      onClick={onClose}>
+      <div className="capture-composer intake-composer" role="dialog"
+        aria-modal="true" aria-labelledby="intake-title"
+        onClick={(event) => event.stopPropagation()}>
+        <div className="settings-card-head">
+          <div>
+            <h3 id="intake-title">Project intake · {itemId || "new project"}</h3>
+            <div className="intake-title">{title}</div>
+          </div>
+          <button className="editbtn" type="button" onClick={onClose}>close</button>
+        </div>
+        <div className="intake-progress muted small">
+          Step {step + 1} of {INTAKE_STEPS.length + 1}
+          <span aria-hidden="true">
+            {INTAKE_STEPS.map((intakeStep, index) => (
+              <i className={index < step ? "complete" : index === step ? "current" : ""}
+                key={intakeStep.key} />
+            ))}
+            <i className={reviewing ? "current" : ""} />
+          </span>
+        </div>
+
+        {reviewing ? (
+          <section className="settings-card intake-step">
+            <h3>Review assembled run-doc</h3>
+            <p className="muted small">
+              This draft opens as the starting context in chat. No run-doc file is
+              written and the card is not moved.
+            </p>
+            <pre className="intake-review">{assembledDraft}</pre>
+          </section>
+        ) : (
+          <section className="settings-card intake-step">
+            <h3>{current.title}</h3>
+            <label htmlFor={`intake-${current.key}`}>{current.question}</label>
+            {current.hint && <p className="capture-hint muted small">{current.hint}</p>}
+            <textarea className="capture-text intake-answer"
+              id={`intake-${current.key}`} key={current.key}
+              value={answers[current.key]} rows={8} autoFocus
+              placeholder={current.placeholder}
+              onChange={(event) => setAnswers((prior) => ({
+                ...prior,
+                [current.key]: event.target.value,
+              }))} />
+          </section>
+        )}
+
+        <div className="intake-actions">
+          <button className="actbtn" type="button" disabled={step === 0}
+            onClick={() => setStep((currentStep) => Math.max(0, currentStep - 1))}>
+            Back
+          </button>
+          {reviewing ? (
+            <button className="actbtn capture-primary" type="button"
+              onClick={startInChat}>
+              Start &amp; open in chat
+            </button>
+          ) : (
+            <button className="actbtn capture-primary" type="button"
+              disabled={!answers[current.key].trim()}
+              onClick={() => setStep((currentStep) => currentStep + 1)}>
+              Next
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -7476,6 +7620,7 @@ function DomainDrawer({
   const [grandTodoText, setGrandTodoText] = useState("");
   const [grandTodoEditBaseSha, setGrandTodoEditBaseSha] = useState("");
   const [grandTodoIgnoredBaseSha, setGrandTodoIgnoredBaseSha] = useState("");
+  const [intakeOpen, setIntakeOpen] = useState(false);
   const id = cardId(card);
 
   useEffect(() => {
@@ -7651,13 +7796,22 @@ function DomainDrawer({
       {canEditGrandTodo && (
         <div className="grand-todo-editor">
           {!editingGrandTodo ? (
-            <button className="actbtn" disabled={busy} onClick={() => {
-              setGrandTodoText(valText(activeCard.description));
-              setGrandTodoEditBaseSha(valText(activeCard.source_sha256));
-              setGrandTodoIgnoredBaseSha("");
-              setMsg(null);
-              setEditingGrandTodo(true);
-            }}>Edit canonical task</button>
+            <div className="grand-todo-actions">
+              <button className="actbtn" disabled={busy || !onOpenChat}
+                title={onOpenChat
+                  ? "Answer the run-doc questions before starting work"
+                  : "Chat is disabled in this deployment"}
+                onClick={() => setIntakeOpen(true)}>
+                Start intake
+              </button>
+              <button className="actbtn" disabled={busy} onClick={() => {
+                setGrandTodoText(valText(activeCard.description));
+                setGrandTodoEditBaseSha(valText(activeCard.source_sha256));
+                setGrandTodoIgnoredBaseSha("");
+                setMsg(null);
+                setEditingGrandTodo(true);
+              }}>Edit canonical task</button>
+            </div>
           ) : (
             <>
               <textarea className="packet-edit" value={grandTodoText}
@@ -7676,6 +7830,10 @@ function DomainDrawer({
           )}
           {msg && <div className="actmsg">{msg}</div>}
         </div>
+      )}
+      {intakeOpen && onOpenChat && (
+        <IntakeWizard card={activeCard} onClose={() => setIntakeOpen(false)}
+          onOpenChat={onOpenChat} />
       )}
       {isResearchCard && !hasCompleteResearchAnalysis && (
         <div className="research-analysis-notice" role="status">
