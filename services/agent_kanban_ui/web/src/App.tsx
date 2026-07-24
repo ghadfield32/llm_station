@@ -9090,7 +9090,12 @@ function pendingApprovalsOf(events: AgentEvent[]) {
     events.filter((e) => e.type === "approval_resolved")
       .map((e) => String(e.payload.approval_id)));
   return events.filter((e) =>
-    e.type === "approval_required" && !resolved.has(String(e.payload.approval_id)));
+    e.type === "approval_required"
+      // Board-policy ASK routes to the existing board confirm card/token wall;
+      // it deliberately has no generic approval_id and must never render a
+      // second approve button in the agent-session strip.
+      && typeof e.payload.approval_id === "string"
+      && !resolved.has(e.payload.approval_id));
 }
 
 // ---- natural transcript: coalesce the raw event stream into chat blocks ----

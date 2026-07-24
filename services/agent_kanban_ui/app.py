@@ -2438,9 +2438,7 @@ def create_board_module(body: BoardModuleIn) -> dict:
         return _create_board_module_locked(body)
 
 
-class BoardChangePreviewIn(BaseModel):
-    """A proposed board/config change to REVIEW (read-only). before/after are the
-    whole config docs the diff/validation runs against."""
+class _BoardChangeProposalIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     author_harness: str
     kind: str
@@ -2450,7 +2448,12 @@ class BoardChangePreviewIn(BaseModel):
     rationale: str = ""
 
 
-class BoardChangeApplyIn(BoardChangePreviewIn):
+class BoardChangePreviewIn(_BoardChangeProposalIn):
+    """An agent proposal to REVIEW, bound to its policy-bearing session."""
+    session_id: str | None = None
+
+
+class BoardChangeApplyIn(_BoardChangeProposalIn):
     """Apply a proposed change. When a signing secret is configured, a
     proposal-bound `approval_token` is REQUIRED (§8) and its operator is the
     approver; otherwise `approved_by` must be in the server operator set."""
@@ -2463,6 +2466,31 @@ class ApprovalTokenIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     proposal_id: str
     operator: str
+
+
+def _gate_agent_board_change(
+    *, session_id: str | None, author_harness: str, kind: str,
+) -> dict | None:
+    """Tighten-only policy check before an agent proposal can be minted.
+
+    The exact flag-off path returns immediately without touching the worker.
+    ASK is only a routing fact: the existing board human-token wall remains the
+    sole approval surface and the apply endpoint never consults this verdict.
+    """
+    if os.environ.get("AGENT_SESSION_POLICIES_ENABLED", "") != "1":
+        return None
+    if not session_id:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "agent_session_id_required",
+                "message": "session_id is required for an agent-authored "
+                           "board-change proposal while session policies are enabled",
+            })
+    client = _require_agent_sessions()
+    return _call_worker(
+        client.evaluate_board_change_policy, session_id,
+        author_harness=author_harness, kind=kind)
 
 
 @app.post("/api/board-changes/approval-token")
@@ -2516,6 +2544,9 @@ def preview_board_change(body: BoardChangePreviewIn) -> dict:
 
     from command_center.kanban_sync.board_change import (
         build_board_change_preview, make_proposal)
+    policy = _gate_agent_board_change(
+        session_id=body.session_id, author_harness=body.author_harness,
+        kind=body.kind)
     try:
         proposal = make_proposal(
             author_harness=body.author_harness, kind=body.kind,
@@ -2526,13 +2557,20 @@ def preview_board_change(body: BoardChangePreviewIn) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     preview = build_board_change_preview(
         proposal, validate=_board_change_validator(body.kind))
-    return {"proposal_id": proposal.proposal_id, "preview": preview.model_dump()}
+    result = {
+        "proposal_id": proposal.proposal_id,
+        "preview": preview.model_dump(),
+    }
+    if policy is not None and policy.get("verdict") == "ask":
+        result["policy"] = policy
+    return result
 
 
 class BoardFormatPlanIn(BaseModel):
     """A STRUCTURED board-format change (no browser-generated YAML): the exact
     columns a board should have. The server computes the `after` config."""
     model_config = ConfigDict(extra="forbid")
+    session_id: str | None = None
     domain_id: str
     columns: list[str]
     author_harness: str = "codex_agent"
@@ -2576,12 +2614,15 @@ def plan_board_format(body: BoardFormatPlanIn) -> dict:
     except (KeyError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     created_at = datetime.now(timezone.utc).isoformat()
+    policy = _gate_agent_board_change(
+        session_id=body.session_id, author_harness=body.author_harness,
+        kind="update_board_format")
     proposal = make_proposal(
         author_harness=body.author_harness, kind="update_board_format",
         target_board=body.domain_id, before=before, after=after,
         rationale=body.rationale, created_at=created_at)
     preview = build_board_change_preview(proposal, validate=_validate_domain_config)
-    return {
+    result = {
         "proposal_id": proposal.proposal_id,
         "target_board": body.domain_id,
         "before_columns": before_cols,
@@ -2595,6 +2636,9 @@ def plan_board_format(body: BoardFormatPlanIn) -> dict:
             "target_board": body.domain_id, "before": before, "after": after,
             "rationale": body.rationale, "created_at": created_at},
     }
+    if policy is not None and policy.get("verdict") == "ask":
+        result["policy"] = policy
+    return result
 
 
 @app.post("/api/board-changes/apply")
