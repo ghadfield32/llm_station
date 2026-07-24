@@ -461,13 +461,21 @@ SERVICES: tuple[ServiceEntry, ...] = (
     ),
     ServiceEntry(
         service_id="vaultwarden", application="Vaultwarden", category="vault",
-        authority="password manager (dummy-data evaluation only; Bitwarden Lite is the deployment target)",
-        lifecycle="gate-later", profile="vault",
+        authority="the personal password vault — as of the Authelia SSO rollout, holds a real, "
+                   "load-bearing credential (Authelia login + TOTP), not just trial data. A Bitwarden "
+                   "Lite migration is still open as a future option but is NOT a precondition for "
+                   "trusting this vault with real secrets; correct this note again if/when that "
+                   "migration actually happens instead of leaving it stale in the other direction",
+        lifecycle="keep", profile="vault",
         links=Links(app="http://127.0.0.1:${VAULTWARDEN_PORT:-8222}",
                      docs="https://bitwarden.com/help/self-host-bitwarden/", runbook="runbooks/app-admission.md"),
         auth=Auth(mode="local", credential_ref="VAULTWARDEN_ADMIN_TOKEN"),
-        setup=Setup(wizard_required=True, registration_must_close=True,
-                     note="dummy credentials ONLY in this trial vault"),
+        setup=Setup(wizard_required=False, registration_must_close=False,
+                     note="Real account created (ghadfield32@gmail.com); SIGNUPS_ALLOWED verified "
+                          "re-locked at both the env AND config.json layer (config.json overrides "
+                          "env — found live, the first re-lock attempt silently didn't take effect "
+                          "because of this) and a registration attempt against it returns 403. "
+                          "Backup+restore-test passed with byte-identical key material."),
         recovery=Recovery(canonical_data_location="${LC_APPDATA}/vaultwarden", complete_backup_unit="appdata/vaultwarden",
                            export_method="client-side vault export (encrypted json)",
                            restoration_proof="offline recovery + every client proven before migrating a real vault"),
