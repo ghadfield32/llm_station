@@ -74,6 +74,13 @@ class AgentWorkerClient:
         return self._request("POST", f"/api/agent-sessions/{session_id}/messages",
                              json={"prompt": prompt})
 
+    def evaluate_board_change_policy(
+        self, session_id: str, *, author_harness: str, kind: str,
+    ) -> httpx.Response:
+        return self._request(
+            "POST", f"/api/agent-sessions/{session_id}/board-change-policy",
+            json={"author_harness": author_harness, "kind": kind})
+
     def build_handoff(self, session_id: str, *, to_harness: str,
                       goal: str | None = None,
                       open_questions: list[str] | None = None) -> httpx.Response:

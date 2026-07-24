@@ -245,6 +245,8 @@ class ClaudeAgentHarness:
         write_mode_wall=Verdict.PASS,
         attachments=Verdict.FAIL,
         model_switch=Verdict.PASS,
+        interrupt=Verdict.PASS,
+        steering=Verdict.FAIL,
     )
     # can_use_tool denies writes automatically; there is no human-in-the-loop
     # approval hook mid-turn in read-only mode (a write is DENIED, not queued for
