@@ -35,7 +35,9 @@ from typing import Any, AsyncIterator, Callable
 import yaml
 
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..secret_paths import is_secret_path as _is_secret_path
 from ..store import SessionStoreProtocol
 
@@ -248,7 +250,8 @@ class OpenRouterAgentHarness:
         self.store.append_event(record.session_id, AgentEvent(
             "session_started",
             {"mode": request.mode, "model": model,
-             "permission_profile": "read_only", "lane": "openrouter_paid"}))
+             "permission_profile": "read_only", "lane": "openrouter_paid",
+             **session_spec_metadata(request)}))
         self.store.set_status(record.session_id, "idle")
         return record.session_id
 

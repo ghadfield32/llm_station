@@ -7,9 +7,11 @@ Exit 0 = all valid. Exit 1 = a typo'd key, bad value, or broken invariant
 This is the "hard to break" guarantee: bad config fails here, not at 2am.
 """
 import sys
+from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
+from command_center.agent_sessions.spec_bridge import load_spec
 from command_center.schemas import CONFIG_CONTRACTS
 
 
@@ -23,6 +25,20 @@ def main() -> int:
         except FileNotFoundError:
             print(f"  MISS {path}  (not found)")
             ok = False
+        except ValidationError as e:
+            print(f"  FAIL {path}")
+            for err in e.errors():
+                loc = ".".join(str(x) for x in err["loc"])
+                print(f"         {loc}: {err['msg']}")
+            ok = False
+        except Exception as e:
+            print(f"  FAIL {path}: {e}")
+            ok = False
+    session_specs_dir = Path("configs/agent_sessions")
+    for path in sorted(session_specs_dir.glob("*.yaml")):
+        try:
+            load_spec(path.stem, directory=session_specs_dir)
+            print(f"  OK   {path}  (AgentSessionSpec)")
         except ValidationError as e:
             print(f"  FAIL {path}")
             for err in e.errors():

@@ -38,7 +38,9 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..store import SessionStoreProtocol
 
 # src/command_center/agent_sessions/adapters/claude_agent.py -> repo root
@@ -326,7 +328,8 @@ class ClaudeAgentHarness:
             {"mode": request.mode, "model": model,
              "model_selection_reason": model_reason,
              "permission_profile": "read_only", "auth": "anthropic_api_key",
-             "read_only_tools": list(_READ_ONLY_TOOLS)}))
+             "read_only_tools": list(_READ_ONLY_TOOLS),
+             **session_spec_metadata(request)}))
         self.store.set_status(record.session_id, "idle")
         return record.session_id
 

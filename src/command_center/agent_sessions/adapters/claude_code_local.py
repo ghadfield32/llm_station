@@ -40,7 +40,9 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..store import SessionStoreProtocol
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -346,7 +348,8 @@ class ClaudeCodeLocalHarness:
              "model_selection_reason": model_reason,
              "requested_effort": request.effort, "context_mode": request.context_mode,
              "permission_profile": "read_only", "auth": "subscription_oauth",
-             "read_only_tools": list(_READ_ONLY_TOOLS)}))
+             "read_only_tools": list(_READ_ONLY_TOOLS),
+             **session_spec_metadata(request)}))
         self.store.set_status(record.session_id, "idle")
         return record.session_id
 

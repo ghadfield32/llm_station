@@ -1,5 +1,8 @@
 """Command-center config contracts. Edit configs/*.yaml; these validate them."""
 from .base import Strict, RiskTier, Decision, Provider, EnvKind
+from .agent_session_spec import (
+    AgentEffort, AgentHarnessId, AgentSessionSpec, CapabilityProfile,
+)
 from .contracts import (
     ModelCandidate, ModelRegistry, ExecutorSpec,
     CuratedModelScoutConfig,
