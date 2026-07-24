@@ -29,7 +29,7 @@ stack (`cc doctor`: ollama/litellm/ledger reachable = PASS). Raw logs in `raw/`.
   per-item rollouts acc = 1.000 / 0.500 / 0.667 →
   **`[baseline result] selection hard=0.6667 soft=0.8889 gate[hard]=0.6667`**.
   This is a genuine champion baseline from the local stack (raw:
-  `raw/searchqa_baseline.log`). The training loop then executed rollouts
+  `raw/searchqa_baseline.txt`). The training loop then executed rollouts
   (epoch 1, step 1) before the Windows crash below.
 
 ### CONFIRMED — two Windows blockers (found + fixed / documented)
@@ -44,7 +44,7 @@ stack (`cc doctor`: ollama/litellm/ledger reachable = PASS). Raw logs in `raw/`.
 
 ### CONFIRMED — full-loop E2E completes on Windows (EXIT=0), gate works
 SearchQA tiny 6/3/3, qwen3:8b target+optimizer via Ollama, 1 epoch, `PYTHONUTF8=1`
-(raw: `raw/searchqa_e2e.log`; wall=167s):
+(raw: `raw/searchqa_e2e.txt`; wall=167s):
 - Baseline selection `hard=0.6667`.
 - **2 training steps, both edits GATE-REJECTED** (`accept=0 reject=2`): step 1
   `REJECT hard=0.3333 <= 0.6667`, step 2 `REJECT hard=0.6667 <= 0.6667`. The

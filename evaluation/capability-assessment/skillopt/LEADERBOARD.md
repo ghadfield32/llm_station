@@ -13,8 +13,8 @@ recorded as unknown, never estimated.
 
 | # | role | target | optimizer | split (tr/sel/test) | selection hard | test hard | gate | commit | provenance |
 |---|------|--------|-----------|---------------------|----------------|-----------|------|--------|------------|
-| baseline-0 | **champion (no-skill)** | qwen3:8b (Ollama) | — | 3-item selection | **0.6667** (soft 0.8889) | — | n/a | skillopt@fdeebaf | `raw/searchqa_baseline.log` — CONFIRMED |
-| chal-1 | challenger (trained skill) | qwen3:8b (Ollama) | qwen3:8b | 6/3/3 tiny | 0.6667 (2 edits **gate-REJECTED**, accept=0) | 0.6667 (best-on-val); noise on 3 items | use_gate=true | skillopt@fdeebaf | `raw/searchqa_e2e.log` — EXIT=0, wall=167s. Loop + gate-reject PROVEN; NOT a lift claim |
+| baseline-0 | **champion (no-skill)** | qwen3:8b (Ollama) | — | 3-item selection | **0.6667** (soft 0.8889) | — | n/a | skillopt@fdeebaf | `raw/searchqa_baseline.txt` — CONFIRMED |
+| chal-1 | challenger (trained skill) | qwen3:8b (Ollama) | qwen3:8b | 6/3/3 tiny | 0.6667 (2 edits **gate-REJECTED**, accept=0) | 0.6667 (best-on-val); noise on 3 items | use_gate=true | skillopt@fdeebaf | `raw/searchqa_e2e.txt` — EXIT=0, wall=167s. Loop + gate-reject PROVEN; NOT a lift claim |
 
 > Note: qwen3:8b as optimizer proves the **loop**, not capability — no lift is
 > claimed from an 8B optimizer. The PILOT lift rows (a CAPABLE optimizer on the
