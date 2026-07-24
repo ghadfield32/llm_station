@@ -1,0 +1,13 @@
+# instructions may be inline, as here, or supplied by instructions_file relative
+# to this YAML. Authentication remains owned by the selected registry harness.
+name: claude-local-analysis
+instructions: >-
+  Review the requested work in analysis mode and report risks, assumptions, and
+  actionable next steps without modifying the repository.
+harness: claude_code_local
+capability_profile: generalist
+mode: analysis
+policy_refs:
+  - session-os-approval
+  - agent-tool-call-cap
+  - server-cost-budget

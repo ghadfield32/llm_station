@@ -39,8 +39,11 @@ import subprocess
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..store import SessionStoreProtocol
 from ..workspace_scope import claude_cli_read_deny_args, prepend_workspace_bounds
 
@@ -223,6 +226,14 @@ class ClaudeCodeLocalHarness:
     adapter."""
 
     name = "claude_code_local"
+    bench_profile = BenchProfile(
+        adapter="claude_code_local",
+        streaming=Verdict.PARTIAL,
+        resume=Verdict.PASS,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     interactive_approvals = False
 
     def __init__(self, store: SessionStoreProtocol) -> None:
@@ -386,7 +397,8 @@ class ClaudeCodeLocalHarness:
              "model_selection_reason": model_reason,
              "requested_effort": request.effort, "context_mode": request.context_mode,
              "permission_profile": "read_only", "auth": "subscription_oauth",
-             "read_only_tools": list(_READ_ONLY_TOOLS)}))
+             "read_only_tools": list(_READ_ONLY_TOOLS),
+             **session_spec_metadata(request)}))
         self.store.set_status(record.session_id, "idle")
         return record.session_id
 

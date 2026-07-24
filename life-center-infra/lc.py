@@ -361,26 +361,19 @@ def _tailnetify(url: str | None, env: dict[str, str]) -> str | None:
     return f"https://{host}:{port}{path}"
 
 
-def _resolve_and_tailnetify(template: str | None, env: dict[str, str], *, tailnetify: bool) -> str | None:
+def _resolve_and_tailnetify(template: str | None, env: dict[str, str]) -> str | None:
     if not template:
         return None
-    resolved = _resolve_template(template, env)
-    return _tailnetify(resolved, env) if tailnetify else resolved
+    return _tailnetify(_resolve_template(template, env), env)
 
 
 def _resolved_links(s: "catalog.ServiceEntry", env: dict[str, str]) -> dict[str, str | None]:
-    # admin-gui (Dockge) is human-only, on-demand, Docker-socket-privileged host
-    # administration — its own catalog note says "start on demand, stop after
-    # use". It never gets a `tailscale serve` mapping (unlike every other
-    # service), so rewriting its link would silently point at a dead tailnet
-    # URL — found live: exactly this broke Dockge's "Open app" link on mobile.
-    tailnetify = s.profile != "admin-gui"
     return {
-        "app": _resolve_and_tailnetify(s.links.app, env, tailnetify=tailnetify),
-        "setup": _resolve_and_tailnetify(s.links.setup, env, tailnetify=tailnetify),
+        "app": _resolve_and_tailnetify(s.links.app, env),
+        "setup": _resolve_and_tailnetify(s.links.setup, env),
         "docs": s.links.docs,
         "runbook": s.links.runbook,
-        "status": _resolve_and_tailnetify(s.links.status, env, tailnetify=tailnetify),
+        "status": _resolve_and_tailnetify(s.links.status, env),
         "native": s.links.native,
     }
 

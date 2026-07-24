@@ -30,8 +30,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..store import SessionStoreProtocol
 from ..workspace_scope import prepend_workspace_bounds
 
@@ -358,6 +361,14 @@ class CodexAgentHarness:
     restart) recovers correctly via thread_resume()."""
 
     name = "codex_agent"
+    bench_profile = BenchProfile(
+        adapter="codex_agent",
+        streaming=Verdict.PASS,
+        resume=Verdict.PASS,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     # REAL FINDING: the pinned SDK exposes no programmatic hook to causally
     # resolve a Guardian approval review (see module docstring and
     # resolve_approval below) — surfaced as a real, queryable capability
@@ -489,7 +500,8 @@ class CodexAgentHarness:
             "session_started",
             {"mode": request.mode, "external_session_id": thread.id,
              "model": model, "model_selection_reason": model_reason,
-             "requested_effort": request.effort or "medium"}))
+             "requested_effort": request.effort or "medium",
+             **session_spec_metadata(request)}))
         # "idle" = ready, no turn running yet — matches FakeHarness/worker_app's
         # status vocabulary exactly (see worker_app.py's async-execution note)
         self.store.set_status(record.session_id, "idle")

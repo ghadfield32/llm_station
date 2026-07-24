@@ -86,6 +86,7 @@ class SessionStartIn(BaseModel):
     effort: str | None = None
     context_mode: str | None = None
     permission_profile: str = "read_only"
+    spec_name: str | None = None
 
 
 class MessageIn(BaseModel):
@@ -216,6 +217,7 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         else:
             from command_center.usage.store import UsageStore as _UsageStore
             usage = _UsageService(_UsageStore())
+    service.usage_service = usage
 
     # Provider collectors must run beside the host-owned SDK/CLI login. The
     # cockpit container deliberately has neither the Codex SDK nor the user's
@@ -372,7 +374,7 @@ def build_app(*, store: SessionStoreProtocol | None = None,
             record = await service.start_session(SessionStart(**body.model_dump()))
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
-        except (ValueError, RuntimeError) as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
             raise HTTPException(400, str(exc)) from exc
         return record.__dict__
 

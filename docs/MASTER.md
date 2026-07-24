@@ -411,8 +411,8 @@ and Codex ARE directly selectable in the Chat UI as **Coding Agent assistants**
 mission is optional governance, never a prerequisite for talking to an agent.
 The old "start from a mission, not this dropdown" dead-end was the bug; see the
 chat-first product surface in §4.8. This split is not stylistic; it is the whole
-safety posture (Orca/Omnigent systems separate chat from agent harnesses for
-the same reason). The frontier tool_calls incident (§14, 2026-07-10/11) proved
+safety posture (ORCA/OmniAgent-class systems separate chat from agent
+harnesses for the same reason). The frontier tool_calls incident (§14, 2026-07-10/11) proved
 it empirically: even a small, explicitly *tool-less* integration crossed a
 dispatch boundary the moment the harness trusted a response field it never
 offered. Widening the ordinary chat surface to something with real shell/FS
@@ -3587,7 +3587,10 @@ in the process: the `/health` probe was hitting a nonexistent `/v1/health` path.
   runtime and write authority. ORCA
   (`https://arxiv.org/abs/2603.02438`) is the best first optional specialist
   for document-heavy job materials such as PDFs, resumes, screenshots, forms,
-  and tables. OmniAgent/Omnigent
+  and tables. OmniAgent
+  (Om-AI-Lab; historically also written "Omnigent" in this repo — unrelated
+  to the omnigent-ai/omnigent meta-harness, whose borrow-pattern verdict is
+  `docs/reviews/2026-07-23-omnigent-borrow-patterns.md`)
   (`https://arxiv.org/abs/2606.19341`) is a later specialist for long
   video/audio and screen-recording evidence. OxyGent is a watch-list candidate
   for modular agent/tool/model components, dynamic planning, visual debugging,
@@ -5645,3 +5648,13 @@ Full design in §6.6; what's left (all user-credential prerequisites) in §9.
   §6 (the five pipelines), §7 (isolation), §8 (the GitHub wall), §5 (model
   lanes), and the doc index in §12. The README no longer tracks the v3→v4
   delta; it points here.
+
+
+
+
+
+
+
+
+
+

@@ -37,8 +37,11 @@ import os
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..store import SessionStoreProtocol
 
 # src/command_center/agent_sessions/adapters/claude_agent.py -> repo root
@@ -235,6 +238,14 @@ class ClaudeAgentHarness:
     restart) recovers via resume=external_session_id."""
 
     name = "claude_agent"
+    bench_profile = BenchProfile(
+        adapter="claude_agent",
+        streaming=Verdict.PARTIAL,
+        resume=Verdict.PASS,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     # can_use_tool denies writes automatically; there is no human-in-the-loop
     # approval hook mid-turn in read-only mode (a write is DENIED, not queued for
     # approval), so approvals are non-interactive for this harness — the same
@@ -326,7 +337,8 @@ class ClaudeAgentHarness:
             {"mode": request.mode, "model": model,
              "model_selection_reason": model_reason,
              "permission_profile": "read_only", "auth": "anthropic_api_key",
-             "read_only_tools": list(_READ_ONLY_TOOLS)}))
+             "read_only_tools": list(_READ_ONLY_TOOLS),
+             **session_spec_metadata(request)}))
         self.store.set_status(record.session_id, "idle")
         return record.session_id
 

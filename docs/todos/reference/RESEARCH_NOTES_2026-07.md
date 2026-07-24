@@ -183,6 +183,34 @@ corresponding [`GRAND_TODO_LIST.md`](../GRAND_TODO_LIST.md) item's Notes.
   ONE already-approved draft via its API; judge coexist-vs-replace against
   `cc linkedin-publish`.
 
+## AGT-13 — Omnigent meta-harness (omnigent-ai/omnigent)
+
+- **Operator question**: replace our chat with Omnigent, or wire it as a
+  kanban link that can also adjust the kanban?
+- **Verdict: neither — borrow_pattern_only.** It's a session/harness
+  orchestration layer (no boards-as-governance, no durable Ledger, no
+  human-owned kanban approval workflow — its ASK policies pause per-session,
+  a different thing; `projects` entity at Stage-1 CRUD as of 07-21); we
+  already built the overlapping half (4 adapters, session ledger,
+  GatewayCore+LiteLLM, usage layer, PWA+channels). A kanban-adjusting link
+  would require a write-capable MCP surface exposed to it — none is
+  registered (`.mcp.json` = zero servers; the internal life_center_actions
+  server stays unregistered), and that wall stays.
+- **Live-verified 2026-07-23** (`gh api repos/omnigent-ai/omnigent` +
+  releases + raw docs): 7,679★, Apache-2.0, v0.6.0 (07-21), alpha, 686 open
+  issues+PRs, pushed same day. Not README-trusted.
+- **Three patterns borrowed** (→ AGT-14/15/16, run-docs under
+  `docs/projects/`): (1) three-level stricter-first declarative policy stack
+  with ALLOW/DENY/ASK (`docs/POLICIES.md`) → KAN-17 + usage budgets; (2)
+  harness capability bench — declared-vs-observed cells with DRIFT verdicts
+  (`docs/harness-bench-design.md`) → adapter bench, KPI for AGT-12; (3)
+  agent-as-YAML with a `harness:` enum (`docs/AGENT_YAML_SPEC.md`) → typed
+  session spec for KAN-26/KAN-15/AGT-10.
+- **Trap recorded**: `OMNIGENT_CHAT_URL` in this repo means **OmniAgent
+  (Om-AI-Lab)** — a different project. Never point it at omnigent-ai/omnigent.
+- Full review: [2026-07-23-omnigent-borrow-patterns.md](../../reviews/2026-07-23-omnigent-borrow-patterns.md);
+  catalog row `omnigent-meta-harness` (verdict `build`).
+- Provenance: single Fable session, `gh api` reads only, 2026-07-23.
 ## AGT-17 — SkillOpt (trainable agent skills) — added 2026-07-23 evening
 
 - **What (verified)**: **microsoft/SkillOpt** — "agent skills as trainable

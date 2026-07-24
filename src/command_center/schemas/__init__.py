@@ -1,5 +1,12 @@
 """Command-center config contracts. Edit configs/*.yaml; these validate them."""
 from .base import Strict, RiskTier, Decision, Provider, EnvKind
+from .agent_session_spec import (
+    AgentEffort, AgentHarnessId, AgentSessionSpec, CapabilityProfile,
+)
+from .session_policy import (
+    PolicyHandler, PolicyLevel, PolicyRule, PolicySet, PolicyVerdict,
+    SessionPoliciesConfig,
+)
 from .contracts import (
     ModelCandidate, ModelRegistry, ExecutorSpec,
     CuratedModelScoutConfig,
@@ -75,6 +82,7 @@ CONFIG_CONTRACTS = {
     "configs/autonomy.yaml": AutonomyConfig,
     "configs/job_search.yaml": JobSearchConfig,
     "configs/assistant-routing.yaml": AssistantRoutingConfig,
+    "configs/session_policies.yaml": SessionPoliciesConfig,
 }
 
 # The improvement loop's contracts. Registered here so the same `make validate` /

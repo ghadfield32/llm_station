@@ -34,8 +34,11 @@ from typing import Any, AsyncIterator, Callable
 
 import yaml
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..secret_paths import is_secret_path as _is_secret_path
 from ..store import SessionStoreProtocol
 
@@ -200,6 +203,14 @@ class OpenRouterAgentHarness:
     the store) — same restart-recovery contract as every other harness."""
 
     name = "openrouter_agent"
+    bench_profile = BenchProfile(
+        adapter="openrouter_agent",
+        streaming=Verdict.PARTIAL,
+        resume=Verdict.PARTIAL,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     # Honest capability disclosure (read by the registry probe → UI): this
     # harness sends repo file contents to a PAID EXTERNAL API. The cockpit must
     # show an explicit "this context will leave the machine" confirmation before
@@ -248,7 +259,8 @@ class OpenRouterAgentHarness:
         self.store.append_event(record.session_id, AgentEvent(
             "session_started",
             {"mode": request.mode, "model": model,
-             "permission_profile": "read_only", "lane": "openrouter_paid"}))
+             "permission_profile": "read_only", "lane": "openrouter_paid",
+             **session_spec_metadata(request)}))
         self.store.set_status(record.session_id, "idle")
         return record.session_id
 
