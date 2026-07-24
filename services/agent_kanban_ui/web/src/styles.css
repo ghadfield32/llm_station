@@ -2509,7 +2509,9 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   padding: 16px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--card); }
 .agent-session-setup .chat-field { display: grid; gap: 4px; }
-.agent-session-setup .chat-field .select { width: 100%; }
+.agent-session-setup .chat-field .select {
+  width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis;
+}
 .agent-register { display: grid; gap: 9px; padding: 10px 0 0; }
 
 /* ---- chat toolbar buttons: make new chat / History / handoff / settings /

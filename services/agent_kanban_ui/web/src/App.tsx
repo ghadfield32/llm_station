@@ -9590,6 +9590,7 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
   const [record, setRecord] = useState<AgentSessionRecord | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [input, setInput] = useState(initialPrompt ?? "");
+  const [queued, setQueued] = useState<string>("");
   // re-seed if a different card's context arrives while the panel is mounted
   useEffect(() => { if (initialPrompt) setInput(initialPrompt); }, [initialPrompt]);
   const [busy, setBusy] = useState(false);
@@ -9652,6 +9653,12 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
   const [promoting, setPromoting] = useState(false);
   const sessionIdRef = useRef(sessionId);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  const queuedRef = useRef(queued);
+  const sendTextRef = useRef(
+    (_id: string, _text: string, _messageAttachments: AttachmentReq[],
+      _clearComposer: boolean) =>
+      Promise.resolve(),
+  );
   const closeStreamRef = useRef<(() => void) | null>(null);
   const autoStartAttemptedRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -9693,6 +9700,17 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
         if (ev.sequence != null) onThreadChange({ agentLastSeenSequence: ev.sequence });
         if (["session_idle", "session_failed", "session_closed"].includes(ev.type)) {
           void fetchAgentSession(id).then(setRecord).catch(() => {});
+        }
+        if (ev.type === "session_idle" && sessionIdRef.current === id) {
+          const queuedText = queuedRef.current.trim();
+          if (queuedText) {
+            queuedRef.current = "";
+            setQueued("");
+            void sendTextRef.current(id, queuedText, [], false);
+          }
+        } else if (["session_failed", "session_closed"].includes(ev.type)) {
+          queuedRef.current = "";
+          setQueued("");
         }
       },
       (detail) => { if (sessionIdRef.current === id) setError(detail); });
@@ -9759,10 +9777,12 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
     }
   }
 
-  async function send() {
-    const id = sessionId;
-    const text = input.trim();
-    if (!id || (!text && attachments.length === 0) || busy) return;
+  async function sendText(
+    id: string,
+    text: string,
+    messageAttachments: AttachmentReq[],
+    clearComposer: boolean,
+  ) {
     // No silent paid send: an external-egress harness needs an explicit,
     // per-session acknowledgement before the FIRST message leaves the machine.
     if (harness?.external_egress && !egressAck) {
@@ -9777,9 +9797,9 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
       // ones (secret path / escape / oversize) are surfaced, never dropped —
       // and we attach TYPED references (path + digest) for the agent to read
       // with its own tools, not concatenated raw content (plan §4).
-      if (attachments.length > 0) {
+      if (messageAttachments.length > 0) {
         const res = await resolveAttachments(
-          repoId || null, !!harness?.external_egress, attachments);
+          repoId || null, !!harness?.external_egress, messageAttachments);
         if (res.summary.blocked.length > 0) {
           setAttachBlocked(res.summary.blocked.map(
             (b) => ({ requested: b.requested, reason: b.reason })));
@@ -9800,15 +9820,33 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
           prompt = `${text}\n\nReferenced context (read these):\n${refs.join("\n")}`;
         }
       }
-      setInput("");
-      setAttachments([]);
-      setAttachBlocked([]);
+      if (clearComposer) {
+        setInput("");
+        setAttachments([]);
+        setAttachBlocked([]);
+      }
       await sendAgentMessage(id, prompt);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+  sendTextRef.current = sendText;
+
+  async function send() {
+    const id = sessionId;
+    const text = input.trim();
+    if (!id || (!text && attachments.length === 0) || busy) return;
+    await sendText(id, text, attachments, true);
+  }
+
+  function queueInput() {
+    const text = input.trim();
+    if (!text) return;
+    queuedRef.current = text;
+    setQueued(text);
+    setInput("");
   }
 
   function addAttachment(a: AttachmentReq) {
@@ -10243,7 +10281,7 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
             </div>
           )}
           <textarea className="chat-composer-input" value={input} rows={3}
-            placeholder={`Message ${harness?.label ?? "the agent"}…  (Enter to send · Shift+Enter for a newline)`}
+            placeholder={`Message ${harness?.label ?? "the agent"}…  (Enter to ${status === "active" ? "queue" : "send"} · Shift+Enter for a newline)`}
             onChange={(e) => {
               setInput(e.target.value);
               // auto-grow: 3 lines min, ~12 lines max, then internal scroll
@@ -10253,9 +10291,23 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault(); void send();
+                e.preventDefault();
+                if (status === "active") queueInput();
+                else void send();
               }
             }} />
+          {queued && (
+            <div className="agent-marker muted small">
+              ⏳ 1 queued — sends when the agent goes idle
+              <button type="button" className="clear" aria-label="clear queued message"
+                onClick={() => {
+                  queuedRef.current = "";
+                  setQueued("");
+                }}>
+                clear
+              </button>
+            </div>
+          )}
           {harness?.external_egress && (
             <label className="egress-notice">
               <input type="checkbox" checked={egressAck}
@@ -10273,13 +10325,22 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
               read-only analysis · {harness?.label ?? harnessId}
               {harness?.external_egress ? " · paid external egress" : ""}
             </span>
-            <button className="actbtn" onClick={() => void send()}
-              disabled={busy || status === "active"
-                || (!input.trim() && attachments.length === 0)
+            {status === "active" && (
+              <button className="clear" onClick={() => void doInterrupt()}>Stop</button>
+            )}
+            <button className="actbtn"
+              onClick={() => {
+                if (status === "active") queueInput();
+                else void send();
+              }}
+              disabled={busy
+                || (status === "active"
+                  ? !input.trim()
+                  : (!input.trim() && attachments.length === 0))
                 || (harness?.external_egress && !egressAck)}
               title={harness?.external_egress && !egressAck
                 ? "Confirm the paid external-egress notice first" : undefined}>
-              {busy ? "…" : "Send"}
+              {busy ? "…" : status === "active" ? "Queue" : "Send"}
             </button>
           </div>
         </div>
