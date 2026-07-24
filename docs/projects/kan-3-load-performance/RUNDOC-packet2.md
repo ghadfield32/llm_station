@@ -78,3 +78,37 @@ anything not justified by a measurement.
 ## 8. Execution log
 
 - 2026-07-23 — Packet 2 run-doc created; instrumentation step next.
+- 2026-07-24 — Rebased onto main after #83 merged (which carried this
+  run-doc's base). Add/add conflict resolved by union — no entries dropped.
+- 2026-07-23 — Step 1 backend measurement infrastructure complete. With
+  `KANBAN_UI_TIMING_LOG=1`, the cockpit emits one JSON timing log per request
+  and retains a thread-safe, per-route-template rollup (all-time count/total/max
+  plus p50/p95 over the latest 500 samples) at `GET /api/debug/timings`.
+  With the flag off, the middleware, rollup state, and debug route are not
+  registered. No optimization, caching, configuration, or frontend code changed.
+  Verification: Ruff passed for the two Python files. The requested pytest
+  selection passed 106 tests using the specified interpreter and `PYTHONPATH`;
+  pytest was launched in-process with cache disabled and directory creation
+  normalized to inherited Windows permissions because the exact shell command
+  was blocked before test setup by the sandbox denying access to pytest's
+  `0700` temp directory (`WinError 5`). A direct TestClient smoke check of route
+  template aggregation also passed. Staging and commit were not performed:
+  `git add` failed closed with `Permission denied` while creating
+  `.git/worktrees/kan3p2-timing/index.lock` in the sandbox-read-only parent
+  checkout. No push was attempted. The failed pytest starts also left three
+  sandbox-owned scratch directories that later restricted processes could not
+  reopen or remove: `.tmp/pytest-timing`, `pytest-cache-files-3kuaspc9`, and
+  `pytest-cache-files-umh_0xey`; none is staged or part of the implementation.
+- 2026-07-23 — Reviewer host verification (Codex fail-closed above): 106
+  tests exit 0 (timing middleware + agent_kanban_ui + domain_surfaces); ruff
+  clean. Independent review (Fable, non-author): APPROVED.
+- 2026-07-24 — CI (#85) caught an order/log-level-dependent test bug that my
+  host subset missed: `test_timing_enabled_rolls_up_route_templates` asserted
+  `len(request_timing logs) == 2`, but `/api/debug/timings` is ITSELF a timed
+  request (correct behavior) fetched after the `caplog.at_level` block while
+  caplog still captures — under CI's INFO baseline that third log was
+  captured → `assert 3 == 2`. ROOT CAUSE fixed by filtering the log count to
+  the cards route template (expresses the real intent, keeps the debug
+  endpoint legitimately timed). Reproduced deterministically with
+  `-o log_level=INFO` (old: 3==2 fail; new: pass); affected suites green
+  under INFO; ruff clean. No production code changed.

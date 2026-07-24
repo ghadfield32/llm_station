@@ -31,6 +31,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from collections import deque
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,6 +88,7 @@ from command_center.work_graph import (
 # growth-os + .env. L3/L4 approve/kill never reach here — only the action layer's
 # governed verbs (which already refuse Approved).
 CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
+KANBAN_UI_TIMING_LOG = os.environ.get("KANBAN_UI_TIMING_LOG", "") == "1"
 DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "1"
 # Phase 5 board-change APPLY (the wall crossing) is OFF by default. Turning it on
 # is a DOUBLE opt-in: this flag AND a non-empty KANBAN_UI_HUMAN_OPERATORS (the
@@ -201,6 +203,74 @@ MISSION_COLUMNS = ["awaiting_approval", "open", "approved", "running",
 
 app = FastAPI(title="Agent Kanban UI", version="1.0.0")
 logger = logging.getLogger(__name__)
+
+if KANBAN_UI_TIMING_LOG:
+    class _RouteTiming:
+        __slots__ = ("count", "total_ms", "max_ms", "samples")
+
+        def __init__(self) -> None:
+            self.count = 0
+            self.total_ms = 0.0
+            self.max_ms = 0.0
+            self.samples: deque[float] = deque(maxlen=500)
+
+    class _TimingRollup:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._routes: dict[str, _RouteTiming] = {}
+
+        def record(self, route: str, duration_ms: float) -> None:
+            with self._lock:
+                timing = self._routes.setdefault(route, _RouteTiming())
+                timing.count += 1
+                timing.total_ms += duration_ms
+                timing.max_ms = max(timing.max_ms, duration_ms)
+                timing.samples.append(duration_ms)
+
+        def snapshot(self) -> dict[str, dict[str, float | int]]:
+            with self._lock:
+                result = {}
+                for route, timing in self._routes.items():
+                    samples = sorted(timing.samples)
+                    result[route] = {
+                        "count": timing.count,
+                        "p50_ms": self._percentile(samples, 50),
+                        "p95_ms": self._percentile(samples, 95),
+                        "max_ms": timing.max_ms,
+                    }
+                return result
+
+        @staticmethod
+        def _percentile(samples: list[float], percentile: int) -> float:
+            index = max(0, (len(samples) * percentile + 99) // 100 - 1)
+            return samples[index]
+
+    app.state.timing_rollup = _TimingRollup()
+
+    @app.middleware("http")
+    async def _request_timing(request: Request, call_next):
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            duration_ms = (time.perf_counter() - started) * 1000
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", None) or request.url.path
+            app.state.timing_rollup.record(route_path, duration_ms)
+            logger.info(json.dumps({
+                "duration_ms": round(duration_ms, 3),
+                "event": "request_timing",
+                "method": request.method,
+                "route": route_path,
+                "status_code": status_code,
+            }, separators=(",", ":"), sort_keys=True))
+
+    @app.get("/api/debug/timings")
+    def timing_debug() -> dict[str, dict[str, float | int]]:
+        return app.state.timing_rollup.snapshot()
 
 _PRIVATE_JOB_MEMORY_PREFIXES = (
     "/api/job-search/relationships",
