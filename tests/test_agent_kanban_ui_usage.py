@@ -250,7 +250,7 @@ def test_portfolio_combines_local_openrouter_and_local_frontier_usage(
     monkeypatch.setattr(mod, "FRONTIER_USAGE_LEDGER", frontier)
     monkeypatch.setattr(mod, "LOCAL_FRONTIER_USAGE_LEDGER", local_frontier)
 
-    response = client.get("/api/model-usage/portfolio")
+    response = client.get("/api/model-usage/portfolio", params={"window": "all"})
     assert response.status_code == 200
     body = response.json()
     by_model = {row["model_id"]: row for row in body["models"]}

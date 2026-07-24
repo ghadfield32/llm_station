@@ -94,3 +94,65 @@ in the execution log.
 ## 8. Execution log
 
 - 2026-07-23 — Run-doc created; packet launching.
+- 2026-07-23 — **Family 5 discovered post-packet** (PR #78's first CI run
+  failed in 19s at `ruff check src`, before pytest): `pyproject.toml` dev
+  extra pinned `ruff>=0.6` with no upper bound; ruff **0.16.0 released
+  2026-07-23** adds rules flagging **597 existing findings** across src on
+  ANY branch (verified locally with `uvx ruff@0.16.0 check src`; the
+  previously-installed 0.15.21 passes the whole tree: `All checks passed!`).
+  Both post-merge main runs (18:49) fail identically → branch-independent.
+  Fix: bound the range `ruff>=0.6,<0.16` (repo standard: pin compatible
+  ranges; adopt 0.16 deliberately later). Range resolution proof:
+  `uv run --with "ruff>=0.6,<0.16" ruff --version` → 0.15.21. Follow-up
+  queued in the KAN-25 item notes: deliberate ruff 0.16 adoption (fix or
+  configure the 597, 279 auto-fixable).
+- 2026-07-23 — Family 3: aligned the stale `_build_args` test with commit
+  `13bc15b`'s stdin contract. The prompt is no longer passed positionally and
+  the test now explicitly asserts it is absent from argv; effort propagation
+  through argv and the session event remains covered.
+- 2026-07-23 — Family 2 decision: the configs are authoritative and remain
+  internally consistent — `frontier-router-providers.yaml` still configures
+  `glm-5.2`, while `local-frontier-providers.yaml` configures
+  `glm-5.2-colibri`. The portfolio intentionally creates frontier rows from
+  observed ledger evidence and defaults to a rolling seven-day window. The
+  test's fixed July 10/11 ledger rows had simply aged out, so the fixture query
+  now requests `window=all`; no config or product behavior changed.
+- 2026-07-23 — Family 1 root cause: the durable
+  `_todo_assignment_guard()` added by `dca1d34` reads `KANBAN_EVENT_LOG` at
+  request time, but the capture-convert loader injected only `CONFIGS_DIR`.
+  That left the real lock pointed at the import-time container default
+  `/app/generated/.locks`. The hermetic loader now injects
+  `KANBAN_EVENT_LOG` and `BOARD_STORE_DIR` under `tmp_path`, exercising the
+  actual cross-process lock without creating or chmodding `/app`. A direct
+  TestClient check confirmed the lock path follows the injected module
+  attribute at call time. The pre-existing `C:\app` tree was inspected before
+  that check and predates this run (created 2026-07-10; last written
+  2026-07-15), so it was not modified.
+- 2026-07-23 — Family 4 decision/evidence: service and test were introduced
+  together by `23b28a3` on July 13; later commit `dca1d34` on July 17 changed
+  only `agent_sessions/service.py` to durably emit `user_message`, explicitly
+  fixing transcript replay that otherwise omitted the human half. The later
+  intentional service behavior wins. Updated the stale test event order,
+  approval-event position, restart history, and continued sequence (`5`, not
+  `4`); production code remains unchanged.
+- 2026-07-23 — Verification: direct contract checks passed for all four
+  families (stdin/effort, all-window portfolio, injected capture-convert lock,
+  and durable event/approval/restart sequencing). Ruff passed all four changed
+  tests; AST parsing and `git diff --check` also passed. There are no changed
+  product files, so the requested product-file Ruff set is empty.
+- 2026-07-23 — Pytest constraint: both the exact four-file packet suite and
+  the `test_agent_kanban_ui.py` + `test_domain_surfaces.py` regression guard
+  were attempted with the main-checkout venv and this worktree's `PYTHONPATH`.
+  The managed Windows sandbox denied pytest's temp root at fixture setup
+  (`PermissionError: C:\Users\ghadf\AppData\Local\Temp\pytest-of-ghadf`);
+  retrying with an in-worktree `--basetemp` was also denied. No test body ran.
+- 2026-07-23 — Commit constraint: the linked worktree's Git administrative
+  directory is outside the writable roots. `git add`/`git commit` cannot create
+  `C:\Users\ghadf\vscode_projects\docker_projects\llm_station\.git\worktrees\kan25-ci-green\index.lock`
+  (`Permission denied`), so the required per-family commits could not be
+  created inside this sandbox.
+- 2026-07-23 — Sandbox artifact note: the denied pytest runs created
+  `.pytest-tmp/` and two `pytest-cache-files-*` directories in this worktree
+  with ACLs that prevent traversal/removal. Exact-target cleanup via native
+  PowerShell was policy-blocked and `git clean` could not enter them; no other
+  untracked path was targeted.

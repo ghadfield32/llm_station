@@ -94,3 +94,33 @@ operator's "research and implement best practices" directive; adjust anytime)
 
 - 2026-07-23 — Run-doc drafted with code-verified root cause; awaiting §5
   KPI-meeting answers.
+- 2026-07-23 — KAN-3 packet 1 resilience implemented in the isolated
+  `feat/kan-3-load-resilience` worktree: keep-last-good data, per-surface stale
+  timestamp/consecutive-failure state, transient fetch-kill classification,
+  two-failure banner debounce, immediate quiet foreground refresh, and
+  Diagnostics failure preservation.
+  - `npm ci --no-audit --no-fund` — exit 1 in the managed sandbox
+    (`spawn EPERM` launching npm lifecycle scripts); script-suppressed locked
+    install used for validation — exit 0.
+  - `node node_modules/typescript/bin/tsc` — exit 0 (strict TypeScript).
+  - Direct assertions over `loadResilience.ts` classifier/state transitions —
+    exit 0. No test file added because packet 1 restricts edits to the listed
+    product module/App/api/run-doc files.
+  - `npm run build` — exit 1 after `tsc` passed; Vite could not spawn the
+    installed esbuild binary under the managed sandbox (`spawn EPERM`).
+  - Required Python suite — exit 1 before test execution: all 104 setups were
+    denied access to pytest's temp directory by the managed sandbox; a scoped
+    `--basetemp` retry was denied identically.
+  - Manual raw-error-path grep and `git diff --check` — exit 0.
+- 2026-07-23 — Verification re-run by the reviewer session on the host (the
+  sandbox blockers above were environment, not code): `npm ci` exit 0,
+  `npm run build` exit 0; pytest test_agent_kanban_ui + test_domain_surfaces
+  → 104 passed, exit 0. Independent review (Fable, non-author, full diff):
+  **APPROVED** — keep-last-good honored on all six surfaces (boards, router,
+  missions, observability, activity, repositories); pure classifier module
+  matches §5 decisions (transient never banners; banner after 2 consecutive
+  non-transient failures; quiet foreground refetch); stale chip uses the
+  existing `.chip` design token; DiagnosticsView still receives full
+  unfiltered failure truth; boards/router views can no longer render a raw
+  "Load failed". Committed by the reviewer with Codex authorship credited
+  (Codex correctly failed closed on its sandbox-blocked verification).

@@ -102,6 +102,53 @@ def test_parser_fails_closed_on_duplicate_ids_and_wrong_expected_count():
         parse_grand_todo_bytes(_source().encode("utf-8"), expected_items=148)
 
 
+def test_parser_reads_optional_priority_impact_and_timeline_lines():
+    text = _source().replace(
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_",
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_\n"
+        "**Priority:** p1\n"
+        "**Impact:**   Unblocks reliable planning   \n"
+        "**Timeline:**   This sprint   ",
+    ).replace(
+        "`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_",
+        "`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_\n"
+        "**Priority:** _TBD_",
+    )
+
+    cards = {
+        card.item_id: card
+        for card in parse_grand_todo_bytes(text.encode("utf-8")).cards
+    }
+
+    assert cards["DE-1"].priority == "P1"
+    assert cards["DE-1"].impact == "Unblocks reliable planning"
+    assert cards["DE-1"].timeline == "This sprint"
+    assert cards["DE-2"].priority is None
+    assert cards["DE-2"].impact is None
+    assert cards["DE-2"].timeline is None
+    assert cards["MLB-3"].priority is None
+
+
+def test_betts_default_does_not_project_absent_or_tbd_optional_fields(tmp_path):
+    text = _source().replace(
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_",
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_\n"
+        "**Priority:** _TBD_",
+    )
+
+    result = _run(tmp_path, text, apply=True)
+    _, store, log = _paths(tmp_path)
+    provider = CommandCenterBoardProvider(
+        board_id=BOARD_ID, event_log=EventLog(log), store_dir=store)
+    cards = {card["card_id"]: card for card in provider.list_cards()}
+
+    assert result["board_id"] == BOARD_ID
+    for card_id in ("grand-todo-de-1", "grand-todo-de-2"):
+        assert "priority" not in cards[card_id]
+        assert "impact" not in cards[card_id]
+        assert "timeline" not in cards[card_id]
+
+
 def test_dry_run_performs_no_runtime_writes(tmp_path):
     result = _run(tmp_path, _source(), apply=False)
     _, store, log = _paths(tmp_path)
@@ -200,7 +247,14 @@ def test_archive_move_updates_source_and_can_restore(tmp_path):
 
 
 def test_edit_rewrites_only_stable_block_and_preserves_all_ids(tmp_path):
-    _run(tmp_path, _source(), apply=True)
+    text = _source().replace(
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_",
+        "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_\n"
+        "**Priority:** P2\n"
+        "**Impact:** Keeps cockpit edits lossless\n"
+        "**Timeline:** Before packet B",
+    )
+    _run(tmp_path, text, apply=True)
     source, store, log = _paths(tmp_path)
     provider = CommandCenterBoardProvider(
         board_id=BOARD_ID, event_log=EventLog(log), store_dir=store)
@@ -214,7 +268,15 @@ def test_edit_rewrites_only_stable_block_and_preserves_all_ids(tmp_path):
 
     assert result["status"] == "edited"
     assert "edited in cockpit" in source.read_text(encoding="utf-8")
-    assert parse_grand_todo_bytes(source.read_bytes()).tracked_count == 3
+    parsed = parse_grand_todo_bytes(source.read_bytes())
+    assert parsed.tracked_count == 3
+    parsed_card = next(card for card in parsed.cards if card.item_id == "DE-1")
+    assert parsed_card.priority == "P2"
+    assert parsed_card.impact == "Keeps cockpit edits lossless"
+    assert parsed_card.timeline == "Before packet B"
+    assert result["card"]["priority"] == "P2"
+    assert result["card"]["impact"] == "Keeps cockpit edits lossless"
+    assert result["card"]["timeline"] == "Before packet B"
 
 
 def test_status_event_before_base_write_recovers_without_source_rollback(
@@ -369,7 +431,10 @@ def test_master_profile_projects_per_item_repo_designations(tmp_path):
     text = _source().replace(
         "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_",
         "`🚧 WIP` · **Target:** 2026-07-20 · **Done:** _—_\n"
-        "**Repo:** `betts_basketball`",
+        "**Repo:** `betts_basketball`\n"
+        "**Priority:** P1\n"
+        "**Impact:** Protects the master tracker\n"
+        "**Timeline:** Immediate",
     )
     source, store, log = _paths(tmp_path)
     source.write_bytes(text.encode("utf-8"))
@@ -388,6 +453,10 @@ def test_master_profile_projects_per_item_repo_designations(tmp_path):
     # master profile default; provenance names the master importer/source.
     assert cards["grand-todo-de-1"]["repo_id"] == "betts_basketball"
     assert cards["grand-todo-de-2"]["repo_id"] == "llm_station"
+    assert cards["grand-todo-de-1"]["priority"] == "P1"
+    assert cards["grand-todo-de-1"]["impact"] == "Protects the master tracker"
+    assert cards["grand-todo-de-1"]["timeline"] == "Immediate"
+    assert "priority" not in cards["grand-todo-de-2"]
     assert cards["grand-todo-de-1"]["source_importer"] == "master-grand-todo.v1"
     assert (cards["grand-todo-de-1"]["source_ref"]
             == "llm_station/docs/todos/GRAND_TODO_LIST.md")

@@ -31,6 +31,7 @@ import threading
 import time
 import unicodedata
 import uuid
+from collections import deque
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -87,6 +88,7 @@ from command_center.work_graph import (
 # growth-os + .env. L3/L4 approve/kill never reach here — only the action layer's
 # governed verbs (which already refuse Approved).
 CHAT_ENABLED = os.environ.get("KANBAN_UI_CHAT_ENABLED", "") == "1"
+KANBAN_UI_TIMING_LOG = os.environ.get("KANBAN_UI_TIMING_LOG", "") == "1"
 DOMAIN_CONFIG_WRITES = os.environ.get("KANBAN_UI_DOMAIN_CONFIG_WRITES", "") == "1"
 # Phase 5 board-change APPLY (the wall crossing) is OFF by default. Turning it on
 # is a DOUBLE opt-in: this flag AND a non-empty KANBAN_UI_HUMAN_OPERATORS (the
@@ -201,6 +203,74 @@ MISSION_COLUMNS = ["awaiting_approval", "open", "approved", "running",
 
 app = FastAPI(title="Agent Kanban UI", version="1.0.0")
 logger = logging.getLogger(__name__)
+
+if KANBAN_UI_TIMING_LOG:
+    class _RouteTiming:
+        __slots__ = ("count", "total_ms", "max_ms", "samples")
+
+        def __init__(self) -> None:
+            self.count = 0
+            self.total_ms = 0.0
+            self.max_ms = 0.0
+            self.samples: deque[float] = deque(maxlen=500)
+
+    class _TimingRollup:
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self._routes: dict[str, _RouteTiming] = {}
+
+        def record(self, route: str, duration_ms: float) -> None:
+            with self._lock:
+                timing = self._routes.setdefault(route, _RouteTiming())
+                timing.count += 1
+                timing.total_ms += duration_ms
+                timing.max_ms = max(timing.max_ms, duration_ms)
+                timing.samples.append(duration_ms)
+
+        def snapshot(self) -> dict[str, dict[str, float | int]]:
+            with self._lock:
+                result = {}
+                for route, timing in self._routes.items():
+                    samples = sorted(timing.samples)
+                    result[route] = {
+                        "count": timing.count,
+                        "p50_ms": self._percentile(samples, 50),
+                        "p95_ms": self._percentile(samples, 95),
+                        "max_ms": timing.max_ms,
+                    }
+                return result
+
+        @staticmethod
+        def _percentile(samples: list[float], percentile: int) -> float:
+            index = max(0, (len(samples) * percentile + 99) // 100 - 1)
+            return samples[index]
+
+    app.state.timing_rollup = _TimingRollup()
+
+    @app.middleware("http")
+    async def _request_timing(request: Request, call_next):
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            duration_ms = (time.perf_counter() - started) * 1000
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", None) or request.url.path
+            app.state.timing_rollup.record(route_path, duration_ms)
+            logger.info(json.dumps({
+                "duration_ms": round(duration_ms, 3),
+                "event": "request_timing",
+                "method": request.method,
+                "route": route_path,
+                "status_code": status_code,
+            }, separators=(",", ":"), sort_keys=True))
+
+    @app.get("/api/debug/timings")
+    def timing_debug() -> dict[str, dict[str, float | int]]:
+        return app.state.timing_rollup.snapshot()
 
 _PRIVATE_JOB_MEMORY_PREFIXES = (
     "/api/job-search/relationships",
@@ -3049,6 +3119,9 @@ class TodoRowOut(BaseModel):
     kind: str | None
     status: str | None
     raw_status: str | None
+    priority: str | None = None
+    impact: str | None = None
+    timeline: str | None = None
     assigned: bool
     boards: list[TodoBoardLinkOut]
     repo_ids: list[str]
@@ -3131,6 +3204,7 @@ class TodoFilterCatalogsOut(BaseModel):
 
     kinds: list[str]
     statuses: list[str]
+    priorities: list[str]
     sources: list[str]
     boards: list[TodoBoardCatalogOut]
 
@@ -3692,6 +3766,21 @@ def _card_todo_row(
         if isinstance(card.get("canonical_status"), str) else None
     )
     raw_status = card.get("status") if isinstance(card.get("status"), str) else None
+    priority = next((
+        value.strip()
+        for field in ("priority", "research_priority", "tier", "severity")
+        if isinstance((value := card.get(field)), str) and value.strip()
+    ), None)
+    impact = (
+        card["impact"].strip()
+        if isinstance(card.get("impact"), str) and card["impact"].strip()
+        else None
+    )
+    timeline = (
+        card["timeline"].strip()
+        if isinstance(card.get("timeline"), str) and card["timeline"].strip()
+        else None
+    )
     return {
         "todo_id": f"card:{domain_id}:{card_id}",
         "work_item_id": None,
@@ -3703,6 +3792,9 @@ def _card_todo_row(
         "kind": kind,
         "status": canonical_status,
         "raw_status": raw_status,
+        "priority": priority,
+        "impact": impact,
+        "timeline": timeline,
         "assigned": True,
         "boards": [{
             "board_id": board_id,
@@ -3892,6 +3984,11 @@ def _all_todo_inventory() -> dict[str, Any]:
             "statuses": sorted({
                 row["status"] for row in rows if isinstance(row.get("status"), str)
             }),
+            "priorities": sorted({
+                row["priority"]
+                for row in rows
+                if isinstance(row.get("priority"), str)
+            }),
             "sources": sorted({str(row["source_kind"]) for row in rows}),
             "boards": [
                 {"board_id": board_id, "domain_id": domain_id, "title": title}
@@ -3906,9 +4003,9 @@ def _all_todo_inventory() -> dict[str, Any]:
     response_model=TodoInventoryOut,
 )
 def all_todos(
-    q: str = "", kind: str = "", status: str = "", source: str = "",
-    assigned: bool | None = None, board_id: str = "", offset: int = 0,
-    limit: int = 10000,
+    q: str = "", kind: str = "", status: str = "", priority: str = "",
+    source: str = "", assigned: bool | None = None, board_id: str = "",
+    offset: int = 0, limit: int = 10000,
 ) -> dict:
     if offset < 0 or not 1 <= limit <= 10000:
         raise HTTPException(status_code=400, detail="offset must be >= 0 and limit 1..10000")
@@ -3927,6 +4024,7 @@ def all_todos(
         )
         and (not kind or row["kind"] == kind)
         and (not status or row["status"] == status)
+        and (not priority or row.get("priority") == priority)
         and (not source or row["source_kind"] == source)
         and (assigned is None or row["assigned"] is assigned)
         and (not board_id or any(board["board_id"] == board_id for board in row["boards"]))
@@ -7401,6 +7499,26 @@ class JobSearchCandidateAnswerIn(BaseModel):
     answer: str = Field(min_length=1, max_length=5_000)
 
 
+class JobSearchDigestItemOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    company: str
+    role: str
+    fit_score: int | float
+    automation_class: str
+    apply_url: str
+    review_href: str
+    column: Literal["Suggested Jobs", "Needs Geoff"]
+
+
+class JobSearchDigestOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[JobSearchDigestItemOut]
+    counts: dict[str, int]
+    generated_at: datetime
+
+
 @app.post("/api/domain/book/cards", status_code=201)
 def create_book_card(body: BookCreateIn) -> dict:
     """Create one operator-authored book and enter its selected governed lane."""
@@ -8661,6 +8779,28 @@ def _application_question_policy() -> tuple[dict[str, Any], Path]:
     if policy_path.is_file():
         return _read_yaml_file(policy_path), policy_path
     return cfg.application_questions.model_dump(mode="json"), CONFIGS_DIR / "job_search.yaml"
+
+
+@app.get("/api/job-search/digest", response_model=JobSearchDigestOut)
+def job_search_digest(response: Response) -> dict:
+    """Read-only review list for Suggested Jobs and prepared Needs-Geoff cards."""
+    _private_no_store(response)
+    spec = _require_job_domain("job_application")
+    from command_center.job_search.digest import build_digest_items
+
+    items = build_digest_items(_domain_cards(spec)["cards"])
+    counts = {
+        "suggested_jobs": sum(
+            item["column"] == "Suggested Jobs" for item in items
+        ),
+        "needs_geoff": sum(item["column"] == "Needs Geoff" for item in items),
+        "total": len(items),
+    }
+    return {
+        "items": items,
+        "counts": counts,
+        "generated_at": datetime.now(UTC),
+    }
 
 
 @app.get("/api/job-search/profile-controls")
