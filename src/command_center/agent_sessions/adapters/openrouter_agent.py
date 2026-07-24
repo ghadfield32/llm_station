@@ -34,6 +34,7 @@ from typing import Any, AsyncIterator, Callable
 
 import yaml
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
 from ..protocol import (
     ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
@@ -202,6 +203,14 @@ class OpenRouterAgentHarness:
     the store) — same restart-recovery contract as every other harness."""
 
     name = "openrouter_agent"
+    bench_profile = BenchProfile(
+        adapter="openrouter_agent",
+        streaming=Verdict.PARTIAL,
+        resume=Verdict.PARTIAL,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     # Honest capability disclosure (read by the registry probe → UI): this
     # harness sends repo file contents to a PAID EXTERNAL API. The cockpit must
     # show an explicit "this context will leave the machine" confirmation before

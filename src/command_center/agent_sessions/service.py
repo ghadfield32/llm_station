@@ -16,10 +16,22 @@ from .registry import HarnessRegistry
 from .store import SessionRecord, SessionStoreProtocol
 
 
+class PolicyRefusal(RuntimeError):
+    """A typed, durably-recorded refusal from the declarative policy stack."""
+
+    def __init__(self, decision, action) -> None:
+        self.decision = decision
+        self.action = action
+        super().__init__(
+            f"policy {decision.policy_set!r} denied tool {action.tool_name!r}")
+
+
 class AgentSessionService:
-    def __init__(self, *, store: SessionStoreProtocol, registry: HarnessRegistry) -> None:
+    def __init__(self, *, store: SessionStoreProtocol, registry: HarnessRegistry,
+                 usage_service: object | None = None) -> None:
         self.store = store
         self.registry = registry
+        self.usage_service = usage_service
         # PROCESS-LOCAL cache only — never the source of truth. A restart empties
         # this; every method below reconstructs a fresh harness instance for an
         # existing durable session rather than assuming this cache still holds
@@ -92,6 +104,95 @@ class AgentSessionService:
     def get_session(self, session_id: str) -> SessionRecord:
         return self.store.get(session_id)
 
+    def _policy_sets_for_session(self, session_id: str):
+        spec_name = None
+        for event in self.store.events_since(session_id, 0):
+            if event.type == "session_started" and event.payload.get("spec_name"):
+                spec_name = event.payload["spec_name"]
+                break
+        if spec_name is None:
+            return []
+
+        # Both imports and both config reads stay action-local: tests and live
+        # operators can change the policy/spec roots without an import-time scan
+        # or stale cache masking the new contract.
+        from . import policy_engine
+        from .spec_bridge import load_spec
+
+        spec, _instructions = load_spec(spec_name)
+        if not spec.policy_refs:
+            return []
+        config = policy_engine.load_policy_config()
+        return policy_engine.select_policy_sets(config, spec.policy_refs)
+
+    def _session_cost_usd(self, session_id: str) -> float | None:
+        if self.usage_service is None:
+            return None
+        reader = getattr(self.usage_service, "session_cost_usd", None)
+        if reader is None:
+            raise TypeError("usage_service does not expose session_cost_usd")
+        return reader(session_id)
+
+    def _session_tool_call_count(self, session_id: str) -> int:
+        action_types = {
+            "tool_requested", "tool_started", "command_started",
+            "approval_required",
+        }
+        return sum(
+            event.type in action_types
+            and not event.payload.get("policy_generated", False)
+            for event in self.store.events_since(session_id, 0))
+
+    @staticmethod
+    def _is_tool_action_event(event: AgentEvent) -> bool:
+        return event.type in {
+            "tool_requested", "tool_started", "command_started",
+            "approval_required",
+        }
+
+    @staticmethod
+    def _tool_name(event: AgentEvent) -> str:
+        for key in ("tool", "name", "item_type"):
+            value = event.payload.get(key)
+            if value:
+                return str(value)
+        if event.type == "command_started":
+            return "os.command"
+        if event.type == "approval_required":
+            return str(event.payload.get("action") or "approval_action")
+        return "unknown_tool"
+
+    @classmethod
+    def _is_os_tool(cls, event: AgentEvent) -> bool:
+        if event.type in {"command_started", "approval_required"}:
+            return True
+        return cls._tool_name(event).casefold() in {
+            "bash", "bashoutput", "cmd", "commandexecution", "edit",
+            "filechange", "killshell", "multiedit", "notebookedit",
+            "powershell", "shell", "write",
+        }
+
+    def _evaluate_policy(self, session_id: str, event: AgentEvent):
+        from .policy_engine import ToolAction, resolve
+
+        action = ToolAction(
+            tool_name=self._tool_name(event),
+            is_os_tool=self._is_os_tool(event),
+            estimated_cost_usd=self._session_cost_usd(session_id),
+            session_tool_call_count=self._session_tool_call_count(session_id),
+        )
+        return action, resolve(self._policy_sets_for_session(session_id), action)
+
+    def _record_policy_denial(self, session_id: str, decision, action) -> AgentEvent:
+        return self.store.append_event(session_id, AgentEvent("policy_denied", {
+            "verdict": decision.verdict.value,
+            "tool": action.tool_name,
+            "level": decision.level.value if decision.level else None,
+            "policy_set": decision.policy_set,
+            "handler": decision.handler.value if decision.handler else None,
+            "note": decision.note,
+        }))
+
     async def send_message(self, session_id: str, prompt: str) -> AsyncIterator[AgentEvent]:
         record = self.store.get(session_id)
         if record.status == "closed":
@@ -103,6 +204,33 @@ class AgentSessionService:
         yield self.store.append_event(
             session_id, AgentEvent("user_message", {"text": prompt}))
         async for event in harness.send(session_id, prompt):
+            if (os.environ.get("AGENT_SESSION_POLICIES_ENABLED", "") == "1"
+                    and self._is_tool_action_event(event)):
+                from command_center.schemas.session_policy import PolicyVerdict
+
+                action, decision = self._evaluate_policy(session_id, event)
+                if decision.verdict == PolicyVerdict.DENY:
+                    self._record_policy_denial(
+                        session_id, decision, action)
+                    raise PolicyRefusal(decision, action)
+                if decision.verdict == PolicyVerdict.ASK:
+                    # A harness-native approval is already the existing wall.
+                    # Otherwise create the same durable approval/event shape and
+                    # stop consuming the harness generator before dispatch.
+                    if event.type == "approval_required":
+                        yield event
+                    else:
+                        yield event
+                        approval = self.store.create_approval(
+                            session_id, action=action.tool_name)
+                        yield self.store.append_event(session_id, AgentEvent(
+                            "approval_required", {
+                                "approval_id": approval.approval_id,
+                                "action": action.tool_name,
+                                "policy_generated": True,
+                                "policy_set": decision.policy_set,
+                            }))
+                    return
             yield event
 
     def get_events(self, session_id: str, after_sequence: int = 0) -> list[AgentEvent]:

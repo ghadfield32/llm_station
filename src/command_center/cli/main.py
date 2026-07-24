@@ -388,6 +388,8 @@ COMMANDS: dict[str, tuple] = {
                         "generic bounded-loop proof for any repo (trivial PR -> required checks -> no merge)"),
     "agent-preflight": (lambda a: pym("command_center.cli.agent_preflight", *a),
                        "Phase 0 evidence probe for Claude Agent SDK / Codex SDK (--harness all|claude|codex; read-only)"),
+    "adapter-bench": (lambda a: pym("command_center.cli.adapter_bench", *a),
+                      "report-only declared-vs-observed adapter capability matrix"),
     "agent-worker": (lambda a: pym("command_center.cli.agent_worker", *a),
                      "start the host-side agent-session worker (FastAPI, token-gated, localhost by default; needs AGENT_WORKER_TOKEN + LEDGER_BASE_URL)"),
     "memory-add": (lambda a: pym("command_center.cli.memory_ops", "add", *a),

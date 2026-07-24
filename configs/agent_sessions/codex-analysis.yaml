@@ -8,5 +8,7 @@ harness: codex_agent
 capability_profile: generalist
 effort: high
 mode: analysis
-# Placeholder references for AGT-14 policy resolution.
-policy_refs: []
+policy_refs:
+  - session-os-approval
+  - agent-tool-call-cap
+  - server-cost-budget

@@ -63,15 +63,20 @@ live run against real harnesses is recorded with the matrix artifact.
 - Validation: targeted pytest (one process only — never two concurrent),
   `make lint`; matrix artifact path recorded.
 
-## 5. Open questions (Stage-4 gate)
+## 5. Open questions — ANSWERED (Stage-4 gate passed 2026-07-24)
 
-1. Dimension set v1: streaming / resume / write-mode wall / attachments /
-   model-switch — right five? Add interrupt/steering?
-2. Live probes spend real tokens and touch real CLIs — cadence and budget
-   (per usage layer) for live runs?
-3. Should DRIFT fail CI, or report-only until the first live baseline is
-   recorded (their P1 probes are report-only)?
-4. Does the matrix artifact live under `evaluation/` or `generated/`?
+Operator decisions, recorded verbatim; scope locked:
+
+1. Dimension set v1: **5 core** — streaming, resume, write-mode wall,
+   attachments, model-switch. Interrupt/steering are a later packet.
+2. Live probes: **operator-triggered only** (never in CI); the offline
+   subset runs in CI. Live-run token budget stays a per-run operator
+   decision (no autonomous spend).
+3. DRIFT: **report-only first** — offline probes run in CI as report-only
+   until one live baseline is recorded (mirrors omnigent's P1 probes); a
+   later challenger flips DRIFT to a CI gate once the baseline is triaged.
+4. Matrix artifact: **`generated/`** — disposable rendered output, never
+   hand-edited, regenerated each run.
 
 ## 6. Model allocation
 
@@ -85,7 +90,48 @@ live run against real harnesses is recorded with the matrix artifact.
 - Independent review: Sol wrote → **Fable/Opus** read-only fresh session
   (probe-validity + honesty of the reconciliation semantics).
 
-## 7. Links
+## 7. Packet-1 evidence (2026-07-24)
+
+- **Implemented by Sol** (`codex exec --sandbox workspace-write --full-auto`,
+  gpt-5.6-sol **high** — throughput, resolved live priority 1; brief:
+  [PACKET-1.md](PACKET-1.md)) in isolated worktree `C:\tmp\agt15-bench`
+  stacked on AGT-14→AGT-16. Sandbox correctly blocked the git commit →
+  committed host-side after independent verification.
+- **Delivered**: `agent_sessions/bench/` (models, profiles, probes/,
+  reconcile, render, runner), `cli/adapter_bench.py` registered in
+  `cli/main.py`, `BenchProfile` attached to FakeHarness + all 4 adapter
+  classes, `generated/adapter-capability-matrix.json`, 7 tests.
+- **The honesty rule held**: offline matrix = PASS 1 / PARTIAL 2 / FAIL 0 /
+  **SKIPPED 22** / DRIFT 0. All 20 real-adapter cells are `SKIPPED` with a
+  concrete offline reason — never a faked PASS (asserted by
+  `test_real_adapters_are_skipped_offline_never_unobserved_passes`).
+  FakeHarness earns 3 observed cells (write_mode_wall PASS, streaming +
+  resume PARTIAL) and honestly SKIPS attachments/model_switch it cannot
+  exercise. DRIFT=0 offline (no real drift found).
+- **Independently verified host-side** (Fable, this session — did NOT write
+  AGT-15; Sol did): validate_config PASS, check_cross_refs PASS,
+  `adapter_bench` exit 0, `pytest test_adapter_bench.py` 7/7, regression
+  (spec + policy + floor + sessions) 55/55, ruff clean, mypy clean. The 5
+  `test_agent_session_service` failures remain the pre-existing KAN-25 family.
+- **DRIFT mechanism proven** (not just asserted absent): a deliberately-wrong
+  profile → DRIFT (`test_declared_not_observed_capability_becomes_drift`);
+  seeded registry-mode mismatch → DRIFT; `external_egress` vs unqualified
+  attachment PASS → DRIFT. **Coverage guard** extends AGT-16's idea:
+  `test_every_registry_harness_has_exactly_one_profile_and_vice_versa` (an
+  orphan profile OR an adapter with no profile FAILS).
+- **Review verdict: APPROVE**, no defects. Design is honest-by-construction:
+  `ProbeResult` forbids a probe from self-declaring DRIFT (reconciliation-only
+  verdict); `BenchProfile` forbids declaring SKIPPED/DRIFT (claims must be a
+  real capability). Report-only per Stage-4 — DRIFT does not gate CI until a
+  live baseline exists.
+- **KPIs vs baseline**: KPI-1 = 3 probe-earned cells + full 5×5 matrix
+  reconciled (baseline 0 probe-earned cells). KPI-2 = DRIFT count now
+  MEASURED = 0 offline (baseline: unknown) — the number the RUNDOC said would
+  stay unknown until measured is now a measured 0, with the mechanism proven
+  to flag a real one. Feeds AGT-12. Stop condition met — live probes +
+  interrupt/steering dims are a later challenger.
+
+## 8. Links
 
 - Master item: `docs/todos/GRAND_TODO_LIST.md` → AGT-15 (AGT-3-for-runtimes;
   KPI feeds AGT-12).

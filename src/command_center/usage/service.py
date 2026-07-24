@@ -137,6 +137,22 @@ class UsageService:
         return [self.runtime_status(rid, after_iso)
                 for rid in self.store.list_runtime_ids()]
 
+    def session_cost_usd(self, session_id: str) -> float | None:
+        """Read the canonical running spend attributed to one agent session.
+
+        Policy consumers use this surface instead of keeping a parallel cost
+        counter. Only additive usage samples participate; unknown/unmetered cost
+        remains ``None`` rather than being fabricated as zero.
+        """
+        samples = []
+        for runtime_id in self.store.list_runtime_ids():
+            samples.extend(
+                sample for sample in self.store.samples_since(runtime_id)
+                if sample.sample_kind in _ADDITIVE_SAMPLE_KINDS
+                and sample.attribution.agent_session_id == session_id)
+        cost, _source = summarize_cost(samples)
+        return cost
+
     def _roll_usage(self, runtime_id: str, after_iso: str | None = None) -> UsageSample | None:
         """Cockpit-ATTRIBUTED roll-up — sums ONLY additive REQUEST_DELTA
         samples, so the same activity observed by several collectors (a

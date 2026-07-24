@@ -1,0 +1,31 @@
+# Declarative agent-session tool policy sets. Evaluation is always stricter-first:
+# session -> agent -> server. ALLOW never overrides an earlier ASK or DENY.
+#
+# The numeric values below are operator-tunable examples for the first flagged
+# rollout; they are not asserted to be validated production limits. The feature
+# remains OFF unless AGENT_SESSION_POLICIES_ENABLED=1.
+schema_version: command-center.session-policies.v1
+policy_sets:
+  - name: session-os-approval
+    level: session
+    rules:
+      - handler: command_center.agent_sessions.policy_builtins.ask_on_os_tools
+        params: {}
+        note: Require the existing human approval wall for OS-backed tools.
+
+  - name: agent-tool-call-cap
+    level: agent
+    rules:
+      - handler: command_center.agent_sessions.policy_builtins.max_tool_calls_per_session
+        params:
+          limit: 100
+        note: Operator-tunable example cap for a single agent session.
+
+  - name: server-cost-budget
+    level: server
+    rules:
+      - handler: command_center.agent_sessions.policy_builtins.cost_budget
+        params:
+          max_cost_usd: 10.0
+          ask_thresholds_usd: [5.0]
+        note: Operator-tunable example soft threshold and hard cost cap.

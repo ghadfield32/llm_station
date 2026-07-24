@@ -37,6 +37,7 @@ import os
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
 from ..protocol import (
     ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
@@ -237,6 +238,14 @@ class ClaudeAgentHarness:
     restart) recovers via resume=external_session_id."""
 
     name = "claude_agent"
+    bench_profile = BenchProfile(
+        adapter="claude_agent",
+        streaming=Verdict.PARTIAL,
+        resume=Verdict.PASS,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     # can_use_tool denies writes automatically; there is no human-in-the-loop
     # approval hook mid-turn in read-only mode (a write is DENIED, not queued for
     # approval), so approvals are non-interactive for this harness — the same

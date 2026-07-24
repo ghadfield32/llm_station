@@ -150,6 +150,26 @@ def check_content_routing(pipeline: dict, roles: set) -> list:
     return problems
 
 
+def check_agent_session_policy_refs(
+    policies: dict, specs_dir: Path = Path("configs/agent_sessions"),
+) -> list:
+    """Every AgentSessionSpec policy ref must name a declared policy set."""
+    known = {
+        policy_set.get("name")
+        for policy_set in policies.get("policy_sets", [])
+        if policy_set.get("name")
+    }
+    problems = []
+    for path in sorted(specs_dir.glob("*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for ref in spec.get("policy_refs", []):
+            if ref not in known:
+                problems.append(
+                    f"agent-session spec '{spec.get('name', path.stem)}' policy_ref "
+                    f"'{ref}' is not in session_policies.yaml")
+    return problems
+
+
 def main() -> int:
     targets = yaml.safe_load(open("configs/targets.yaml"))
     proactive = yaml.safe_load(open("configs/proactive.yaml"))
@@ -241,6 +261,11 @@ def main() -> int:
         ok = False
     pipeline = yaml.safe_load(open("configs/content_pipeline.yaml"))
     for msg in check_content_routing(pipeline, roles):
+        print(f"  DANGLING: {msg}")
+        ok = False
+
+    session_policies = yaml.safe_load(open("configs/session_policies.yaml"))
+    for msg in check_agent_session_policy_refs(session_policies):
         print(f"  DANGLING: {msg}")
         ok = False
 
