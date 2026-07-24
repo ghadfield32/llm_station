@@ -1,0 +1,5 @@
+name: malformed
+instructions: NEVER_EXPOSE_THIS_SECRET
+harness: definitely_not_a_harness
+capability_profile: generalist
+mode: analysis
