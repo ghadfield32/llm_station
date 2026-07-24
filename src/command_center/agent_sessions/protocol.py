@@ -42,6 +42,14 @@ class SessionStart:
     effort: str | None = None
     context_mode: str | None = None    # e.g. "1m" for a long-context model
     permission_profile: str = "read_only"
+    # Populated only by the defaults-off agent-session-spec consumer.
+    instructions: str | None = None
+    spec_name: str | None = None
+
+
+def session_spec_metadata(request: SessionStart) -> dict[str, str]:
+    """Durable event metadata present only for a spec-derived session."""
+    return {"spec_name": request.spec_name} if request.spec_name is not None else {}
 
 
 @dataclass

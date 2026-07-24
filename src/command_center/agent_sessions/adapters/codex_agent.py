@@ -31,7 +31,9 @@ from pathlib import Path
 from typing import Any, AsyncIterator
 
 from ..events import AgentEvent
-from ..protocol import ApprovalDecision, HarnessProbe, SessionStart
+from ..protocol import (
+    ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
+)
 from ..store import SessionStoreProtocol
 from ..workspace_scope import prepend_workspace_bounds
 
@@ -489,7 +491,8 @@ class CodexAgentHarness:
             "session_started",
             {"mode": request.mode, "external_session_id": thread.id,
              "model": model, "model_selection_reason": model_reason,
-             "requested_effort": request.effort or "medium"}))
+             "requested_effort": request.effort or "medium",
+             **session_spec_metadata(request)}))
         # "idle" = ready, no turn running yet — matches FakeHarness/worker_app's
         # status vocabulary exactly (see worker_app.py's async-execution note)
         self.store.set_status(record.session_id, "idle")
