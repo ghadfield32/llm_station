@@ -31,6 +31,8 @@ class FakeHarness:
         write_mode_wall=Verdict.PASS,
         attachments=Verdict.FAIL,
         model_switch=Verdict.FAIL,
+        interrupt=Verdict.PASS,
+        steering=Verdict.FAIL,
     )
 
     def __init__(self, store: SessionStoreProtocol) -> None:

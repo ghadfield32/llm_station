@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://www.authelia.com/schemas/v4.39/json-schema/configuration.json
+
+server:
+  address: 'tcp://:9091'
+
+totp:
+  disable: false
+
+authentication_backend:
+  file:
+    path: '/config/users_database.yml'
+
+access_control:
+  # This session is now the single credential guarding every app behind it --
+  # one_factor would mean a leaked password alone grants full access. Found
+  # live during Phase 1 validation: with one_factor, a first-factor-only
+  # session reached the gated pilot successfully EVEN AFTER a TOTP device was
+  # registered, because registering 2FA only makes it available, it doesn't
+  # require it -- the explicit rule below is what requires it.
+  #
+  # default_policy is 'deny', not 'two_factor': every real request in this
+  # single-domain deployment matches the explicit rule anyway (identical
+  # practical effect right now), but fail-closed means a future
+  # misconfiguration or unexpected Host header denies outright instead of
+  # silently granting two_factor to a domain nobody intended to protect.
+  # Independent review flagged this as the safer default.
+  default_policy: 'deny'
+  rules:
+    - domain: '{{ mustEnv "LC_TAILNET_HOST" }}'
+      policy: 'two_factor'
+
+session:
+  name: 'authelia_session'
+  cookies:
+    # v4.39 requires both values. Render the operator's MagicDNS hostname so
+    # one domain-scoped cookie works across the portal and gated app ports.
+    - domain: '{{ mustEnv "LC_TAILNET_HOST" }}'
+      authelia_url: 'https://{{ mustEnv "LC_TAILNET_HOST" }}:{{ mustEnv "CADDY_AUTH_PORTAL_PORT" }}'
+
+storage:
+  local:
+    path: '/data/db.sqlite3'
+
+notifier:
+  filesystem:
+    filename: '/data/notification.txt'

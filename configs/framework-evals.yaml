@@ -5,6 +5,7 @@ schema_version: command-center.framework-evals.v1
 # They run against the local Ollama OpenAI-compatible endpoint, are OFF by default, and are
 # bounded by a sample budget (full runs are minutes-hours on a 24 GB card). Priority order:
 # EvalPlus first (execution-based pass@1), then BigCodeBench (realistic function-call tasks).
+# The adaptive-rubric judge is a separate local, sampled supporting-evidence signal.
 
 frameworks:
   evalplus:
@@ -26,3 +27,14 @@ frameworks:
     informs_role: coder
     trust: supporting_evidence_only
     subset: hard
+
+  rubric_judge:
+    enabled: false
+    cli_command: local-judge
+    backend: openai_compatible
+    base_url_env: OLLAMA_OPENAI_BASE_URL
+    sample_budget: 20
+    informs_role: coder
+    trust: supporting_evidence_only
+    judge_role: local-judge
+    sampling_count: 3

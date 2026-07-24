@@ -233,6 +233,8 @@ class ClaudeCodeLocalHarness:
         write_mode_wall=Verdict.PASS,
         attachments=Verdict.FAIL,
         model_switch=Verdict.PASS,
+        interrupt=Verdict.PASS,
+        steering=Verdict.FAIL,
     )
     interactive_approvals = False
 

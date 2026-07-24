@@ -1,0 +1,47 @@
+# Acceptance rubric — SkillOpt (AGT-17). Thresholds fixed before the measured run.
+schema: capability-assessment.acceptance-rubric.v1
+tool: SkillOpt
+tracker_id: AGT-17
+
+knockouts:   # any TRUE => DEFER
+  - id: needs_provider_key_local_path
+    check: "does the LOCAL path require a provider API key?"
+    result: PASS   # NO — Ollama, dummy key
+  - id: external_egress_local_path
+    check: "does the LOCAL path egress off-box?"
+    result: PASS   # NO — http://localhost:11434
+  - id: nonpermissive_license
+    check: "license non-permissive?"
+    result: PASS   # MIT
+  - id: writes_agent_config_unapproved
+    check: "writes skills into agent config dirs without approval?"
+    result: PASS   # best_skill.md -> out_root; deploy-into-agent is a separate gated step
+  - id: not_windows_runnable
+    check: "cannot run on Windows?"
+    result: PASS   # runs with PYTHONUTF8=1 + materialize (data step, not a platform block)
+
+gates:   # a scored result must satisfy ALL
+  - id: skillopt_gate
+    requirement: "evaluation.use_gate=true — edit kept only if held-out selection improves"
+  - id: reproducible
+    requirement: "fixed seed, pinned commit, pinned target+optimizer, exact command; number re-runs"
+  - id: independent_verification
+    requirement: "fresh non-authoring session re-runs champion-vs-challenger before promotion"
+  - id: no_leakage
+    requirement: "test split disjoint from train/selection; never seen in training"
+  - id: honesty
+    requirement: "unknown values recorded as unknown; never estimated"
+
+decision_ladder:
+  - INSTALL_VERIFIED: "installs + imports on Windows"          # ACHIEVED
+  - WIRING_VERIFIED: "openai_compatible -> local Ollama; trainer reaches baseline eval; materialize works; real baseline number produced"  # ACHIEVED
+  - PILOT: ">=2 Tier-1 scenarios show non-negative gate-accepted held-out delta with a CAPABLE optimizer, independently reproduced"
+  - ADOPT: "Tier-2 lift on held-out llm_station tasks via claude_code_exec/codex_exec AND clears approval/merge walls"
+
+tier1_pass:
+  scenarios_required: 2
+  metric: held_out_test_accuracy_hard
+  direction: "challenger (trained skill) >= champion (no skill), gate-accepted, reproduced"
+  optimizer: "CAPABLE model required for a lift claim (8B proves wiring only)"
+
+current_status: WIRING_VERIFIED   # heading into PILOT; see results.md + LEADERBOARD.md
