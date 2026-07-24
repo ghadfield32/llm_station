@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test": "node tests/researchProgress.test.mjs && node tests/researchAnalysis.test.mjs && node tests/todoStoryRequest.test.mjs && node tests/bookLibrary.test.mjs && node tests/chatPresentation.test.mjs && node tests/agentSessionSpecs.test.mjs",
+    "test": "node tests/researchProgress.test.mjs && node tests/researchAnalysis.test.mjs && node tests/todoStoryRequest.test.mjs && node tests/bookLibrary.test.mjs && node tests/chatPresentation.test.mjs && node tests/agentSessionSpecs.test.mjs && node tests/intakeDraft.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
