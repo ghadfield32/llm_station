@@ -64,14 +64,23 @@ external meta-harness.
 
 ## Naming collision — do not wire `OMNIGENT_CHAT_URL` to this repo
 
-`OMNIGENT_CHAT_URL` / `OMNIAGENT_CHAT_URL` in this repo already mean
-**OmniAgent (Om-AI-Lab)** — the long-video/audio evidence specialist
-(README L111, `docs/MASTER.md`, COCKPIT quickstart/mobile docs,
-`services/agent_kanban_ui/web/src/App.tsx` chat specialist card). That is a
-different project from omnigent-ai/omnigent. Rule: never point those env vars
-at omnigent-ai/omnigent. Follow-up: disambiguate the naming the next time
-those files are touched (deliberately, in one pass — a MASTER.md edit forces
-a `capabilities.yaml` digest re-record, so it should not ride along here).
+`OMNIGENT_CHAT_URL` / `OMNIAGENT_CHAT_URL` in this repo mean **OmniAgent
+(Om-AI-Lab)** — the long-video/audio evidence specialist — a different
+project from omnigent-ai/omnigent. Rule: never point those env vars at
+omnigent-ai/omnigent.
+
+**Disambiguation pass completed 2026-07-23** (same day, deliberate, with the
+MASTER.md digest re-record), and it surfaced a stronger fact: **no code reads
+any `*_CHAT_URL` var anymore.** The specialist handoff links were removed
+from the chat runtime payload — `tests/test_agent_kanban_ui.py` asserts
+`external_chats` is absent from `/api/chat/runtime` — so the vars are inert,
+and the collision was docs-only. Fixed: README, COCKPIT_QUICKSTART (env
+block replaced with the inert-vars truth), MASTER.md ×2 (OmniAgent named
+properly, meta-harness distinguished), App.tsx Settings label
+"OxyGent / ORCA / OmniAgent". The archive/ copies stay as written (frozen
+history). If a specialist handoff link is ever wanted again, it re-enters
+through the governed runtime payload as new work — not by resurrecting the
+env vars.
 
 ## Pattern 1 — three-level declarative policy stack (→ AGT-14)
 

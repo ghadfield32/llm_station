@@ -44,6 +44,7 @@ from ..protocol import (
     ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
 )
 from ..store import SessionStoreProtocol
+from ..workspace_scope import claude_cli_read_deny_args, prepend_workspace_bounds
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _MODEL_PREFS_CONFIG = _REPO_ROOT / "configs" / "agent-session-models.yaml"
@@ -270,10 +271,14 @@ class ClaudeCodeLocalHarness:
             detail=f"authenticated via {method} ({sub}) — local Claude Code "
                    f"subscription session, no API key; {_PROTOCOL_NOTE}")
 
-    def _build_args(self, bin_path: str, record: Any, prompt: str,
+    def _build_args(self, bin_path: str, record: Any,
                     repo_path: Path) -> list[str]:
+        # The prompt is NOT an argv element: it is fed on stdin (--input-format
+        # text, the default) by _stream_cli. Passing a user-sized prompt in argv
+        # blew past the Windows 32,767-char CreateProcess command-line limit and
+        # failed the whole turn with "The command line is too long." (2026-07-17).
         args = [
-            bin_path, "-p", prompt,
+            bin_path, "-p",
             "--output-format", "stream-json", "--verbose",
             "--permission-mode", "plan",          # planning mode: no edits
             "--strict-mcp-config",                # + no --mcp-config => zero MCP servers
@@ -283,6 +288,10 @@ class ClaudeCodeLocalHarness:
             "--disallowedTools", *_DISALLOWED_TOOLS,
             "--add-dir", str(repo_path),
         ]
+        # Only additions supported by THIS installed CLI's live --help belong
+        # here. The shared helper deliberately returns no args when the help
+        # lacks a documented read-path deny grammar.
+        args += claude_cli_read_deny_args(bin_path, repo_path)
         if record.model:
             args += ["--model", record.model]
         effort = self._effort.get(record.session_id)
@@ -293,11 +302,16 @@ class ClaudeCodeLocalHarness:
         return args
 
     async def _stream_cli(self, session_id: str, args: list[str], cwd: Path,
-                          env: dict[str, str]) -> AsyncIterator[dict[str, Any]]:
-        """Spawn the CLI and yield parsed stream-json objects line by line. The
-        single seam the hermetic tests override — translation stays pure."""
+                          env: dict[str, str],
+                          prompt: str) -> AsyncIterator[dict[str, Any]]:
+        """Spawn the CLI, feed `prompt` on stdin, and yield parsed stream-json
+        objects line by line. The single seam the hermetic tests override —
+        translation stays pure."""
         proc = await asyncio.create_subprocess_exec(
             *args, cwd=str(cwd), env=env,
+            # prompt goes in on stdin, not argv (see _build_args): sidesteps the
+            # Windows 32,767-char command-line limit for arbitrarily long pastes.
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             # one stream-json line can carry an ENTIRE Read tool result;
             # asyncio's default 64 KiB readline limit raised
@@ -305,6 +319,26 @@ class ClaudeCodeLocalHarness:
             # limit') and killed a live session mid-answer (2026-07-17)
             limit=16 * 1024 * 1024)
         self._active_procs[session_id] = proc
+
+        async def _feed_stdin() -> None:
+            # Write concurrently with the stdout read below: a prompt larger than
+            # the OS pipe buffer would block a serial write until the CLI drains
+            # it, so we never gate stdout on the write completing. A broken pipe
+            # (CLI exited early) is swallowed — the non-zero exit is reported via
+            # the _exit_error path below, never masked here.
+            assert proc.stdin is not None
+            try:
+                proc.stdin.write(prompt.encode("utf-8"))
+                await proc.stdin.drain()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        feeder = asyncio.create_task(_feed_stdin())
         try:
             assert proc.stdout is not None
             async for raw in proc.stdout:
@@ -322,6 +356,12 @@ class ClaudeCodeLocalHarness:
                     err = (await proc.stderr.read()).decode("utf-8", "replace")[:500]
                 yield {"type": "_exit_error", "returncode": proc.returncode, "stderr": err}
         finally:
+            if not feeder.done():
+                feeder.cancel()
+            try:
+                await feeder
+            except (asyncio.CancelledError, Exception):
+                pass
             self._active_procs.pop(session_id, None)
 
     async def start_session(self, request: SessionStart) -> str:
@@ -359,8 +399,13 @@ class ClaudeCodeLocalHarness:
             raise RuntimeError("claude CLI not found on PATH")
         record = self.store.get(session_id)
         repo_path = _resolve_repo_path(record.repo_id)
-        args = self._build_args(bin_path, record, prompt, repo_path)
-        async for obj in self._stream_cli(session_id, args, repo_path, _subprocess_env()):
+        args = self._build_args(bin_path, record, repo_path)
+        session_prompt = prompt
+        if not record.external_session_id:
+            session_prompt = prepend_workspace_bounds(
+                prompt, repo_path, record.repo_id)
+        async for obj in self._stream_cli(
+                session_id, args, repo_path, _subprocess_env(), session_prompt):
             sid = obj.get("session_id")
             if sid and not self.store.get(session_id).external_session_id:
                 self.store.update_session(session_id, external_session_id=sid)

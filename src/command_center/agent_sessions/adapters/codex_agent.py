@@ -35,6 +35,7 @@ from ..protocol import (
     ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
 )
 from ..store import SessionStoreProtocol
+from ..workspace_scope import prepend_workspace_bounds
 
 # Repo root: src/command_center/agent_sessions/adapters/codex_agent.py -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -372,6 +373,7 @@ class CodexAgentHarness:
         self._client: Any = None
         self._threads: dict[str, Any] = {}
         self._active_turns: dict[str, Any] = {}
+        self._workspace_bounds_sent: set[str] = set()
         # reasoning effort for THIS session. AgentSessionService constructs a
         # fresh harness instance per session (service.py _harness_for), so this
         # per-instance value is per-session — it is baked into the client's
@@ -499,8 +501,18 @@ class CodexAgentHarness:
     async def send(self, session_id: str, prompt: str) -> AsyncIterator[AgentEvent]:
         oc = _import_sdk()
         thread = await self._resolve_thread(session_id, oc)
+        session_prompt = prompt
+        if session_id not in self._workspace_bounds_sent:
+            record = self.store.get(session_id)
+            repo_path = _resolve_repo_path(record.repo_id)
+            session_prompt = prepend_workspace_bounds(
+                prompt, repo_path, record.repo_id)
         handle = await thread.turn(
-            prompt, sandbox=oc.Sandbox.read_only, approval_mode=oc.ApprovalMode.deny_all)
+            session_prompt,
+            sandbox=oc.Sandbox.read_only,
+            approval_mode=oc.ApprovalMode.deny_all,
+        )
+        self._workspace_bounds_sent.add(session_id)
         self._active_turns[session_id] = handle
         # ONE state for this entire turn — never shared across turns/
         # sessions — so delta-coalescing and terminal-failure dedup (see
@@ -565,6 +577,7 @@ class CodexAgentHarness:
         self.store.set_status(session_id, "closed")
         self._active_turns.pop(session_id, None)
         self._threads.pop(session_id, None)
+        self._workspace_bounds_sent.discard(session_id)
 
     async def shutdown(self) -> None:
         """Called by the worker on process shutdown (see worker_app.py's
@@ -580,6 +593,7 @@ class CodexAgentHarness:
             except Exception:
                 pass   # best-effort — shutdown must not hang on a stuck turn
         self._active_turns.clear()
+        self._workspace_bounds_sent.clear()
         if self._client is not None:
             try:
                 await self._client.close()

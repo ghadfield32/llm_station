@@ -86,18 +86,18 @@ chat shortcuts in a shared server-side metadata file at `KANBAN_CHAT_THREADS`
 (defaulting beside `KANBAN_EVENT_LOG`) and uses browser local storage only as a
 fallback cache. This stores launcher metadata only, not full transcripts.
 
-Optional specialist links can be added without changing the cockpit runtime:
+External specialists are watch-list guidance only — the former
+`ORCA_CHAT_URL` / `OMNIAGENT_CHAT_URL` (legacy alias `OMNIGENT_CHAT_URL`) /
+`OXYGENT_CHAT_URL` handoff links were removed from the chat runtime payload
+(`tests/test_agent_kanban_ui.py` asserts `external_chats` is absent), so
+setting those env vars currently does nothing. Naming note: OmniAgent is the
+Om-AI-Lab video/audio specialist — unrelated to the omnigent-ai/omnigent
+meta-harness (see
+[`docs/reviews/2026-07-23-omnigent-borrow-patterns.md`](../reviews/2026-07-23-omnigent-borrow-patterns.md)).
 
-```powershell
-$env:ORCA_CHAT_URL="https://example-orca-chat"
-$env:OMNIAGENT_CHAT_URL="https://example-omniagent-chat"
-$env:OXYGENT_CHAT_URL="https://example-oxygent-dashboard"
-docker compose --profile ui up -d --build agent-kanban-ui
-```
-
-Use ORCA first for document-heavy job materials such as resumes, PDFs,
-screenshots, forms, and tables. Use OmniAgent/Omnigent later for long
-video/audio or screen-recording evidence. Keep OxyGent as a framework spike for
+If a specialist ever earns a real pilot: ORCA first for document-heavy job
+materials such as resumes, PDFs, screenshots, forms, and tables; OmniAgent
+later for long video/audio or screen-recording evidence. Keep OxyGent as a framework spike for
 planning graphs, visual debugging, and auditability. All three remain external
 handoffs; governed board writes, approvals, submits, merges, and deploys stay
 behind GatewayCore, the action layer, and the Ledger wall.
@@ -136,9 +136,9 @@ behind GatewayCore, the action layer, and the Ledger wall.
   `search_settings` path. The cockpit writes only the profile override file,
   not `configs/job_search.yaml`.
 - The Chat page's runtime panel should say `GatewayCore` + `LiteLLM`.
-  ORCA, OmniAgent/Omnigent, and OxyGent should show as `not linked` unless the
-  matching `*_CHAT_URL` env var is set. They are launch links, not active
-  runtime dependencies.
+  ORCA, OmniAgent, and OxyGent appear only as a static watch-list row in
+  Settings — the `*_CHAT_URL` launch links were removed from the runtime
+  payload and those env vars are inert.
 - A board looks stale: inspect `/api/debug/runtime`, then verify the board store
   and governed kanban-event log paths shown there.
 - `/api/debug/runtime`: non-secret runtime diagnostics for the exact Ledger

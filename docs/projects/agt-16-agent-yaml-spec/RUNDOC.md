@@ -99,7 +99,43 @@ Operator decisions, recorded verbatim; scope locked:
 - Independent review: Sol wrote → **Fable/Opus** read-only fresh session
   (contract semantics + the executor-vs-chat-model wall).
 
-## 7. Links
+## 7. Packet-1 evidence (2026-07-23)
+
+- **Implemented by Sol** (`codex exec --sandbox workspace-write --full-auto`,
+  gpt-5.6-sol high, isolated worktree `C:\tmp\agt16-spec`, brief:
+  [PACKET-1.md](PACKET-1.md)). Commit **1b5bb82** on
+  `feat/agt16-session-spec` (16 files, +493/−12) — committed host-side: the
+  sandbox correctly blocked writes to the linked worktree's git metadata
+  (which lives under the main checkout's `.git/worktrees/`), the exact
+  permission wall working as designed, surfaced not worked around.
+- **Independently verified host-side** (not trusted from Sol's report):
+  `validate_config` PASS (both example specs OK), `check_cross_refs` PASS,
+  `pytest tests/test_agent_session_spec.py` 11/11, ruff clean on all 13
+  changed/new files. The 5 `test_agent_session_service.py` failures are
+  **proven pre-existing**: identical set fails on the unchanged base
+  checkout — the KAN-25 `user_message` family, fixed on main by PR #78,
+  which this branch predates; resolves on merge with main.
+- **Review** (Fable, this session — read-only, non-implementing per the
+  reviewer-independence rule; Sol wrote): **APPROVE.** Flag-off path proven
+  byte-for-byte (exact-payload assertion + identical base failures);
+  traversal guard, name↔filename check, loud errors, OSError→400, no
+  import-time caches. Non-blocking notes for later packets: (1)
+  `provider_profile` carries capability-profile values on the spec path —
+  give AGT-10 a dedicated field when it consumes it; (2)
+  `AGENT_SESSION_SPECS_DIR` is cwd-relative (consistent with
+  validate_config's repo-root convention) — revisit when the worker is
+  containerized.
+- **KPIs vs baseline**: KPI-1 = 4/4 production runtimes (plus fake)
+  constructible behind one validated spec, enum↔registry drift-guarded
+  (baseline 0). KPI-2 = 1 seam consumer proven (service boot path, flag
+  `AGENT_SESSION_SPEC_ENABLED` defaults OFF) (baseline 0). Stop condition
+  met — reassess before widening.
+- **Brief deviations Sol flagged** (both verified): `--extra fastapi` does
+  not exist (fastapi ships inside `dev`) — brief error, not code error;
+  sandbox network block prevented `uv sync`, so validation used the
+  provisioned env + worktree PYTHONPATH (same method as this verification).
+
+## 8. Links
 
 - Master item: `docs/todos/GRAND_TODO_LIST.md` → AGT-16 (feeds KAN-26,
   KAN-15, AGT-10).
