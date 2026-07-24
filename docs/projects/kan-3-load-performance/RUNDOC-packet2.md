@@ -102,3 +102,13 @@ anything not justified by a measurement.
 - 2026-07-23 — Reviewer host verification (Codex fail-closed above): 106
   tests exit 0 (timing middleware + agent_kanban_ui + domain_surfaces); ruff
   clean. Independent review (Fable, non-author): APPROVED.
+- 2026-07-24 — CI (#85) caught an order/log-level-dependent test bug that my
+  host subset missed: `test_timing_enabled_rolls_up_route_templates` asserted
+  `len(request_timing logs) == 2`, but `/api/debug/timings` is ITSELF a timed
+  request (correct behavior) fetched after the `caplog.at_level` block while
+  caplog still captures — under CI's INFO baseline that third log was
+  captured → `assert 3 == 2`. ROOT CAUSE fixed by filtering the log count to
+  the cards route template (expresses the real intent, keeps the debug
+  endpoint legitimately timed). Reproduced deterministically with
+  `-o log_level=INFO` (old: 3==2 fail; new: pass); affected suites green
+  under INFO; ruff clean. No production code changed.

@@ -65,12 +65,17 @@ def test_timing_enabled_rolls_up_route_templates(
         <= timings[route]["max_ms"]
     )
 
-    timing_logs = [
-        json.loads(record.getMessage())
+    # Filter to the cards route: /api/debug/timings is ITSELF a timed request
+    # (correct behavior — every request is measured), and it is fetched below
+    # while caplog is still capturing, so counting all request_timing records
+    # would be order/log-level dependent. The test's intent is "the two cards
+    # requests each logged exactly once", which the route filter expresses.
+    cards_logs = [
+        entry
         for record in caplog.records
         if '"event":"request_timing"' in record.getMessage()
+        and (entry := json.loads(record.getMessage()))["route"] == route
     ]
-    assert len(timing_logs) == 2
-    assert {entry["route"] for entry in timing_logs} == {route}
-    assert {entry["method"] for entry in timing_logs} == {"GET"}
-    assert {entry["status_code"] for entry in timing_logs} == {200}
+    assert len(cards_logs) == 2
+    assert {entry["method"] for entry in cards_logs} == {"GET"}
+    assert {entry["status_code"] for entry in cards_logs} == {200}
