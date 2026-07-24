@@ -73,7 +73,32 @@ services:
       - "127.0.0.1:${MEALIE_PORT:-9925}:9000"
     environment:
       - TZ=${LC_TZ:-UTC}
-      - BASE_URL=http://127.0.0.1:${MEALIE_PORT:-9925}
+      # BASE_URL correction, found in independent review: my first pass here
+      # claimed Mealie builds its OIDC redirect_uri FROM this env var,
+      # matching a GitHub issue TITLE (mealie-recipes/mealie#4579) I hadn't
+      # read past. The reviewer checked v2.6.0's actual source: the redirect
+      # is `URLPath("/login").make_absolute_url(request.base_url)` --
+      # Starlette's per-REQUEST base URL, not this env var. It only reflects
+      # the tailnet HTTPS address because Tailscale Serve forwards
+      # X-Forwarded-Proto/Host and Mealie's Uvicorn trusts them by default
+      # (forwarded_allow_ips=*) -- confirmed live: hitting the real
+      # /api/auth/oauth endpoint through the tailnet URL, Mealie itself
+      # generated the correct https tailnet redirect_uri with NO BASE_URL
+      # dependency at all. BASE_URL is kept at the tailnet address anyway for
+      # Mealie's OTHER absolute-URL generation (recipe/image links), but it is
+      # NOT what makes OIDC redirects correct -- don't repeat my mistake of
+      # attributing a fix to the wrong mechanism.
+      - BASE_URL=https://${LC_TAILNET_HOST:?set LC_TAILNET_HOST in .env}:${MEALIE_PORT:-9925}
+      # Native OIDC is additive: v2.6.0 links an existing password user by
+      # email without changing that user's authentication method. New OIDC-only
+      # accounts stay disabled so a claim mismatch cannot create a duplicate.
+      - OIDC_AUTH_ENABLED=true
+      - OIDC_SIGNUP_ENABLED=false
+      - OIDC_CONFIGURATION_URL=https://${LC_TAILNET_HOST:?set LC_TAILNET_HOST in .env}:${CADDY_AUTH_PORTAL_PORT:-9091}/.well-known/openid-configuration
+      - OIDC_CLIENT_ID=mealie
+      - OIDC_CLIENT_SECRET=${MEALIE_OIDC_CLIENT_SECRET:?set MEALIE_OIDC_CLIENT_SECRET in .env}
+      - OIDC_AUTO_REDIRECT=false
+      - OIDC_PROVIDER_NAME=Authelia
     volumes:
       - ${LC_APPDATA:-./appdata}/mealie/data:/app/data
 
