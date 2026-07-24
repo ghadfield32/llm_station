@@ -93,6 +93,11 @@ class MessageIn(BaseModel):
     prompt: str
 
 
+class BoardChangePolicyIn(BaseModel):
+    author_harness: str
+    kind: str
+
+
 class ApprovalIn(BaseModel):
     approved: bool
     reason: str = ""
@@ -384,6 +389,46 @@ def build_app(*, store: SessionStoreProtocol | None = None,
             return service.get_session(session_id).__dict__
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/agent-sessions/{session_id}/board-change-policy",
+              dependencies=[Depends(_authed)])
+    def evaluate_board_change_policy(
+        session_id: str, body: BoardChangePolicyIn,
+    ) -> dict:
+        """Durably gate an agent proposal before the cockpit can mint it."""
+        if os.environ.get("AGENT_SESSION_POLICIES_ENABLED", "") != "1":
+            raise HTTPException(
+                503,
+                detail="agent-session policy enforcement disabled; "
+                       "set AGENT_SESSION_POLICIES_ENABLED=1",
+            )
+
+        from .service import PolicyRefusal
+
+        try:
+            action, decision = service.evaluate_board_change_policy(
+                session_id, author_harness=body.author_harness, kind=body.kind)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except PolicyRefusal as exc:
+            if exc.event is None:
+                raise RuntimeError(
+                    "board policy refusal was not durably recorded") from exc
+            raise HTTPException(
+                403, detail={"code": "policy_denied", **exc.event.payload}) from exc
+        return {
+            "verdict": decision.verdict.value,
+            "tool": action.tool_name,
+            "level": decision.level.value if decision.level else None,
+            "policy_set": decision.policy_set,
+            "handler": decision.handler.value if decision.handler else None,
+            "note": decision.note,
+            "approval_surface": (
+                "board_change_human_wall"
+                if decision.verdict.value == "ask" else None),
+        }
 
     @app.post("/api/agent-sessions/{session_id}/messages", status_code=202,
              dependencies=[Depends(_authed)])

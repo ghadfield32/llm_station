@@ -154,3 +154,16 @@ Operator decisions, recorded verbatim; scope locked:
   `omnigent-meta-harness`.
 - Siblings: AGT-14 (policies referenced by the spec), AGT-15 (enum↔registry
   drift guard shares its reconciliation idea).
+
+## 9. Packet 2 evidence (2026-07-24)
+
+**Packet 2 (Sol gpt-5.6-sol high):** `GET /api/agent-session-specs` lists
+validated specs for display-only clients — redacts instruction bodies + file
+paths; a malformed spec yields a stable typed error, never a 500 or leaked
+YAML. App.tsx consumes it as a runtime-agnostic spec picker (DESIGN.md: badge-
+only runtime distinction, no hardcoded colors) using independent display state
+so selection never auto-starts a session (no-mutation preserved). AGT-10
+allocator emission seam documented (allocator output flows through this same
+read contract — AGT-10 itself is future work). Commit `0f49557`. Host-verified:
+validate PASS, endpoint tests 2/2, web tests 2/2, tsc clean, ruff clean, vite
+build exit 0. Fable review APPROVE.

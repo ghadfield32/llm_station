@@ -158,6 +158,61 @@ SERVICES: tuple[ServiceEntry, ...] = (
             icon_key="tailscale", sort_order=2),
     ),
     ServiceEntry(
+        service_id="authelia", application="Authelia", category="sso",
+        authority="the one login (+2FA) that will front every app admitted behind SSO",
+        lifecycle="conditional", profile="sso",
+        links=Links(docs="https://www.authelia.com/", runbook="runbooks/password-and-sso.md"),
+        auth=Auth(mode="local", username_ref="ghadfield32", supports_oidc=False,
+                   password_manager_item_ref="vaultwarden:Authelia SSO"),
+        setup=Setup(wizard_required=False,
+                     note="Login + TOTP device registered; the credential lives in Vaultwarden "
+                          "('Authelia SSO' item), not in this catalog or .env. Rotation is a "
+                          "human-in-the-loop step by design — see runbooks/password-and-sso.md: "
+                          "generate in Vaultwarden, hash with `authelia crypto hash generate argon2`, "
+                          "update the runtime users_database.yml, restart, verify live, then update "
+                          "the vault item. No process may auto-push a new password into this file — "
+                          "that would require exposing the vault's own master key to a script."),
+        recovery=Recovery(canonical_data_location="${LC_APPDATA}/authelia/users_database.yml "
+                                                    "(credential) + ${LC_APPDATA}/authelia/data (sessions/2FA)",
+                           complete_backup_unit="appdata/authelia (both paths above)",
+                           export_method="n/a — restic covers appdata/ already",
+                           restoration_proof="restore appdata/authelia, restart, confirm login + 2FA "
+                                              "still work with the SAME Vaultwarden-stored credential"),
+        automation=Automation(), risk_tier="privileged",
+        display=Display(
+            short_description="The single login (with mandatory 2FA) guarding every app admitted "
+                               "behind the SSO tier.",
+            long_description="Authelia is opt-in and pilot-only right now (Phase 1+2 of the SSO "
+                               "rollout, PR #93) — only Stirling-PDF is actually gated behind it. "
+                               "Never front Vaultwarden, Dockge, or restic with this.",
+            icon_key="authelia", sort_order=3, show_in_launch=False),
+    ),
+    ServiceEntry(
+        service_id="caddy", application="Caddy (SSO gate)", category="sso",
+        authority="the forward-auth reverse proxy in front of SSO-admitted apps — Authelia has no "
+                   "host-published port and is only reachable through this",
+        lifecycle="conditional", profile="sso",
+        links=Links(app="http://127.0.0.1:${CADDY_AUTH_PORTAL_PORT:-9091}",
+                     docs="https://caddyserver.com/docs/", runbook="runbooks/password-and-sso.md"),
+        auth=Auth(mode="none"),  # Caddy itself has no login — it fronts Authelia's login
+        setup=Setup(note="Portal exposed via `tailscale serve --https=9091 http://127.0.0.1:9091`. "
+                          "Pilot cutover: `tailscale serve --https=8084 http://127.0.0.1:9099` "
+                          "(Stirling-PDF's existing public port, repointed to the gate). Instant "
+                          "revert: `tailscale serve --https=8084 http://127.0.0.1:8084`."),
+        recovery=Recovery(canonical_data_location="${LC_APPDATA}/caddy/data (TLS/autosave state only — "
+                                                    "no credentials here)",
+                           complete_backup_unit="n/a — stateless; Caddyfile is tracked in git",
+                           export_method="n/a", restoration_proof="redeploy from the tracked Caddyfile"),
+        automation=Automation(), risk_tier="moderate",
+        display=Display(
+            short_description="The login gate in front of SSO-admitted apps (currently: Stirling-PDF).",
+            long_description="Caddy terminates plain HTTP from Tailscale Serve, checks every request "
+                               "against Authelia, and strips the session cookie before forwarding to "
+                               "the app — see runbooks/password-and-sso.md for the full design and "
+                               "the independent-review findings that shaped it.",
+            icon_key="caddy", sort_order=4, primary_action_label="Open Authelia Portal"),
+    ),
+    ServiceEntry(
         service_id="nextcloud", application="Nextcloud", category="core",
         authority="ordinary files, folder sync, Calendar/Contacts, Joplin WebDAV transport",
         lifecycle="keep", profile="files",
@@ -461,13 +516,21 @@ SERVICES: tuple[ServiceEntry, ...] = (
     ),
     ServiceEntry(
         service_id="vaultwarden", application="Vaultwarden", category="vault",
-        authority="password manager (dummy-data evaluation only; Bitwarden Lite is the deployment target)",
-        lifecycle="gate-later", profile="vault",
+        authority="the personal password vault — as of the Authelia SSO rollout, holds a real, "
+                   "load-bearing credential (Authelia login + TOTP), not just trial data. A Bitwarden "
+                   "Lite migration is still open as a future option but is NOT a precondition for "
+                   "trusting this vault with real secrets; correct this note again if/when that "
+                   "migration actually happens instead of leaving it stale in the other direction",
+        lifecycle="keep", profile="vault",
         links=Links(app="http://127.0.0.1:${VAULTWARDEN_PORT:-8222}",
                      docs="https://bitwarden.com/help/self-host-bitwarden/", runbook="runbooks/app-admission.md"),
         auth=Auth(mode="local", credential_ref="VAULTWARDEN_ADMIN_TOKEN"),
-        setup=Setup(wizard_required=True, registration_must_close=True,
-                     note="dummy credentials ONLY in this trial vault"),
+        setup=Setup(wizard_required=False, registration_must_close=False,
+                     note="Real account created (ghadfield32@gmail.com); SIGNUPS_ALLOWED verified "
+                          "re-locked at both the env AND config.json layer (config.json overrides "
+                          "env — found live, the first re-lock attempt silently didn't take effect "
+                          "because of this) and a registration attempt against it returns 403. "
+                          "Backup+restore-test passed with byte-identical key material."),
         recovery=Recovery(canonical_data_location="${LC_APPDATA}/vaultwarden", complete_backup_unit="appdata/vaultwarden",
                            export_method="client-side vault export (encrypted json)",
                            restoration_proof="offline recovery + every client proven before migrating a real vault"),
