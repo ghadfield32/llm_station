@@ -347,11 +347,11 @@ Repo default: `llm_station`. Model allocation, agent quality, evaluation.
 **Notes:** Turn the hand-known capability matrix of the agent-session adapters (claude_agent, claude_code_local, codex_agent, openrouter_agent — Copilot when AGT-4 lands) into an executable conformance suite: each capability cell (streaming, resume, write-mode wall, attachments, model switch) is earned by a probe and reconciled against the adapter's declared profile; declared ✓ but observed ✗ = DRIFT failure. Per-adapter facts live on a self-declared profile object, never in probe code; offline/live probe split so CI runs the cheap subset. AGT-3-for-runtimes; drift count feeds AGT-12's KPI leaderboard. Run-doc: [docs/projects/agt-15-adapter-capability-bench/RUNDOC.md](../projects/agt-15-adapter-capability-bench/RUNDOC.md).
 
 #### AGT-16 · Typed agent-session spec — runtime-agnostic YAML with a harness enum
-`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+`🚧 WIP` · **Target:** _TBD_ · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P2
 **Source:** AGT-13 pattern 3 (omnigent docs/AGENT_YAML_SPEC.md), 2026-07-23
-**Notes:** A Pydantic `extra="forbid"` session-spec (name, instructions, `harness` enum over our adapters, model-by-capability-profile, limits, policy refs) so the runtime is one swappable field: gives KAN-26 its runtime-agnostic chat chrome seam, KAN-15 its auto-engage config, and AGT-10's allocator a typed artifact to emit instead of code edits. Not borrowed: omnigent's auth plumbing or harness breadth — our adapter set stays deliberate. Run-doc: [docs/projects/agt-16-agent-yaml-spec/RUNDOC.md](../projects/agt-16-agent-yaml-spec/RUNDOC.md).
+**Notes:** A Pydantic `extra="forbid"` session-spec (name, instructions, `harness` enum over our adapters, model-by-capability-profile, limits, policy refs) so the runtime is one swappable field: gives KAN-26 its runtime-agnostic chat chrome seam, KAN-15 its auto-engage config, and AGT-10's allocator a typed artifact to emit instead of code edits. Not borrowed: omnigent's auth plumbing or harness breadth — our adapter set stays deliberate. Run-doc: [docs/projects/agt-16-agent-yaml-spec/RUNDOC.md](../projects/agt-16-agent-yaml-spec/RUNDOC.md). **Packet 1 IMPLEMENTED 2026-07-23** (Sol gpt-5.6-sol high, isolated worktree): schema + spec_bridge + configs/agent_sessions/ in validate_config + defaults-off `AGENT_SESSION_SPEC_ENABLED` consumer + 11 tests incl. enum↔registry drift guard — commit 1b5bb82 on `feat/agt16-session-spec`, host-verified (validate PASS, 11/11, ruff clean; 5 service-test failures proven pre-existing = KAN-25 family, resolves on merge with main), Fable review APPROVE. Evidence: RUNDOC §7. **Awaiting operator merge decision.**
 
 ## PROC — Todo→Project Process & Standards
 
