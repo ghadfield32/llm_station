@@ -1,0 +1,49 @@
+=== SearchQA train (tiny 6/3/3, qwen3:8b via Ollama, 1 epoch) ===
+  [SearchQADataLoader] train=6 val=3 test=3  (from data/searchqa_tiny)
+  [config] batches/epoch=2 total_steps=2 games/epoch=6
+  BASELINE — evaluate initial skill on Selection set (valid_seen)
+  [baseline result] selection hard=0.6667 soft=0.6667 gate[hard]=0.6667
+  [EPOCH 1/1] shuffled_seeds=[1043, 1044]
+  [STEP 1/2] epoch=1 step_in_epoch=0 ==============================
+    [1/6 done] hard=0.6667 soft=0.6667
+    [2/6 done] failure_patches=1 success_patches=1
+    [3/6 done] merged 2 edits
+    [6/6 EVALUATE] selection items=3
+    [6/6 EVALUATE] REJECT hard=0.3333 <= current=0.6667
+  [STEP 1 done] epoch=1 action=reject current=0.6667 best=0.6667 dt=46.5s
+    timing: rollout=7.2s reflect=10.1s aggregate=5.0s select=0.0s evaluate=24.1s
+  [STEP 2/2] epoch=1 step_in_epoch=1 ==============================
+    [1/6 done] hard=0.6667 soft=0.8000
+    [2/6 done] failure_patches=1 success_patches=1
+    [3/6 done] merged 3 edits
+    [6/6 EVALUATE] selection items=3
+    [6/6 EVALUATE] REJECT hard=0.6667 <= current=0.6667
+  [STEP 2 done] epoch=1 action=reject current=0.6667 best=0.6667 dt=88.2s
+    timing: rollout=7.3s reflect=55.1s aggregate=7.5s select=8.3s evaluate=9.9s
+  [SLOW UPDATE epoch 1] injected empty placeholder
+  [META SKILL epoch 1] skipped — first epoch
+  [done] best skill from step 0, score=0.6667
+  [final skill val] items=3 final_selection_hard=0.6667 gate=0.6667 (best=0.6667)
+  BASELINE TEST — evaluate initial skill on Test set (valid_unseen)
+  === Baseline Test Results (S_0) ===
+  BEST SKILL TEST — evaluate best skill on Test set (valid_unseen)
+  === Best Skill Test Results ===
+  FINAL SKILL TEST — evaluate last skill on Test set (valid_unseen)
+  === Final Skill Test Results ===
+  === Improvement vs baseline (init S_0) ===
+  Final Summary
+  steps=2 accept=0 reject=2 skip=0
+  best_score=0.6667 (step 0)  wall=167s
+    epoch 1: accept=0 reject=2 best=0.6667
+  === TEST scores (3 skills, split=valid_unseen) ===
+    [1] init/baseline (S_0)          : test_hard=1.0000
+    [2] best-on-val (step 0)         : test_hard=0.6667 test_soft=0.6667
+    [3] final/last skill             : test_hard=1.0000 test_soft=1.0000
+  Final test: 0.6667
+=== TRAIN3 EXIT=0 ===
+C:\tmp\skillopt-feasibility\upstream\outputs\searchqa_tiny_run\meta_skill\epoch_01\meta_skill_result.json
+C:\tmp\skillopt-feasibility\upstream\outputs\searchqa_tiny_run\skills\skill_v0000.md
+C:\tmp\skillopt-feasibility\upstream\outputs\searchqa_tiny_run\skills\skill_v0001.md
+C:\tmp\skillopt-feasibility\upstream\outputs\searchqa_tiny_run\skills\skill_v0002.md
+C:\tmp\skillopt-feasibility\upstream\outputs\searchqa_tiny_run\steps\step_0001\candidate_skill.md
+C:\tmp\skillopt-feasibility\upstream\outputs\searchqa_tiny_run\steps\step_0002\candidate_skill.md
