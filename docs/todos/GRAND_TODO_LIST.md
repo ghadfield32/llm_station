@@ -230,6 +230,40 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Source:** operator direction 2026-07-23 ("utilize Open Design so our chats look better and work better across different agents") + L9 chat-width complaint
 **Notes:** Rebuild the cockpit chat surfaces to the [services/agent_kanban_ui/DESIGN.md](../../services/agent_kanban_ui/DESIGN.md) chat contract: runtime-agnostic message chrome (Claude/Codex/GatewayCore/future Copilot differ only by a small badge, never bubble style); assistant/model pickers as compact viewport-fitting selects (kills the too-wide chat dropdown — the chat half of KAN-4); tool calls/evidence as collapsed monospace insets, never raw JSON; a single context-chip row above the composer (registered repo — where KAN-13's dropdown lands — plus linked board/card); streaming state via `--run` accent; in-thread `.error` blocks with runtime badge instead of toast-only failures. Bundle with KAN-8 (Open-in-chat-only + model dropdown) as one Codex UI packet under the DESIGN.md workflow rules (build + 390px fit check + no hardcoded colors).
 
+#### AGT-17 · Skillopt — trainable agent skills for the kanban + normal agents
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P2
+**Source:** operator todo 2026-07-23 (recovered from the argv-bug error text — the todo itself triggered the CLI failure)
+**Notes:** "Add skillopt to Kanban and your normal agents so skills can get better: https://www.linkedin.com/posts/shubhamsaboo_wait-whatyou-can-now-train-agent-skills-share-7485916464504389634-7qzY/" **Research verdict (2026-07-23): TRIAL — strong adopt candidate.** It is **microsoft/SkillOpt** (MIT, ~14.8k★, `pip install skillopt`, v0.2.0 2026-07-02): treats a skill markdown file as trainable parameters for a frozen model — rollout → reflect → **validation-gated edit acceptance** (our champion-challenger gate, in text space) → deployable best_skill.md. Harness-NATIVE to Claude Code + Codex CLIs (our exact executors; +19.1 avg pts inside the Claude Code harness) and `openai_compatible` backend points at our LiteLLM gateway. Directly attacks the harness-score Skills 0/17 gap. Costs: custom scoreable env from our task history; rollouts consume subscription quota per epoch. First step: sandboxed venv → SearchQA in direct-chat mode vs LiteLLM → then a 10-20-task env from our harness-score Skills checks, one epoch, best_skill.md vs no-skill onto the KPI leaderboard. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
+
+#### AGT-18 · Research the igorls open-source devtools/aicoding project + add its abilities
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P2
+**Source:** operator 2026-07-23
+**Notes:** "Add this and its abilities to the kanban: https://www.linkedin.com/posts/igorls_opensource-developertools-aicoding-share-7484025706507616256-gSwU/" **Research verdict (2026-07-23): SKIP as dependency; MINE the board semantics.** It is **igorls/agent-portal** (MIT, created 2026-07-11, single author — too young for a governed control plane): Rust/Tauri desktop app whose "example board" = **lane-per-runtime, session-per-card, drag = migrate a session between agent CLIs** (Claude Code ⇄ Codex native conversion; otherwise a deterministic handoff BRIEF), always dry-run-first with an append-only per-migration-undoable ledger, plus an Ollama worker that auto-titles sessions offline. Adapt "with all our variability" as a cockpit **Sessions board**: lane=runtime, card=session, drag=governed migration behind OUR approval wall; reuse the handoff-brief format for the Claude⇄Codex protocol; Ollama auto-titling for cards. First step: read `crates/portal-adapters` + trial read-only against ~/.claude and the Codex store. Details: [RESEARCH_NOTES_2026-07.md](reference/RESEARCH_NOTES_2026-07.md).
+
+#### KAN-27 · Chat controls: stop, queue-another, live settings, usage, newest models
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P1
+**Source:** operator 2026-07-23
+**Notes:** (1) A stop control near Send to halt a running response; (2) "send another message" while one is running so additions queue instead of blocking; (3) chat settings (model/effort/repo) adjustable at ANY time mid-conversation, not only at session setup; (4) usage limits easy to view from within the chat; (5) the newest frontier models (GPT Sol family etc. — resolved live, never a remembered slug) always present as picker options. Dropdown width: #81 bounded `.select` (max-width min(100%,320px)) — acceptance here includes verifying full-width behavior on mobile post-merge.
+
+#### KAN-28 · Navigation reorg: chat-first sidebar, tab audit, Work Map atop boards
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P1
+**Source:** operator 2026-07-23
+**Notes:** Chat becomes the FIRST sidebar option, then Kanbans. Audit every other tab for whether it earns a slot: Work Map moves to the top of the kanban boards (the review surface for priority/difficulty/timeline per project — pairs with KAN-12); Life Center becomes its own board with its links at the top; Activity becomes an option within a surface rather than its own tab. Chat should surface as an option while viewing kanbans, and pop up ready-to-go when choosing New.
+
+#### KAN-29 · OpenRouter model management + open-model leaderboard surface
+`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+**Repo:** `llm_station`
+**Priority:** P2
+**Source:** operator 2026-07-23
+**Notes:** View and update the models used via OpenRouter (e.g. pulling in new Kimi K3); any newly pulled model is AUTO-ADDED to the model leaderboard with its results if not already there; an open-model leaderboard area that's easy to view (extends KAN-18, feeds from AGT-12's task-completion KPIs and the existing model-scout watchlist/dual-budget flow — canary/promote stay human-only).
 #### KAN-25 · Restore main CI to green (12 pre-existing lint-test failures)
 `✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
