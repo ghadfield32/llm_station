@@ -19,9 +19,10 @@ from .store import SessionRecord, SessionStoreProtocol
 class PolicyRefusal(RuntimeError):
     """A typed, durably-recorded refusal from the declarative policy stack."""
 
-    def __init__(self, decision, action) -> None:
+    def __init__(self, decision, action, event: AgentEvent | None = None) -> None:
         self.decision = decision
         self.action = action
+        self.event = event
         super().__init__(
             f"policy {decision.policy_set!r} denied tool {action.tool_name!r}")
 
@@ -183,6 +184,52 @@ class AgentSessionService:
         )
         return action, resolve(self._policy_sets_for_session(session_id), action)
 
+    def evaluate_board_change_policy(
+        self, session_id: str, *, author_harness: str, kind: str,
+    ):
+        """Evaluate an agent proposal before the cockpit creates it.
+
+        A board-policy ASK records that the request must continue through the
+        board wall that already exists; it never creates or resolves a generic
+        agent-session approval. The board wall remains authoritative.
+        """
+        from command_center.schemas.session_policy import PolicyVerdict
+
+        from .policy_engine import ToolAction, resolve
+
+        record = self.store.get(session_id)
+        if record.harness != author_harness:
+            raise ValueError(
+                f"session {session_id!r} belongs to harness {record.harness!r}, "
+                f"not proposal author {author_harness!r}")
+        action = ToolAction(
+            tool_name=f"board_change:{kind}",
+            is_os_tool=False,
+            estimated_cost_usd=self._session_cost_usd(session_id),
+            # Tool events are already appended when packet-1 evaluates them.
+            # Count this not-yet-created proposal action explicitly so the
+            # existing call-cap builtin has identical semantics here.
+            session_tool_call_count=self._session_tool_call_count(session_id) + 1,
+            author_harness=author_harness,
+            session_id=session_id,
+        )
+        decision = resolve(self._policy_sets_for_session(session_id), action)
+        if decision.verdict == PolicyVerdict.DENY:
+            denial = self._record_policy_denial(session_id, decision, action)
+            raise PolicyRefusal(decision, action, denial)
+        if decision.verdict == PolicyVerdict.ASK:
+            # This is a durable routing marker, not a second approval record:
+            # there is deliberately no approval_id and no create_approval().
+            self.store.append_event(session_id, AgentEvent(
+                "approval_required", {
+                    "action": action.tool_name,
+                    "policy_generated": True,
+                    "policy_set": decision.policy_set,
+                    "approval_surface": "board_change_human_wall",
+                    "requires_human_token": True,
+                }))
+        return action, decision
+
     def _record_policy_denial(self, session_id: str, decision, action) -> AgentEvent:
         return self.store.append_event(session_id, AgentEvent("policy_denied", {
             "verdict": decision.verdict.value,
@@ -210,9 +257,9 @@ class AgentSessionService:
 
                 action, decision = self._evaluate_policy(session_id, event)
                 if decision.verdict == PolicyVerdict.DENY:
-                    self._record_policy_denial(
+                    denial = self._record_policy_denial(
                         session_id, decision, action)
-                    raise PolicyRefusal(decision, action)
+                    raise PolicyRefusal(decision, action, denial)
                 if decision.verdict == PolicyVerdict.ASK:
                     # A harness-native approval is already the existing wall.
                     # Otherwise create the same durable approval/event shape and

@@ -368,6 +368,8 @@ class CodexAgentHarness:
         write_mode_wall=Verdict.PASS,
         attachments=Verdict.FAIL,
         model_switch=Verdict.PASS,
+        interrupt=Verdict.PASS,
+        steering=Verdict.FAIL,
     )
     # REAL FINDING: the pinned SDK exposes no programmatic hook to causally
     # resolve a Guardian approval review (see module docstring and

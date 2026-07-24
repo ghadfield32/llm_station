@@ -15,6 +15,8 @@ class Dimension(StrEnum):
     WRITE_MODE_WALL = "write_mode_wall"
     ATTACHMENTS = "attachments"
     MODEL_SWITCH = "model_switch"
+    INTERRUPT = "interrupt"
+    STEERING = "steering"
 
 
 CORE_DIMENSIONS: tuple[Dimension, ...] = tuple(Dimension)
@@ -40,6 +42,8 @@ class BenchProfile(Strict):
     write_mode_wall: Verdict
     attachments: Verdict
     model_switch: Verdict
+    interrupt: Verdict
+    steering: Verdict
 
     @model_validator(mode="after")
     def _claims_are_capabilities(self) -> "BenchProfile":

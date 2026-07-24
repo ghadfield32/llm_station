@@ -1,0 +1,37 @@
+{
+  "tool": "SkillOpt",
+  "tracker_id": "AGT-17",
+  "source": "https://github.com/microsoft/SkillOpt",
+  "license": "MIT",
+  "pinned_version": "0.2.0",
+  "pinned_commit": "fdeebaf976f5d895978959c3e392e62b7dfc3c7e",
+  "pypi": "skillopt (pip install skillopt)",
+  "install_method": "cloned repo + editable install (scripts/train.py + configs/ + envs/ live in the repo, not the wheel)",
+  "install_location": "C:\\tmp\\skillopt-feasibility\\upstream (scratch, gitignored — NOT committed into the repo)",
+  "install_commands": [
+    "git clone --depth 1 https://github.com/microsoft/SkillOpt.git upstream",
+    "uv venv .venv",
+    "uv pip install -e .",
+    "uv pip install datasets   # for benchmark materialization"
+  ],
+  "verified_platform": "Windows 11 (win32)",
+  "windows_notes": [
+    "Installs, imports (v0.2.0), and scripts/train.py --help work.",
+    "openai_compatible backend initializes against local Ollama (http://localhost:11434/v1) with a dummy key — no external egress, no provider key.",
+    "REQUIRES PYTHONUTF8=1 (or PYTHONIOENCODING=utf-8): the optimizer prints non-cp1252 characters (e.g. U+2192 '->') that crash the default Windows console codec mid-run (UnicodeEncodeError). This is a Windows-console issue, not a logic fault.",
+    "Bundled data/*_id_split/ dirs are LOOKUP MANIFESTS (IDs only), not runnable payloads — each benchmark must be materialized from its HF source first. SearchQA has scripts/materialize_searchqa.py; others need per-benchmark materialization."
+  ],
+  "backends_available": ["azure_openai", "openai_compatible", "openai_chat", "codex", "codex_exec", "claude", "claude_chat", "claude_code_exec", "cursor", "cursor_exec", "qwen", "minimax"],
+  "local_wiring": {
+    "target_backend": "openai_compatible",
+    "optimizer_backend": "openai_compatible",
+    "base_url": "http://localhost:11434/v1 (Ollama, direct — LiteLLM->Ollama path is buggy per repo memory)",
+    "api_key": "dummy (Ollama ignores it)",
+    "models_available_locally": ["qwen3:8b", "qwen3:30b", "qwen3-coder:30b", "devstral:24b", "nomic-embed-text"]
+  },
+  "not_committed": [
+    "The cloned upstream repo + its .venv (scratch, gitignored).",
+    "Materialized benchmark data (downloaded from HF; not redistributed).",
+    "outputs/ run artifacts (raw logs excerpted into raw/ for provenance only)."
+  ]
+}

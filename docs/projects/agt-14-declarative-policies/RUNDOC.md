@@ -140,3 +140,31 @@ Operator decisions, recorded verbatim; scope locked:
 - Catalog row: `knowledge/research/source_catalog.yaml` →
   `omnigent-meta-harness`.
 - Siblings: AGT-15 (bench), AGT-16 (session spec — policy refs live there).
+
+## 9. Packet 2 evidence + pre-enablement deep review (2026-07-24)
+
+**Packet 2 (Sol gpt-5.6-sol xhigh):** a tighten-only policy gate BEFORE an
+agent-authored board-change proposal is created, flag-gated by
+`AGENT_SESSION_POLICIES_ENABLED` (default OFF). DENY → durable `policy_denied`
+event + typed 403 before `make_proposal` runs; ASK → routes to the EXISTING
+human-token wall (no second approval surface); ALLOW → untouched flow. Commit
+`a7aa2d3`; finding-4 fix `c32b6b1`. Host-verified: validate PASS, 36 policy/
+floor/board-gate + 56 UI + 93 board/worker/proxy tests, ruff clean, vite build
+exit 0. `board_change.py` integrity code untouched (verified). Safety invariant
+machine-proven: no policy verdict (allow/ask/deny) applies without the human
+token; flag-off path identical (after the finding-4 fix flag-gates the worker
+endpoint).
+
+**Fresh-Sol pre-enablement DEEP REVIEW — VERDICT: DO-NOT-ENABLE.** An
+independent read-only Sol session (xhigh) audited the whole policy system
+(packet 1 on main + packet 2). It confirmed what HELD (board wall never
+bypassed; `resolve()` monotone; closed enum, no import injection; no
+permission-profile mutation; flag-off identity after finding-4). It found
+**four blockers to flipping the flag**, now tracked as **AGT-19 (BLOCKED,
+P1)**: (1) CRITICAL — tool-call enforcement is observational not preventative
+(evaluates on `tool_started`/`command_started` after the harness began; ASK is
+an effective auto-pass, adapters record approval `effective: False`); (2) no
+mandatory server floor (unspec'd session → ALLOW); (3) cost policy fails open
+silently when usage is unavailable; (4) generated ASK approvals aren't
+human-verified. **The flag stays OFF. Enablement gate: clear AGT-19 → fresh-Sol
+re-review → operator flips the flag.** Nothing here enabled it.
