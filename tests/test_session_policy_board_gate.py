@@ -161,6 +161,30 @@ def _apply_without_token(client: TestClient, payload: dict):
     return client.post("/api/board-changes/apply", json=payload)
 
 
+def test_worker_board_policy_endpoint_is_inert_when_flag_off(monkeypatch):
+    monkeypatch.delenv("AGENT_SESSION_POLICIES_ENABLED", raising=False)
+    store = SessionStore()
+    session = store.create_session(
+        harness="codex_agent", conversation_id="conversation-1", repo_id="repo-1")
+    store.append_event(session.session_id, AgentEvent("session_started", {}))
+    events_before = store.events_since(session.session_id)
+    worker = TestClient(build_app(
+        store=store, token=TOKEN, registry=HarnessRegistry([])))
+
+    response = worker.post(
+        f"/api/agent-sessions/{session.session_id}/board-change-policy",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+        json={"author_harness": "codex_agent", "kind": "update_board_format"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "agent-session policy enforcement disabled; "
+        "set AGENT_SESSION_POLICIES_ENABLED=1"
+    )
+    assert store.events_since(session.session_id) == events_before
+
+
 def test_flag_off_is_identical_and_never_consults_policy(monkeypatch, tmp_path):
     store = SessionStore()
     session = store.create_session(

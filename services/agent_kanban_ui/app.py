@@ -2570,7 +2570,7 @@ class BoardFormatPlanIn(BaseModel):
     """A STRUCTURED board-format change (no browser-generated YAML): the exact
     columns a board should have. The server computes the `after` config."""
     model_config = ConfigDict(extra="forbid")
-    session_id: str | None = None
+    session_id: str | None = None  # Accepted but ignored when the policy flag is off.
     domain_id: str
     columns: list[str]
     author_harness: str = "codex_agent"

@@ -396,6 +396,13 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         session_id: str, body: BoardChangePolicyIn,
     ) -> dict:
         """Durably gate an agent proposal before the cockpit can mint it."""
+        if os.environ.get("AGENT_SESSION_POLICIES_ENABLED", "") != "1":
+            raise HTTPException(
+                503,
+                detail="agent-session policy enforcement disabled; "
+                       "set AGENT_SESSION_POLICIES_ENABLED=1",
+            )
+
         from .service import PolicyRefusal
 
         try:
