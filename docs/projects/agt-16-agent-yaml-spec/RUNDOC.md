@@ -134,6 +134,14 @@ Operator decisions, recorded verbatim; scope locked:
   not exist (fastapi ships inside `dev`) — brief error, not code error;
   sandbox network block prevented `uv sync`, so validation used the
   provisioned env + worktree PYTHONPATH (same method as this verification).
+- **Concurrency absorbed (merge c6edba7)**: mid-packet, the concurrent
+  life-center session landed 455799d on the parent branch — an
+  agent_sessions subtree sync from main (stdin fix #70 + KAN-2 workspace
+  scoping) touching the same two adapters Sol edited, and revealing a LIVE
+  worker serves from that checkout's src. Sol's branch merged the parent
+  cleanly (no conflicts); merged tree re-verified: both stdin fix and
+  spec metadata present in `claude_code_local.py`, validate PASS, 26/26
+  spec+adapter tests, ruff clean on the merged files.
 
 ## 8. Links
 
