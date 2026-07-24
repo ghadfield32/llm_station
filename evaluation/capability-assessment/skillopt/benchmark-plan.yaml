@@ -1,0 +1,59 @@
+# Benchmark plan — SkillOpt (AGT-17). Written BEFORE the measured lift run (Stage 5).
+# A = champion (frozen target, initial/no learned skill). B = challenger (same target + trained best_skill.md).
+design:
+  a_champion: "frozen target model with the env's initial skill (no learning)"
+  b_challenger: "same frozen target with the SkillOpt-trained best_skill.md"
+  gate: "SkillOpt use_gate=true — an edit is kept ONLY if it improves the held-out selection score"
+  split: "split_mode=split_dir, disjoint train/val(selection)/test; test never seen during training"
+  reproducibility: "fixed seed=42, pinned SkillOpt commit, pinned target+optimizer, exact command recorded"
+  machine: "Windows 11 workstation; PYTHONUTF8=1 required"
+
+tiers:
+  tier1_validation:
+    goal: "reproduce SkillOpt's gated lift locally across a VARIETY of standard scenarios (de-risk before custom env)"
+    scenarios:
+      - name: searchqa
+        type: "retrieval / multi-hop factoid QA (context inline)"
+        local_runnable: true
+        note: "self-contained after materialize_searchqa.py; text-only; FIRST scenario"
+      - name: officeqa
+        type: "office-document tool-use QA"
+        local_runnable: "needs doc materialization"
+      - name: livemathematicianbench
+        type: "competition math reasoning"
+        local_runnable: "needs HF materialization of monthly files"
+      - name: spreadsheetbench
+        type: "spreadsheet manipulation"
+        local_runnable: "needs spreadsheet payloads"
+      - name: alfworld
+        type: "embodied/agentic text-game planning"
+        local_runnable: "needs alfworld-download + $ALFWORLD_DATA"
+    acceptance: ">=2 scenarios show a non-negative, gate-accepted held-out delta with a CAPABLE optimizer, independently re-run"
+  tier2_adoption:
+    goal: "custom SkillOpt env over llm_station cockpit tasks, trained through claude_code_exec/codex_exec"
+    acceptance: "challenger skill beats no-skill champion on held-out llm_station tasks AND clears the approval/merge walls"
+    status: "operator-gated (runs paid/loopback executors); env built from skillopt/envs/_template/"
+
+metrics:
+  quality:
+    - held_out_test_accuracy (hard/exact-graded)  # PRIMARY KPI, A vs B, per scenario
+    - held_out_selection_accuracy (gate metric)
+    - soft_accuracy (partial credit)
+  cost_efficiency:
+    - tokens_per_task
+    - latency_per_task_seconds
+    - gate_accepted_edits (skill growth)
+  governance:
+    - external_egress (expected: NONE on the local Ollama path)
+    - provider_api_keys_required (expected: NONE on the local path — knockout if required)
+    - writes_into_agent_config_dirs (expected: NONE — best_skill.md lands in out_root; deploying INTO an agent is a separate gated step)
+    - license (MIT)
+    - windows_runnable (with PYTHONUTF8=1 + materialize)
+
+capability_note: >
+  qwen3:8b (local, free) proves WIRING, not capability. An 8B optimizer is too weak
+  to expect real lift; Tier-1 lift numbers require a capable optimizer (Sol/Claude
+  native backends, or a frontier via the opt-in lane) — recorded per run as a
+  cost/authority decision. Baseline (champion) numbers are valid at any target size.
+
+windows_note: "Windows behavior is first-class (abtop lesson): PYTHONUTF8=1 is mandatory; materialize step required before any run."
