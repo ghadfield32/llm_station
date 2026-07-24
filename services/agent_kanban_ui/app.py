@@ -7429,6 +7429,26 @@ class JobSearchCandidateAnswerIn(BaseModel):
     answer: str = Field(min_length=1, max_length=5_000)
 
 
+class JobSearchDigestItemOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    company: str
+    role: str
+    fit_score: int | float
+    automation_class: str
+    apply_url: str
+    review_href: str
+    column: Literal["Suggested Jobs", "Needs Geoff"]
+
+
+class JobSearchDigestOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[JobSearchDigestItemOut]
+    counts: dict[str, int]
+    generated_at: datetime
+
+
 @app.post("/api/domain/book/cards", status_code=201)
 def create_book_card(body: BookCreateIn) -> dict:
     """Create one operator-authored book and enter its selected governed lane."""
@@ -8689,6 +8709,28 @@ def _application_question_policy() -> tuple[dict[str, Any], Path]:
     if policy_path.is_file():
         return _read_yaml_file(policy_path), policy_path
     return cfg.application_questions.model_dump(mode="json"), CONFIGS_DIR / "job_search.yaml"
+
+
+@app.get("/api/job-search/digest", response_model=JobSearchDigestOut)
+def job_search_digest(response: Response) -> dict:
+    """Read-only review list for Suggested Jobs and prepared Needs-Geoff cards."""
+    _private_no_store(response)
+    spec = _require_job_domain("job_application")
+    from command_center.job_search.digest import build_digest_items
+
+    items = build_digest_items(_domain_cards(spec)["cards"])
+    counts = {
+        "suggested_jobs": sum(
+            item["column"] == "Suggested Jobs" for item in items
+        ),
+        "needs_geoff": sum(item["column"] == "Needs Geoff" for item in items),
+        "total": len(items),
+    }
+    return {
+        "items": items,
+        "counts": counts,
+        "generated_at": datetime.now(UTC),
+    }
 
 
 @app.get("/api/job-search/profile-controls")
