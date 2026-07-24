@@ -399,6 +399,11 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   min-width: 0; flex-wrap: wrap; }
 .chat-header > *, .chat-header-left > *, .chat-header-right > * { min-width: 0; }
 .chat-field { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.agent-spec-picker { display: flex; align-items: center; gap: 6px;
+  min-width: 0; max-width: min(92vw, 480px); }
+.agent-spec-picker .select { max-width: min(100%, 230px); }
+.agent-spec-meta { display: inline-flex; align-items: center; gap: 4px;
+  min-width: 0; flex-wrap: wrap; }
 .chat-back { background: var(--col); border: 1px solid var(--border); color: inherit;
   border-radius: 8px; padding: 5px 12px; cursor: pointer; font-weight: 600; }
 .chat-back:hover { border-color: var(--accent, #6ab7ff); }
@@ -646,6 +651,9 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   .chat-workspace { flex: 0 0 auto; min-height: calc(100dvh - 112px); }
   .chat-runtime-wrap { overflow: visible; padding-right: 0; }
   .chat-bar { align-items: stretch; }
+  .agent-spec-picker { flex: 1 1 100%; flex-wrap: wrap; }
+  .agent-spec-picker .chat-field { flex: 1 1 100%; }
+  .agent-spec-picker .select { flex: 1 1 auto; }
   .chat-log { min-height: 160px; border-radius: 8px; }
   .chat-input {
     /* nav is at the top now — the input sticks to the real bottom edge */
@@ -2526,7 +2534,9 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
   padding: 16px; border: 1px solid var(--border); border-radius: 12px;
   background: var(--card); }
 .agent-session-setup .chat-field { display: grid; gap: 4px; }
-.agent-session-setup .chat-field .select { width: 100%; }
+.agent-session-setup .chat-field .select {
+  width: 100%; max-width: 100%; min-width: 0; text-overflow: ellipsis;
+}
 .agent-register { display: grid; gap: 9px; padding: 10px 0 0; }
 
 /* ---- chat toolbar buttons: make new chat / History / handoff / settings /

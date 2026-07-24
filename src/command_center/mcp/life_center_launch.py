@@ -103,6 +103,15 @@ class LaunchView:
     summary: LaunchSummary
     global_action_ids: tuple[str, ...]
     services: tuple[LaunchService, ...]
+    # Distinct from status_generated_at (last time the boards actually
+    # CHANGED): this is "did the host-side scheduled sync job's last attempt
+    # exit 0". A run that fails all 3 retries leaves the boards stale but
+    # this still flips to False the moment it happens, rather than only
+    # becoming visible once the 1-hour staleness threshold quietly passes.
+    # None (not False) when the status file doesn't exist yet -- honestly
+    # unknown, never presented as a false "it's fine".
+    sync_job_last_attempt_at: str | None = None
+    sync_job_ok: bool | None = None
 
 
 def _parse_iso(value: str | None) -> datetime.datetime | None:
@@ -123,6 +132,8 @@ def build_launch_view(
     operations_cards: Sequence[Mapping],
     generated_at: str,
     status_generated_at: str | None,
+    sync_job_last_attempt_at: str | None = None,
+    sync_job_ok: bool | None = None,
 ) -> LaunchView:
     services_by_id = {str(c["service_id"]): c for c in services_cards if c.get("service_id")}
     overview_by_id = {str(c["service"]): c for c in overview_cards if c.get("service")}
@@ -219,11 +230,13 @@ def build_launch_view(
                                setup_pending=setup_pending, unknown=unknown),
         global_action_ids=_GLOBAL_ACTIONS,
         services=tuple(out_services),
+        sync_job_last_attempt_at=sync_job_last_attempt_at, sync_job_ok=sync_job_ok,
     )
 
 
 def live_launch_view() -> LaunchView:
     """Bind `build_launch_view` to the real catalog + boards."""
+    import json
     import os
     from pathlib import Path
 
@@ -256,12 +269,31 @@ def live_launch_view() -> LaunchView:
     checks = [c.get("last_check") for c in overview_cards if c.get("last_check")]
     status_generated_at = max(checks) if checks else None
 
+    # Written by scripts/run_life_center_sync.cmd's host-side scheduled task
+    # into the already-mounted ./generated dir. Deliberately NOT the same
+    # signal as status_generated_at above: that's "when did the boards last
+    # change", this is "did the job's last attempt actually exit 0" — a run
+    # that exhausts all 3 retries flips this to False immediately, instead of
+    # only becoming visible once the 1-hour staleness threshold quietly
+    # passes. Missing file (job never run yet, or mount unavailable) reports
+    # both as None -- honestly unknown, never presented as a false "it's fine".
+    sync_job_last_attempt_at: str | None = None
+    sync_job_ok: bool | None = None
+    status_path = Path(os.environ.get("KANBAN_BOARD_STORE", "generated/boards")).parent / "life_center_sync_status.json"
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+        sync_job_last_attempt_at = payload.get("last_attempt_at")
+        sync_job_ok = payload.get("success")
+    except (OSError, ValueError):
+        pass
+
     return build_launch_view(
         catalog_services=catalog_services, catalog_digest=catalog["catalog_digest"],
         services_cards=services_cards, overview_cards=overview_cards,
         operations_cards=operations_cards,
         generated_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         status_generated_at=status_generated_at,
+        sync_job_last_attempt_at=sync_job_last_attempt_at, sync_job_ok=sync_job_ok,
     )
 
 

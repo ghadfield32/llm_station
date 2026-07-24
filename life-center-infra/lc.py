@@ -37,8 +37,10 @@ ENV_EXAMPLE = ROOT / ".env.example"
 #   smart-home physical-home dependency
 #   vault      critical identity dependency, admitted last
 #   admin-gui  privileged host administration (Docker socket access)
+#   sso        Authelia+Caddy forward-auth foundation — opt-in until proven, do NOT add to NON_SENSITIVE
 TIERS = {
     "foundation": "foundation.yml",
+    "sso": "sso.yml",
     "files": "files.yml",
     "photos": "photos.yml",
     "docs": "docs.yml",
@@ -60,7 +62,8 @@ SECRET_KEYS = [
     "NEXTCLOUD_ADMIN_PASSWORD", "NEXTCLOUD_DB_PASSWORD", "IMMICH_DB_PASSWORD",
     "PAPERLESS_SECRET_KEY", "PAPERLESS_DB_PASSWORD", "LINKWARDEN_NEXTAUTH_SECRET",
     "LINKWARDEN_DB_PASSWORD", "ACTUAL_PASSWORD", "VAULTWARDEN_ADMIN_TOKEN",
-    "RESTIC_PASSWORD",
+    "RESTIC_PASSWORD", "AUTHELIA_JWT_SECRET", "AUTHELIA_SESSION_SECRET",
+    "AUTHELIA_STORAGE_ENCRYPTION_KEY",
 ]
 
 
@@ -224,6 +227,16 @@ def c_setup(_args) -> int:
             if key not in assigned:
                 lines.append(f"{key}={_gen_secret()}")
         ENV_FILE.write_text(existing + "\n".join(lines) + "\n", encoding="utf-8")
+        # Best-effort owner-only permissions. No-op on Windows (NTFS has no
+        # POSIX mode bits; user-profile ACLs already isolate it there) but
+        # real on this repo's actual target host, a dedicated Linux machine —
+        # a default umask can otherwise leave every generated secret
+        # world-readable. Independent review flagged this while reviewing the
+        # SSO secrets specifically, but it protects every secret in this file.
+        try:
+            ENV_FILE.chmod(0o600)
+        except OSError:
+            pass
         _print(f"generated {len(SECRET_KEYS)} local secrets into {ENV_FILE.name}")
     else:
         _print(f"{ENV_FILE.name} already exists — leaving it untouched")
@@ -278,8 +291,20 @@ def c_first_boot(args) -> int:
 
 
 def c_config(args) -> int:
-    """Lint the merged Compose for a profile (docker compose config)."""
+    """Lint the merged Compose for a profile (docker compose config).
+
+    WITHOUT --quiet this resolves and prints every ${VAR} substitution,
+    including secret values (RESTIC_PASSWORD, VAULTWARDEN_ADMIN_TOKEN, the
+    Authelia secrets, etc.) — that's `docker compose config`'s normal
+    behavior, not a bug specific to this wrapper, but it means the plain
+    output must never be pasted into a log, issue, or support request.
+    Independent review flagged this while reviewing the SSO tier, whose
+    secrets raise the stakes of this repo-wide, pre-existing behavior.
+    --quiet validates the merged config's syntax without printing anything.
+    """
     tiers = _resolve_tiers(getattr(args, "profile", None))
+    if getattr(args, "quiet", False):
+        return run(_compose_base() + _compose_files(tiers) + ["config", "--quiet"], check=False)
     return run(_compose_base() + _compose_files(tiers) + ["config"], check=False)
 
 
@@ -894,6 +919,10 @@ def main(argv: list[str] | None = None) -> int:
                            help="generate a local HTML fallback page instead of opening the cockpit")
             p.add_argument("--no-health", action="store_true",
                            help="--standalone only: skip the verify pass (faster, no health badges)")
+        if name == "config":
+            p.add_argument("--quiet", action="store_true",
+                           help="validate only, print nothing (safe: does not resolve secret values "
+                                "into terminal/log output)")
     args = parser.parse_args(argv)
     if not args.cmd:
         parser.print_help()

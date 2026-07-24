@@ -55,10 +55,12 @@ import {
   fetchPrepStatus, fetchRejectionsReport, RejectionsReport,
   REJECT_REASONS,
   AgentEvent, AgentHarnessOption, AgentSessionRecord, AgentModelOption,
+  AgentSessionSpecSummary,
   buildAgentHandoff, resolveAttachments, AttachmentReq,
   fetchBoardFormatTargets, planBoardFormat, mintBoardApproval, applyBoardChange,
   BoardFormatTarget, BoardFormatPlan,
   closeAgentSession, createAgentSession, fetchAgentEvents, fetchAgentHarnesses,
+  fetchAgentSessionSpecs,
   fetchAgentSession, fetchHarnessModels, interruptAgentSession, promoteAgentSession,
   promoteChat, resolveAgentApproval, resumeAgentSession, sendAgentMessage, streamAgentEvents,
   UsageStatus, UsageLimit, CollectorHealth, ModelUsageEntry, ModelUsagePortfolio,
@@ -83,6 +85,7 @@ import {
   describeChatEvent, optionLabel, runtimeLabel, type RuntimeTarget,
 } from "./chatPresentation";
 import { buildRunDocDraft, type IntakeAnswers } from "./intakeDraft";
+import { agentSessionSpecOptionLabel } from "./agentSessionSpecs";
 
 type View = "missions" | "boards" | "domains" | "todos" | "settings" | "router" | "diagnostics" | "observability" | "activity" | "usage" | "chat" | "inbox" | "work-map" | "life-center";
 const NAV: { id: View; label: string }[] = [
@@ -96,13 +99,13 @@ const NAV: { id: View; label: string }[] = [
   { id: "diagnostics", label: "Status" },
   { id: "observability", label: "Metrics" },
   { id: "usage", label: "Usage & Limits" },
-  { id: "activity", label: "Activity" },
 ];
 const VIEW_IDS: ReadonlySet<string> = new Set([
   ...NAV.map((n) => n.id),
   "missions",
   "boards",
   "chat",
+  "activity",
 ]);
 type DomainNavItem = {
   id: string;
@@ -9245,7 +9248,12 @@ function pendingApprovalsOf(events: AgentEvent[]) {
     events.filter((e) => e.type === "approval_resolved")
       .map((e) => String(e.payload.approval_id)));
   return events.filter((e) =>
-    e.type === "approval_required" && !resolved.has(String(e.payload.approval_id)));
+    e.type === "approval_required"
+      // Board-policy ASK routes to the existing board confirm card/token wall;
+      // it deliberately has no generic approval_id and must never render a
+      // second approve button in the agent-session strip.
+      && typeof e.payload.approval_id === "string"
+      && !resolved.has(e.payload.approval_id));
 }
 
 // ---- natural transcript: coalesce the raw event stream into chat blocks ----
@@ -9740,6 +9748,7 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
   const [record, setRecord] = useState<AgentSessionRecord | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [input, setInput] = useState(initialPrompt ?? "");
+  const [queued, setQueued] = useState<string>("");
   // re-seed if a different card's context arrives while the panel is mounted
   useEffect(() => { if (initialPrompt) setInput(initialPrompt); }, [initialPrompt]);
   const [busy, setBusy] = useState(false);
@@ -9802,6 +9811,12 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
   const [promoting, setPromoting] = useState(false);
   const sessionIdRef = useRef(sessionId);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  const queuedRef = useRef(queued);
+  const sendTextRef = useRef(
+    (_id: string, _text: string, _messageAttachments: AttachmentReq[],
+      _clearComposer: boolean) =>
+      Promise.resolve(),
+  );
   const closeStreamRef = useRef<(() => void) | null>(null);
   const autoStartAttemptedRef = useRef("");
   const endRef = useRef<HTMLDivElement | null>(null);
@@ -9843,6 +9858,17 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
         if (ev.sequence != null) onThreadChange({ agentLastSeenSequence: ev.sequence });
         if (["session_idle", "session_failed", "session_closed"].includes(ev.type)) {
           void fetchAgentSession(id).then(setRecord).catch(() => {});
+        }
+        if (ev.type === "session_idle" && sessionIdRef.current === id) {
+          const queuedText = queuedRef.current.trim();
+          if (queuedText) {
+            queuedRef.current = "";
+            setQueued("");
+            void sendTextRef.current(id, queuedText, [], false);
+          }
+        } else if (["session_failed", "session_closed"].includes(ev.type)) {
+          queuedRef.current = "";
+          setQueued("");
         }
       },
       (detail) => { if (sessionIdRef.current === id) setError(detail); });
@@ -9909,10 +9935,12 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
     }
   }
 
-  async function send() {
-    const id = sessionId;
-    const text = input.trim();
-    if (!id || (!text && attachments.length === 0) || busy) return;
+  async function sendText(
+    id: string,
+    text: string,
+    messageAttachments: AttachmentReq[],
+    clearComposer: boolean,
+  ) {
     // No silent paid send: an external-egress harness needs an explicit,
     // per-session acknowledgement before the FIRST message leaves the machine.
     if (harness?.external_egress && !egressAck) {
@@ -9927,9 +9955,9 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
       // ones (secret path / escape / oversize) are surfaced, never dropped —
       // and we attach TYPED references (path + digest) for the agent to read
       // with its own tools, not concatenated raw content (plan §4).
-      if (attachments.length > 0) {
+      if (messageAttachments.length > 0) {
         const res = await resolveAttachments(
-          repoId || null, !!harness?.external_egress, attachments);
+          repoId || null, !!harness?.external_egress, messageAttachments);
         if (res.summary.blocked.length > 0) {
           setAttachBlocked(res.summary.blocked.map(
             (b) => ({ requested: b.requested, reason: b.reason })));
@@ -9950,15 +9978,33 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
           prompt = `${text}\n\nReferenced context (read these):\n${refs.join("\n")}`;
         }
       }
-      setInput("");
-      setAttachments([]);
-      setAttachBlocked([]);
+      if (clearComposer) {
+        setInput("");
+        setAttachments([]);
+        setAttachBlocked([]);
+      }
       await sendAgentMessage(id, prompt);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
+  }
+  sendTextRef.current = sendText;
+
+  async function send() {
+    const id = sessionId;
+    const text = input.trim();
+    if (!id || (!text && attachments.length === 0) || busy) return;
+    await sendText(id, text, attachments, true);
+  }
+
+  function queueInput() {
+    const text = input.trim();
+    if (!text) return;
+    queuedRef.current = text;
+    setQueued(text);
+    setInput("");
   }
 
   function addAttachment(a: AttachmentReq) {
@@ -10393,7 +10439,7 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
             </div>
           )}
           <textarea className="chat-composer-input" value={input} rows={3}
-            placeholder={`Message ${harness?.label ?? "the agent"}…  (Enter to send · Shift+Enter for a newline)`}
+            placeholder={`Message ${harness?.label ?? "the agent"}…  (Enter to ${status === "active" ? "queue" : "send"} · Shift+Enter for a newline)`}
             onChange={(e) => {
               setInput(e.target.value);
               // auto-grow: 3 lines min, ~12 lines max, then internal scroll
@@ -10403,9 +10449,23 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault(); void send();
+                e.preventDefault();
+                if (status === "active") queueInput();
+                else void send();
               }
             }} />
+          {queued && (
+            <div className="agent-marker muted small">
+              ⏳ 1 queued — sends when the agent goes idle
+              <button type="button" className="clear" aria-label="clear queued message"
+                onClick={() => {
+                  queuedRef.current = "";
+                  setQueued("");
+                }}>
+                clear
+              </button>
+            </div>
+          )}
           {harness?.external_egress && (
             <label className="egress-notice">
               <input type="checkbox" checked={egressAck}
@@ -10423,13 +10483,22 @@ function AgentSessionPanel({ conversationId, harnessId, harnesses, repos, thread
               read-only analysis · {harness?.label ?? harnessId}
               {harness?.external_egress ? " · paid external egress" : ""}
             </span>
-            <button className="actbtn" onClick={() => void send()}
-              disabled={busy || status === "active"
-                || (!input.trim() && attachments.length === 0)
+            {status === "active" && (
+              <button className="clear" onClick={() => void doInterrupt()}>Stop</button>
+            )}
+            <button className="actbtn"
+              onClick={() => {
+                if (status === "active") queueInput();
+                else void send();
+              }}
+              disabled={busy
+                || (status === "active"
+                  ? !input.trim()
+                  : (!input.trim() && attachments.length === 0))
                 || (harness?.external_egress && !egressAck)}
               title={harness?.external_egress && !egressAck
                 ? "Confirm the paid external-egress notice first" : undefined}>
-              {busy ? "…" : "Send"}
+              {busy ? "…" : status === "active" ? "Queue" : "Send"}
             </button>
           </div>
         </div>
@@ -10863,11 +10932,12 @@ function ThreadTimeline({ transcript, loading, error, onRefresh, onLoadAll,
 }
 
 function ChatView({ roles, runtime, agentHarnesses, agentHarnessesError,
-  draft, onBack, onWorkCreated }: {
+  agentSessionSpecs, draft, onBack, onWorkCreated }: {
   roles: string[];
   runtime: ChatRuntime | null;
   agentHarnesses: AgentHarnessOption[] | null;
   agentHarnessesError: string | null;
+  agentSessionSpecs: AgentSessionSpecSummary[];
   draft?: { text: string; nonce: number; conversationId?: string;
             storyTs?: string; target?: string; repoId?: string } | null;
   onBack?: () => void;
@@ -10890,6 +10960,11 @@ function ChatView({ roles, runtime, agentHarnesses, agentHarnessesError,
   // union everything else below switches on.
   const [targetRaw, setTargetRaw] = useState(initialActive.target);
   const chatTarget = decodeChatTarget(targetRaw);
+  // Packet 2 is a read path only: this selection previews a validated spec in
+  // the chrome and never changes targetRaw or mounts/starts an agent session.
+  const [selectedSpecName, setSelectedSpecName] = useState("");
+  const selectedSessionSpec = agentSessionSpecs.find(
+    (spec) => spec.name === selectedSpecName) ?? agentSessionSpecs[0];
   const [input, setInput] = useState("");
   const [events, setEvents] = useState<ChatEvent[]>([]);
   const [threads, setThreads] = useState<ChatThread[]>(() => loadChatThreads());
@@ -10960,6 +11035,12 @@ function ChatView({ roles, runtime, agentHarnesses, agentHarnessesError,
       roles.includes(current) ? current : roles.includes("chat") ? "chat" : roles[0]
     ));
   }, [roles]);
+  useEffect(() => {
+    setSelectedSpecName((current) => (
+      agentSessionSpecs.some((spec) => spec.name === current)
+        ? current : agentSessionSpecs[0]?.name ?? ""
+    ));
+  }, [agentSessionSpecs]);
   useEffect(() => {
     let cancelled = false;
     fetchChatThreads()
@@ -11317,6 +11398,27 @@ function ChatView({ roles, runtime, agentHarnesses, agentHarnessesError,
                 onPick={(assistantId) => setTargetRaw(
                   assistantId === "gatewaycore" ? "GatewayCore"
                     : `agent:${assistantId}`)} />
+              {selectedSessionSpec && (
+                <div className="agent-spec-picker"
+                  title="Display preview only — selecting a spec does not start or change a session.">
+                  <label className="chat-field">
+                    <span className="muted small">session spec</span>
+                    <select className="select" value={selectedSessionSpec.name}
+                      onChange={(event) => setSelectedSpecName(event.target.value)}>
+                      {agentSessionSpecs.map((spec) => (
+                        <option key={spec.name} value={spec.name}
+                          title={agentSessionSpecOptionLabel(spec)}>
+                          {agentSessionSpecOptionLabel(spec)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="agent-spec-meta" aria-live="polite">
+                    <Badge value={selectedSessionSpec.harness} />
+                    <Badge value={selectedSessionSpec.capability_profile} />
+                  </span>
+                </div>
+              )}
               {chatTarget.kind === "gateway" && (
                 <label className="chat-field">
                   <span className="muted small">chat model</span>
@@ -11767,6 +11869,8 @@ export function App() {
   const [chatRuntime, setChatRuntime] = useState<ChatRuntime | null>(null);
   const [agentHarnesses, setAgentHarnesses] = useState<AgentHarnessOption[] | null>(null);
   const [agentHarnessesError, setAgentHarnessesError] = useState<string | null>(null);
+  const [agentSessionSpecs, setAgentSessionSpecs] =
+    useState<AgentSessionSpecSummary[]>([]);
   const [registeredRepos, setRegisteredRepos] = useState<RegisteredRepository[]>([]);
   const [chatDraft, setChatDraft] =
     useState<{ text: string; nonce: number; conversationId?: string;
@@ -11934,6 +12038,14 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    fetchAgentSessionSpecs()
+      .then((specs) => { if (!cancelled) setAgentSessionSpecs(specs); })
+      .catch(() => { if (!cancelled) setAgentSessionSpecs([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void refreshGlobal(true);
     };
@@ -11991,7 +12103,10 @@ export function App() {
       // remember where we came from so Chat's Back button returns there
       setView((prev) => { if (prev !== "chat") setChatReturnView(prev); return "chat"; });
     }, []);
-  const nav = [...NAV, { id: "chat" as View, label: "Chat" }];
+  const nav: { id: View; label: string }[] = [
+    { id: "chat", label: "Chat" },
+    ...NAV,
+  ];
   const domainNavCount = domainNav.reduce(
     (total, item) => total + (item.count ?? 0), 0);
   const counts: Partial<Record<View, number>> = {
@@ -12139,6 +12254,7 @@ export function App() {
           <div style={{ display: view === "chat" ? "block" : "none" }}>
             <ChatView roles={cfg?.model_roles ?? []} runtime={chatRuntime}
               agentHarnesses={agentHarnesses} agentHarnessesError={agentHarnessesError}
+              agentSessionSpecs={agentSessionSpecs}
               draft={chatDraft}
               onBack={() => setView(chatReturnView)}
               onWorkCreated={() => setUpdated(new Date().toISOString())} />

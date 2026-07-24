@@ -35,6 +35,8 @@ class ToolAction:
     is_os_tool: bool
     estimated_cost_usd: float | None
     session_tool_call_count: int
+    author_harness: str | None = None
+    session_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.tool_name.strip():
@@ -43,6 +45,13 @@ class ToolAction:
             raise ValueError("estimated_cost_usd must be non-negative")
         if self.session_tool_call_count < 0:
             raise ValueError("session_tool_call_count must be non-negative")
+        if self.author_harness is not None and not self.author_harness.strip():
+            raise ValueError("author_harness must not be blank")
+        if self.session_id is not None and not self.session_id.strip():
+            raise ValueError("session_id must not be blank")
+        if (self.author_harness is None) != (self.session_id is None):
+            raise ValueError(
+                "author_harness and session_id must be supplied together")
 
 
 @dataclass(frozen=True)
