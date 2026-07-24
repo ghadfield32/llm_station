@@ -95,13 +95,13 @@ const NAV: { id: View; label: string }[] = [
   { id: "diagnostics", label: "Status" },
   { id: "observability", label: "Metrics" },
   { id: "usage", label: "Usage & Limits" },
-  { id: "activity", label: "Activity" },
 ];
 const VIEW_IDS: ReadonlySet<string> = new Set([
   ...NAV.map((n) => n.id),
   "missions",
   "boards",
   "chat",
+  "activity",
 ]);
 type DomainNavItem = {
   id: string;
@@ -11833,7 +11833,10 @@ export function App() {
       // remember where we came from so Chat's Back button returns there
       setView((prev) => { if (prev !== "chat") setChatReturnView(prev); return "chat"; });
     }, []);
-  const nav = [...NAV, { id: "chat" as View, label: "Chat" }];
+  const nav: { id: View; label: string }[] = [
+    { id: "chat", label: "Chat" },
+    ...NAV,
+  ];
   const domainNavCount = domainNav.reduce(
     (total, item) => total + (item.count ?? 0), 0);
   const counts: Partial<Record<View, number>> = {
