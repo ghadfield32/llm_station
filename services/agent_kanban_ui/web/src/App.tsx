@@ -7743,11 +7743,60 @@ function DomainDrawer({
     </DrawerShell>
   );
 }
-function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenChat,
+function PriorityStrip({
+  cards, query, priority, onQuery, onPriority, onOpenView,
+}: {
+  cards: DomainCard[];
+  query: string;
+  priority: string;
+  onQuery: (value: string) => void;
+  onPriority: (value: string) => void;
+  onOpenView: (view: View) => void;
+}) {
+  const counts = ["P1", "P2", "P3"].map((level) => ({
+    level,
+    count: cards.filter((card) => cardPriority(card) === level).length,
+  }));
+  return (
+    <div className="filterbar priority-strip" aria-label="Priority board filters">
+      <div className="priority-counts" aria-label="Priority counts">
+        {counts.map(({ level, count }) => (
+          <span className="priority-count-chip" key={level}>
+            <b>{level}</b>{count}
+          </span>
+        ))}
+      </div>
+      <select className="select" value={priority}
+        aria-label="Filter cards by priority"
+        onChange={(e) => onPriority(e.target.value)}>
+        <option value="">All</option>
+        {["P1", "P2", "P3"].map((level) => (
+          <option key={level} value={level}>{level}</option>
+        ))}
+      </select>
+      <input className="search" type="search" placeholder="search cards…" value={query}
+        aria-label="Search cards"
+        onChange={(e) => onQuery(e.target.value)} />
+      <button className="actbtn priority-work-map" type="button"
+        onClick={() => onOpenView("work-map")}>
+        Work Map
+      </button>
+      {(query || priority) && (
+        <button className="clear" type="button"
+          onClick={() => { onQuery(""); onPriority(""); }}>
+          clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenView, onOpenChat,
   chatHarnesses = null, registeredRepos = [], onDomainResult }: {
   refreshKey: string;
   activeDomain: string;
   onActiveDomainChange: (domainId: string) => void;
+  onOpenView: (view: View) => void;
   onOpenChat?: (
     prompt: string, conversationId?: string, storyTs?: string,
     target?: string, repoId?: string,
@@ -7765,6 +7814,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   const [loading, setLoading] = useState(true);
   const [qByDomain, setQByDomain] = useState<Record<string, string>>({});
   const [statusByDomain, setStatusByDomain] = useState<Record<string, string>>({});
+  const [priorityByDomain, setPriorityByDomain] = useState<Record<string, string>>({});
   const [automationByDomain, setAutomationByDomain] = useState<Record<string, string>>({});
   const [topicByDomain, setTopicByDomain] = useState<Record<string, string>>({});
   const [bookFilters, setBookFilters] = useState<BookLibraryFilterState>(
@@ -7917,8 +7967,10 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
   const pack = cards[spec.domain_id];
   const q = qByDomain[spec.domain_id] ?? "";
   const status = statusByDomain[spec.domain_id] ?? "";
+  const priority = priorityByDomain[spec.domain_id] ?? "";
   const automationClass = automationByDomain[spec.domain_id] ?? "";
   const allCards = pack?.cards ?? [];
+  const hasPriority = allCards.some((card) => Boolean(cardPriority(card)));
   const isJobDomain = spec.domain_id === "job_application";
   const isBookDomain = spec.domain_id === "book";
   const isResearchDomain = spec.card_component === "paper" || spec.card_component === "repo";
@@ -7951,7 +8003,8 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
       Array.isArray(card.review_topics) && card.review_topics.includes(activeTopic)
     ))
     && (!isSelfImprovementDomain
-      || selfImprovementCardMatches(card, selfImprovementFilters)));
+      || selfImprovementCardMatches(card, selfImprovementFilters))
+    && (!priority || cardPriority(card) === priority));
   const unsortedShown = baseShown.filter((c) =>
     !automationClass || valText(c.automation_class) === automationClass);
   const shown = isBookDomain
@@ -8115,6 +8168,20 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
 
   return (
     <>
+      {hasPriority && (
+        <PriorityStrip
+          cards={allCards}
+          query={q}
+          priority={priority}
+          onQuery={(value) => setQByDomain((current) => ({
+            ...current, [spec.domain_id]: value,
+          }))}
+          onPriority={(value) => setPriorityByDomain((current) => ({
+            ...current, [spec.domain_id]: value,
+          }))}
+          onOpenView={onOpenView}
+        />
+      )}
       <HorizontalScroller className="domain-tabs">
         {domains.map((d) => (
           <button key={d.domain_id} className={`tab ${d.domain_id === spec.domain_id ? "tab-on" : ""}`}
@@ -8176,6 +8243,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
           onClear={() => {
             setQByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
             setStatusByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
+            setPriorityByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
             setSelfImprovementFilters({ ...EMPTY_SELF_IMPROVEMENT_FILTERS });
           }}
         />
@@ -8304,6 +8372,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
             onClear={() => {
               setQByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
               setStatusByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
+              setPriorityByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
               setBookFilters({ ...EMPTY_BOOK_FILTERS, facets: {} });
             }}
           />
@@ -8335,11 +8404,12 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
             {automationValues.map((value) => <option key={value} value={value}>{titleToken(value)}</option>)}
           </select>
         )}
-        {(q || status || automationClass || researchFiltersActive(researchFilters)
+        {(q || status || priority || automationClass || researchFiltersActive(researchFilters)
           || (isJobDomain && jobBoardMode !== "manual")) && (
           <button className="clear" onClick={() => {
             setQByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
             setStatusByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
+            setPriorityByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
             setAutomationByDomain((m) => ({ ...m, [spec.domain_id]: "" }));
             setResearchFiltersByDomain((m) => ({
               ...m, [spec.domain_id]: { ...EMPTY_RESEARCH_FILTERS },
@@ -8359,6 +8429,7 @@ function DomainsView({ refreshKey, activeDomain, onActiveDomainChange, onOpenCha
             <button className="actbtn" onClick={() => {
               setQByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
               setStatusByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
+              setPriorityByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
               setAutomationByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
               setTopicByDomain((current) => ({ ...current, [spec.domain_id]: "" }));
               setResearchFiltersByDomain((current) => ({
@@ -11867,7 +11938,8 @@ export function App() {
             </div>)}
         {view === "domains" && (
           <DomainsView refreshKey={updated} activeDomain={activeDomain}
-            onActiveDomainChange={setActiveDomain} onOpenChat={openChatWithPrompt}
+            onActiveDomainChange={setActiveDomain} onOpenView={setView}
+            onOpenChat={openChatWithPrompt}
             chatHarnesses={agentHarnesses}
             registeredRepos={registeredRepos}
             onDomainResult={recordDomainResults} />
