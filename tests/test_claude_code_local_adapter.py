@@ -57,8 +57,11 @@ async def _drain(gen):
     return [e async for e in gen]
 
 
-def _fake_stream(objs):
-    async def _gen(self, session_id, args, cwd, env):
+def _fake_stream(objs, captured=None):
+    async def _gen(self, session_id, args, cwd, env, prompt):
+        if captured is not None:
+            captured["args"] = args
+            captured["prompt"] = prompt
         for o in objs:
             yield o
     return _gen
@@ -125,8 +128,8 @@ def test_build_args_is_defense_in_depth_read_only(harness):
     h, _ = harness
     rec = h.store.create_session(harness=h.name, conversation_id="c", repo_id="r",
                                  model="opus")
-    args = h._build_args("/usr/bin/claude", rec, "look around", Path("/repo"))
-    assert "--print".replace("--print", "-p") in args or "-p" in args
+    args = h._build_args("/usr/bin/claude", rec, Path("/repo"))
+    assert "-p" in args
     # capability restriction + writelist + planning mode + MCP isolation
     assert args[args.index("--tools") + 1:args.index("--tools") + 4] == ["Read", "Glob", "Grep"]
     for w in ("Write", "Edit", "Bash", "WebFetch"):
@@ -144,7 +147,7 @@ def test_build_args_resumes_when_external_session_id_present(harness):
     rec = h.store.create_session(harness=h.name, conversation_id="c", repo_id="r")
     h.store.update_session(rec.session_id, external_session_id="sess-xyz")
     rec = h.store.get(rec.session_id)
-    args = h._build_args("/usr/bin/claude", rec, "follow up", Path("/repo"))
+    args = h._build_args("/usr/bin/claude", rec, Path("/repo"))
     assert args[args.index("--resume") + 1] == "sess-xyz"
 
 
@@ -215,6 +218,25 @@ def test_send_translates_stream_and_captures_session_id(harness, monkeypatch):
     assert kinds[-1] == "session_idle"
     # external session id captured from the init event's session_id
     assert h.store.get(sid).external_session_id == "sess-abc"
+
+
+def test_long_prompt_goes_to_stdin_not_argv(harness, monkeypatch):
+    """Regression (2026-07-17): a ~40 KB paste as an argv element blew past the
+    Windows 32,767-char command-line limit ('The command line is too long.').
+    The prompt must ride stdin; argv must stay small and prompt-free."""
+    h, _ = harness
+    sid = asyncio.run(h.start_session(_start()))
+    big = "SmartLine plan " * 3000            # ~45 KB, far over the Windows cap
+    captured: dict = {}
+    monkeypatch.setattr(ccl.ClaudeCodeLocalHarness, "_stream_cli",
+                        _fake_stream([_RESULT_OK], captured))
+    asyncio.run(_drain(h.send(sid, big)))
+    assert captured["prompt"].endswith(big)                # full prompt via stdin
+    assert "[WORKSPACE BOUNDS" in captured["prompt"]      # first-turn contract
+    joined = "\x00".join(captured["args"])
+    assert big not in joined                                # never in argv
+    assert len("\x00".join(captured["args"])) < 4096        # argv stays small
+    assert "-p" in captured["args"]
 
 
 def test_interrupt_terminates_the_active_proc(harness):

@@ -211,6 +211,53 @@ corresponding [`GRAND_TODO_LIST.md`](../GRAND_TODO_LIST.md) item's Notes.
 - Full review: [2026-07-23-omnigent-borrow-patterns.md](../../reviews/2026-07-23-omnigent-borrow-patterns.md);
   catalog row `omnigent-meta-harness` (verdict `build`).
 - Provenance: single Fable session, `gh api` reads only, 2026-07-23.
+## AGT-17 — SkillOpt (trainable agent skills) — added 2026-07-23 evening
+
+- **What (verified)**: **microsoft/SkillOpt** — "agent skills as trainable
+  parameters" (MSR blog 2026-06-30; arXiv paper). A text-space optimizer for
+  a FROZEN model: rollout on scored tasks → optimizer proposes bounded skill
+  edits → **validation-gated acceptance** (edit kept only if held-out score
+  improves) → deployable `best_skill.md`. v0.2.0 adds offline
+  "SkillOpt-Sleep" self-evolution. MIT, ~14.8k★, `pip install skillopt`,
+  WebUI dashboard. Distinguish from forks (mitkox/, xuzixuan1998/).
+- **Fit — unusually direct**: runs its loop THROUGH the Claude Code and
+  Codex CLI harnesses (our exact executors; +19.1 avg pts inside Claude
+  Code on GPT-5.5) and supports `openai_compatible` → our LiteLLM/Ollama
+  gateway. Validation-gated edits = our champion-challenger evidence gate in
+  text space. Attacks the harness-score **Skills 0/17** gap with skills that
+  learn from OUR successes/failures. Costs: must build a custom scoreable
+  env from our task history (pattern: `skillopt/envs/searchqa/`); agentic
+  rollouts consume subscription quota per epoch; unproven on small in-house
+  task sets.
+- **Verdict: TRIAL (strong adopt candidate).** First step: sandboxed venv →
+  built-in SearchQA in direct-chat mode against LiteLLM → then a 10-20-task
+  env from our harness-score Skills checks, one epoch via the Claude Code
+  harness, `best_skill.md` vs no-skill (held-out) onto the KPI leaderboard.
+- Note: both LinkedIn posts in this batch were recent (May-July 2026), not
+  January — the paper is 2026-05, MSR blog 2026-06-30.
+
+## AGT-18 — igorls/agent-portal (the "example board") — added 2026-07-23 evening
+
+- **What (verified)**: **igorls/agent-portal** (MIT, created 2026-07-11,
+  single author) — Rust/Tauri + Angular desktop app that migrates and routes
+  coding-agent sessions between 10 CLIs. The board the operator saw:
+  **lane = agent runtime, card = session (grouped by project), drag =
+  migrate** — native Claude Code ⇄ Codex session conversion (both JSONL),
+  otherwise a deterministic **handoff brief** that seeds a fresh session;
+  every migration is dry-run-first and lands in an append-only,
+  per-migration-undoable ledger. Optional Ollama worker auto-titles
+  sessions fully offline.
+- **Fit**: the board semantics are precisely our cockpit "Sessions" seam;
+  the handoff brief automates our Claude⇄Codex handoff packet; dry-run +
+  undoable ledger matches our approval-wall philosophy; `crates/
+  portal-adapters` is a clean reference for parsing both session stores.
+  Mismatches: Tauri desktop vs our PWA, Angular, no conversation hosting,
+  and drag = ungoverned immediate migration (we'd front it with our wall).
+- **Verdict: SKIP as dependency; MINE the patterns** (trial the app
+  standalone, read-only). First step: read `portal-adapters` + point a
+  release build read-only at `~/.claude` and the Codex store; evaluate
+  conversion fidelity + the brief format; then spec a cockpit Sessions
+  board card type reusing that brief behind the approval wall.
 
 ## Provenance
 

@@ -91,6 +91,9 @@ domains:
   - name: repo_id
     label: Repo
     kind: badge
+  - name: priority
+    label: Priority
+    kind: badge
   - name: source_status
     label: Source status
     kind: badge
@@ -105,6 +108,12 @@ domains:
     kind: markdown
   - name: repo_id
     label: Designated repo
+  - name: priority
+    label: Priority
+  - name: impact
+    label: Impact
+  - name: timeline
+    label: Timeline
   - name: completed
     label: Completed
   - name: source_ref

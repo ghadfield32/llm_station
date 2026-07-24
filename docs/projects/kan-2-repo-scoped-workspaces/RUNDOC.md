@@ -112,3 +112,50 @@ lifecycle scripts.
 ## 8. Execution log
 
 - 2026-07-23 — Run-doc created from the seam-map sweep; Step A dry-run next.
+- 2026-07-23 — Step A DONE: `bball_homography_pipeline` registered via
+  `run_repo_register` (dry-run evidenced, then apply): disabled manifest
+  (`github_app_pending`, autonomy off, blocker recorded), board
+  `personal_todos`, env-ref path; `validate` + `check_cross_refs` PASS.
+  Operator tail: `.env` `BBALL_HOMOGRAPHY_PIPELINE_LOCAL_PATH` line.
+- 2026-07-23 — Step B implemented by Codex gpt-5.6-sol (xhigh, isolated
+  worktree, detached launch): new `workspace_scope.py` (bounds contract +
+  runtime-verified CLI deny args), first-turn injection in both native
+  adapters (Claude: `external_session_id` gate; Codex: per-session sent-flag
+  set only after a successful turn), close/shutdown cleanup, tests. Honest
+  finding: the installed Claude CLI's `--help` documents NO read-path deny
+  grammar → zero flags emitted; the prompt contract + read-only tool set is
+  the enforcement layer for this CLI version (limitation recorded here).
+  Codex failed closed on its sandbox (pytest tempdir + git index.lock).
+- 2026-07-23 — Reviewer host verification: 50 tests (workspace_scope +
+  pickers + session service + kanban-ui agent sessions) exit 0; 57 adapter
+  tests (claude_code_local + codex_agent suites) exit 0; ruff clean.
+  Independent review (Fable, non-author, security lens): **APPROVED** —
+  first-turn gates correct on both lanes, no invented flags, resume paths
+  re-send idempotently, no write-path changes. Committed by the reviewer
+  with Codex authorship credited.
+- 2026-07-23 — STEP B implemented in `feat/kan-2-workspace-scoping`: added the
+  shared first-turn workspace contract, wired it into both native adapters, and
+  covered repo scope, `home_workspace` targeted reads, secret-path language,
+  first-turn-only prompt composition, and the exact Claude argv.
+- 2026-07-23 — Claude runtime capability check: live `claude --help` advertises
+  generic `--disallowedTools` and opaque `--settings <file-or-json>` inputs, but
+  does not document a path-scoped `Read` matcher or the settings permission JSON
+  schema. No read-deny flags/rules were invented or emitted. The mandatory
+  first-turn workspace/secret-path contract is therefore the enforcement layer
+  for this installed CLI version; this is a prompt-level limitation, not an OS
+  filesystem sandbox.
+- 2026-07-23 — Verification: focused STEP B + both native-adapter suites passed
+  (`64 passed`) with `--noconftest -p no:cacheprovider`; the new scope tests plus
+  picker/UI suites passed (`34 passed`) with the same sandbox-safe options. The
+  packet's full required selection could not complete in this managed sandbox:
+  `test_agent_session_service.py`'s explicit `tmp_path` fixtures failed during
+  setup with `PermissionError` while scanning
+  `C:\Users\ghadf\AppData\Local\Temp\pytest-of-ghadf` (`34 passed, 15 setup
+  errors`; no assertion failures). Ruff passed all changed Python files.
+- 2026-07-23 — Commit attempt made with the requested subject and
+  `Co-Authored-By` trailer; Git was sandbox-blocked before staging/commit because
+  it could not create the linked worktree metadata file
+  `.git/worktrees/kan2-workspace-scope/index.lock` (`Permission denied`). No push
+  was attempted.
+- 2026-07-23 — Rebased onto main after #77 merged (which carried the Step A
+  run-doc); execution-log conflict resolved by union — no entries dropped.

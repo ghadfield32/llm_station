@@ -172,10 +172,117 @@ if AIRFLOW_AVAILABLE:
             _published: dict,
             _processed: dict,
             _retention: dict,
-        ) -> str:
-            from command_center.job_search.digest import write_digest
+        ) -> dict:
+            from command_center.job_search.digest import (
+                read_digest_items,
+                write_digest,
+            )
 
-            return str(write_digest())
+            path = write_digest()
+            return {"path": str(path), "items": read_digest_items()}
+
+        @task
+        def push_digest(digest: dict) -> dict:
+            """Notify only; missing channel config records the exact would-send."""
+            import json
+            import os
+            from pathlib import Path
+
+            from command_center.cli.notify import read_env, send_discord
+            from command_center.job_search.proactive import (
+                render_job_digest_ping,
+            )
+
+            env = {**read_env(), **os.environ}
+            board_url = (
+                env.get("JOB_SEARCH_BOARD_URL")
+                or env.get("KANBAN_UI_URL")
+                or (
+                    "http://127.0.0.1:8787/"
+                    "?view=domains&domain=job_application"
+                )
+            )
+            line = render_job_digest_ping(digest["items"], board_url)
+            if line is None:
+                print("[job_search_daily] no reviewable jobs; no digest push")
+                return {"status": "no_push", "count": 0}
+
+            record_path = Path(digest["path"]).with_name(
+                "job-search-digest-push.log"
+            )
+
+            def record(status: str, detail: str) -> dict:
+                row = {
+                    "at": datetime.now().astimezone().isoformat(),
+                    "status": status,
+                    "detail": detail,
+                    "line": line,
+                }
+                print(
+                    f"[job_search_daily] {status.upper()}: {detail}; "
+                    f"would-send: {line}"
+                )
+                try:
+                    with record_path.open("a", encoding="utf-8") as handle:
+                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                except OSError as exc:
+                    # The Airflow task log above is itself the durable fallback.
+                    print(
+                        "[job_search_daily] notification record file unavailable: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                return {
+                    "status": status,
+                    "count": len(digest["items"]),
+                    "record_path": str(record_path),
+                    "line": line,
+                }
+
+            token = env.get("DISCORD_BOT_TOKEN", "")
+            channel = env.get("DISCORD_CHANNEL_ID") or next(
+                (
+                    value.strip()
+                    for value in env.get(
+                        "DISCORD_ALLOWED_CHANNEL_IDS", ""
+                    ).split(",")
+                    if value.strip()
+                ),
+                "",
+            )
+            missing = [
+                name
+                for name, value in (
+                    ("DISCORD_BOT_TOKEN", token),
+                    (
+                        "DISCORD_CHANNEL_ID "
+                        "(or DISCORD_ALLOWED_CHANNEL_IDS)",
+                        channel,
+                    ),
+                )
+                if not value
+            ]
+            if missing:
+                return record(
+                    "recorded_only",
+                    "channel unconfigured; missing " + ", ".join(missing),
+                )
+            try:
+                send_discord(channel, token, line)
+            except Exception as exc:
+                return record(
+                    "error",
+                    f"channel send failed: {type(exc).__name__}: {exc}",
+                )
+            print(
+                "[job_search_daily] SENT: "
+                f"{len(digest['items'])} reviewable job(s) to channel {channel}"
+            )
+            return {
+                "status": "sent",
+                "count": len(digest["items"]),
+                "channel": channel,
+                "line": line,
+            }
 
         backup = verified_runtime_backup()
         profile = load_profile(backup)
@@ -184,7 +291,10 @@ if AIRFLOW_AVAILABLE:
         published = publish_to_board(live)
         processed = process_geoff_selected(published)
         retention = retention_plan(backup)
-        emit_digest(profile, live, examples, published, processed, retention)
+        digest = emit_digest(
+            profile, live, examples, published, processed, retention
+        )
+        push_digest(digest)
 
     dag = job_search_daily()
 else:

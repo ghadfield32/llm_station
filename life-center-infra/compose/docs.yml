@@ -61,7 +61,16 @@ services:
       - PAPERLESS_DBPASS=${PAPERLESS_DB_PASSWORD:?set PAPERLESS_DB_PASSWORD in .env}
       - PAPERLESS_SECRET_KEY=${PAPERLESS_SECRET_KEY:?set PAPERLESS_SECRET_KEY in .env}
       - PAPERLESS_TIME_ZONE=${LC_TZ:-UTC}
-      - PAPERLESS_URL=http://127.0.0.1:${PAPERLESS_PORT:-8000}
+      # Paperless is a Django app: when reached through the Tailscale HTTPS proxy
+      # (https://<tailnet-host>:<port>) the login POST's Origin must be in
+      # CSRF_TRUSTED_ORIGINS or Django rejects it with "CSRF verification failed
+      # (403)". Paperless derives CSRF/allowed-hosts from PAPERLESS_URL, so point
+      # it at the tailnet origin, and keep 127.0.0.1 trusted for desktop/loopback
+      # use. If NOT fronting with Tailscale, set PAPERLESS_URL back to
+      # http://127.0.0.1:${PAPERLESS_PORT:-8000} and drop the two lines below.
+      - PAPERLESS_URL=https://${LC_TAILNET_HOST:?set LC_TAILNET_HOST in .env or revert PAPERLESS_URL to loopback}:${PAPERLESS_PORT:-8000}
+      - PAPERLESS_CSRF_TRUSTED_ORIGINS=https://${LC_TAILNET_HOST}:${PAPERLESS_PORT:-8000},http://127.0.0.1:${PAPERLESS_PORT:-8000}
+      - PAPERLESS_ALLOWED_HOSTS=${LC_TAILNET_HOST},127.0.0.1,localhost
     volumes:
       - paperless_data:/usr/src/paperless/data
       - ${LC_DATA:-./testdata/data}/personal/paperless/media:/usr/src/paperless/media
