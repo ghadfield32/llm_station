@@ -153,3 +153,102 @@ pattern. Adding a component-test runner is out of scope here (own packet).
 ## 8. Execution log
 
 - 2026-07-23 — Run-doc created from the seam-map sweep; packet launching.
+- 2026-07-23 — Reviewer host verification (Codex fail-closed correctly: its
+  sandbox blocked esbuild's child process with `spawn EPERM`, so it refused
+  to commit an unverified build): `npm ci` exit 0, `npm run build` exit 0,
+  `npm test` exit 0 with **41 tests passing** (38 existing + 3 new). No new
+  hardcoded hex colors. `.agent-bubble` / `.cl.you` / `.cl.final` fully
+  retired with zero orphaned references in TSX or CSS.
+- 2026-07-23 — **Packet-design error found and fixed by the reviewer**: the
+  packet forbade `package.json` edits (to block dependency/runner changes),
+  which also blocked *registering* the new suite — `npm test` hardcodes its
+  four filenames, so `chatPresentation.test.mjs` existed but never ran. Fixed
+  by adding it to the `test` script (script-only change, zero dependency
+  changes). Lesson for future UI packets: forbid `dependencies`/
+  `devDependencies`, not the whole file.
+- 2026-07-23 — Independent review (Fable, non-author, DESIGN.md checklist):
+  **APPROVED.**
+  - KAN-26: one `ChatBubbleShell` now renders every lane (9 call sites across
+    gateway, agent, and story views) with a runtime badge — geometry is
+    identical across runtimes, satisfying "differ only by a badge". Both
+    raw-JSON dump sites are gone from the chat renderers.
+  - Unknown-event handling is *stricter* than the packet asked: known-schema
+    tool args still render in the collapsed inset, but unknown-shape payloads
+    are named (`activity: <type>`) and withheld rather than rendered, since an
+    unrecognized payload could carry credentials. Accepted as the safer line
+    and pinned by a test; the event type still gives the diagnostic signal,
+    and Diagnostics retains full unfiltered truth.
+  - KAN-4: root causes fixed (`.select` bounded with `max-width: min(100%,
+    320px)` + `min-width: 0` + ellipsis; `min-width: 0` on all chat-header
+    flex children; `.roles-grid`/`.attach-menu`/`.agent-settings-body` clamped
+    with `min()` against the viewport; the double-absolute settings body
+    un-nested to `position: static`). The `overflow-x` guards on `html`/
+    `.shell` sit *on top of* those real fixes as a backstop, not as a cover —
+    verified each source was addressed independently. Three dead rules
+    deleted (`.chat-bar .select`, the `.chat-bar-hint` ≤480px block,
+    `.chat-input`). Long model detail preserved in `title=`, never dropped.
+  - KAN-8: three buttons → one pending-aware `Open in chat` + a runtime
+    `<select>` built from the **live** harness list, with unavailable
+    harnesses disabled and their reason in `title`. Zero hardcoded harness ids
+    remain in card actions.
+  - Out of scope, deliberately untouched (recorded as follow-ups): the
+    research-handoff entry point still hardcodes `agent:codex_agent`
+    (different feature), and `EventRow` still serializes mission payloads
+    (missions view, not chat).
+- 2026-07-23 — **CI caught a real verification gap in MY process** (PR #81
+  `lint-test` red): `tests/test_card_chat_context.py` is a **backend pytest
+  that reads `App.tsx` as source text** and pinned the old three-button
+  design (`"Ask Claude" in src`, `chatAboutCard("agent:claude_code_local")`).
+  I had verified this frontend packet with `npm run build` + `npm test` only.
+  **Lesson (now standing): a frontend-only packet still requires the full
+  backend suite, because backend guardrail tests assert over frontend
+  source.** Recorded in WORKLOG.
+  Resolution — contract moved, not deleted (the invariant "every card can
+  open chat on the lane the user picks" is still valuable): the two obsolete
+  assertions were rewritten to pin the NEW, stricter contract —
+  `test_every_card_has_one_open_in_chat_action_plus_a_runtime_picker`
+  (one action + `card-runtime-select`, and the old button labels must be
+  ABSENT), `test_card_runtime_picker_is_built_from_the_live_harness_list`
+  (picker enumerates fetched harnesses, unavailable ones disabled, GatewayCore
+  always offered), and a new
+  `test_card_actions_never_hardcode_an_agent_harness_id` that scopes to the
+  `DomainCardTile` function body so a literal harness id in a card action is
+  itself a failure. The two tests that still held (chat_prompt seeding,
+  draft-target honoring) were left untouched and still pass.
+- 2026-07-23 — Full re-verification after the fix: **entire backend suite
+  `pytest tests/` exit 0**, `ruff check src` clean, `npm run build` exit 0,
+  `npm test` exit 0 (41 passing).
+- 2026-07-23 — Implemented Sections 4.1–4.5 in the five allowed files. No
+  DESIGN.md deviation was required. GatewayCore and native-agent messages now
+  share one bubble shell/runtime badge; tool, result, and unknown events use
+  collapsed activity rows; model option detail is preserved in `title`; the
+  390px width constraints are bounded; and card chat actions use the lifted
+  live harness catalog with a pending-aware single action.
+- 2026-07-23 — Incremental verification: after each implementation step,
+  `npm run build` reached and passed `tsc`; every attempt then stopped in Vite
+  because this Windows sandbox rejects esbuild's child-process launch with
+  `Error: spawn EPERM`. The final `npm run build` therefore exited 1 and is
+  **not claimed green**. Standalone `node_modules\.bin\tsc.cmd --noEmit`
+  exited 0.
+- 2026-07-23 — Required install command
+  `npm ci --no-audit --no-fund` exited 1 with `npm error syscall spawn` /
+  `EPERM`, matching the packet's documented sandbox limitation. Fallback
+  `npm ci --ignore-scripts --no-audit --no-fund` exited 0 and installed 114
+  packages, enabling typecheck and pure-helper tests without postinstall
+  process launches.
+- 2026-07-23 — `npm test` exited 0: all four package-script suites passed (38
+  tests). The frozen `package.json` script explicitly enumerates only those
+  four pre-existing suites, so the new allowed-file suite was also run
+  directly: `node tests\chatPresentation.test.mjs` exited 0 (3/3 tests).
+  `package.json` was not changed.
+- 2026-07-23 — PowerShell has no `grep` executable; the equivalent
+  `rg -n -g '*.tsx' -g '*.ts' '#[0-9a-f]{6}' src` found no matches (exit 1
+  from `rg`, normalized to verification exit 0). No new hardcoded hex colors
+  were introduced. `git diff --check` exited 0. A static 390px audit passed
+  (366px mobile content width, 320px select cap, viewport-clamped popovers),
+  but browser rendering was not run because the Vite build/server process is
+  blocked as above.
+- 2026-07-23 — Fail-closed outcome: no commit was created because the required
+  `npm run build` could not exit 0 in this sandbox. Changes remain confined to
+  the allowed files for verification and commit in an environment that permits
+  esbuild child processes.
