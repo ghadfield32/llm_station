@@ -58,16 +58,22 @@ destructive double-agreement) cannot be loosened by any policy document.
 - Validation: `make validate`, targeted pytest, `make lint`; `uv run cc
   doctor` if worker wiring lands.
 
-## 5. Open questions (Stage-4 gate)
+## 5. Open questions — ANSWERED (Stage-4 gate passed 2026-07-24)
 
-1. Which enforcement points first — agent-session tool calls only, or also
-   the chat→Kanban write proposals?
-2. Where do policy documents live: one `configs/session_policies.yaml`, or
-   per-agent files beside the (future AGT-16) session specs?
-3. KPI-1 target: how many enforcement points must be policy-gated before
-   this counts as shipped v1?
-4. Is the flag-off default acceptable for the first merge (enforcement
-   opt-in), or must it enforce from day one?
+Operator decisions, recorded verbatim; scope locked:
+
+1. Enforcement points: **agent-session tool calls only** for packet 1 (the
+   session worker's tool-call/approval path). Chat→Kanban write proposals
+   stay on their existing governance wall — a later packet.
+2. Policy home: **one `configs/session_policies.yaml`** — a validated file of
+   named policy sets; AGT-16 specs reference them via the existing
+   `policy_refs` field.
+3. KPI-1 target v1: the **three seed builtins** enforcing on the tool-call
+   path (ask-on-os-tools, max-tool-calls-per-session, cost-budget) + the
+   floor-integrity suite green. Widening coverage is a later challenger.
+4. Flag default: **flag-off on first merge** — `AGENT_SESSION_POLICIES_ENABLED`
+   defaults OFF (same opt-in idiom as AGT-16's `AGENT_SESSION_SPEC_ENABLED`);
+   floors are tested regardless of the flag.
 
 ## 6. Model allocation
 
@@ -83,7 +89,49 @@ destructive double-agreement) cannot be loosened by any policy document.
   fresh session; floor-integrity test design reviewed by Fable before
   implementation.
 
-## 7. Links
+## 7. Packet-1 evidence (2026-07-24)
+
+- **Implemented by Sol** (`codex exec --sandbox workspace-write --full-auto`,
+  gpt-5.6-sol **xhigh** — deep_code, resolved live priority 1; brief:
+  [PACKET-1.md](PACKET-1.md)) in isolated worktree `C:\tmp\agt14-policies`
+  stacked on the AGT-16 spec branch. Sandbox correctly blocked the git
+  commit → committed host-side after independent verification.
+- **Delivered**: `session_policy.py` (Strict schema, **closed** PolicyHandler
+  enum so YAML can never name an import), `policy_engine.py` (pure monotone
+  session→agent→server `resolve`, no grant/override op), `policy_builtins.py`
+  (3 builtins), `configs/session_policies.yaml` (validated; numbers labeled
+  operator-tunable examples), flag-off `AGENT_SESSION_POLICIES_ENABLED`
+  enforcement hook in `service.py` routing DENY→durable `policy_denied`
+  event + typed `PolicyRefusal`, ASK→existing approval wall; canonical usage
+  read via new `UsageService.session_cost_usd` (no parallel accounting).
+- **Independently verified host-side** (Fable, this session — did NOT write
+  AGT-14; Sol did — so a valid cross-family reviewer per the
+  reviewer-independence rule): validate_config PASS, check_cross_refs PASS,
+  `pytest test_session_policy.py + floor_integrity` 29/29, regression
+  (spec + sessions + registry) 34/34, ruff clean on all 11 files. The 5
+  `test_agent_session_service` failures remain the pre-existing KAN-25
+  `user_message` family (unchanged; resolves on merge with main).
+- **Floor-integrity (the point)** — machine-proven, 4 tests:
+  `test_permissive_server_allow_cannot_override_session_deny` (checks **all
+  permutations** of declaration order → session DENY always wins),
+  `test_human_only_ask_is_never_auto_allowed_by_another_policy`,
+  `test_read_only_and_destructive_floors_survive_every_policy_verdict`
+  (one approval ≠ destructive double-agreement; read_only stays read_only),
+  `test_policy_language_has_no_grant_or_override_verdict` (locks the verdict
+  set to allow/deny/ask — a future "grant" verdict fails this test).
+- **Review verdict: APPROVE.** Non-blocking notes for a later packet:
+  (1) cosmetic redundant `yield event` in both ASK branches of
+  `send_message`; (2) an ASK abandons the harness generator to pause — correct
+  for the read-only analysis milestone, revisit when write-mode/steering
+  lands; (3) deep-review-before-enable: since the flag is OFF by default, a
+  fresh-Sol deep read is available on request before the operator flips
+  `AGENT_SESSION_POLICIES_ENABLED=1`.
+- **KPIs vs baseline**: KPI-1 = 3/3 seed builtins enforcing on the tool-call
+  path behind the flag (baseline 0 declarative policy docs). KPI-2 =
+  floor-integrity suite green (hard requirement met). Stop condition met —
+  reassess before widening to chat→Kanban proposals.
+
+## 8. Links
 
 - Master item: `docs/todos/GRAND_TODO_LIST.md` → AGT-14 (feeds KAN-17).
 - Board/mission card: pending Stage-5 human approval — not created before

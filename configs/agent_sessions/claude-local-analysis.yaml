@@ -7,4 +7,7 @@ instructions: >-
 harness: claude_code_local
 capability_profile: generalist
 mode: analysis
-policy_refs: []
+policy_refs:
+  - session-os-approval
+  - agent-tool-call-cap
+  - server-cost-budget

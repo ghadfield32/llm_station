@@ -17,6 +17,7 @@ EventType = Literal[
     "session_started", "user_message", "assistant_delta", "assistant_message",
     "tool_requested", "approval_required", "approval_resolved",
     "tool_started", "tool_output", "tool_finished",
+    "policy_denied",
     "file_changed", "command_started", "command_finished",
     "usage", "rate_limit", "warning",
     # Phase 3: a bounded hand-off between assistants (Claude ⇄ Codex ⇄

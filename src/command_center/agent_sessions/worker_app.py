@@ -217,6 +217,7 @@ def build_app(*, store: SessionStoreProtocol | None = None,
         else:
             from command_center.usage.store import UsageStore as _UsageStore
             usage = _UsageService(_UsageStore())
+    service.usage_service = usage
 
     # Provider collectors must run beside the host-owned SDK/CLI login. The
     # cockpit container deliberately has neither the Codex SDK nor the user's
