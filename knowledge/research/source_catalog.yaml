@@ -74,6 +74,24 @@ sources:
     notes:
       - "Worktree isolation itself is already the core design (MASTER.md:1152); only per-card dep fields were missing."
 
+  - id: omnigent-meta-harness
+    title: "Omnigent meta-harness: policy stack + harness bench + agent-YAML patterns"
+    source_type: github
+    source: omnigent-ai/omnigent
+    url: https://github.com/omnigent-ai/omnigent
+    concept_cluster: agent_control_plane
+    claim: "Open-source meta-harness over Claude Code/Codex/Cursor/…; borrow three patterns (3-level declarative policies, declared-vs-observed capability bench, agent-as-YAML harness enum), never the runtime."
+    related_modules: [src/command_center/agent_sessions, src/command_center/usage, services/agent_kanban_ui]
+    measured_gap: "Our session walls are code-shaped with no declarative per-level policy doc (KAN-17); adapter capabilities are hand-known with no declared-vs-observed conformance matrix; no typed runtime-agnostic session spec for KAN-26/KAN-15/AGT-10."
+    verdict: build
+    priority: medium
+    risk_level: low
+    trigger: "Runtime adoption itself stays watch-cadence: revisit only at a stable 1.0 + matured projects entity + a measured gap we can't close (managed cloud sandboxes is the honest candidate)."
+    notes:
+      - "Live-verified 2026-07-23: 7,679 stars, Apache-2.0, v0.6.0 (07-21), alpha, 686 open issues+PRs. Full review: docs/reviews/2026-07-23-omnigent-borrow-patterns.md; packets AGT-14/15/16."
+      - "Never point OMNIGENT_CHAT_URL at this repo — that var means OmniAgent (Om-AI-Lab), a different project (README L111)."
+      - "No write-capable kanban MCP registered or exposed to external runtimes (.mcp.json registers zero servers; internal life_center_actions stays unregistered)."
+
   # ---- Already in-stack: recorded so the same link is never re-litigated ----
   - id: cline-worktree-executor
     title: "Cline as a coding-agent executor"

@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import AsyncIterator
 
 from .events import AgentEvent
-from .protocol import ApprovalDecision, HarnessProbe, SessionStart
+from .protocol import ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata
 from .store import SessionStoreProtocol
 
 
@@ -39,7 +39,8 @@ class FakeHarness:
             repo_id=request.repo_id, provider_profile=request.provider_profile,
             model=request.model, permission_profile=request.permission_profile)
         self.store.append_event(
-            record.session_id, AgentEvent("session_started", {"mode": request.mode}))
+            record.session_id, AgentEvent(
+                "session_started", {"mode": request.mode, **session_spec_metadata(request)}))
         # "idle" = ready, no turn in progress. "active" is reserved EXCLUSIVELY
         # for "a background task is genuinely running this session right now"
         # (set only by the worker's task wrapper — see worker_app.py). Keeping

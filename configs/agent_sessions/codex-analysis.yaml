@@ -1,0 +1,12 @@
+# Agent-session specs select one runtime harness while keeping model selection
+# portable. capability_profile is resolved live; effort may override its default.
+name: codex-analysis
+instructions: >-
+  Analyze the requested repository work read-only and return evidence-backed
+  findings with concrete file references.
+harness: codex_agent
+capability_profile: generalist
+effort: high
+mode: analysis
+# Placeholder references for AGT-14 policy resolution.
+policy_refs: []

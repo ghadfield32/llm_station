@@ -6,6 +6,8 @@ restart.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+import os
 from typing import AsyncIterator
 
 from .events import AgentEvent
@@ -58,7 +60,22 @@ class AgentSessionService:
         return list(result)
 
     async def start_session(self, request: SessionStart) -> SessionRecord:
-        descriptor = self.registry.get(request.harness_id)
+        if os.environ.get("AGENT_SESSION_SPEC_ENABLED", "") == "1" and request.spec_name:
+            # Import and lookup stay inside the call: no import-time config scan
+            # or cached lookup can hide a changed/monkeypatched spec directory.
+            from .spec_bridge import load_spec, resolve_spec
+            spec, instructions = load_spec(request.spec_name)
+            descriptor = resolve_spec(spec, self.registry)
+            request = replace(
+                request, harness_id=descriptor.harness_id, mode=spec.mode,
+                provider_profile=spec.capability_profile.value,
+                model=None, effort=spec.effort.value if spec.effort else None,
+                instructions=instructions, spec_name=spec.name)
+        else:
+            # A supplied spec_name is deliberately ignored while the flag is
+            # off, preserving the pre-AGT-16 boot request byte for byte.
+            request = replace(request, instructions=None, spec_name=None)
+            descriptor = self.registry.get(request.harness_id)
         if request.mode not in descriptor.supported_modes:
             raise ValueError(
                 f"harness {request.harness_id!r} does not support mode "
