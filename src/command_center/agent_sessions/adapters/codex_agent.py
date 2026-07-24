@@ -30,6 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
 from ..protocol import (
     ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
@@ -360,6 +361,14 @@ class CodexAgentHarness:
     restart) recovers correctly via thread_resume()."""
 
     name = "codex_agent"
+    bench_profile = BenchProfile(
+        adapter="codex_agent",
+        streaming=Verdict.PASS,
+        resume=Verdict.PASS,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     # REAL FINDING: the pinned SDK exposes no programmatic hook to causally
     # resolve a Guardian approval review (see module docstring and
     # resolve_approval below) — surfaced as a real, queryable capability

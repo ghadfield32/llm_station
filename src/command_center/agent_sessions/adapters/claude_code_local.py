@@ -39,6 +39,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+from ..bench.models import BenchProfile, Verdict
 from ..events import AgentEvent
 from ..protocol import (
     ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata,
@@ -225,6 +226,14 @@ class ClaudeCodeLocalHarness:
     adapter."""
 
     name = "claude_code_local"
+    bench_profile = BenchProfile(
+        adapter="claude_code_local",
+        streaming=Verdict.PARTIAL,
+        resume=Verdict.PASS,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.PASS,
+    )
     interactive_approvals = False
 
     def __init__(self, store: SessionStoreProtocol) -> None:

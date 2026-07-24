@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import AsyncIterator
 
+from .bench.models import BenchProfile, Verdict
 from .events import AgentEvent
 from .protocol import ApprovalDecision, HarnessProbe, SessionStart, session_spec_metadata
 from .store import SessionStoreProtocol
@@ -23,6 +24,14 @@ class FakeHarness:
     contract a real Claude/Codex adapter must satisfy."""
 
     name = "fake"
+    bench_profile = BenchProfile(
+        adapter="fake",
+        streaming=Verdict.PARTIAL,
+        resume=Verdict.PARTIAL,
+        write_mode_wall=Verdict.PASS,
+        attachments=Verdict.FAIL,
+        model_switch=Verdict.FAIL,
+    )
 
     def __init__(self, store: SessionStoreProtocol) -> None:
         self.store = store
