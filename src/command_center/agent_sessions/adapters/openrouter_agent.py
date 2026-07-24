@@ -210,6 +210,8 @@ class OpenRouterAgentHarness:
         write_mode_wall=Verdict.PASS,
         attachments=Verdict.FAIL,
         model_switch=Verdict.PASS,
+        interrupt=Verdict.PARTIAL,
+        steering=Verdict.FAIL,
     )
     # Honest capability disclosure (read by the registry probe → UI): this
     # harness sends repo file contents to a PAID EXTERNAL API. The cockpit must
