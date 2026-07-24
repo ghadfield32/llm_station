@@ -1,4 +1,4 @@
-# SSO tier — Authelia + Caddy forward-auth foundation.
+# SSO tier — Authelia provider + Caddy forward-auth foundation.
 # Opt-in until proven; must be named explicitly (`lc up --profile sso`) and
 # excluded from `all`. Caddy stays plain HTTP because Tailscale Serve terminates
 # TLS; both host-facing ports bind loopback only.
@@ -18,7 +18,7 @@ networks:
     name: lc_auth
 
 services:
-  # ── authelia: single-user forward-auth authority ──────────────────────────
+  # ── authelia: single-user forward-auth + OIDC authority ───────────────────
   authelia:
     image: authelia/authelia:4.39.20  # pin: @sha256 before real data
     container_name: lc-authelia
@@ -28,21 +28,32 @@ services:
       - AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET=${AUTHELIA_JWT_SECRET:?set AUTHELIA_JWT_SECRET in .env}
       - AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET:?set AUTHELIA_SESSION_SECRET in .env}
       - AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY:?set AUTHELIA_STORAGE_ENCRYPTION_KEY in .env}
+      - AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET=${AUTHELIA_OIDC_HMAC_SECRET:?set AUTHELIA_OIDC_HMAC_SECRET in .env}
       # v4.39 requires an explicit cookie domain + portal URL; render the
-      # operator's MagicDNS hostname so neither is hardcoded in the template.
+      # operator's MagicDNS hostname so neither it nor the OIDC redirect port
+      # is hardcoded in the template.
       - X_AUTHELIA_CONFIG_FILTERS=template
       - LC_TAILNET_HOST=${LC_TAILNET_HOST:?set LC_TAILNET_HOST in .env}
       - CADDY_AUTH_PORTAL_PORT=${CADDY_AUTH_PORTAL_PORT:-9091}
+      - MEALIE_PORT=${MEALIE_PORT:-9925}
     volumes:
-      # configuration.yml is a tracked, secret-free template (env-var
-      # substituted at runtime). users_database.yml is NOT tracked -- it holds
-      # a real password hash once set up, so it lives under appdata like every
-      # other app's real credentials in this repo. Independent review caught
-      # an earlier version of this file that mounted the whole sso/authelia/
-      # directory, which would have meant committing a real hash straight into
-      # git; see sso/authelia/users_database.yml.example for the setup step.
+      # configuration.yml is tracked but contains no plaintext secrets (the
+      # Mealie client verifier is a one-way digest). users_database.yml is NOT
+      # tracked -- it holds a real password hash once set up, so it lives under
+      # appdata like every other app's real credentials in this repo.
+      # Independent review caught an earlier version of this file that mounted
+      # the whole sso/authelia/ directory, which would have meant committing a
+      # real user-password hash straight into git; see the README for setup.
       - ./sso/authelia/configuration.yml:/config/configuration.yml:ro
       - ${LC_APPDATA:-./appdata}/authelia/users_database.yml:/config/users_database.yml:ro
+      - ${LC_APPDATA:-./appdata}/authelia/oidc-issuer-private.pem:/config/oidc-issuer-private.pem:ro
+      # Independent review, second pass: an Argon2id digest still enables
+      # offline guessing if published, same reasoning already applied to
+      # users_database.yml -- so the Mealie OIDC client secret's digest gets
+      # the identical treatment: gitignored runtime file, loaded via the
+      # `secret` template function, never embedded directly in the tracked
+      # configuration.yml.
+      - ${LC_APPDATA:-./appdata}/authelia/mealie-client-secret-hash.txt:/config/mealie-client-secret-hash.txt:ro
       - ${LC_APPDATA:-./appdata}/authelia/data:/data
     healthcheck:
       test: ["CMD", "/app/healthcheck.sh"]

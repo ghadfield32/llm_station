@@ -37,6 +37,55 @@ session:
     - domain: '{{ mustEnv "LC_TAILNET_HOST" }}'
       authelia_url: 'https://{{ mustEnv "LC_TAILNET_HOST" }}:{{ mustEnv "CADDY_AUTH_PORTAL_PORT" }}'
 
+identity_providers:
+  oidc:
+    # AUTHELIA_IDENTITY_PROVIDERS_OIDC_HMAC_SECRET is injected by Compose.
+    # v4.39 replaced the deprecated issuer_private_key setting with jwks.
+    # Keep the real signing key in gitignored appdata and load it through the
+    # already-enabled template filter.
+    jwks:
+      - key: {{ secret "/config/oidc-issuer-private.pem" | mindent 10 "|" | msquote }}
+    # By default Authelia puts NO identity-revealing claims in the ID token,
+    # even when the client requests and is granted the email/profile scopes --
+    # found live: the token exchange itself succeeded (200 from /api/oidc/token),
+    # but Mealie's backend rejected the login with "[OIDC] Required claims not
+    # present. Expected: {'name', 'email'}" because the returned ID token only
+    # had the standard claims (sub, aud, iss, exp, ...), nothing identity-
+    # specific. This policy is what actually puts email/name in the ID token.
+    claims_policies:
+      mealie_identity:
+        id_token:
+          - 'email'
+          - 'name'
+    clients:
+      # Mealie v2's server-side Authorization Code + PKCE flow. This is native
+      # OIDC; requests to Mealie itself do not pass through Caddy forward-auth.
+      - client_id: 'mealie'
+        client_name: 'Mealie'
+        # An Argon2id digest still enables offline guessing if published --
+        # same reasoning as users_database.yml and the RSA issuer key. Loaded
+        # from gitignored runtime state, never embedded in this tracked file.
+        # Mealie itself receives the matching plaintext through OIDC_CLIENT_SECRET.
+        client_secret: '{{ secret "/config/mealie-client-secret-hash.txt" }}'
+        public: false
+        authorization_policy: 'two_factor'
+        require_pkce: true
+        pkce_challenge_method: 'S256'
+        claims_policy: 'mealie_identity'
+        redirect_uris:
+          - 'https://{{ mustEnv "LC_TAILNET_HOST" }}:{{ mustEnv "MEALIE_PORT" }}/login'
+        scopes:
+          - 'openid'
+          - 'email'
+          - 'profile'
+        response_types:
+          - 'code'
+        grant_types:
+          - 'authorization_code'
+        access_token_signed_response_alg: 'none'
+        userinfo_signed_response_alg: 'none'
+        token_endpoint_auth_method: 'client_secret_basic'
+
 storage:
   local:
     path: '/data/db.sqlite3'
