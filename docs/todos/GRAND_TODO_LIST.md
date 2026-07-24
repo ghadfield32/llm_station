@@ -133,11 +133,11 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Notes:** When a todo first becomes a kanban project, the system should produce the full run-doc and ask the questions needed to fulfil it (KPI-discussion style, before any work in the wrong direction). The user answers easily — voice or anything. Once assembled it offers to move the card to In Progress, then starts the chat/process; we can step in at any point and it asks questions along the way. UI counterpart of PROC-3; process contract in [`TODO_PROCESS.md`](TODO_PROCESS.md).
 
 #### KAN-12 · Priority system + priority viewer (priority / business impact / timeline)
-`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+`🚧 WIP` · **Target:** 2026-07-24 · **Done:** _—_
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** soon_to_be_deleted_todos.md L18 + L50 (2026-07-23 migration)
-**Notes:** Everything is created with level of priority, business impact, and timeline. A priority viewer sits at the top of everything, filters as each board is selected, is adjustable by priority level, and is searchable for quick interaction. Include areas-of-life filters (home/study/work/portfolio/self-work/jobs/books/etc.) and an algorithm to make the most of every day.
+**Notes:** Everything is created with level of priority, business impact, and timeline. A priority viewer sits at the top of everything, filters as each board is selected, is adjustable by priority level, and is searchable for quick interaction. Include areas-of-life filters (home/study/work/portfolio/self-work/jobs/books/etc.) and an algorithm to make the most of every day. **PACKET A MERGED 2026-07-23 (PR #86, main @ a511f15):** priority/impact/timeline are now first-class parsed card fields (importer mirrors the `**Repo:**` pattern; edit round-trips preserve them), the grand_todo board shows a Priority badge, and `/api/todos` exposes the fields + `?priority=` filter + catalog. The existing frontend `cardPriority()` already surfaces the badge. Run-doc: [docs/projects/kan-12-priority-viewer/RUNDOC.md](../projects/kan-12-priority-viewer/RUNDOC.md). **PACKET B remaining:** the filterable viewer strip above the board tabs (mount point mapped) + areas-of-life filters + Work Map link (with KAN-28) — now unblocked by the #81 merge.
 
 #### KAN-13 · Chat repository setter — dropdown preselect/add + in-chat confirmation
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
@@ -224,11 +224,11 @@ Repo default: `llm_station`. The cockpit (agent_kanban_ui) and its backend.
 **Notes:** Implemented 2026-07-23 by Codex gpt-5.6-sol in an isolated worktree (branch `feat/kan-24-grand-todo-ui-parity`, commit 3e54a24) per [docs/projects/kan-24-grand-todo-ui-parity/RUNDOC.md](../projects/kan-24-grand-todo-ui-parity/RUNDOC.md): parameterized sync/edit endpoints + all cockpit gates over both boards; 174 tests green, build green, literal KPI met; independent Fable review APPROVED. Tail: operator merges the branch and rebuilds the cockpit to ship the new bundle. First feature todo through the full TODO_PROCESS loop (with PROC-1).
 
 #### KAN-26 · Chat redesign to the DESIGN.md contract (runtime-agnostic, fits every screen)
-`📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
+`✅ DONE` · **Target:** 2026-07-23 · **Done:** 2026-07-23
 **Repo:** `llm_station`
 **Priority:** P1
 **Source:** operator direction 2026-07-23 ("utilize Open Design so our chats look better and work better across different agents") + L9 chat-width complaint
-**Notes:** Rebuild the cockpit chat surfaces to the [services/agent_kanban_ui/DESIGN.md](../../services/agent_kanban_ui/DESIGN.md) chat contract: runtime-agnostic message chrome (Claude/Codex/GatewayCore/future Copilot differ only by a small badge, never bubble style); assistant/model pickers as compact viewport-fitting selects (kills the too-wide chat dropdown — the chat half of KAN-4); tool calls/evidence as collapsed monospace insets, never raw JSON; a single context-chip row above the composer (registered repo — where KAN-13's dropdown lands — plus linked board/card); streaming state via `--run` accent; in-thread `.error` blocks with runtime badge instead of toast-only failures. Bundle with KAN-8 (Open-in-chat-only + model dropdown) as one Codex UI packet under the DESIGN.md workflow rules (build + 390px fit check + no hardcoded colors).
+**Notes:** SHIPPED + MERGED 2026-07-23 (**PR #81**, main @ 69d1012, with KAN-4 + KAN-8): one `ChatBubbleShell` renders every lane (GatewayCore/Claude/Codex differ only by a runtime badge); both raw-JSON dump sites removed; `.select` bounded (fits 390px); card actions = one "Open in chat" + a live-harness picker (no hardcoded ids). New pure `chatPresentation.ts` + tests. Fable review APPROVED; 41 frontend + full backend suites green. **Follow-ups now tracked as KAN-27** (stop/queue/live-settings/usage/newest-models) — the *controls* layer on top of this *rendering* layer.
 
 #### AGT-17 · Skillopt — trainable agent skills for the kanban + normal agents
 `📋 PLANNED` · **Target:** _TBD_ · **Done:** _—_
