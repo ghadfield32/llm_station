@@ -1,0 +1,34 @@
+:9091 {
+	# Same scheme override as the gated site below -- Authelia's own portal
+	# needs to see "https" too (its cookies are Secure-flagged; configuration.yml
+	# declares authelia_url as https, so an inconsistent plain-http view of the
+	# same request breaks login, not just forward-auth).
+	reverse_proxy authelia:9091 {
+		header_up X-Forwarded-Proto "https"
+	}
+}
+
+:9099 {
+	# Caddy itself only ever receives plain HTTP here -- Tailscale Serve is the
+	# TLS terminator in front of it (there is no other legitimate path to this
+	# loopback-only port). Without this override Authelia's forward-auth
+	# endpoint rejects every request with "insecure scheme http": it computes
+	# the original request's scheme from X-Forwarded-Proto, and Caddy's own
+	# default is derived from its own (plain-HTTP) connection, not the
+	# client's. Found live: this exact rejection, on the first bring-up.
+	forward_auth authelia:9091 {
+		uri /api/authz/forward-auth
+		copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+		header_up X-Forwarded-Proto "https"
+	}
+
+	reverse_proxy stirling-pdf:8080 {
+		header_up X-Forwarded-Proto "https"
+		# Cookies don't scope by port, so authelia_session is sent to every
+		# HTTPS site on this MagicDNS hostname, including this one -- found in
+		# independent review. Stirling-PDF has no reason to see it, and once
+		# more apps share this domain in later phases they shouldn't either.
+		# Exact directive per Authelia's own Caddy integration guide.
+		header_up Cookie "authelia_session=[^;]+" "authelia_session=_"
+	}
+}
