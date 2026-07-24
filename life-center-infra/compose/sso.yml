@@ -1,0 +1,72 @@
+# SSO tier — Authelia + Caddy forward-auth foundation.
+# Opt-in until proven; must be named explicitly (`lc up --profile sso`) and
+# excluded from `all`. Caddy stays plain HTTP because Tailscale Serve terminates
+# TLS; both host-facing ports bind loopback only.
+#
+# Stirling-PDF keeps its direct 127.0.0.1 mapping as a desktop/loopback bypass.
+# This tier adds a separate gated path without changing the application itself.
+#
+# lc_auth is a SEPARATE network from lc_core, found necessary in independent
+# review: lc_core is shared by every app in this repo, so putting Authelia
+# there would let any of those containers reach its plain-HTTP API directly,
+# bypassing Caddy entirely. Only Caddy bridges the two networks.
+
+networks:
+  lc_core:
+    name: lc_core
+  lc_auth:
+    name: lc_auth
+
+services:
+  # ── authelia: single-user forward-auth authority ──────────────────────────
+  authelia:
+    image: authelia/authelia:4.39.20  # pin: @sha256 before real data
+    container_name: lc-authelia
+    restart: unless-stopped
+    networks: [lc_auth]
+    environment:
+      - AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET=${AUTHELIA_JWT_SECRET:?set AUTHELIA_JWT_SECRET in .env}
+      - AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET:?set AUTHELIA_SESSION_SECRET in .env}
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY:?set AUTHELIA_STORAGE_ENCRYPTION_KEY in .env}
+      # v4.39 requires an explicit cookie domain + portal URL; render the
+      # operator's MagicDNS hostname so neither is hardcoded in the template.
+      - X_AUTHELIA_CONFIG_FILTERS=template
+      - LC_TAILNET_HOST=${LC_TAILNET_HOST:?set LC_TAILNET_HOST in .env}
+      - CADDY_AUTH_PORTAL_PORT=${CADDY_AUTH_PORTAL_PORT:-9091}
+    volumes:
+      # configuration.yml is a tracked, secret-free template (env-var
+      # substituted at runtime). users_database.yml is NOT tracked -- it holds
+      # a real password hash once set up, so it lives under appdata like every
+      # other app's real credentials in this repo. Independent review caught
+      # an earlier version of this file that mounted the whole sso/authelia/
+      # directory, which would have meant committing a real hash straight into
+      # git; see sso/authelia/users_database.yml.example for the setup step.
+      - ./sso/authelia/configuration.yml:/config/configuration.yml:ro
+      - ${LC_APPDATA:-./appdata}/authelia/users_database.yml:/config/users_database.yml:ro
+      - ${LC_APPDATA:-./appdata}/authelia/data:/data
+    healthcheck:
+      test: ["CMD", "/app/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # ── caddy: loopback-only portal + Stirling-PDF pilot gate ─────────────────
+  caddy:
+    image: caddy:2.11.4-alpine  # pin: @sha256 before real data
+    container_name: lc-caddy
+    restart: unless-stopped
+    networks: [lc_core, lc_auth]
+    depends_on:
+      authelia:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${CADDY_AUTH_PORTAL_PORT:-9091}:9091"
+      - "127.0.0.1:${CADDY_STIRLING_PROXY_PORT:-9099}:9099"
+    volumes:
+      - ./sso/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${LC_APPDATA:-./appdata}/caddy/data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9091/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

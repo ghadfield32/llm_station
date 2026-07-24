@@ -4,7 +4,9 @@ into ten modules would be ceremony, not clarity. Each top-level class maps to on
 configs/*.yaml file.
 """
 from __future__ import annotations
+import math
 import re
+from string import Formatter
 from typing import Literal
 from pydantic import Field, model_validator
 from .base import Strict, RiskTier, Decision, Provider, EnvKind
@@ -657,9 +659,56 @@ class LocalFrontierProvidersConfig(Strict):
 
 
 # ---- framework-evals.yaml --------------------------------------------------
-# External code-eval frameworks (EvalPlus, BigCodeBench) as SUPPORTING evidence only — the
-# `trust` Literal makes "this can promote a model" unrepresentable. They run against the local
-# Ollama OpenAI-compatible endpoint, are off by default, and are bounded by a sample budget.
+# External eval frameworks as SUPPORTING evidence only — the `trust` Literal makes "this can
+# promote a model" unrepresentable. They run against the local Ollama OpenAI-compatible
+# endpoint, are off by default, and are bounded by a sample budget.
+class RubricCriterion(Strict):
+    name: str = Field(min_length=1)
+    guidance: str = Field(min_length=1)
+    weight: float = Field(gt=0)
+    scale: tuple[float, float]
+
+    @model_validator(mode="after")
+    def _checks(self):
+        if not math.isfinite(self.weight):
+            raise ValueError("rubric criterion weight must be finite")
+        lower, upper = self.scale
+        if not math.isfinite(lower) or not math.isfinite(upper):
+            raise ValueError("rubric criterion scale bounds must be finite")
+        if lower >= upper:
+            raise ValueError("rubric criterion scale must be ordered low-to-high")
+        return self
+
+
+class Rubric(Strict):
+    id: str = Field(min_length=1)
+    criteria: list[RubricCriterion] = Field(min_length=1)
+    prompt_template: str = Field(min_length=1)
+    sampling_count: int = Field(ge=1, le=32)
+    judge_role: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _checks(self):
+        names = [criterion.name for criterion in self.criteria]
+        if len(names) != len(set(names)):
+            raise ValueError("rubric criterion names must be unique")
+        try:
+            fields = {
+                field_name
+                for _literal, field_name, _format_spec, _conversion
+                in Formatter().parse(self.prompt_template)
+                if field_name
+            }
+        except ValueError as exc:
+            raise ValueError(f"rubric prompt_template is invalid: {exc}") from exc
+        missing = {"prompt", "response"} - fields
+        if missing:
+            raise ValueError(
+                "rubric prompt_template must contain {prompt} and {response} placeholders"
+            )
+        return self
+
+
 class FrameworkEvalSpec(Strict):
     enabled: bool = False
     cli_command: str                               # binary/module checked for availability + run
@@ -670,6 +719,8 @@ class FrameworkEvalSpec(Strict):
     trust: Literal["supporting_evidence_only"] = "supporting_evidence_only"
     datasets: list[str] = []                       # e.g. EvalPlus: humaneval_plus, mbpp_plus
     subset: str | None = None                      # e.g. BigCodeBench: full | hard
+    judge_role: str | None = None                  # rubric_judge: local judges.yaml role alias
+    sampling_count: int | None = Field(default=None, ge=1, le=32)
 
     @model_validator(mode="after")
     def _checks(self):
@@ -689,6 +740,16 @@ class FrameworkEvalsConfig(Strict):
             raise ValueError("schema_version must be command-center.framework-evals.v1")
         if not self.frameworks:
             raise ValueError("framework-evals config must define at least one framework")
+        rubric_judge = self.frameworks.get("rubric_judge")
+        if rubric_judge is not None:
+            if rubric_judge.judge_role != "local-judge":
+                raise ValueError("rubric_judge must use the local-judge role")
+            if rubric_judge.sampling_count is None:
+                raise ValueError("rubric_judge must declare sampling_count")
+            if rubric_judge.backend != "openai_compatible":
+                raise ValueError("rubric_judge must use the local OpenAI-compatible backend")
+            if rubric_judge.base_url_env != "OLLAMA_OPENAI_BASE_URL":
+                raise ValueError("rubric_judge must use OLLAMA_OPENAI_BASE_URL")
         return self
 
 

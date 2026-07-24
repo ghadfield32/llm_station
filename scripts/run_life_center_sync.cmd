@@ -29,4 +29,11 @@ echo [%date% %time%] attempt %ATTEMPT% failed (likely BoardWriteLocked); retryin
 timeout /t 20 /nobreak >nul
 goto lc_sync_retry
 :lc_sync_done
-echo [%date% %time%] life_center_sync exited (code %errorlevel%) after %ATTEMPT% attempt(s) >> life_center_sync.log
+set LC_SYNC_EXIT=%errorlevel%
+echo [%date% %time%] life_center_sync exited (code %LC_SYNC_EXIT%) after %ATTEMPT% attempt(s) >> life_center_sync.log
+REM Status file for the Launch API: readable from inside the containerized
+REM cockpit via the already-mounted ./generated dir (unlike this .log file,
+REM which lives at the repo root and isn't mounted in). Written even on
+REM success -- the Launch API needs "when did the job last actually run",
+REM not just "when did the boards last change".
+.venv\Scripts\python.exe -c "import json,datetime; json.dump({'last_attempt_at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'success': %LC_SYNC_EXIT% == 0, 'attempts': %ATTEMPT%, 'exit_code': %LC_SYNC_EXIT%}, open('generated/life_center_sync_status.json','w',encoding='utf-8'))"

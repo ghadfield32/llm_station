@@ -142,3 +142,15 @@ Operator decisions, recorded verbatim; scope locked:
   `omnigent-meta-harness`.
 - Siblings: AGT-14 (policy stack — "policy DENY actually blocks" becomes a
   probe once both exist), AGT-16 (session spec).
+
+## 9. Packet 2 evidence (2026-07-24)
+
+**Packet 2 (Sol gpt-5.6-sol high):** added `interrupt` + `steering`
+dimensions (5→7). interrupt is event-observable (FakeHarness earns PASS from
+`session_failed` + interrupted status); steering is honestly SKIPPED for
+FakeHarness (no mid-turn steering surface) — never faked. Per-adapter claims
+added (interrupt PASS/PARTIAL, steering FAIL); DRIFT mechanism proven for both
+new dims. Adapter edits purely additive bench_profile fields. Commit `a2d2f10`.
+Host-verified: validate PASS, adapter-bench 7-dim exit 0, 9 bench + 36
+regression tests, ruff clean. Report-only default unchanged (CI DRIFT-gate flip
+still gated on an operator live baseline). Fable review APPROVE.

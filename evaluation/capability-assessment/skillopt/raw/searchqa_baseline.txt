@@ -1,0 +1,19 @@
+=== STEP 2: materialize SearchQA (public HF lucadiliello/searchqa) ===
+Wrote SearchQA splits to C:\tmp\skillopt-feasibility\upstream\data\searchqa_split: {'train': 400, 'val': 200, 'test': 1400}
+materialize exit=0
+=== materialized OK; split sizes ===
+train = 400 items
+val = 200 items
+test = 1400 items
+  BASELINE — evaluate initial skill on Selection set (valid_seen)
+  Selection items: 3
+    [rollout] 1/3 (acc=1.000) id=52967b20d9564d5b94756bc0b3d113d6 hard=1
+    [rollout] 2/3 (acc=0.500) id=1758dc50625e46ee814e44a6061f091d hard=0
+    [rollout] 3/3 (acc=0.667) id=e77dbfc0d45e476b9ed5b2204b6d9fc8 hard=1
+  [baseline result] selection hard=0.6667 soft=0.8889 gate[hard]=0.6667
+  [STEP 1/134] epoch=1 step_in_epoch=0 ==============================
+    [1/6 ROLLOUT] train items=3 (from pool, batch_seed=1043)
+    [rollout] 1/3 (acc=0.000) id=b44cf87107b9474d8e04d8147c895a60 hard=0
+    [rollout] 2/3 (acc=0.500) id=1d039c043dde4ca4a740e0ec20e936ea hard=1
+    [rollout] 3/3 (acc=0.333) id=9e4f88422e8c4e47a7f96f7fe0ecb40e hard=0
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 37: character maps to <undefined>

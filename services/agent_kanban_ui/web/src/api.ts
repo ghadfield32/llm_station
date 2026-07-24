@@ -1,5 +1,11 @@
 // Typed client for the read-only backend. Errors are surfaced to the UI, never
 // swallowed into an empty board (the backend returns 502 when the Ledger is down).
+import {
+  parseAgentSessionSpecs,
+  type AgentSessionSpecSummary,
+} from "./agentSessionSpecs";
+
+export type { AgentSessionSpecSummary } from "./agentSessionSpecs";
 
 export interface MissionCard {
   id: string;
@@ -1299,6 +1305,9 @@ export interface LocalFrontierModelOption {
   measured?: LocalFrontierMeasuredResult | null;
 }
 export const fetchChatRuntime = () => getJSON<ChatRuntime>("/api/chat/runtime");
+
+export const fetchAgentSessionSpecs = async (): Promise<AgentSessionSpecSummary[]> =>
+  parseAgentSessionSpecs(await getJSON<unknown>("/api/agent-session-specs"));
 
 // Deep-context counterpart to a domain card's chat_prompt, for the "registered
 // repo" chat entry point: the manifest, a live read-only repo-verify pass, and

@@ -53,8 +53,14 @@ def test_each_fake_probe_earns_expected_observed_verdict():
         Dimension.WRITE_MODE_WALL: Verdict.PASS,
         Dimension.ATTACHMENTS: Verdict.SKIPPED,
         Dimension.MODEL_SWITCH: Verdict.SKIPPED,
+        Dimension.INTERRUPT: Verdict.PASS,
+        Dimension.STEERING: Verdict.SKIPPED,
     }
     assert all(result.detail for result in results.values())
+    assert (
+        results[Dimension.STEERING].detail
+        == "fake harness has no mid-turn steering surface"
+    )
 
 
 def test_declared_not_observed_capability_becomes_drift():
@@ -65,6 +71,35 @@ def test_declared_not_observed_capability_becomes_drift():
     assert streaming.declared is Verdict.PASS
     assert streaming.observed is Verdict.PARTIAL
     assert streaming.verdict is Verdict.DRIFT
+
+
+@pytest.mark.parametrize(
+    ("dimension", "declared"),
+    [
+        (Dimension.INTERRUPT, Verdict.PARTIAL),
+        (Dimension.STEERING, Verdict.PASS),
+    ],
+)
+def test_wrong_new_dimension_profile_becomes_drift(
+    dimension: Dimension,
+    declared: Verdict,
+):
+    wrong = FakeHarness.bench_profile.model_copy(
+        update={dimension.value: declared}
+    )
+    observed = [
+        ProbeResult(
+            dimension=current,
+            observed_verdict=(
+                Verdict.FAIL if current is dimension else Verdict.SKIPPED
+            ),
+            detail=f"seeded {current.value} observation",
+        )
+        for current in CORE_DIMENSIONS
+    ]
+    cells = reconcile(wrong, observed)
+    cell = next(cell for cell in cells if cell.dimension is dimension)
+    assert cell.verdict is Verdict.DRIFT
 
 
 def test_real_adapters_are_skipped_offline_never_unobserved_passes():
@@ -159,6 +194,8 @@ def test_every_registry_harness_has_exactly_one_profile_and_vice_versa():
         write_mode_wall=Verdict.FAIL,
         attachments=Verdict.FAIL,
         model_switch=Verdict.FAIL,
+        interrupt=Verdict.FAIL,
+        steering=Verdict.FAIL,
     )
     with pytest.raises(ValueError, match="orphaned=.*orphan"):
         assert_profile_registry_coverage(registry, {**profiles, "orphan": orphan})
