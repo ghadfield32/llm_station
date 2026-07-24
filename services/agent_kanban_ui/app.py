@@ -3049,6 +3049,9 @@ class TodoRowOut(BaseModel):
     kind: str | None
     status: str | None
     raw_status: str | None
+    priority: str | None = None
+    impact: str | None = None
+    timeline: str | None = None
     assigned: bool
     boards: list[TodoBoardLinkOut]
     repo_ids: list[str]
@@ -3131,6 +3134,7 @@ class TodoFilterCatalogsOut(BaseModel):
 
     kinds: list[str]
     statuses: list[str]
+    priorities: list[str]
     sources: list[str]
     boards: list[TodoBoardCatalogOut]
 
@@ -3692,6 +3696,21 @@ def _card_todo_row(
         if isinstance(card.get("canonical_status"), str) else None
     )
     raw_status = card.get("status") if isinstance(card.get("status"), str) else None
+    priority = next((
+        value.strip()
+        for field in ("priority", "research_priority", "tier", "severity")
+        if isinstance((value := card.get(field)), str) and value.strip()
+    ), None)
+    impact = (
+        card["impact"].strip()
+        if isinstance(card.get("impact"), str) and card["impact"].strip()
+        else None
+    )
+    timeline = (
+        card["timeline"].strip()
+        if isinstance(card.get("timeline"), str) and card["timeline"].strip()
+        else None
+    )
     return {
         "todo_id": f"card:{domain_id}:{card_id}",
         "work_item_id": None,
@@ -3703,6 +3722,9 @@ def _card_todo_row(
         "kind": kind,
         "status": canonical_status,
         "raw_status": raw_status,
+        "priority": priority,
+        "impact": impact,
+        "timeline": timeline,
         "assigned": True,
         "boards": [{
             "board_id": board_id,
@@ -3892,6 +3914,11 @@ def _all_todo_inventory() -> dict[str, Any]:
             "statuses": sorted({
                 row["status"] for row in rows if isinstance(row.get("status"), str)
             }),
+            "priorities": sorted({
+                row["priority"]
+                for row in rows
+                if isinstance(row.get("priority"), str)
+            }),
             "sources": sorted({str(row["source_kind"]) for row in rows}),
             "boards": [
                 {"board_id": board_id, "domain_id": domain_id, "title": title}
@@ -3906,9 +3933,9 @@ def _all_todo_inventory() -> dict[str, Any]:
     response_model=TodoInventoryOut,
 )
 def all_todos(
-    q: str = "", kind: str = "", status: str = "", source: str = "",
-    assigned: bool | None = None, board_id: str = "", offset: int = 0,
-    limit: int = 10000,
+    q: str = "", kind: str = "", status: str = "", priority: str = "",
+    source: str = "", assigned: bool | None = None, board_id: str = "",
+    offset: int = 0, limit: int = 10000,
 ) -> dict:
     if offset < 0 or not 1 <= limit <= 10000:
         raise HTTPException(status_code=400, detail="offset must be >= 0 and limit 1..10000")
@@ -3927,6 +3954,7 @@ def all_todos(
         )
         and (not kind or row["kind"] == kind)
         and (not status or row["status"] == status)
+        and (not priority or row.get("priority") == priority)
         and (not source or row["source_kind"] == source)
         and (assigned is None or row["assigned"] is assigned)
         and (not board_id or any(board["board_id"] == board_id for board in row["boards"]))

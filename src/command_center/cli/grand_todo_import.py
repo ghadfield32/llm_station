@@ -114,6 +114,12 @@ MASTER_PROFILE = BoardProfile(
 PROFILES = {profile.board_id: profile for profile in (BETTS_PROFILE, MASTER_PROFILE)}
 
 _REPO_LINE_RE = re.compile(r"^\*\*Repo:\*\*\s+`?(?P<repo>[A-Za-z0-9_.-]+)`?\s*$")
+_PRIORITY_LINE_RE = re.compile(
+    r"^\*\*Priority:\*\*\s+(?P<priority>P[123]|_TBD_)\s*$",
+    re.IGNORECASE,
+)
+_IMPACT_LINE_RE = re.compile(r"^\*\*Impact:\*\*\s+(?P<impact>.+?)\s*$")
+_TIMELINE_LINE_RE = re.compile(r"^\*\*Timeline:\*\*\s+(?P<timeline>.+?)\s*$")
 
 
 @dataclass(frozen=True)
@@ -132,6 +138,9 @@ class SourceCard:
     start_char: int
     end_char: int
     repo_id: str | None = None
+    priority: str | None = None
+    impact: str | None = None
+    timeline: str | None = None
 
     @property
     def source_sha256(self) -> str:
@@ -233,6 +242,18 @@ def parse_grand_todo_bytes(raw: bytes, *, expected_items: int | None = None) -> 
         repo_match = next(
             (_REPO_LINE_RE.match(line) for line in block_lines[1:]
              if _REPO_LINE_RE.match(line)), None)
+        priority_match = next(
+            (_PRIORITY_LINE_RE.match(line) for line in block_lines[1:]
+             if _PRIORITY_LINE_RE.match(line)), None)
+        impact_match = next(
+            (_IMPACT_LINE_RE.match(line) for line in block_lines[1:]
+             if _IMPACT_LINE_RE.match(line)), None)
+        timeline_match = next(
+            (_TIMELINE_LINE_RE.match(line) for line in block_lines[1:]
+             if _TIMELINE_LINE_RE.match(line)), None)
+        priority = priority_match.group("priority").upper() if priority_match else None
+        if priority == "_TBD_":
+            priority = None
         cards.append(SourceCard(
             card_id=_card_id(item_id),
             item_id=item_id,
@@ -247,6 +268,11 @@ def parse_grand_todo_bytes(raw: bytes, *, expected_items: int | None = None) -> 
             initial_status=_initial_status(status),
             start_char=char_offsets[start], end_char=char_offsets[end],
             repo_id=repo_match.group("repo") if repo_match else None,
+            priority=priority,
+            impact=impact_match.group("impact").strip() if impact_match else None,
+            timeline=(
+                timeline_match.group("timeline").strip() if timeline_match else None
+            ),
         ))
 
     idea_start = next((i for i, line in enumerate(lines)
@@ -315,7 +341,7 @@ def _source_fields(card: SourceCard, existing: dict[str, Any] | None,
     revisions = list(revisions)
     if not revisions or revisions[-1].get("sha256") != card.source_sha256:
         revisions.append(_revision(card, captured_at))
-    return {
+    fields = {
         "item_id": card.item_id,
         "title": card.title,
         "category": card.category,
@@ -333,6 +359,16 @@ def _source_fields(card: SourceCard, existing: dict[str, Any] | None,
         "source_importer": profile.importer_id,
         "repo_id": card.repo_id or profile.default_repo_id,
     }
+    fields.update({
+        name: value
+        for name, value in (
+            ("priority", card.priority),
+            ("impact", card.impact),
+            ("timeline", card.timeline),
+        )
+        if value is not None
+    })
+    return fields
 
 
 def _append_change_log(text: str, *, item_id: str, detail: str, at: datetime) -> str:

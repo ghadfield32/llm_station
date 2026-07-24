@@ -866,19 +866,33 @@ def _without_grand_todo(configs: Path) -> None:
 def test_all_todos_lists_unassigned_and_every_board_link_with_filters(
     monkeypatch, tmp_path,
 ):
-    _mod, service, client, configs = _load(monkeypatch, tmp_path)
+    mod, service, client, configs = _load(monkeypatch, tmp_path)
     _without_grand_todo(configs)
+    from command_center.boards.command_center_provider import CommandCenterBoardProvider
+
     unassigned = service.create_item("Unassigned research", kind="research")
     assigned = service.create_item("Placed bug", kind="bug")
     service.add_placement(
         assigned.work_item_id, "tasks", "tasks", is_primary=True,
         card_component="generic_task")
+    provider = CommandCenterBoardProvider(
+        board_id="tasks", event_log=mod.EventLog(mod.KANBAN_EVENT_LOG),
+        store_dir=mod.BOARD_STORE_DIR)
+    provider.upsert_card("priority-card", {
+        "title": "Prioritized legacy card",
+        "description": "Card priority must reach the unified inventory.",
+        "kind": "bug",
+        "priority": "P1",
+        "research_priority": "P2",
+        "impact": "Unblocks backlog triage",
+        "timeline": "This week",
+    }, status="Backlog")
 
     response = client.get("/api/todos")
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["completeness"]["complete"] is True
-    assert body["completeness"]["emitted_total"] == 2
+    assert body["completeness"]["emitted_total"] == 3
     assert body["completeness"]["unassigned_total"] == 1
     by_id = {row["work_item_id"]: row for row in body["rows"]}
     assert by_id[unassigned.work_item_id]["status"] == "backlog"
@@ -887,6 +901,13 @@ def test_all_todos_lists_unassigned_and_every_board_link_with_filters(
     assert by_id[assigned.work_item_id]["repo_ids"] == ["llm_station"]
     assert by_id[assigned.work_item_id]["boards"][0]["href"].startswith("?view=domains")
     assert by_id[assigned.work_item_id]["boards"][0]["repo_ids"] == ["llm_station"]
+    priority_row = next(
+        row for row in body["rows"]
+        if row["todo_id"] == "card:tasks:priority-card"
+    )
+    assert priority_row["priority"] == "P1"
+    assert priority_row["impact"] == "Unblocks backlog triage"
+    assert priority_row["timeline"] == "This week"
     assert [repo["repo_id"] for repo in body["registered_repos"]] == [
         "llm_station", "betts_basketball",
     ]
@@ -896,14 +917,21 @@ def test_all_todos_lists_unassigned_and_every_board_link_with_filters(
     assert client.get("/api/todos", params={"kind": "bug"}).json()[
         "rows"][0]["work_item_id"] == assigned.work_item_id
     assert client.get("/api/todos", params={"board_id": "tasks"}).json()[
-        "filtered_total"] == 1
+        "filtered_total"] == 2
     assert client.get("/api/todos", params={"q": "research"}).json()[
         "filtered_total"] == 1
+    priority_filtered = client.get(
+        "/api/todos", params={"priority": "P1"}).json()
+    assert priority_filtered["filtered_total"] == 1
+    assert priority_filtered["rows"][0]["todo_id"] == "card:tasks:priority-card"
+    assert client.get("/api/todos", params={"priority": "P2"}).json()[
+        "filtered_total"] == 0
     paged = client.get("/api/todos", params={"limit": 1}).json()
-    assert paged["inventory_total"] == 2
+    assert paged["inventory_total"] == 3
     assert paged["has_more"] is True
     assert set(paged["filter_catalogs"]["kinds"]) == {"bug", "research"}
-    assert paged["completeness"]["emitted_total"] == 2
+    assert paged["filter_catalogs"]["priorities"] == ["P1"]
+    assert paged["completeness"]["emitted_total"] == 3
 
 
 def test_all_todos_attributes_grand_todo_cards_to_registered_betts_repo(
