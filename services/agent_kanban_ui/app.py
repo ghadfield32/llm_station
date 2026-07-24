@@ -57,6 +57,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent_worker_client import AgentWorkerClient, AgentWorkerUnavailable
+from command_center.agent_sessions import spec_bridge
 from command_center.kanban.metrics import (
     compute_metrics, load_calls, log_path, recent_calls)
 from command_center.kanban_sync import EventLog, KanbanEvent, project_cards
@@ -9725,6 +9726,71 @@ def chat_repo_context(repo_id: str) -> dict:
     context = _repo_chat_context(repo_id)
     context["chat_prompt"] = _chat_prompt_for_repo(context)
     return context
+
+
+class AgentSessionSpecListItem(BaseModel):
+    name: str
+    harness: str
+    capability_profile: str
+    effort: str | None
+    mode: str
+    instructions_source: Literal["inline", "file"]
+    policy_refs: list[str]
+
+
+class AgentSessionSpecListErrorDetail(BaseModel):
+    code: Literal["invalid_agent_session_spec"] = "invalid_agent_session_spec"
+    message: str = "This agent-session spec could not be loaded or validated."
+
+
+class AgentSessionSpecListError(BaseModel):
+    name: str
+    error: AgentSessionSpecListErrorDetail
+
+
+AgentSessionSpecListEntry = AgentSessionSpecListItem | AgentSessionSpecListError
+
+
+@app.get(
+    "/api/agent-session-specs",
+    response_model=list[AgentSessionSpecListEntry],
+)
+def agent_session_specs() -> list[AgentSessionSpecListEntry]:
+    """List validated, redacted agent-session specs for display-only clients.
+
+    The response deliberately omits instruction content and file paths. AGT-10's
+    future allocator emission seam is a validated ``AgentSessionSpec`` YAML in
+    ``CONFIGS_DIR / "agent_sessions"``; allocator output will therefore appear
+    through this same read contract without a separate mutation API.
+    """
+    directory = CONFIGS_DIR / "agent_sessions"
+    if not directory.is_dir():
+        return []
+
+    entries: list[AgentSessionSpecListEntry] = []
+    for path in sorted(directory.glob("*.yaml")):
+        try:
+            spec, _instructions = spec_bridge.load_spec(
+                path.stem, directory=directory)
+        except Exception:
+            # Validation errors can contain the rejected YAML input. Keep the
+            # public error stable and intentionally discard those details so a
+            # malformed file cannot turn this read endpoint into a secret leak.
+            entries.append(AgentSessionSpecListError(
+                name=path.stem,
+                error=AgentSessionSpecListErrorDetail(),
+            ))
+            continue
+        entries.append(AgentSessionSpecListItem(
+            name=spec.name,
+            harness=spec.harness.value,
+            capability_profile=spec.capability_profile.value,
+            effort=spec.effort.value if spec.effort is not None else None,
+            mode=spec.mode,
+            instructions_source="inline" if spec.instructions is not None else "file",
+            policy_refs=spec.policy_refs,
+        ))
+    return entries
 
 
 @app.get("/api/chat/runtime")
